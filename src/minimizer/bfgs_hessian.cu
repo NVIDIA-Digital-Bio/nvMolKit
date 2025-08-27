@@ -1,0 +1,246 @@
+// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include <cooperative_groups.h>
+#include <cooperative_groups/reduce.h>
+
+#include <cub/cub.cuh>
+#include <vector>
+
+#include "bfgs_hessian.h"
+#include "cuda_error_check.h"
+#include "device_vector.h"
+#include "host_vector.h"
+namespace cg = cooperative_groups;
+
+namespace nvMolKit {
+
+namespace {
+
+constexpr int warpSize  = 32;
+constexpr int blockSize = 512;
+constexpr int numWarp   = blockSize / warpSize;
+constexpr int maxAtom   = 256;
+
+template <int dataDim>
+__global__ void updateInverseHessianBFGSBatchKernel(const int16_t* statuses,
+                                                    const int*     atomStarts,
+                                                    const int*     hessianStarts,
+                                                    double*        invHessians,
+                                                    double*        dGrads,
+                                                    double*        xis,
+                                                    double*        hessDGrads,
+                                                    const double*  grads,
+                                                    const int*     activeSystemIndices) {
+  __shared__ double facShared[1];
+  __shared__ double faeShared[1];
+  __shared__ double fadShared[1];
+  __shared__ double sumDGradShared[1];
+  __shared__ double sumXiShared[1];
+  __shared__ bool   needUpdateInverseHessian[1];
+
+  __shared__ double cachedDGrads[dataDim * maxAtom];
+  __shared__ double cachedHessDGrads[dataDim * maxAtom];
+  __shared__ double cachedXis[dataDim * maxAtom];
+  __shared__ double cachedUpdatedXis[dataDim * maxAtom];
+  __shared__ double cachedGrads[dataDim * maxAtom];
+
+  const int sysIdx = activeSystemIndices[blockIdx.x];
+  if (statuses != nullptr && statuses[sysIdx] == 0) {
+    return;
+  }
+
+  cg::thread_block                block           = cg::this_thread_block();
+  cg::thread_block_tile<warpSize> warp            = cg::tiled_partition<warpSize>(block);
+  const int                       idxWithinSystem = threadIdx.x;
+  const int                       warpIdx         = idxWithinSystem / warpSize;
+  const int                       laneIdx         = idxWithinSystem % warpSize;
+
+  // Get local pointers. Note that inverse hessian is dim indexed but the atomStart-based ones are * dataDim
+  const int           atomOffset      = atomStarts[sysIdx];
+  const int           dim             = dataDim * (atomStarts[sysIdx + 1] - atomOffset);
+  double* const       invHessianLocal = &invHessians[hessianStarts[sysIdx]];
+  const int           absAtomOffset   = atomOffset * dataDim;
+  double* const       localDGrad      = &dGrads[absAtomOffset];
+  double* const       localHessDGrad  = &hessDGrads[absAtomOffset];
+  double* const       localXi         = &xis[absAtomOffset];
+  const double* const localGrad       = &grads[absAtomOffset];
+
+  // Load dGrads, Xi, grads into shared memory
+  if (idxWithinSystem < dim) {
+    cachedDGrads[idxWithinSystem] = localDGrad[idxWithinSystem];
+    cachedXis[idxWithinSystem]    = localXi[idxWithinSystem];
+    cachedGrads[idxWithinSystem]  = localGrad[idxWithinSystem];
+  }
+
+  block.sync();
+
+  // Update hessDGrads
+  // Update hessDGrads: Each warp processes different rows
+  for (int row = warpIdx; row < dim; row += numWarp) {
+    double dotProduct = 0.0;
+
+    // Update hessDGrads: Each thread in warp processes different columns
+    for (int col = laneIdx; col < dim; col += warpSize) {
+      dotProduct += invHessianLocal[row * dim + col] * cachedDGrads[col];
+    }
+
+    cg::reduce_store_async(warp, &cachedHessDGrads[row], dotProduct, cg::plus<double>{});
+  }
+
+  block.sync();
+
+  // Compute BFGS sums
+  // Compute BFGS sums: Compute 4 dot products using 4 warps
+  double sumTerm = 0.0;
+  if (warpIdx == 0) {
+    for (int i = laneIdx; i < dim; i += warpSize) {
+      sumTerm += cachedDGrads[i] * cachedXis[i];
+    }
+    cg::reduce_store_async(warp, &facShared[0], sumTerm, cg::plus<double>{});
+  } else if (warpIdx == 1) {
+    for (int i = laneIdx; i < dim; i += warpSize) {
+      sumTerm += cachedDGrads[i] * cachedHessDGrads[i];
+    }
+    cg::reduce_store_async(warp, &faeShared[0], sumTerm, cg::plus<double>{});
+  } else if (warpIdx == 2) {
+    for (int i = laneIdx; i < dim; i += warpSize) {
+      sumTerm += cachedDGrads[i] * cachedDGrads[i];
+    }
+    cg::reduce_store_async(warp, &sumDGradShared[0], sumTerm, cg::plus<double>{});
+  } else if (warpIdx == 3) {
+    for (int i = laneIdx; i < dim; i += warpSize) {
+      sumTerm += cachedXis[i] * cachedXis[i];
+    }
+    cg::reduce_store_async(warp, &sumXiShared[0], sumTerm, cg::plus<double>{});
+  }
+
+  block.sync();
+
+  // Compute BFGS sums: compute the update flag
+  if (idxWithinSystem == 0) {
+    constexpr double EPS                  = 3e-8;
+    const double     sumXi                = sumXiShared[0];
+    const double     sumDGrad             = sumDGradShared[0];
+    const double     fac                  = facShared[0];
+    const double     fae                  = faeShared[0];
+    bool             updateInverseHessian = fac > sqrt(EPS * sumDGrad * sumXi);
+    if (updateInverseHessian) {
+      facShared[0] = 1.0 / fac;
+      fadShared[0] = 1.0 / fae;
+    }
+    needUpdateInverseHessian[0] = updateInverseHessian;
+  }
+
+  block.sync();
+
+  if (needUpdateInverseHessian[0]) {
+    // Update dGrads, Inverse Hessian, and Xi
+    const double fac = facShared[0];
+    const double fae = faeShared[0];
+    const double fad = fadShared[0];
+
+    if (idxWithinSystem < dim) {
+      cachedDGrads[idxWithinSystem] = fac * cachedXis[idxWithinSystem] - fad * cachedHessDGrads[idxWithinSystem];
+    }
+
+    block.sync();
+
+    for (int row = warpIdx; row < dim; row += numWarp) {
+      const double pxi        = fac * cachedXis[row];
+      const double hdgi       = fad * cachedHessDGrads[row];
+      const double dgi        = fae * cachedDGrads[row];
+      double       dotProduct = 0.0;
+
+      for (int col = laneIdx; col < dim; col += warpSize) {
+        const double pxj       = cachedXis[col];
+        const double hdgj      = cachedHessDGrads[col];
+        const double dgj       = cachedDGrads[col];
+        double       new_value = pxi * pxj - hdgi * hdgj + dgi * dgj;
+        new_value += invHessianLocal[row * dim + col];
+        dotProduct -= new_value * cachedGrads[col];
+        invHessianLocal[row * dim + col] = new_value;
+      }
+
+      cg::reduce_store_async(warp, &cachedUpdatedXis[row], dotProduct, cg::plus<double>{});
+    }
+  } else {
+    // Update Xi Only
+    for (int row = warpIdx; row < dim; row += numWarp) {
+      double dotProduct = 0.0;
+
+      for (int col = laneIdx; col < dim; col += warpSize) {
+        dotProduct -= invHessianLocal[row * dim + col] * cachedGrads[col];
+      }
+
+      cg::reduce_store_async(warp, &cachedUpdatedXis[row], dotProduct, cg::plus<double>{});
+    }
+  }
+
+  block.sync();
+
+  // Update hessDGrads and Xi: Copy Xi and hessDGrads to global memory
+  if (idxWithinSystem < dim) {
+    localDGrad[idxWithinSystem]     = cachedDGrads[idxWithinSystem];
+    localXi[idxWithinSystem]        = cachedUpdatedXis[idxWithinSystem];
+    localHessDGrad[idxWithinSystem] = cachedHessDGrads[idxWithinSystem];
+  }
+}
+
+}  // namespace
+
+void updateInverseHessianBFGSBatch(int            numActiveSystems,
+                                   const int16_t* statuses,
+                                   const int*     hessianStarts,
+                                   const int*     atomStarts,
+                                   double*        invHessians,
+                                   double*        dGrads,
+                                   double*        xis,
+                                   double*        hessDGrads,
+                                   const double*  grads,
+                                   int            dataDim,
+                                   const int*     activeSystemIndices,
+                                   cudaStream_t   stream) {
+  // Row mapping parameters are computed and passed but not used yet
+  // They will be used when we implement true row-based processing
+
+  if (dataDim == 3) {
+    updateInverseHessianBFGSBatchKernel<3><<<numActiveSystems, blockSize, 0, stream>>>(statuses,
+                                                                                       atomStarts,
+                                                                                       hessianStarts,
+                                                                                       invHessians,
+                                                                                       dGrads,
+                                                                                       xis,
+                                                                                       hessDGrads,
+                                                                                       grads,
+                                                                                       activeSystemIndices);
+  } else if (dataDim == 4) {
+    updateInverseHessianBFGSBatchKernel<4><<<numActiveSystems, blockSize, 0, stream>>>(statuses,
+                                                                                       atomStarts,
+                                                                                       hessianStarts,
+                                                                                       invHessians,
+                                                                                       dGrads,
+                                                                                       xis,
+                                                                                       hessDGrads,
+                                                                                       grads,
+                                                                                       activeSystemIndices);
+  } else {
+    throw std::runtime_error("Unsupported data dimension: " + std::to_string(dataDim));
+  }
+
+  cudaCheckError(cudaGetLastError());
+}
+
+}  // namespace nvMolKit

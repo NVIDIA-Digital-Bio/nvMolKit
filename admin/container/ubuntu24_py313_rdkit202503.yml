@@ -1,0 +1,19 @@
+image_name: "ubuntu2024_gcc14_py313_rdkit202503"
+image_base: "nvcr.io/nvidia/cuda:12.5.1-devel-ubuntu24.04"
+cxx_compiler_id: "gcc"
+cxx_compiler_version: "14"
+cmake_version: "3.30.0"
+python_version: "3.13"
+python_conda_deps:
+  - "pytorch"
+  - "libboost-python-devel"
+  - "libboost-headers"
+  - "libboost-devel"
+  - "pytorch-cuda=12.4"
+  - "rdkit=2025.03"
+  - "librdkit-dev=2025.03"
+  - "pandas"
+  - "scikit-build=0.18"
+  - "pytest"
+python_pip_deps:
+install_clang_tools: false

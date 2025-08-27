@@ -1,0 +1,18 @@
+#ifndef NVMOLKIT_VERSIONS_H
+#define NVMOLKIT_VERSIONS_H
+
+#define RDKIT_VERSION_MAJOR @RDKit_VERSION_MAJOR@
+#define RDKIT_VERSION_MINOR @RDKit_VERSION_MINOR@
+#define RDKIT_VERSION_PATCH @RDKit_VERSION_PATCH@
+
+
+namespace nvMolKit {
+// Account for API break adding d_structureFlags. Our GPU codepath always includes it, but
+// for an earlier version we pass in 1.0 to not change results. The CPU API must be adapted here and in
+// chiralty ETKDG code.
+constexpr bool RDKIT_NEW_FLAG_API  = (RDKIT_VERSION_MAJOR > 2024 || (RDKIT_VERSION_MAJOR == 2024 && RDKIT_VERSION_MINOR >= 9));
+
+
+} // namespace nvMolKit
+
+#endif  // NVMOLKIT_VERSIONS_H

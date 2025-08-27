@@ -1,0 +1,2 @@
+implicit-integer-sign-change:raw_hash_set.h
+unsigned-integer-overflow:raw_hash_set.h

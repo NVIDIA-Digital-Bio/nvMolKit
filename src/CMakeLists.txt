@@ -1,0 +1,94 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved. SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not
+# use this file except in compliance with the License. You may obtain a copy of
+# the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations under
+# the License.
+
+add_subdirectory(data_structures)
+add_subdirectory(forcefields)
+add_subdirectory(minimizer)
+add_subdirectory(testutils)
+add_subdirectory(utils)
+
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/versions.h.in
+               ${CMAKE_CURRENT_BINARY_DIR}/versions.h @ONLY)
+
+add_library(similarity_kernels similarity_kernels.cu)
+target_link_libraries(similarity_kernels PRIVATE cuda_error_check device)
+
+target_include_directories(similarity_kernels
+                           PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(similarity_kernels SYSTEM
+                           PRIVATE ${Boost_INCLUDE_DIRS})
+add_library(Similarity similarity.cpp similarity_cpu.cpp)
+
+target_link_libraries(
+  Similarity
+  PUBLIC CUDA::cudart device_vector
+  PRIVATE similarity_kernels ${RDKit_LIBS} device_vector device
+          OpenMP::OpenMP_CXX)
+target_include_directories(Similarity PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(Similarity SYSTEM PRIVATE ${Boost_INCLUDE_DIRS})
+
+add_library(symmetricEigenSolver symmetric_eigensolver.cu)
+target_link_libraries(
+  symmetricEigenSolver PRIVATE CUDA::cudart CUDA::cusolver CUDA::cublas
+                               cuda_error_check device)
+target_include_directories(symmetricEigenSolver
+                           PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_library(triangle_smooth triangle_smooth.cu)
+target_link_libraries(triangle_smooth PRIVATE ${RDKit_LIBS} device_vector)
+target_include_directories(triangle_smooth PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_library(embedder_utils embedder_utils.cpp)
+target_link_libraries(embedder_utils PRIVATE ${RDKit_LIBS} device_vector
+                                             triangle_smooth)
+target_include_directories(embedder_utils PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(embedder_utils PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+
+add_library(etkdg_impl etkdg_impl.cpp etkdg_kernels.cu)
+target_link_libraries(
+  etkdg_impl
+  PRIVATE embedder_utils rdkit_dist_geom_flattened OpenMP::OpenMP_CXX
+  PUBLIC dist_geom ${RDKit_LIBS} device_vector)
+target_include_directories(etkdg_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_library(
+  etkdg_stages
+  etkdg_stage_coordgen.cu etkdg_stage_firstminimization.cu
+  etkdg_stage_fourthdimminimization.cu etkdg_stage_update_conformers.cu
+  etkdg_stage_stereochem_checks.cu etkdg_stage_etk_minimization.cu)
+
+target_link_libraries(
+  etkdg_stages
+  PRIVATE device_vector
+          ${RDKit_LIBS}
+          ff_kernel_utils
+          dist_geom
+          rdkit_dist_geom_flattened
+          etkdg
+          bfgs_distgeom)
+target_include_directories(etkdg_stages PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_library(etkdg etkdg.cpp)
+target_link_libraries(
+  etkdg
+  PRIVATE ${RDKit_LIBS}
+          device_vector
+          dist_geom
+          embedder_utils
+          rdkit_dist_geom_flattened
+          etkdg_impl
+          etkdg_stages
+          OpenMP::OpenMP_CXX)
+target_include_directories(etkdg PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

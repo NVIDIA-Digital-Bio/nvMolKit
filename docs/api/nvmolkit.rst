@@ -1,0 +1,39 @@
+.. SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
+.. module:: nvmolkit
+.. currentmodule:: nvmolkit
+
+nvMolKit APIs
+=============
+
+
+Similarity Calculations
+-----------------------
+
+.. autosummary::
+   :toctree: generated/
+   :template: function_template.rst
+
+   similarity.bulkTanimotoSimilarity
+   similarity.crossTanimotoSimilarity
+   similarity.bulkCosineSimilarity
+   similarity.crossCosineSimilarity
+
+
+ETKDG Conformer Generation
+--------------------------
+
+.. autosummary::
+   :toctree: generated/
+   :template: function_template.rst
+
+   embedMolecules.EmbedMolecules
+
+MMFF Optimization
+-----------------
+
+.. autosummary::
+   :toctree: generated/
+   :template: function_template.rst
+
+   mmff.MMFFOptimizeMoleculesConfs

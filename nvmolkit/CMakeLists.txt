@@ -1,0 +1,54 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved. SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not
+# use this file except in compliance with the License. You may obtain a copy of
+# the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations under
+# the License.
+
+set(CMAKE_SHARED_MODULE_PREFIX "")
+
+# Set up the libraries and header search paths for this target
+add_library(_DataStructs MODULE DataStructs.cpp)
+target_link_libraries(
+  _DataStructs PUBLIC ${Boost_LIBRARIES} ${PYTHON_LIBRARIES} ${RDKit_LIBS}
+                      Similarity)
+target_include_directories(_DataStructs PRIVATE ${Python_INCLUDE_DIRS})
+installpythontarget(_DataStructs ./)
+
+add_library(_arrayHelpers MODULE array_helpers.cpp)
+target_link_libraries(_arrayHelpers PUBLIC ${Boost_LIBRARIES} device_vector)
+target_include_directories(
+  _arrayHelpers PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils ${Python_INCLUDE_DIRS})
+target_include_directories(_arrayHelpers SYSTEM PUBLIC ${Boost_INCLUDE_DIRS})
+target_link_libraries(_arrayHelpers PRIVATE ${RDKit_LIBS})
+installpythontarget(_arrayHelpers ./)
+
+add_library(_mmffOptimization MODULE mmffOptimization.cpp)
+target_link_libraries(_mmffOptimization PUBLIC ${Boost_LIBRARIES}
+                                               ${PYTHON_LIBRARIES})
+target_link_libraries(_mmffOptimization PRIVATE ${RDKit_LIBS} bfgs_mmff
+                                                ff_utils)
+target_include_directories(
+  _mmffOptimization PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils
+                           ${Python_INCLUDE_DIRS})
+target_include_directories(_mmffOptimization SYSTEM
+                           PUBLIC ${Boost_INCLUDE_DIRS})
+installpythontarget(_mmffOptimization ./)
+
+add_library(_embedMolecules MODULE embedMolecules.cpp)
+target_link_libraries(_embedMolecules PUBLIC ${Boost_LIBRARIES}
+                                             ${PYTHON_LIBRARIES} device_vector)
+target_link_libraries(_embedMolecules PRIVATE ${RDKit_LIBS} dist_geom etkdg)
+target_include_directories(
+  _embedMolecules PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils
+                         ${Python_INCLUDE_DIRS})
+target_include_directories(_embedMolecules SYSTEM PUBLIC ${Boost_INCLUDE_DIRS})
+installpythontarget(_embedMolecules ./)

@@ -1,0 +1,39 @@
+---
+Checks: '
+  abseil-*,
+  bugprone-*,
+   -bugprone-narrowing-conversions,
+   -bugprone-implicit-widening-of-multiplication-result,
+   -bugprone-unchecked-optional-access,
+  clang-analyzer-*,
+   -clang-analyzer-optin.cplusplus.VirtualCall
+  clang-diagnostic-*,
+  cppcoreguidelines-*,
+    -cppcoreguidelines-avoid-c-arrays,
+    -cppcoreguidelines-pro-bounds-constant-array-index,
+    -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+    -cppcoreguidelines-pro-type-reinterpret-cast,
+    -cppcoreguidelines-macro-usage,
+    -cppcoreguidelines-narrowing-conversions
+  hicpp-*,
+     -hicpp-avoid-c-arrays,
+  llvm-*,
+   -llvm-include-order,
+  misc-*,
+   -misc-non-private-member-variables-in-classes,
+   -misc-unused-parameters,
+   -misc-include-cleaner,
+  modernize-*,
+   -modernize-avoid-c-arrays,
+   -modernize-concat-nested-namespaces,
+   -modernize-use-trailing-return-type,
+  mpi-*,
+  openmp-*,
+    -openmp-exception-escape
+  performance-*,
+  readability-*,
+  -readability-function-cognitive-complexity'
+FormatStyle: none
+CheckOptions:
+  - { key: bugprone-easily-swappable-parameters.MinimumLength,          value: 4 }
+...
