@@ -1,0 +1,18 @@
+image_name: "ubuntu2022_gcc12_py311_rdkit202403"
+image_base: "nvcr.io/nvidia/cuda:12.5.0-devel-ubuntu22.04"
+cxx_compiler_id: "gcc"
+cxx_compiler_version: "12"
+cmake_version: "3.30.0"
+python_version: "3.11.7"
+python_conda_deps:
+  - "libboost-python-devel"
+  - "libboost-headers"
+  - "libboost-devel"
+  - "pytorch"
+  - "pytorch-cuda=12.4"
+  - "rdkit=2024.03.5"
+  - "librdkit-dev=2024.03.5"
+  - "scikit-build=0.18"
+  - "pytest"
+python_pip_deps:
+install_clang_tools: false

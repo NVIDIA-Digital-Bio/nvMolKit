@@ -1,0 +1,13 @@
+name: nvmolkit_dev
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - cmake=3.26.4
+  - python=3.10.6
+  - python_abi=3.10
+  - pytz=2022.6
+  - rdkit=2022.09.1
+  - rdkit-dev=2022.09.1
+  - pip:
+      - cmakelang==0.6.13

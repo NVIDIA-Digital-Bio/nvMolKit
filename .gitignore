@@ -1,0 +1,14 @@
+.vscode
+/cmake-build-*
+.idea
+build/*
+admin/*_build
+*_build
+*egg-info
+*__pycache__
+_skbuild
+*.Dockerfile
+docs/public/*
+docs/api/generated/*
+.gitattributes
+*ipynb_checkpoints*
