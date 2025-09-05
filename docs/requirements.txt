@@ -1,5 +1,0 @@
-sphinx
-nvidia-sphinx-theme
-autodocsumm
-myst-parser
-jupyter-sphinx
