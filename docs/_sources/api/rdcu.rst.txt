@@ -49,13 +49,3 @@ MMFF Optimization
    :template: function_template.rst
 
    mmffOptimization.MMFFOptimizeMoleculesConfs
-
-Types
------
-
-.. autosummary::
-   :toctree: generated/
-   :template: class_template.rst
-
-   types.AsyncGpuResult
-   types.HardwareOptions
