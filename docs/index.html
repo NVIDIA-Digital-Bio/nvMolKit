@@ -319,6 +319,7 @@
 <p>For APIs that modify RDKit structures, nvMolKit applies changes in-place as is done with RDKit. An example of conformer generation:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">rdkit.Chem.rdDistGeom</span><span class="w"> </span><span class="kn">import</span> <span class="n">ETKDGv3</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">rdkit.Chem</span><span class="w"> </span><span class="kn">import</span> <span class="n">MolFromSmiles</span><span class="p">,</span> <span class="n">AddHs</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rdkit.Chem.AllChem</span><span class="w"> </span><span class="kn">import</span> <span class="n">EmbedMultipleConfs</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">nvmolkit.embedMolecules</span><span class="w"> </span><span class="kn">import</span> <span class="n">EmbedMolecules</span> <span class="k">as</span> <span class="n">nvMolKitEmbed</span>
 
 <span class="c1"># ETKDG conformer generation via nvMolKit</span>
@@ -331,15 +332,22 @@
     <span class="n">confsPerMolecule</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>
     <span class="n">maxIterations</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span>  <span class="c1"># Automatic iteration calculation</span>
 <span class="p">)</span>
+<span class="c1"># RDKit version would be</span>
+<span class="c1"># for mol in mols:</span>
+<span class="c1">#     EmbedMultipleConfs(mol, numConfs=5, params=params)</span>
 <span class="k">for</span> <span class="n">mol</span> <span class="ow">in</span> <span class="n">mols</span><span class="p">:</span>
     <span class="nb">print</span><span class="p">(</span><span class="n">mol</span><span class="o">.</span><span class="n">GetNumConformers</span><span class="p">())</span>
 </pre></div>
 </div>
 <p>For more fully-fledged examples, check out the Jupyter notebooks in the <cite>examples</cite> folder of the repository.</p>
 </section>
+<section id="source-code">
+<h2>Source Code<a class="headerlink" href="#source-code" title="Link to this heading">#</a></h2>
+<p>nvMolKit is open source under the Apache License, and is available on <a class="reference external" href="https://github.com/NVIDIA-Digital-Bio/nvMolKit">GitHub</a>.</p>
+</section>
 <section id="installation">
 <h2>Installation<a class="headerlink" href="#installation" title="Link to this heading">#</a></h2>
-<p>See installation instructions in the GitHub README.</p>
+<p>See installation instructions in the <a class="reference external" href="https://github.com/NVIDIA-Digital-Bio/nvMolKit">GitHub README</a>.</p>
 </section>
 <section id="features">
 <h2>Features<a class="headerlink" href="#features" title="Link to this heading">#</a></h2>
@@ -348,6 +356,7 @@
 <li><dl class="simple">
 <dt><strong>Morgan Fingerprints</strong>: Generate Morgan fingerprints for batches of molecules in parallel on GPU</dt><dd><ul>
 <li><p>Supports fingerprint sizes 128, 256, 512, 1024, and 2048 bits</p></li>
+<li><p>Does not yet support countSimulation and other non-default options</p></li>
 </ul>
 </dd>
 </dl>
@@ -363,6 +372,17 @@
 <li><dl class="simple">
 <dt><strong>ETKDG Conformer Generation</strong>: GPU-accelerated 3D conformer generation using Experimental-Torsion Knowledge-based Distance Geometry</dt><dd><ul>
 <li><p>Batch processing of multiple molecules with multiple conformers per molecule</p></li>
+<li><p>Supports multiple GPUs</p></li>
+<li><dl class="simple">
+<dt>Does not support all ETKDG options. Defaults in ETKDGv3() are supported with 1 exception.</dt><dd><ul>
+<li><p>Requires <code class="docutils literal notranslate"><span class="pre">useRandomCoords=True</span></code></p></li>
+<li><p>Does not yet support coordMap or fixed atoms</p></li>
+<li><p>Does not yet support conformer deduplication</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><p>Maximum of 256 atoms per molecule</p></li>
 </ul>
 </dd>
 </dl>
@@ -371,6 +391,8 @@
 <dt><strong>MMFF Geometry Relaxation</strong>: GPU-accelerated molecular mechanics force field optimization</dt><dd><ul>
 <li><p>MMFF94 force field implementation for conformer optimization</p></li>
 <li><p>Batch optimization of multiple molecules and conformers</p></li>
+<li><p>Supports multiple GPUs</p></li>
+<li><p>Maximum of 256 atoms per molecule</p></li>
 </ul>
 </dd>
 </dl>
@@ -408,7 +430,7 @@ synchronizing with the GPU before copy to the GPU. For torch operations, synchro
 <section id="hardware-targeting">
 <h2>Hardware targeting<a class="headerlink" href="#hardware-targeting" title="Link to this heading">#</a></h2>
 <p>Some operations (currently conformer generation and energy relaxation) support multiple GPUs,and have options for
-controlling tunable performance parameters. The <code class="docutils literal notranslate"><span class="pre">BatchHardwareOptions</span></code> class can be used to specify these options.</p>
+controlling tunable performance parameters. The <code class="docutils literal notranslate"><span class="pre">HardwareOptions</span></code> class can be used to specify these options.</p>
 <p>An example:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">nvmolkit.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">HardwareOptions</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">nvmolkit.embedMolecules</span><span class="w"> </span><span class="kn">import</span> <span class="n">EmbedMolecules</span>
@@ -490,6 +512,7 @@ controlling tunable performance parameters. The <code class="docutils literal no
   <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="visible nav section-nav flex-column">
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#nvmolkit-introduction">nvMolKit Introduction</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#source-code">Source Code</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#installation">Installation</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#features">Features</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#asynchronous-gpu-results">Asynchronous GPU Results</a></li>
