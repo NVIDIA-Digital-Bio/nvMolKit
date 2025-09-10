@@ -8,6 +8,4 @@ admin/*_build
 *__pycache__
 _skbuild
 *.Dockerfile
-docs/public/*
-docs/api/generated/*
 .gitattributes
