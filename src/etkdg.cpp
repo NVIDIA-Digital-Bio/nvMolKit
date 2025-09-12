@@ -29,6 +29,8 @@
 #include "etkdg_stage_update_conformers.h"
 #include "nvtx.h"
 
+#include "conformer_pruning.h"
+
 namespace nvMolKit {
 namespace {
 
@@ -180,11 +182,14 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
   std::atomic<bool> workComplete{false};
   std::atomic<bool> allFinished{false};
 
+  std::vector<std::vector<std::unique_ptr<Conformer>>> conformers(mols.size());
+
   // Process molecules using Scheduler dispatch in parallel
 #pragma omp parallel num_threads(numThreadsGpuBatching) default(none) shared(streamsPerThread,     \
                                                                                devicesPerThread,   \
                                                                                sortedMols,         \
                                                                                eargs,              \
+                                                                               conformers,          \
                                                                                paramsCopy,         \
                                                                                debugMode,          \
                                                                                failures,           \
@@ -273,6 +278,7 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
       // Writeback
       stages.push_back(std::make_unique<detail::ETKDGUpdateConformersStage>(batchMolsWithConfs,
                                                                             batchEargs,
+                                                                            conformers,
                                                                             streamPtr,
                                                                             &conformer_mutex,
                                                                             confsPerMolecule));
@@ -315,6 +321,12 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
           }
         }
       }
+    }
+  }
+  if (params.pruneRmsThresh > 0.0) {
+#pragma omp parallel for num_threads(numThreads) default(none) schedule(dynamic) shared(mols, conformers, params)
+    for (int i = 0; i < mols.size(); ++i) {
+      nvmolkit::addConformersToMoleculeWithPruning(*mols[i], conformers[i], params);
     }
   }
 }

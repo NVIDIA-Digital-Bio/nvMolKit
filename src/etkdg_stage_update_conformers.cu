@@ -22,11 +22,13 @@ namespace detail {
 
 ETKDGUpdateConformersStage::ETKDGUpdateConformersStage(const std::vector<RDKit::ROMol*>& mols,
                                                        const std::vector<EmbedArgs>&     eargs,
+                                                       std::vector<std::vector<std::unique_ptr<RDKit::Conformer>>>& conformers,
                                                        cudaStream_t                      stream,
                                                        std::mutex*                       conformer_mutex,
-                                                       int                               maxConformersPerMol)
+                                                       const int                               maxConformersPerMol)
     : mols_(mols),
       eargs_(eargs),
+      conformers_(conformers),
       stream_(stream),
       conformer_mutex_(conformer_mutex),
       maxConformersPerMol_(maxConformersPerMol) {}
@@ -43,7 +45,6 @@ void ETKDGUpdateConformersStage::execute(ETKDGContext& ctx) {
   ctx.activeThisStage.copyToHost(hostActiveThisStage);
   cudaStreamSynchronize(stream_);
 
-  // Update each molecule's conformer with the new positions
   for (size_t i = 0; i < mols_.size(); ++i) {
     // Skip if not active this stage
     if (hostActiveThisStage[i] != 1) {
@@ -68,11 +69,13 @@ void ETKDGUpdateConformersStage::execute(ETKDGContext& ctx) {
       std::lock_guard<std::mutex> lock(*conformer_mutex_);
       // Check if molecule already has enough conformers
       if (maxConformersPerMol_ <= 0 || mol->getNumConformers() < static_cast<unsigned int>(maxConformersPerMol_)) {
-        mol->addConformer(newConf.release(), /*assignId=*/true);  // true to take ownership
+        conformers_[i].push_back(std::move(newConf));
       }
     } else {
-      // Without mutex, assume single-threaded and add conformer
-      mol->addConformer(newConf.release(), /*assignId=*/true);
+      // Without mutex, assume single-threaded. Since we're in a batch, we could still be oversubscribing.
+      if (maxConformersPerMol_ <= 0 || mol->getNumConformers() < static_cast<unsigned int>(maxConformersPerMol_)) {
+        conformers_[i].push_back(std::move(newConf));
+      }
     }
     // If conformer wasn't added, it's still a unique_ptr, and will destruct out of scope.
   }

@@ -27,6 +27,7 @@
 #include "etkdg_impl.h"
 #include "etkdg_stage_coordgen.h"
 #include "etkdg_stage_update_conformers.h"
+#include "conformer_pruning.h"
 #include "test_utils.h"
 
 using ::nvMolKit::detail::ETKDGContext;
@@ -423,6 +424,7 @@ TEST_F(ETKDGPipelineInitTestFixture, InitMultipleMolecules) {
 
 TEST_F(ETKDGPipelineInitTestFixture, UpdateConformersStage) {
   // Create eargs with dim=3 for all molecules
+  auto params = DGeomHelpers::ETKDGv3;
   std::vector<nvMolKit::detail::EmbedArgs> eargs;
   for (size_t i = 0; i < mols_.size(); ++i) {
     auto& earg = eargs.emplace_back();
@@ -453,8 +455,12 @@ TEST_F(ETKDGPipelineInitTestFixture, UpdateConformersStage) {
   context.systemDevice.positions.copyFromHost(refPositions);
 
   // Create and execute the stage
-  nvMolKit::detail::ETKDGUpdateConformersStage stage(mols_, eargs, nullptr, nullptr, -1);
+  std::vector<std::vector<std::unique_ptr<Conformer>>> conformers(mols_.size());
+  nvMolKit::detail::ETKDGUpdateConformersStage stage(mols_, eargs, conformers, nullptr, nullptr, -1);
   stage.execute(context);
+  for (int i = 0; i < mols_.size(); ++i) {
+    nvmolkit::addConformersToMoleculeWithPruning(*mols_[i], conformers[i], params);
+  }
 
   // Verify positions in conformers match reference positions
   for (size_t i = 0; i < mols_.size(); ++i) {
@@ -508,9 +514,13 @@ TEST_F(ETKDGPipelineInitTestFixture, UpdateConformersStageWithInactiveMolecule) 
   context.systemDevice.positions.copyFromHost(refPositions);
 
   // Create and execute the stage
-  nvMolKit::detail::ETKDGUpdateConformersStage stage(mols_, eargs, nullptr, nullptr, -1);
+  auto params = DGeomHelpers::ETKDGv3;
+  std::vector<std::vector<std::unique_ptr<Conformer>>> conformers(mols_.size());
+  nvMolKit::detail::ETKDGUpdateConformersStage stage(mols_, eargs, conformers, nullptr, nullptr, -1);
   stage.execute(context);
-
+  for (int i = 0; i < mols_.size(); ++i) {
+    nvmolkit::addConformersToMoleculeWithPruning(*mols_[i], conformers[i], params);
+  }
   // Verify positions in conformers match reference positions
   for (size_t i = 0; i < mols_.size(); ++i) {
     const auto& mol = mols_[i];

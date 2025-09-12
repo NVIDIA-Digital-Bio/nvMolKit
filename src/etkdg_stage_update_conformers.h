@@ -24,10 +24,11 @@
 namespace nvMolKit {
 namespace detail {
 
-class ETKDGUpdateConformersStage : public ETKDGStage {
+class ETKDGUpdateConformersStage final : public ETKDGStage {
  public:
   ETKDGUpdateConformersStage(const std::vector<RDKit::ROMol*>& mols,
                              const std::vector<EmbedArgs>&     eargs,
+                             std::vector<std::vector<std::unique_ptr<RDKit::Conformer>>>& conformers,
                              cudaStream_t                      stream              = nullptr,
                              std::mutex*                       conformer_mutex     = nullptr,
                              int                               maxConformersPerMol = -1);
@@ -38,6 +39,7 @@ class ETKDGUpdateConformersStage : public ETKDGStage {
  private:
   const std::vector<RDKit::ROMol*>& mols_;
   const std::vector<EmbedArgs>&     eargs_;
+  std::vector<std::vector<std::unique_ptr<RDKit::Conformer>>>& conformers_;
   cudaStream_t                      stream_;
   std::mutex*                       conformer_mutex_;
   int                               maxConformersPerMol_;
