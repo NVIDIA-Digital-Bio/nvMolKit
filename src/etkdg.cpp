@@ -163,8 +163,8 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
   // Assign streams to the specified GPU devices
   const int numThreadsGpuBatching = effectivebatchesPerGpu * static_cast<int>(gpuIdsToUse.size());
   for (int i = 0; i < numThreadsGpuBatching; ++i) {
-    const int deviceId = gpuIdsToUse[i % gpuIdsToUse.size()];
-    cudaCheckError(cudaSetDevice(deviceId));
+    const int        deviceId = gpuIdsToUse[i % gpuIdsToUse.size()];
+    const WithDevice dev(deviceId);
     streamsPerThread.emplace_back();
     devicesPerThread.push_back(deviceId);
   }
@@ -211,9 +211,9 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
         }
         break;
       }
-      cudaStream_t streamPtr = streamsPerThread[omp_get_thread_num()].stream();
-      const int    deviceId  = devicesPerThread[omp_get_thread_num()];
-      cudaCheckError(cudaSetDevice(deviceId));
+      cudaStream_t     streamPtr = streamsPerThread[omp_get_thread_num()].stream();
+      const int        deviceId  = devicesPerThread[omp_get_thread_num()];
+      const WithDevice dev(deviceId);
 
       // Create batch of molecules and eargs for the dispatched work
       std::vector<RDKit::ROMol*>     batchMolsWithConfs;
