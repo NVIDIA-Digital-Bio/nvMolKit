@@ -108,7 +108,7 @@ if(CMAKE_CUDA_ARCHITECTURES STREQUAL "native")
     message(FATAL_ERROR "Failed to build detect_cuda_arch.cu")
   endif()
   # _native_cc will be something like "86"
-  foreach(cc IN ITEMS 80 86 89)
+  foreach(cc IN ITEMS 80 86 89 90)
     if(_native_cc STREQUAL "${cc}")
       add_definitions(-DNVMOLKIT_CUDA_CC_${cc}=1)
     else()
