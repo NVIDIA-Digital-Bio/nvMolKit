@@ -54,6 +54,7 @@ def test_nvmolkit_fingerprint_throws_on_invalid_fpsize(fpSize, size_limited_mols
 def test_empty_input():
     fpgen = MorganFingerprintGenerator(radius=3, fpSize=2048)
     fps = fpgen.GetFingerprints([]).torch()
+    torch.cuda.synchronize()
     assert fps.shape == (0, 2048 // 32)
 
 def test_invalid_input():
@@ -70,6 +71,7 @@ def test_nvmolkit_morgan_fingerprint(size_limited_mols, fpSize, radius):
 
     nvmolkit_fpgen = MorganFingerprintGenerator(radius=radius, fpSize=fpSize)
     nvmolkit_fps_torch =  nvmolkit_fpgen.GetFingerprints(size_limited_mols).torch()
+    torch.cuda.synchronize()
     assert nvmolkit_fps_torch.device.type == 'cuda'
     want_n_rows = len(size_limited_mols)
     want_n_cols = fpSize / 32

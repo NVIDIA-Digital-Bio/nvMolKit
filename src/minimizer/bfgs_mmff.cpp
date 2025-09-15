@@ -94,8 +94,8 @@ std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKi
   streamPool.reserve(numThreads);
   std::vector<int> devicesPerThread(numThreads);
   for (int i = 0; i < numThreads; ++i) {
-    const int gpuId = gpuIds[i % gpuIds.size()];
-    cudaCheckError(cudaSetDevice(gpuId));
+    const int        gpuId = gpuIds[i % gpuIds.size()];
+    const WithDevice dev(gpuId);
     streamPool.emplace_back();
     devicesPerThread[i] = gpuId;  // Round-robin assignment of devices
   }
@@ -109,9 +109,9 @@ std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKi
                                                                                           streamPool,         \
                                                                                           devicesPerThread)
   for (size_t batchStart = 0; batchStart < totalConformers; batchStart += effectiveBatchSize) {
-    const int threadId = omp_get_thread_num();
-    cudaCheckError(cudaSetDevice(devicesPerThread[threadId]));
-    const size_t batchEnd = std::min(batchStart + effectiveBatchSize, totalConformers);
+    const int        threadId = omp_get_thread_num();
+    const WithDevice dev(devicesPerThread[threadId]);
+    const size_t     batchEnd = std::min(batchStart + effectiveBatchSize, totalConformers);
 
     // Create batch subset of conformers
     std::vector<ConformerInfo> batchConformers(allConformers.begin() + batchStart, allConformers.begin() + batchEnd);

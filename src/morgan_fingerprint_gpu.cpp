@@ -273,8 +273,8 @@ AsyncDeviceVector<FlatBitVect<fpSize>> computeFingerprintsCuImpl(const std::vect
   for (size_t i = 0; i < numThreadsTotal; i++) {
     std::vector<std::pair<FlatBitVect<fpSize>, int>> largeResults;
 
-    auto& threadCpuBuffers = threadBuffers[omp_get_thread_num()];
-
+    auto&             threadCpuBuffers = threadBuffers[omp_get_thread_num()];
+    const WithDevice  dev(0);
     // Do large molecules while we're waiting for the previous cycle, if possible
     const std::string rangeName =
       "LargeMolecules processing during downtime in main run thread " + std::to_string(omp_get_thread_num());
