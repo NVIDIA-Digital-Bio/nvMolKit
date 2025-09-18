@@ -115,7 +115,7 @@ def test_nvmolkit_cross_tanimoto_similarity_from_nvmolkit_fp(size_limited_mols):
 
 
 
-@pytest.mark.parametrize('nxmdims', ((1, 20), (2, 10), (4, 5), (5, 4), (10, 2), (20, 1)))
+@pytest.mark.parametrize('nxmdims', ((1, 20), (20, 1), (20, 2), (29, 29)))
 def test_nxm_cross_tanimoto_similarity_from_nvmolkit_fp(size_limited_mols, nxmdims):
     d1, d2 = nxmdims
     fpgen = rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=1024)
@@ -149,6 +149,39 @@ def test_nxm_cross_tanimoto_similarity_from_nvmolkit_fp(size_limited_mols, nxmdi
     nvmolkit_sims = crossTanimotoSimilarity(nvmolkit_fps_torch1, nvmolkit_fps_torch2).torch()
     torch.testing.assert_close(nvmolkit_sims, ref_sims)
 
+@pytest.mark.parametrize('nxmdims', ((1, 20), (2, 10), (300, 300)))
+def test_nxm_cross_tanimoto_similarity_from_packing(nxmdims):
+    d1, d2 = nxmdims
+
+    fps_1 = torch.randint(0, 2, (d1, 2048), dtype=torch.bool).to('cuda')
+    fps_2 = torch.randint(0, 2, (d2, 2048), dtype=torch.bool).to('cuda')
+    from nvmolkit.fingerprints import pack_fingerprint
+    nvmolkit_fps_torch1 = pack_fingerprint(fps_1)
+    nvmolkit_fps_torch2 = pack_fingerprint(fps_2)
+
+    bitvects_a = []
+    bitvects_b = []
+    from rdkit.DataStructs import ExplicitBitVect
+    for i in range(d1):
+        bv = ExplicitBitVect(2048)
+        for bit in range(2048):
+            if fps_1[i, bit].item():
+                bv.SetBit(bit)
+        bitvects_a.append(bv)
+    for i in range(d2):
+        bv = ExplicitBitVect(2048)
+        for bit in range(2048):
+            if fps_2[i, bit].item():
+                bv.SetBit(bit)
+        bitvects_b.append(bv)
+
+    ref_sims = torch.zeros(d1, d2, dtype=torch.float64)
+    for i in range(d1):
+        ref_sims[i, :] = torch.tensor(BulkTanimotoSimilarity(bitvects_a[i], bitvects_b))
+    ref_sims = ref_sims.to('cuda')
+    torch.cuda.synchronize()
+    nvmolkit_sims = crossTanimotoSimilarity(nvmolkit_fps_torch1, nvmolkit_fps_torch2).torch()
+    torch.testing.assert_close(nvmolkit_sims, ref_sims)
 # --------------------------------
 # Cosine similarity tests
 # --------------------------------

@@ -26,9 +26,10 @@ def one_hundred_smiles():
     Returns:
         list: A list of one hundred SMILES strings.
     """
-    path = os.path.join(os.path.dirname(__file__), 'testdata', 'smiles.csv')
+    path = os.path.join(os.path.dirname(__file__), "testdata", "smiles.csv")
     df = pd.read_csv(path)
-    return df['smiles'].tolist()
+    return df["smiles"].tolist()
+
 
 @pytest.fixture
 def one_hundred_mols(one_hundred_smiles):
@@ -42,6 +43,7 @@ def one_hundred_mols(one_hundred_smiles):
     """
     return [Chem.MolFromSmiles(smi) for smi in one_hundred_smiles]
 
+
 @pytest.fixture
 def size_limited_mols(one_hundred_mols):
     """Generate RDKit molecules from one hundred smiles and discard any that have more than 128 atoms or bonds.
@@ -52,4 +54,4 @@ def size_limited_mols(one_hundred_mols):
     Returns:
         list: A list of RDKit molecules with at most 128 atoms and bonds. Up to 100 molecules are returned.
     """
-    return [mol for mol in one_hundred_mols if mol.GetNumAtoms() <= 128 and mol.GetNumBonds() <=128]
+    return [mol for mol in one_hundred_mols if mol.GetNumAtoms() <= 128 and mol.GetNumBonds() <= 128]
