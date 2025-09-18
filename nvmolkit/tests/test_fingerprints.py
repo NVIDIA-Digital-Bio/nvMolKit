@@ -45,6 +45,10 @@ def test_pack_unpack_uneven_size():
     assert unpacked.shape == (n_fps, 128)
     torch.testing.assert_close(test_fp, unpacked[:, :fp_size])
 
+def test_unpack_invalid_dtype():
+    with pytest.raises(ValueError):
+        unpack_fingerprint(torch.randint(0, 2, (10, 32), device='cuda', dtype=torch.int64))
+
 @pytest.mark.parametrize('fpSize', (17, 8192))
 def test_nvmolkit_fingerprint_throws_on_invalid_fpsize(fpSize, size_limited_mols):
     fpgen = MorganFingerprintGenerator(radius=3, fpSize=fpSize)
