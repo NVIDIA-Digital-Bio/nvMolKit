@@ -21,7 +21,7 @@ from nvmolkit._Fingerprints import MorganFingerprintGenerator as InternalFPGen
 from nvmolkit.types import AsyncGpuResult
 
 def unpack_fingerprint(fp: torch.Tensor) -> torch.Tensor:
-    """Unpack an integer-encoded fingerprint into a 2D boolean tensor of shape (len(fp), fingerprint_size).
+    """Unpack a 32-bit integer-encoded fingerprint into a 2D boolean tensor of shape (len(fp), fingerprint_size).
 
     Args:
         fp: A tensor of shape `(n_fps, fp_size / 32)`, containing packed fingerprints with dtype int32
@@ -29,14 +29,16 @@ def unpack_fingerprint(fp: torch.Tensor) -> torch.Tensor:
     Returns:
         A boolean tensor of shape `(n_fps, fp_size)`
     """
+    if fp.dtype not in (torch.int32, torch.uint32):
+        raise ValueError("Input tensor must have dtype int32 or uint32")
     n_fps = fp.shape[0]
     n_ints = fp.shape[1]
     fp_size = n_ints * 32
-    return ((fp.unsqueeze(2) >> torch.arange(0, 32, device=fp.device)) & 1).bool().reshape(n_fps, fp_size)
+    return ((fp.unsqueeze(2) >> torch.arange(0, 32, device=fp.device, dtype=torch.int32)) & 1).bool().reshape(n_fps, fp_size)
 
 
 def pack_fingerprint(fp: torch.Tensor) -> torch.Tensor:
-    """Pack a 2D boolean tensor of shape `(n_fps, fingerprint_size)` into an integer-encoded fingerprint.
+    """Pack a 2D boolean tensor of shape `(n_fps, fingerprint_size)` into a 32-bit integer-encoded fingerprint.
 
     Args:
         fp: A boolean tensor of shape `(n_fps, fp_size)`
@@ -58,10 +60,10 @@ def pack_fingerprint(fp: torch.Tensor) -> torch.Tensor:
     fp_reshaped = fp.reshape(n_fps, n_ints, 32)
 
     # Create powers of 2 for each bit position, using 0 to 31 instead of 31 to 0 to fix endianness
-    powers = 1 << torch.arange(0, 32, device=fp.device)
+    powers = 1 << torch.arange(0, 32, device=fp.device, dtype=torch.int32)
 
     # Multiply and sum to create packed integers
-    return (fp_reshaped * powers.unsqueeze(0)).sum(dim=2)
+    return (fp_reshaped * powers.unsqueeze(0)).sum(dim=2, dtype=torch.int32)
 
 class MorganFingerprintGenerator:
     """Morgan fingerprint generator."""
