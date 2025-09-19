@@ -59,6 +59,10 @@ AsyncDeviceVector<double> crossCosineSimilarityGpuResult(const cuda::std::span<c
 AsyncDeviceVector<double> crossCosineSimilarityGpuResult(const cuda::std::span<const std::uint32_t> bitsOneBuffer,
                                                          const cuda::std::span<const std::uint32_t> bitsTwoBuffer,
                                                          int                                        fpSize);
+std::vector<double> crossTanimotoSimilarityNumpy(const cuda::std::span<const std::uint32_t> bitsOneBuffer,
+                                                           const cuda::std::span<const std::uint32_t> bitsTwoBuffer,
+                                                           int                                        fpSize);
+
 }  // namespace nvMolKit
 
 #endif  // NVMOLKIT_SIMILARITY_H

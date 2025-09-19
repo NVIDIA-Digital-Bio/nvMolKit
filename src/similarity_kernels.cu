@@ -495,7 +495,8 @@ void launchCrossTanimotoSimilarity(const cuda::std::span<const std::uint32_t> bi
                                    const cuda::std::span<const std::uint32_t> bitsTwo,
                                    const size_t                               numBitsPerMolecule,
                                    const cuda::std::span<double>              results,
-                                   const size_t                               offset) {
+                                   const size_t                               offset,
+                                   cudaStream_t stream) {
   int device;
   cudaGetDevice(&device);
   cudaCheckError(cudaGetLastError());
@@ -533,7 +534,7 @@ void launchCrossTanimotoSimilarity(const cuda::std::span<const std::uint32_t> bi
                                   BLOCK_TILE_SIZE_K,
                                   NUM_WARP_X,
                                   NUM_WARP_Y>
-      <<<grid_dim, block_dim>>>(bitsOne, bitsTwo, numBitsPerMolecule, results, offset);
+      <<<grid_dim, block_dim, 0, stream>>>(bitsOne, bitsTwo, numBitsPerMolecule, results, offset);
   } else {
     constexpr unsigned int BLOCK_TILE_SIZE_X{64U};
     constexpr unsigned int BLOCK_TILE_SIZE_Y{128U};
@@ -563,7 +564,7 @@ void launchCrossTanimotoSimilarity(const cuda::std::span<const std::uint32_t> bi
                                   BLOCK_TILE_SIZE_K,
                                   THREAD_TILE_X,
                                   THREAD_TILE_Y>
-      <<<grid_dim, block_dim>>>(bitsOne, bitsTwo, numBitsPerMolecule, results, offset);
+      <<<grid_dim, block_dim, 0, stream>>>(bitsOne, bitsTwo, numBitsPerMolecule, results, offset);
   }
 
   cudaCheckError(cudaGetLastError());
