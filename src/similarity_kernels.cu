@@ -27,9 +27,6 @@ using internal::kNumThreadsPerFingerPrintTemporaryFixed;
 
 namespace {
 
-//! Kernel block size.
-constexpr int kBlockSize = 256;
-
 //! Detects if we can use BMMA tensor operations for the given device compute capability,
 //! taking into account compile-time targets.
 bool supportsTensorOps(const int major, const int minor) {
@@ -360,190 +357,8 @@ __device__ void crossSimilarityKernelSIMT(const cuda::std::span<const kThreadRed
 }
 
 // --------------------------------
-// Core kernel templates
-// --------------------------------
-
-template <SimilarityType similarityType>
-__device__ void similarityKernel(const std::uint32_t*                 bitsOne,
-                                 cuda::std::span<const std::uint32_t> bitsTwo,
-                                 cuda::std::span<float>               similarities) {
-  const std::uint32_t idx = (blockIdx.x * blockDim.x) + threadIdx.x;
-  if (idx >= bitsTwo.size()) {
-    return;
-  }
-
-  const std::uint32_t intersection   = *bitsOne & bitsTwo[idx];
-  const int           intersectNBits = __popc(intersection);
-  const int           bitsOneNBits   = __popc(*bitsOne);
-  const int           bitsTwoNBits   = __popc(bitsTwo[idx]);
-
-  if constexpr (similarityType == SimilarityType::Tanimoto) {
-    similarities[idx] =
-      static_cast<float>(intersectNBits) / static_cast<float>(max(bitsOneNBits + bitsTwoNBits - intersectNBits, 1));
-  } else if constexpr (similarityType == SimilarityType::Cosine) {
-    const float denominator = sqrtf(static_cast<float>(bitsOneNBits)) * sqrtf(static_cast<float>(bitsTwoNBits));
-    similarities[idx]       = denominator == 0.0f ? 0.0f : static_cast<float>(intersectNBits) / denominator;
-  }
-}
-
-template <typename kThreadReductionType, SimilarityType similarityType>
-__device__ void distributedSimilarityKernel(const cuda::std::span<const kThreadReductionType> bitsOne,
-                                            const cuda::std::span<const kThreadReductionType> bitsTwo,
-                                            const size_t                                      elementsPerMolecule,
-                                            cuda::std::span<double>                           similarities,
-                                            const size_t                                      offset) {
-  __shared__ typename cub::WarpReduce<kThreadReductionType>::TempStorage tempStorage[kBlockSize];
-  const std::uint32_t idx               = (blockIdx.x * blockDim.x) + threadIdx.x + offset;
-  const std::uint32_t warpIDWithinBlock = threadIdx.x / 32;
-  const std::uint32_t laneID            = idx % 32;
-  const size_t        numMoleculesTotal = bitsTwo.size() / elementsPerMolecule;
-
-  const size_t molIdx           = idx / kNumThreadsPerFingerPrintTemporaryFixed;  // Deliberate truncation.
-  const size_t bitsTwoAccessIdx = molIdx * elementsPerMolecule + laneID;
-
-  kThreadReductionType bitsOneSection = 0;
-  kThreadReductionType bitsTwoSection = 0;
-  if (molIdx < numMoleculesTotal && laneID < elementsPerMolecule) {
-    bitsOneSection = bitsOne[laneID];
-    bitsTwoSection = bitsTwo[bitsTwoAccessIdx];
-  }
-
-  const kThreadReductionType intersection = bitsOneSection & bitsTwoSection;
-  int                        sectionIntersectNBits;
-  int                        sectionBitsOneNBits;
-  int                        sectionBitsTwoNBits;
-
-  if constexpr (sizeof(kThreadReductionType) == 4) {
-    sectionIntersectNBits = __popc(intersection);
-    sectionBitsOneNBits   = __popc(bitsOneSection);
-    sectionBitsTwoNBits   = __popc(bitsTwoSection);
-
-  } else {
-    sectionIntersectNBits = __popcll(intersection);
-    sectionBitsOneNBits   = __popcll(bitsOneSection);
-    sectionBitsTwoNBits   = __popcll(bitsTwoSection);
-  }
-
-  const kThreadReductionType allIntersectBits =
-    cub::WarpReduce<kThreadReductionType>(tempStorage[warpIDWithinBlock]).Sum(sectionIntersectNBits);
-  __syncwarp();
-  const kThreadReductionType allBitsOne =
-    cub::WarpReduce<kThreadReductionType>(tempStorage[warpIDWithinBlock]).Sum(sectionBitsOneNBits);
-  __syncwarp();
-  const kThreadReductionType allBitsTwo =
-    cub::WarpReduce<kThreadReductionType>(tempStorage[warpIDWithinBlock]).Sum(sectionBitsTwoNBits);
-  __syncwarp();
-
-  if (laneID == 0 && molIdx < numMoleculesTotal) {
-    if constexpr (similarityType == SimilarityType::Tanimoto) {
-      // Guard against 0 division, if 0, set to 1, for a zero similarity.
-      const kThreadReductionType denominatorMaxDisambiguated = 1;
-      const kThreadReductionType denominator =
-        max(allBitsOne + allBitsTwo - allIntersectBits, denominatorMaxDisambiguated);
-      const float similarity = static_cast<float>(allIntersectBits) / static_cast<float>(denominator);
-      similarities[molIdx]   = static_cast<double>(similarity);
-    } else if constexpr (similarityType == SimilarityType::Cosine) {
-      const double denominator = sqrt(static_cast<double>(allBitsOne) * static_cast<double>(allBitsTwo));
-      similarities[molIdx]     = (denominator == 0.0) ? 0.0 : static_cast<double>(allIntersectBits) / denominator;
-    }
-  }
-}
-
-template <typename kThreadReductionType, SimilarityType similarityType>
-__device__ void crossSimilarityKernel(const cuda::std::span<const kThreadReductionType> bitsOne,
-                                      const cuda::std::span<const kThreadReductionType> bitsTwo,
-                                      const size_t                                      elementsPerMolecule,
-                                      cuda::std::span<double>                           similarities,
-                                      const size_t                                      offset) {
-  __shared__ typename cub::WarpReduce<kThreadReductionType>::TempStorage tempStorage[kBlockSize];
-
-  assert(offset % 32 == 0);
-  const size_t idx                  = (size_t(blockIdx.x) * size_t(blockDim.x)) + size_t(threadIdx.x) + offset;
-  const size_t warpIDWithinBlock    = threadIdx.x / 32;
-  const size_t laneID               = idx % 32;
-  const size_t numMoleculesTotalOne = bitsOne.size() / elementsPerMolecule;
-  const size_t numMoleculesTotalTwo = bitsTwo.size() / elementsPerMolecule;
-
-  const size_t cumIdx = idx / kNumThreadsPerFingerPrintTemporaryFixed;
-  size_t       molIdx1, molIdx2, idx1, idx2;  // NOLINT
-
-  molIdx1 = cumIdx / numMoleculesTotalTwo;
-  molIdx2 = cumIdx % numMoleculesTotalTwo;
-  idx1    = (molIdx1 * elementsPerMolecule) + laneID;
-  idx2    = (molIdx2 * elementsPerMolecule) + laneID;
-
-  kThreadReductionType bitsOneSection = 0;
-  kThreadReductionType bitsTwoSection = 0;
-
-  if (idx1 < bitsOne.size() && idx2 < bitsTwo.size() && laneID < elementsPerMolecule) {
-    bitsOneSection = bitsOne[idx1];
-    bitsTwoSection = bitsTwo[idx2];
-  }
-
-  const kThreadReductionType intersection = bitsOneSection & bitsTwoSection;
-  int                        sectionBitsTwoNBits;
-  int                        sectionIntersectNBits;
-  int                        sectionBitsOneNBits;
-  if constexpr (sizeof(kThreadReductionType) == 4) {
-    sectionIntersectNBits = __popc(intersection);
-    sectionBitsOneNBits   = __popc(bitsOneSection);
-    sectionBitsTwoNBits   = __popc(bitsTwoSection);
-
-  } else {
-    sectionIntersectNBits = __popcll(intersection);
-    sectionBitsOneNBits   = __popcll(bitsOneSection);
-    sectionBitsTwoNBits   = __popcll(bitsTwoSection);
-  }
-  const kThreadReductionType allIntersectBits =
-    cub::WarpReduce<kThreadReductionType>(tempStorage[warpIDWithinBlock]).Sum(sectionIntersectNBits);
-  __syncwarp();
-  const kThreadReductionType allBitsOne =
-    cub::WarpReduce<kThreadReductionType>(tempStorage[warpIDWithinBlock]).Sum(sectionBitsOneNBits);
-  __syncwarp();
-  const kThreadReductionType allBitsTwo =
-    cub::WarpReduce<kThreadReductionType>(tempStorage[warpIDWithinBlock]).Sum(sectionBitsTwoNBits);
-  __syncwarp();
-
-  const size_t offsetOutput = offset / kNumThreadsPerFingerPrintTemporaryFixed;
-  if (laneID == 0 && idx1 < bitsOne.size() && idx2 < bitsTwo.size()) {
-    if constexpr (similarityType == SimilarityType::Tanimoto) {
-      // Guard against 0 division, if 0, set to 1, for a zero similarity.
-      const size_t               outputIdx1 = (molIdx1 * numMoleculesTotalTwo) + molIdx2 - offsetOutput;
-      const kThreadReductionType denominatorMaxDisambiguated = 1;
-      const kThreadReductionType denominator =
-        max(allBitsOne + allBitsTwo - allIntersectBits, denominatorMaxDisambiguated);
-      const float similarity   = static_cast<float>(allIntersectBits) / static_cast<float>(denominator);
-      similarities[outputIdx1] = static_cast<double>(similarity);
-    } else if constexpr (similarityType == SimilarityType::Cosine) {
-      const size_t outputIdx1  = (molIdx1 * numMoleculesTotalTwo) + molIdx2 - offsetOutput;
-      const double denominator = sqrt(static_cast<double>(allBitsOne) * static_cast<double>(allBitsTwo));
-      similarities[outputIdx1] = (denominator == 0.0) ? 0.0 : static_cast<double>(allIntersectBits) / denominator;
-    }
-  }
-}
-
-// --------------------------------
 // Tanimoto similarity kernels
 // --------------------------------
-
-__global__ void tanimotoSimilarityKernel(const std::uint32_t*                 bitsOne,
-                                         cuda::std::span<const std::uint32_t> bitsTwo,
-                                         cuda::std::span<float>               similarities) {
-  similarityKernel<SimilarityType::Tanimoto>(bitsOne, bitsTwo, similarities);
-}
-
-template <typename kThreadReductionType>
-__global__ void tanimotoDistributedSimilarityKernel(const cuda::std::span<const kThreadReductionType> bitsOne,
-                                                    const cuda::std::span<const kThreadReductionType> bitsTwo,
-                                                    const size_t            elementsPerMolecule,
-                                                    cuda::std::span<double> similarities,
-                                                    const size_t            offset) {
-  distributedSimilarityKernel<kThreadReductionType, SimilarityType::Tanimoto>(bitsOne,
-                                                                              bitsTwo,
-                                                                              elementsPerMolecule,
-                                                                              similarities,
-                                                                              offset);
-}
 
 template <typename kThreadReductionType,
           size_t BLOCK_TILE_SIZE_X,
@@ -587,47 +402,6 @@ __global__ void tanimotoCrossSimilarityKernel(const cuda::std::span<const kThrea
 // --------------------------------
 // Tanimoto similarity launch functions
 // --------------------------------
-
-void launchBulkTanimotoSimilarity(const AsyncDevicePtr<std::uint32_t>&    bitsOne,
-                                  const AsyncDeviceVector<std::uint32_t>& bitsTwo,
-
-                                  AsyncDeviceVector<float>& results) {
-  const int numBlocks = (bitsTwo.size() + kBlockSize - 1) / kBlockSize;
-  tanimotoSimilarityKernel<<<numBlocks, kBlockSize>>>(bitsOne.data(), toSpan(bitsTwo), toSpan(results));
-}
-
-template <typename T>
-void launchBulkTanimotoSimilarity(const AsyncDeviceVector<internal::kBlockType>& bitsOne,
-                                  const AsyncDeviceVector<internal::kBlockType>& bitsTwo,
-                                  const size_t                                   elementsPerMolecule,
-                                  const size_t                                   batchSize,
-                                  AsyncDeviceVector<double>&                     results,
-                                  const size_t                                   offset,
-                                  const cudaStream_t                             stream) {
-  const size_t numBlocks = (batchSize * kNumThreadsPerFingerPrintTemporaryFixed + kBlockSize - 1) / kBlockSize;
-  tanimotoDistributedSimilarityKernel<<<numBlocks, kBlockSize, 0, stream>>>(
-    castAsSpanOfSmallerType<internal::kBlockType, T>(bitsOne),
-    castAsSpanOfSmallerType<internal::kBlockType, T>(bitsTwo),
-    elementsPerMolecule,
-    toSpan(results),
-    offset);
-}
-
-template <typename blockType>
-void launchBulkTanimotoSimilarity(const cuda::std::span<const blockType> bitsOneBuffer,
-                                  const cuda::std::span<const blockType> bitsTwoBuffer,
-                                  const size_t                           elementsPerMolecule,
-                                  AsyncDeviceVector<double>&             results,
-                                  const cudaStream_t                     stream) {
-  const size_t numBlocks =
-    (bitsTwoBuffer.size() * kNumThreadsPerFingerPrintTemporaryFixed + kBlockSize - 1) / kBlockSize;
-  tanimotoDistributedSimilarityKernel<<<numBlocks, kBlockSize, 0, stream>>>(bitsOneBuffer,
-                                                                            bitsTwoBuffer,
-                                                                            elementsPerMolecule,
-                                                                            toSpan(results),
-                                                                            0);
-  cudaCheckError(cudaGetLastError());
-}
 
 //! Launches a kernel to compute the all-to-all Tanimoto similarity between a list of fingerprints.
 //! \param bits The list of fingerprints
@@ -795,23 +569,6 @@ void launchCrossTanimotoSimilarity(const cuda::std::span<const std::uint32_t> bi
   cudaCheckError(cudaGetLastError());
 }
 
-// Template instantiations
-template void launchBulkTanimotoSimilarity<std::uint32_t>(const AsyncDeviceVector<internal::kBlockType>& bitsOne,
-                                                          const AsyncDeviceVector<internal::kBlockType>& bitsTwo,
-                                                          const size_t elementsPerMolecule,
-                                                          const size_t batchSize,
-
-                                                          AsyncDeviceVector<double>& results,
-                                                          const size_t               offset,
-                                                          const cudaStream_t         stream);
-template void launchBulkTanimotoSimilarity<std::uint64_t>(const AsyncDeviceVector<internal::kBlockType>& bitsOne,
-                                                          const AsyncDeviceVector<internal::kBlockType>& bitsTwo,
-                                                          const size_t elementsPerMolecule,
-                                                          const size_t batchSize,
-
-                                                          AsyncDeviceVector<double>& results,
-                                                          const size_t               offset,
-                                                          const cudaStream_t         stream);
 
 template void launchCrossTanimotoSimilarity<typename std::uint32_t>(
   const AsyncDeviceVector<internal::kBlockType>& bitsOne,
@@ -820,40 +577,11 @@ template void launchCrossTanimotoSimilarity<typename std::uint32_t>(
   AsyncDeviceVector<double>&                     results,
   const size_t                                   offset);
 
-template void launchBulkTanimotoSimilarity<std::uint32_t>(const cuda::std::span<const std::uint32_t> bitsOneBuffer,
-                                                          const cuda::std::span<const std::uint32_t> bitsTwoBuffer,
-                                                          const size_t               elementsPerMolecule,
-                                                          AsyncDeviceVector<double>& results,
-                                                          const cudaStream_t         stream);
-template void launchBulkTanimotoSimilarity<std::uint64_t>(const cuda::std::span<const std::uint64_t> bitsOneBuffer,
-                                                          const cuda::std::span<const std::uint64_t> bitsTwoBuffer,
-                                                          const size_t               elementsPerMolecule,
-                                                          AsyncDeviceVector<double>& results,
-                                                          const cudaStream_t         stream);
 
 namespace {
 // --------------------------------
 // Cosine similarity kernels
 // --------------------------------
-
-__global__ void cosineSimilarityKernel(const std::uint32_t*                 bitsOne,
-                                       cuda::std::span<const std::uint32_t> bitsTwo,
-                                       cuda::std::span<float>               similarities) {
-  similarityKernel<SimilarityType::Cosine>(bitsOne, bitsTwo, similarities);
-}
-
-template <typename kThreadReductionType>
-__global__ void cosineDistributedSimilarityKernel(const cuda::std::span<const kThreadReductionType> bitsOne,
-                                                  const cuda::std::span<const kThreadReductionType> bitsTwo,
-                                                  const size_t                                      elementsPerMolecule,
-                                                  cuda::std::span<double>                           similarities,
-                                                  const size_t                                      offset) {
-  distributedSimilarityKernel<kThreadReductionType, SimilarityType::Cosine>(bitsOne,
-                                                                            bitsTwo,
-                                                                            elementsPerMolecule,
-                                                                            similarities,
-                                                                            offset);
-}
 
 template <typename kThreadReductionType,
           size_t BLOCK_TILE_SIZE_X,
@@ -897,47 +625,6 @@ __global__ void cosineCrossSimilarityKernel(const cuda::std::span<const kThreadR
 // --------------------------------
 // Cosine similarity launch functions
 // --------------------------------
-
-void launchBulkCosineSimilarity(const AsyncDevicePtr<std::uint32_t>&    bitsOne,
-                                const AsyncDeviceVector<std::uint32_t>& bitsTwo,
-
-                                AsyncDeviceVector<float>& results) {
-  const int numBlocks = (bitsTwo.size() + kBlockSize - 1) / kBlockSize;
-  cosineSimilarityKernel<<<numBlocks, kBlockSize>>>(bitsOne.data(), toSpan(bitsTwo), toSpan(results));
-}
-
-template <typename T>
-void launchBulkCosineSimilarity(const AsyncDeviceVector<internal::kBlockType>& bitsOne,
-                                const AsyncDeviceVector<internal::kBlockType>& bitsTwo,
-                                const size_t                                   elementsPerMolecule,
-                                const size_t                                   batchSize,
-                                AsyncDeviceVector<double>&                     results,
-                                const size_t                                   offset,
-                                const cudaStream_t                             stream) {
-  const size_t numBlocks = (batchSize * kNumThreadsPerFingerPrintTemporaryFixed + kBlockSize - 1) / kBlockSize;
-  cosineDistributedSimilarityKernel<<<numBlocks, kBlockSize, 0, stream>>>(
-    castAsSpanOfSmallerType<internal::kBlockType, T>(bitsOne),
-    castAsSpanOfSmallerType<internal::kBlockType, T>(bitsTwo),
-    elementsPerMolecule,
-    toSpan(results),
-    offset);
-}
-
-template <typename blockType>
-void launchBulkCosineSimilarity(const cuda::std::span<const blockType> bitsOneBuffer,
-                                const cuda::std::span<const blockType> bitsTwoBuffer,
-                                const size_t                           elementsPerMolecule,
-                                AsyncDeviceVector<double>&             results,
-                                const cudaStream_t                     stream) {
-  const size_t numBlocks =
-    (bitsTwoBuffer.size() * kNumThreadsPerFingerPrintTemporaryFixed + kBlockSize - 1) / kBlockSize;
-  cosineDistributedSimilarityKernel<<<numBlocks, kBlockSize, 0, stream>>>(bitsOneBuffer,
-                                                                          bitsTwoBuffer,
-                                                                          elementsPerMolecule,
-                                                                          toSpan(results),
-                                                                          0);
-  cudaCheckError(cudaGetLastError());
-}
 
 //! Launches a kernel to compute the all-to-all Tanimoto similarity between a list of fingerprints.
 //! \param bits The list of fingerprints
@@ -1100,40 +787,11 @@ void launchCrossCosineSimilarity(const cuda::std::span<const std::uint32_t> bits
   cudaCheckError(cudaGetLastError());
 }
 
-// Template instantiations
-template void launchBulkCosineSimilarity<std::uint32_t>(const AsyncDeviceVector<internal::kBlockType>& bitsOne,
-                                                        const AsyncDeviceVector<internal::kBlockType>& bitsTwo,
-                                                        const size_t elementsPerMolecule,
-                                                        const size_t batchSize,
-
-                                                        AsyncDeviceVector<double>& results,
-                                                        const size_t               offset,
-                                                        const cudaStream_t         stream);
-template void launchBulkCosineSimilarity<std::uint64_t>(const AsyncDeviceVector<internal::kBlockType>& bitsOne,
-                                                        const AsyncDeviceVector<internal::kBlockType>& bitsTwo,
-                                                        const size_t elementsPerMolecule,
-                                                        const size_t batchSize,
-
-                                                        AsyncDeviceVector<double>& results,
-                                                        const size_t               offset,
-                                                        const cudaStream_t         stream);
-
 template void launchCrossCosineSimilarity<typename std::uint32_t>(
   const AsyncDeviceVector<internal::kBlockType>& bitsOne,
   const AsyncDeviceVector<internal::kBlockType>& bitsTwo,
   const size_t                                   numBitsPerMolecule,
   AsyncDeviceVector<double>&                     results,
   const size_t                                   offset);
-
-template void launchBulkCosineSimilarity<std::uint32_t>(const cuda::std::span<const std::uint32_t> bitsOneBuffer,
-                                                        const cuda::std::span<const std::uint32_t> bitsTwoBuffer,
-                                                        const size_t                               elementsPerMolecule,
-                                                        AsyncDeviceVector<double>&                 results,
-                                                        const cudaStream_t                         stream);
-template void launchBulkCosineSimilarity<std::uint64_t>(const cuda::std::span<const std::uint64_t> bitsOneBuffer,
-                                                        const cuda::std::span<const std::uint64_t> bitsTwoBuffer,
-                                                        const size_t                               elementsPerMolecule,
-                                                        AsyncDeviceVector<double>&                 results,
-                                                        const cudaStream_t                         stream);
 
 }  // namespace nvMolKit
