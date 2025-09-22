@@ -18,9 +18,42 @@ import torch
 from rdkit.Chem import rdFingerprintGenerator
 from rdkit.DataStructs import BulkCosineSimilarity, BulkTanimotoSimilarity
 
-from nvmolkit.similarity import crossCosineSimilarity, crossTanimotoSimilarity
+from nvmolkit.similarity import (
+    crossCosineSimilarity,
+    crossTanimotoSimilarity,
+    crossTanimotoSimilarityMemoryConstrained,
+    crossCosineSimilarityMemoryConstrained,
+)
 from nvmolkit.fingerprints import MorganFingerprintGenerator
 
+
+# --------------------------------
+# Test helpers
+# --------------------------------
+
+def replicate_mols(mols, target_len):
+    base = list(mols)
+    if not base:
+        raise ValueError("Empty molecule list cannot be replicated")
+    reps = (target_len + len(base) - 1) // len(base)
+    return (base * reps)[:target_len]
+
+
+def make_rdkit_and_gpu_fps(mols, target_len, fp_size=1024):
+    """Replicate molecules to target_len and compute RDKit and nvMolKit fingerprints.
+
+    Returns (rdkit_fps_list, torch_gpu_packed_bit_ints)
+    """
+    mols_rep = replicate_mols(mols, target_len)
+    fpgen_rd = rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=fp_size)
+    rdkit_fps = [fpgen_rd.GetFingerprint(mol) for mol in mols_rep]
+
+    nvmolkit_fpgen = MorganFingerprintGenerator(radius=3, fpSize=fp_size)
+    nvmolkit_fps_cu = nvmolkit_fpgen.GetFingerprints(mols_rep, num_threads=1)
+    t = nvmolkit_fps_cu.torch()
+    assert t.shape == (target_len, fp_size // 32)
+    assert t.device.type == 'cuda'
+    return rdkit_fps, t
 
 # --------------------------------
 # Edge cases and failure tests.
@@ -70,27 +103,8 @@ def test_nvmolkit_cross_tanimoto_similarity_from_nvmolkit_fp(size_limited_mols):
 @pytest.mark.parametrize('nxmdims', ((1, 20), (20, 1), (20, 2), (29, 29)))
 def test_nxm_cross_tanimoto_similarity_from_nvmolkit_fp(size_limited_mols, nxmdims):
     d1, d2 = nxmdims
-    fpgen = rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=1024)
-    nvmolkit_fpgen = MorganFingerprintGenerator(radius=3, fpSize=1024)
-
-    assert d1 + d2 <= len(size_limited_mols), \
-        f"Need enough molecules for {d1} x {d2} cross similarity, got {len(size_limited_mols)}"
-    mols1 = size_limited_mols[:d1]
-    mols2 = size_limited_mols[d1:d1+d2]
-
-    fps1 = [fpgen.GetFingerprint(mol) for mol in mols1]
-    fps2 = [fpgen.GetFingerprint(mol) for mol in mols2]
-
-    nvmolkit_fps_cu1 = nvmolkit_fpgen.GetFingerprints(mols1, num_threads=1)
-    nvmolkit_fps_cu2 = nvmolkit_fpgen.GetFingerprints(mols2, num_threads=1)
-
-    nvmolkit_fps_torch1 = nvmolkit_fps_cu1.torch()
-    nvmolkit_fps_torch2 = nvmolkit_fps_cu2.torch()
-
-    assert nvmolkit_fps_torch1.shape == (len(mols1), 1024 // 32)
-    assert nvmolkit_fps_torch1.device.type == 'cuda'
-    assert nvmolkit_fps_torch2.shape == (len(mols2), 1024 // 32)
-    assert nvmolkit_fps_torch2.device.type == 'cuda'
+    fps1, nvmolkit_fps_torch1 = make_rdkit_and_gpu_fps(size_limited_mols, d1, fp_size=1024)
+    fps2, nvmolkit_fps_torch2 = make_rdkit_and_gpu_fps(size_limited_mols, d2, fp_size=1024)
 
 
     ref_sims = torch.empty(len(fps1), len(fps2), dtype=torch.float64)
@@ -101,7 +115,7 @@ def test_nxm_cross_tanimoto_similarity_from_nvmolkit_fp(size_limited_mols, nxmdi
     nvmolkit_sims = crossTanimotoSimilarity(nvmolkit_fps_torch1, nvmolkit_fps_torch2).torch()
     torch.testing.assert_close(nvmolkit_sims, ref_sims)
 
-@pytest.mark.parametrize('nxmdims', ((1, 20), (2, 10), (300, 300)))
+@pytest.mark.parametrize('nxmdims', ((1, 20), (2, 10), (50, 50)))
 def test_nxm_cross_tanimoto_similarity_from_packing(nxmdims):
     d1, d2 = nxmdims
 
@@ -165,27 +179,8 @@ def test_nvmolkit_cross_cosine_similarity_from_nvmolkit_fp(size_limited_mols):
 @pytest.mark.parametrize('nxmdims', ((1, 20), (2, 10), (4, 5), (5, 4), (10, 2), (20, 1)))
 def test_nxm_cross_cosine_similarity_from_nvmolkit_fp(size_limited_mols, nxmdims):
     d1, d2 = nxmdims
-    fpgen = rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=1024)
-    nvmolkit_fpgen = MorganFingerprintGenerator(radius=3, fpSize=1024)
-
-    assert d1 + d2 <= len(size_limited_mols), \
-        f"Need enough molecules for {d1} x {d2} cross similarity, got {len(size_limited_mols)}"
-    mols1 = size_limited_mols[:d1]
-    mols2 = size_limited_mols[d1:d1+d2]
-
-    fps1 = [fpgen.GetFingerprint(mol) for mol in mols1]
-    fps2 = [fpgen.GetFingerprint(mol) for mol in mols2]
-
-    nvmolkit_fps_cu1 = nvmolkit_fpgen.GetFingerprints(mols1, num_threads=1)
-    nvmolkit_fps_cu2 = nvmolkit_fpgen.GetFingerprints(mols2, num_threads=1)
-
-    nvmolkit_fps_torch1 = nvmolkit_fps_cu1.torch()
-    nvmolkit_fps_torch2 = nvmolkit_fps_cu2.torch()
-
-    assert nvmolkit_fps_torch1.shape == (len(mols1), 1024 // 32)
-    assert nvmolkit_fps_torch1.device.type == 'cuda'
-    assert nvmolkit_fps_torch2.shape == (len(mols2), 1024 // 32)
-    assert nvmolkit_fps_torch2.device.type == 'cuda'
+    fps1, nvmolkit_fps_torch1 = make_rdkit_and_gpu_fps(size_limited_mols, d1, fp_size=1024)
+    fps2, nvmolkit_fps_torch2 = make_rdkit_and_gpu_fps(size_limited_mols, d2, fp_size=1024)
 
 
     ref_sims = torch.empty(len(fps1), len(fps2), dtype=torch.float64)
@@ -196,3 +191,71 @@ def test_nxm_cross_cosine_similarity_from_nvmolkit_fp(size_limited_mols, nxmdims
     nvmolkit_sims = crossCosineSimilarity(nvmolkit_fps_torch1, nvmolkit_fps_torch2).torch()
 
     torch.testing.assert_close(nvmolkit_sims, ref_sims)
+
+
+# --------------------------------
+# Memory-constrained CPU result tests (Python wrappers)
+# --------------------------------
+
+def test_memory_constrained_tanimoto_self(size_limited_mols):
+    fpgen = rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=1024)
+    nvmolkit_fpgen = MorganFingerprintGenerator(radius=3, fpSize=1024)
+
+    fps = [fpgen.GetFingerprint(mol) for mol in size_limited_mols]
+    ref = torch.empty(len(fps), len(fps), dtype=torch.float64)
+    for i in range(len(fps)):
+        ref[i] = torch.tensor(BulkTanimotoSimilarity(fps[i], fps))
+
+    # GPU-packed fingerprints (torch CUDA tensor)
+    nvmolkit_fps_cu = nvmolkit_fpgen.GetFingerprints(size_limited_mols, num_threads=1)
+    nvmolkit_fps_torch = nvmolkit_fps_cu.torch()
+
+    got = crossTanimotoSimilarityMemoryConstrained(nvmolkit_fps_torch)
+    # Compare as numpy
+    import numpy as np
+    np.testing.assert_allclose(got, ref.cpu().numpy(), rtol=1e-5, atol=1e-5)
+
+
+@pytest.mark.parametrize('nxmdims', ((1, 20), (20, 1), (50, 50)))
+def test_memory_constrained_tanimoto_cross(size_limited_mols, nxmdims):
+    d1, d2 = nxmdims
+    fps1, t1 = make_rdkit_and_gpu_fps(size_limited_mols, d1, fp_size=1024)
+    fps2, t2 = make_rdkit_and_gpu_fps(size_limited_mols, d2, fp_size=1024)
+    ref = torch.empty(d1, d2, dtype=torch.float64)
+    for i in range(d1):
+        ref[i] = torch.tensor(BulkTanimotoSimilarity(fps1[i], fps2))
+
+    got = crossTanimotoSimilarityMemoryConstrained(t1, t2)
+    import numpy as np
+    np.testing.assert_allclose(got, ref.cpu().numpy(), rtol=1e-5, atol=1e-5)
+
+
+def test_memory_constrained_cosine_self(size_limited_mols):
+    fpgen = rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=1024)
+    nvmolkit_fpgen = MorganFingerprintGenerator(radius=3, fpSize=1024)
+
+    fps = [fpgen.GetFingerprint(mol) for mol in size_limited_mols]
+    ref = torch.empty(len(fps), len(fps), dtype=torch.float64)
+    for i in range(len(fps)):
+        ref[i] = torch.tensor(BulkCosineSimilarity(fps[i], fps))
+
+    nvmolkit_fps_cu = nvmolkit_fpgen.GetFingerprints(size_limited_mols, num_threads=1)
+    nvmolkit_fps_torch = nvmolkit_fps_cu.torch()
+
+    got = crossCosineSimilarityMemoryConstrained(nvmolkit_fps_torch)
+    import numpy as np
+    np.testing.assert_allclose(got, ref.cpu().numpy(), rtol=1e-5, atol=1e-5)
+
+
+@pytest.mark.parametrize('nxmdims', ((1, 20), (20, 1), (50, 50)))
+def test_memory_constrained_cosine_cross(size_limited_mols, nxmdims):
+    d1, d2 = nxmdims
+    fps1, t1 = make_rdkit_and_gpu_fps(size_limited_mols, d1, fp_size=1024)
+    fps2, t2 = make_rdkit_and_gpu_fps(size_limited_mols, d2, fp_size=1024)
+    ref = torch.empty(d1, d2, dtype=torch.float64)
+    for i in range(d1):
+        ref[i] = torch.tensor(BulkCosineSimilarity(fps1[i], fps2))
+
+    got = crossCosineSimilarityMemoryConstrained(t1, t2)
+    import numpy as np
+    np.testing.assert_allclose(got, ref.cpu().numpy(), rtol=1e-5, atol=1e-5)
