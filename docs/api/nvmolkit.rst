@@ -25,9 +25,7 @@ Similarity Calculations
    :toctree: generated/
    :template: function_template.rst
 
-   similarity.bulkTanimotoSimilarity
    similarity.crossTanimotoSimilarity
-   similarity.bulkCosineSimilarity
    similarity.crossCosineSimilarity
 
 
