@@ -323,3 +323,256 @@ INSTANTIATE_TEST_SUITE_P(SelfSimilarity,
                                           testing::Values(128, 2048),
                                           testing::Values(SimMetric::Tanimoto, SimMetric::Cosine)),
                          SelfTestName);
+
+// --------------------------------
+// Cross similarity CPU result tests (parameterized)
+// --------------------------------
+
+// Cross CPU params: N, M, bits
+using CrossCpuParams = std::tuple<int, int, int>;
+
+class CrossCpuSimilarityParamTestFixture : public testing::TestWithParam<CrossCpuParams> {
+ protected:
+  CrossCpuSimilarityParamTestFixture() { InitializeMols(mols_); }
+
+  std::vector<std::unique_ptr<ROMol>> mols_;
+};
+
+static std::string CrossCpuTestName(const testing::TestParamInfo<CrossCpuParams>& info) {
+  const auto [n, m, bits] = info.param;
+  return std::string("CPU_Tan_N") + std::to_string(n) + "_M" + std::to_string(m) + "_B" + std::to_string(bits);
+}
+
+// Default memory path (may compute in a single shot)
+TEST_P(CrossCpuSimilarityParamTestFixture, DefaultMemoryAgrees) {
+  const auto [N, M, kNumBits] = GetParam();
+
+  std::vector<std::unique_ptr<ExplicitBitVect>> explicitVectsA;
+  std::vector<std::unique_ptr<ExplicitBitVect>> explicitVectsB;
+  explicitVectsA.reserve(N);
+  explicitVectsB.reserve(M);
+  for (int i = 0; i < N; ++i) {
+    const size_t idx = static_cast<size_t>(i) % mols_.size();
+    explicitVectsA.emplace_back(MorganFingerprints::getFingerprintAsBitVect(*mols_[idx], 3, kNumBits));
+  }
+  for (int j = 0; j < M; ++j) {
+    const size_t idx = static_cast<size_t>(j) % mols_.size();
+    explicitVectsB.emplace_back(MorganFingerprints::getFingerprintAsBitVect(*mols_[idx], 3, kNumBits));
+  }
+
+  std::vector<double> wantSimilarities;
+  wantSimilarities.reserve(static_cast<size_t>(N) * static_cast<size_t>(M));
+  for (const auto& a : explicitVectsA) {
+    for (const auto& b : explicitVectsB) {
+      wantSimilarities.push_back(TanimotoSimilarity(*a, *b));
+    }
+  }
+
+  std::vector<std::uint64_t> bitsA;
+  std::vector<std::uint64_t> bitsB;
+  for (const auto& bitVec : explicitVectsA) {
+    boost::to_block_range(*bitVec->dp_bits, std::back_inserter(bitsA));
+  }
+  for (const auto& bitVec : explicitVectsB) {
+    boost::to_block_range(*bitVec->dp_bits, std::back_inserter(bitsB));
+  }
+
+  AsyncDeviceVector<std::uint64_t> bitsGpuA(bitsA.size());
+  AsyncDeviceVector<std::uint64_t> bitsGpuB(bitsB.size());
+  bitsGpuA.copyFromHost(bitsA);
+  bitsGpuB.copyFromHost(bitsB);
+  auto bitsGpuSpanA = castAsSpanOfSmallerType<std::uint64_t, std::uint32_t>(bitsGpuA);
+  auto bitsGpuSpanB = castAsSpanOfSmallerType<std::uint64_t, std::uint32_t>(bitsGpuB);
+
+  const auto got = crossTanimotoSimilarityCPUResult(bitsGpuSpanA, bitsGpuSpanB, kNumBits);
+  cudaDeviceSynchronize();
+  EXPECT_THAT(got, testing::Pointwise(testing::DoubleNear(1e-5), wantSimilarities));
+}
+
+// Constrained memory: attempt to force segmentation when feasible (e.g., N>=100)
+TEST_P(CrossCpuSimilarityParamTestFixture, ConstrainedMemoryAgrees) {
+  const auto [N, M, kNumBits] = GetParam();
+
+  std::vector<std::unique_ptr<ExplicitBitVect>> explicitVectsA;
+  std::vector<std::unique_ptr<ExplicitBitVect>> explicitVectsB;
+  explicitVectsA.reserve(N);
+  explicitVectsB.reserve(M);
+  for (int i = 0; i < N; ++i) {
+    const size_t idx = static_cast<size_t>(i) % mols_.size();
+    explicitVectsA.emplace_back(MorganFingerprints::getFingerprintAsBitVect(*mols_[idx], 3, kNumBits));
+  }
+  for (int j = 0; j < M; ++j) {
+    const size_t idx = static_cast<size_t>(j) % mols_.size();
+    explicitVectsB.emplace_back(MorganFingerprints::getFingerprintAsBitVect(*mols_[idx], 3, kNumBits));
+  }
+
+  std::vector<double> wantSimilarities;
+  wantSimilarities.reserve(static_cast<size_t>(N) * static_cast<size_t>(M));
+  for (const auto& a : explicitVectsA) {
+    for (const auto& b : explicitVectsB) {
+      wantSimilarities.push_back(TanimotoSimilarity(*a, *b));
+    }
+  }
+
+  std::vector<std::uint64_t> bitsA;
+  std::vector<std::uint64_t> bitsB;
+  for (const auto& bitVec : explicitVectsA) {
+    boost::to_block_range(*bitVec->dp_bits, std::back_inserter(bitsA));
+  }
+  for (const auto& bitVec : explicitVectsB) {
+    boost::to_block_range(*bitVec->dp_bits, std::back_inserter(bitsB));
+  }
+
+  AsyncDeviceVector<std::uint64_t> bitsGpuA(bitsA.size());
+  AsyncDeviceVector<std::uint64_t> bitsGpuB(bitsB.size());
+  bitsGpuA.copyFromHost(bitsA);
+  bitsGpuB.copyFromHost(bitsB);
+  auto bitsGpuSpanA = castAsSpanOfSmallerType<std::uint64_t, std::uint32_t>(bitsGpuA);
+  auto bitsGpuSpanB = castAsSpanOfSmallerType<std::uint64_t, std::uint32_t>(bitsGpuB);
+
+  const size_t           totalBytes   = static_cast<size_t>(N) * static_cast<size_t>(M) * sizeof(double);
+  // Minimal bytes to support two rotating buffers for a batch of 32 rows
+  // Derived from kernel's buffer math: freeBytes >= ceil( (32*M) * (20*sizeof(double)) / 9 )
+  const size_t           minThreshold = ((size_t)32 * (size_t)M * (size_t)20 * sizeof(double) + 8) / 9;
+  const size_t           margin       = 64;
+  CrossSimilarityOptions opts;
+  if (totalBytes > minThreshold + margin) {
+    opts.maxDeviceMemoryBytes = minThreshold + margin;  // forces segmented path
+  } else {
+    opts.maxDeviceMemoryBytes = totalBytes + margin;  // not enough headroom to segment; compute single-shot
+  }
+
+  const auto got = crossTanimotoSimilarityCPUResult(bitsGpuSpanA, bitsGpuSpanB, kNumBits, opts);
+  cudaDeviceSynchronize();
+  EXPECT_THAT(got, testing::Pointwise(testing::DoubleNear(1e-5), wantSimilarities));
+}
+
+INSTANTIATE_TEST_SUITE_P(CrossCpuSimilarity,
+                         CrossCpuSimilarityParamTestFixture,
+                         testing::Combine(testing::Values(1, 10, 100),
+                                          testing::Values(1, 10, 100),
+                                          testing::Values(128, 2048)),
+                         CrossCpuTestName);
+
+// --------------------------------
+// Cosine cross CPU tests (default and constrained memory)
+// --------------------------------
+
+class CrossCpuCosineSimilarityParamTestFixture : public testing::TestWithParam<CrossCpuParams> {
+ protected:
+  CrossCpuCosineSimilarityParamTestFixture() { InitializeMols(mols_); }
+
+  std::vector<std::unique_ptr<ROMol>> mols_;
+};
+
+static std::string CrossCpuCosTestName(const testing::TestParamInfo<CrossCpuParams>& info) {
+  const auto [n, m, bits] = info.param;
+  return std::string("CPU_Cos_N") + std::to_string(n) + "_M" + std::to_string(m) + "_B" + std::to_string(bits);
+}
+
+TEST_P(CrossCpuCosineSimilarityParamTestFixture, DefaultMemoryAgrees) {
+  const auto [N, M, kNumBits] = GetParam();
+
+  std::vector<std::unique_ptr<ExplicitBitVect>> explicitVectsA;
+  std::vector<std::unique_ptr<ExplicitBitVect>> explicitVectsB;
+  explicitVectsA.reserve(N);
+  explicitVectsB.reserve(M);
+  for (int i = 0; i < N; ++i) {
+    const size_t idx = static_cast<size_t>(i) % mols_.size();
+    explicitVectsA.emplace_back(MorganFingerprints::getFingerprintAsBitVect(*mols_[idx], 3, kNumBits));
+  }
+  for (int j = 0; j < M; ++j) {
+    const size_t idx = static_cast<size_t>(j) % mols_.size();
+    explicitVectsB.emplace_back(MorganFingerprints::getFingerprintAsBitVect(*mols_[idx], 3, kNumBits));
+  }
+
+  std::vector<double> wantSimilarities;
+  wantSimilarities.reserve(static_cast<size_t>(N) * static_cast<size_t>(M));
+  for (const auto& a : explicitVectsA) {
+    for (const auto& b : explicitVectsB) {
+      wantSimilarities.push_back(CosineSimilarity(*a, *b));
+    }
+  }
+
+  std::vector<std::uint64_t> bitsA;
+  std::vector<std::uint64_t> bitsB;
+  for (const auto& bitVec : explicitVectsA) {
+    boost::to_block_range(*bitVec->dp_bits, std::back_inserter(bitsA));
+  }
+  for (const auto& bitVec : explicitVectsB) {
+    boost::to_block_range(*bitVec->dp_bits, std::back_inserter(bitsB));
+  }
+
+  AsyncDeviceVector<std::uint64_t> bitsGpuA(bitsA.size());
+  AsyncDeviceVector<std::uint64_t> bitsGpuB(bitsB.size());
+  bitsGpuA.copyFromHost(bitsA);
+  bitsGpuB.copyFromHost(bitsB);
+  auto bitsGpuSpanA = castAsSpanOfSmallerType<std::uint64_t, std::uint32_t>(bitsGpuA);
+  auto bitsGpuSpanB = castAsSpanOfSmallerType<std::uint64_t, std::uint32_t>(bitsGpuB);
+
+  const auto got = crossCosineSimilarityCPUResult(bitsGpuSpanA, bitsGpuSpanB, kNumBits);
+  cudaDeviceSynchronize();
+  EXPECT_THAT(got, testing::Pointwise(testing::DoubleNear(1e-5), wantSimilarities));
+}
+
+TEST_P(CrossCpuCosineSimilarityParamTestFixture, ConstrainedMemoryAgrees) {
+  const auto [N, M, kNumBits] = GetParam();
+
+  std::vector<std::unique_ptr<ExplicitBitVect>> explicitVectsA;
+  std::vector<std::unique_ptr<ExplicitBitVect>> explicitVectsB;
+  explicitVectsA.reserve(N);
+  explicitVectsB.reserve(M);
+  for (int i = 0; i < N; ++i) {
+    const size_t idx = static_cast<size_t>(i) % mols_.size();
+    explicitVectsA.emplace_back(MorganFingerprints::getFingerprintAsBitVect(*mols_[idx], 3, kNumBits));
+  }
+  for (int j = 0; j < M; ++j) {
+    const size_t idx = static_cast<size_t>(j) % mols_.size();
+    explicitVectsB.emplace_back(MorganFingerprints::getFingerprintAsBitVect(*mols_[idx], 3, kNumBits));
+  }
+
+  std::vector<double> wantSimilarities;
+  wantSimilarities.reserve(static_cast<size_t>(N) * static_cast<size_t>(M));
+  for (const auto& a : explicitVectsA) {
+    for (const auto& b : explicitVectsB) {
+      wantSimilarities.push_back(CosineSimilarity(*a, *b));
+    }
+  }
+
+  std::vector<std::uint64_t> bitsA;
+  std::vector<std::uint64_t> bitsB;
+  for (const auto& bitVec : explicitVectsA) {
+    boost::to_block_range(*bitVec->dp_bits, std::back_inserter(bitsA));
+  }
+  for (const auto& bitVec : explicitVectsB) {
+    boost::to_block_range(*bitVec->dp_bits, std::back_inserter(bitsB));
+  }
+
+  AsyncDeviceVector<std::uint64_t> bitsGpuA(bitsA.size());
+  AsyncDeviceVector<std::uint64_t> bitsGpuB(bitsB.size());
+  bitsGpuA.copyFromHost(bitsA);
+  bitsGpuB.copyFromHost(bitsB);
+  auto bitsGpuSpanA = castAsSpanOfSmallerType<std::uint64_t, std::uint32_t>(bitsGpuA);
+  auto bitsGpuSpanB = castAsSpanOfSmallerType<std::uint64_t, std::uint32_t>(bitsGpuB);
+
+  const size_t           totalBytes   = static_cast<size_t>(N) * static_cast<size_t>(M) * sizeof(double);
+  const size_t           minThreshold = ((size_t)32 * (size_t)M * (size_t)20 * sizeof(double) + 8) / 9;
+  const size_t           margin       = 64;
+  CrossSimilarityOptions opts;
+  if (totalBytes > minThreshold + margin) {
+    opts.maxDeviceMemoryBytes = minThreshold + margin;
+  } else {
+    opts.maxDeviceMemoryBytes = totalBytes + margin;
+  }
+
+  const auto got = crossCosineSimilarityCPUResult(bitsGpuSpanA, bitsGpuSpanB, kNumBits, opts);
+  cudaDeviceSynchronize();
+  EXPECT_THAT(got, testing::Pointwise(testing::DoubleNear(1e-5), wantSimilarities));
+}
+
+INSTANTIATE_TEST_SUITE_P(CrossCpuCosineSimilarity,
+                         CrossCpuCosineSimilarityParamTestFixture,
+                         testing::Combine(testing::Values(1, 10, 100),
+                                          testing::Values(1, 10, 100),
+                                          testing::Values(128, 2048)),
+                         CrossCpuCosTestName);

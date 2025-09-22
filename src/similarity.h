@@ -44,24 +44,29 @@ struct BulkFingerprintOptions {
 // Tanimoto similarity wrapper functions
 // --------------------------------
 
-AsyncDeviceVector<double> crossTanimotoSimilarityGpuResult(const cuda::std::span<const std::uint32_t> bits, int fpSize);
+AsyncDeviceVector<double> crossTanimotoSimilarityGpuResult(cuda::std::span<const std::uint32_t> bits, int fpSize);
 
-AsyncDeviceVector<double> crossTanimotoSimilarityGpuResult(const cuda::std::span<const std::uint32_t> bitsOneBuffer,
-                                                           const cuda::std::span<const std::uint32_t> bitsTwoBuffer,
-                                                           int                                        fpSize);
-
+AsyncDeviceVector<double> crossTanimotoSimilarityGpuResult(cuda::std::span<const std::uint32_t> bitsOneBuffer,
+                                                           cuda::std::span<const std::uint32_t> bitsTwoBuffer,
+                                                           int                                  fpSize);
+std::vector<double>       crossTanimotoSimilarityCPUResult(cuda::std::span<const std::uint32_t> bitsOneBuffer,
+                                                           cuda::std::span<const std::uint32_t> bitsTwoBuffer,
+                                                           int                                  fpSize,
+                                                           const CrossSimilarityOptions& options = CrossSimilarityOptions());
 // --------------------------------
 // Cosine similarity wrapper functions
 // --------------------------------
 
-AsyncDeviceVector<double> crossCosineSimilarityGpuResult(const cuda::std::span<const std::uint32_t> bits, int fpSize);
+AsyncDeviceVector<double> crossCosineSimilarityGpuResult(cuda::std::span<const std::uint32_t> bits, int fpSize);
 
-AsyncDeviceVector<double> crossCosineSimilarityGpuResult(const cuda::std::span<const std::uint32_t> bitsOneBuffer,
-                                                         const cuda::std::span<const std::uint32_t> bitsTwoBuffer,
-                                                         int                                        fpSize);
-std::vector<double> crossTanimotoSimilarityNumpy(const cuda::std::span<const std::uint32_t> bitsOneBuffer,
-                                                           const cuda::std::span<const std::uint32_t> bitsTwoBuffer,
-                                                           int                                        fpSize);
+AsyncDeviceVector<double> crossCosineSimilarityGpuResult(cuda::std::span<const std::uint32_t> bitsOneBuffer,
+                                                         cuda::std::span<const std::uint32_t> bitsTwoBuffer,
+                                                         int                                  fpSize);
+
+std::vector<double> crossCosineSimilarityCPUResult(cuda::std::span<const std::uint32_t> bitsOneBuffer,
+                                                   cuda::std::span<const std::uint32_t> bitsTwoBuffer,
+                                                   int                                  fpSize,
+                                                   const CrossSimilarityOptions& options = CrossSimilarityOptions());
 
 }  // namespace nvMolKit
 
