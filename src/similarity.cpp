@@ -15,11 +15,6 @@
 
 #include "similarity.h"
 
-#include <DataStructs/ExplicitBitVect.h>
-
-#include <unordered_set>
-
-#include "cuda_error_check.h"
 #include "device.h"
 #include "device_vector.h"
 #include "similarity_kernels.h"
@@ -28,16 +23,7 @@ namespace nvMolKit {
 using internal::kBlockType;
 
 namespace {
-
-//! Restrictions on fingerprint sizes.
-//! Supported sizes are powers of 2 up to 2048. 32 bit and smaller types should be handled with thread-per-int, which
-//! we have implemented but not hooked up. 4096 and larger will need moderate work to support.
-const std::unordered_set<size_t> kSupportedFingerprintSizes = {64, 128, 256, 512, 1024, 2048};
-constexpr int                    kBitsPerByte               = 8;
-
-constexpr int    kMaxBitsWith32BitSubdivision = 1024;
-constexpr size_t kNBitsInBoostBitSet          = kBitsPerByte * sizeof(kBlockType);
-
+constexpr int kBitsPerByte = 8;
 }  // namespace
 
 // --------------------------------
@@ -46,9 +32,9 @@ constexpr size_t kNBitsInBoostBitSet          = kBitsPerByte * sizeof(kBlockType
 
 AsyncDeviceVector<double> crossTanimotoSimilarityGpuResult(const cuda::std::span<const std::uint32_t> bits,
                                                            int                                        fpSize) {
-  const size_t              nElementsPerFp = fpSize / (kBitsPerByte * sizeof(std::uint32_t));
-  const size_t              nFps           = bits.size() / nElementsPerFp;
-  AsyncDeviceVector<double> similarities_d = AsyncDeviceVector<double>(nFps * nFps);
+  const size_t nElementsPerFp = fpSize / (kBitsPerByte * sizeof(std::uint32_t));
+  const size_t nFps           = bits.size() / nElementsPerFp;
+  auto         similarities_d = AsyncDeviceVector<double>(nFps * nFps);
   launchCrossTanimotoSimilarity(bits, bits, nElementsPerFp, toSpan(similarities_d), 0);
   return similarities_d;
 }
@@ -56,10 +42,10 @@ AsyncDeviceVector<double> crossTanimotoSimilarityGpuResult(const cuda::std::span
 AsyncDeviceVector<double> crossTanimotoSimilarityGpuResult(const cuda::std::span<const std::uint32_t> bitsOneBuffer,
                                                            const cuda::std::span<const std::uint32_t> bitsTwoBuffer,
                                                            int                                        fpSize) {
-  const size_t              nElementsPerFp = fpSize / (kBitsPerByte * sizeof(std::uint32_t));
-  const size_t              nFps1          = bitsOneBuffer.size() / nElementsPerFp;
-  const size_t              nFps2          = bitsTwoBuffer.size() / nElementsPerFp;
-  AsyncDeviceVector<double> similarities_d = AsyncDeviceVector<double>(nFps1 * nFps2);
+  const size_t nElementsPerFp = fpSize / (kBitsPerByte * sizeof(std::uint32_t));
+  const size_t nFps1          = bitsOneBuffer.size() / nElementsPerFp;
+  const size_t nFps2          = bitsTwoBuffer.size() / nElementsPerFp;
+  auto         similarities_d = AsyncDeviceVector<double>(nFps1 * nFps2);
   launchCrossTanimotoSimilarity(bitsOneBuffer, bitsTwoBuffer, nElementsPerFp, toSpan(similarities_d), 0);
   return similarities_d;
 }
@@ -72,7 +58,7 @@ struct SimilaritiesRotBuffers {
   AsyncDeviceVector<double> bufferB;
 
   bool                       useA = true;
-  cudaStream_t               currentStream() { return useA ? streamA.stream() : streamB.stream(); }
+  [[nodiscard]] cudaStream_t currentStream() const { return useA ? streamA.stream() : streamB.stream(); }
   AsyncDeviceVector<double>& currentBuffer() { return useA ? bufferA : bufferB; }
 };
 // Send compute A
