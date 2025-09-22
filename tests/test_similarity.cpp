@@ -21,6 +21,9 @@
 #include <GraphMol/SmilesParse/SmilesParse.h>
 #include <gtest/gtest.h>
 
+#include <string>
+#include <tuple>
+
 #include "similarity.h"
 
 using namespace RDKit;
@@ -161,93 +164,162 @@ cuda::std::span<const OtherT> castAsSpanOfSmallerType(const AsyncDeviceVector<T>
 }
 
 // --------------------------------
-// Tanimoto similarity tests
+// Parameterized cross- and self-similarity tests with metric selection
 // --------------------------------
 
-TEST_F(SimilarityTestFixture, CrossTanimotoGPUCrossResultsCorrect) {
-  const int    kNumBits = 1024;
-  const size_t nMols    = mols_.size();
+enum class SimMetric {
+  Tanimoto,
+  Cosine
+};
 
-  std::vector<std::unique_ptr<ExplicitBitVect>> explicitVects;
+// Cross: N, M, bits, metric
+using CrossParams = std::tuple<int, int, int, SimMetric>;
 
-  explicitVects.reserve(nMols);
-  std::vector<double> wantSimilarities;
-  wantSimilarities.reserve(nMols);
+class CrossSimilarityParamTestFixture : public testing::TestWithParam<CrossParams> {
+ protected:
+  CrossSimilarityParamTestFixture() { InitializeMols(mols_); }
 
-  for (const auto& mol : mols_) {
-    explicitVects.emplace_back(MorganFingerprints::getFingerprintAsBitVect(*mol,
-                                                                           /*radius=*/3,
-                                                                           /*nBits=*/kNumBits,
-                                                                           /*invariants=*/nullptr,
-                                                                           /*fromAtoms=*/nullptr,
-                                                                           /*useChirality=*/false,
-                                                                           /*useBondTypes=*/true,
-                                                                           /*onlyNonzeroInvariants=*/false,
-                                                                           /*atomsSettingBits=*/nullptr,
-                                                                           /*includeRedundantEnvironments=*/false));
+  std::vector<std::unique_ptr<ROMol>> mols_;
+};
+static std::string SimMetricToString(SimMetric m) {
+  switch (m) {
+    case SimMetric::Tanimoto:
+      return "Tan";
+    case SimMetric::Cosine:
+      return "Cos";
   }
-  for (const auto& bitVec : explicitVects) {
-    for (const auto& bitVec2 : explicitVects) {
-      wantSimilarities.push_back(TanimotoSimilarity(*bitVec, *bitVec2));
+  return "Unknown";
+}
+
+static std::string CrossTestName(const testing::TestParamInfo<CrossParams>& info) {
+  const auto [n, m, bits, metric] = info.param;
+  return SimMetricToString(metric) + std::string("_N") + std::to_string(n) + "_M" + std::to_string(m) + "_B" +
+         std::to_string(bits);
+}
+
+TEST_P(CrossSimilarityParamTestFixture, CrossCpuGpuAgree) {
+  const auto [N, M, kNumBits, metric] = GetParam();
+
+  std::vector<std::unique_ptr<ExplicitBitVect>> explicitVectsA;
+  std::vector<std::unique_ptr<ExplicitBitVect>> explicitVectsB;
+  explicitVectsA.reserve(N);
+  explicitVectsB.reserve(M);
+
+  for (int i = 0; i < N; ++i) {
+    const size_t idx = static_cast<size_t>(i) % mols_.size();
+    explicitVectsA.emplace_back(MorganFingerprints::getFingerprintAsBitVect(*mols_[idx], 3, kNumBits));
+  }
+  for (int j = 0; j < M; ++j) {
+    const size_t idx = static_cast<size_t>(j) % mols_.size();
+    explicitVectsB.emplace_back(MorganFingerprints::getFingerprintAsBitVect(*mols_[idx], 3, kNumBits));
+  }
+
+  std::vector<double> wantSimilarities;
+  wantSimilarities.reserve(static_cast<size_t>(N) * static_cast<size_t>(M));
+  for (const auto& a : explicitVectsA) {
+    for (const auto& b : explicitVectsB) {
+      if (metric == SimMetric::Tanimoto) {
+        wantSimilarities.push_back(TanimotoSimilarity(*a, *b));
+      } else {
+        wantSimilarities.push_back(CosineSimilarity(*a, *b));
+      }
     }
   }
+
+  std::vector<std::uint64_t> bitsA;
+  std::vector<std::uint64_t> bitsB;
+  for (const auto& bitVec : explicitVectsA) {
+    boost::to_block_range(*bitVec->dp_bits, std::back_inserter(bitsA));
+  }
+  for (const auto& bitVec : explicitVectsB) {
+    boost::to_block_range(*bitVec->dp_bits, std::back_inserter(bitsB));
+  }
+
+  AsyncDeviceVector<std::uint64_t> bitsGpuA(bitsA.size());
+  AsyncDeviceVector<std::uint64_t> bitsGpuB(bitsB.size());
+  bitsGpuA.copyFromHost(bitsA);
+  bitsGpuB.copyFromHost(bitsB);
+  auto bitsGpuSpanA = castAsSpanOfSmallerType<std::uint64_t, std::uint32_t>(bitsGpuA);
+  auto bitsGpuSpanB = castAsSpanOfSmallerType<std::uint64_t, std::uint32_t>(bitsGpuB);
+
+  AsyncDeviceVector<double> gotSimilaritiesGpu =
+    (metric == SimMetric::Tanimoto) ? crossTanimotoSimilarityGpuResult(bitsGpuSpanA, bitsGpuSpanB, kNumBits) :
+                                      crossCosineSimilarityGpuResult(bitsGpuSpanA, bitsGpuSpanB, kNumBits);
+  std::vector<double> gotSimilaritiesCpu(gotSimilaritiesGpu.size());
+  gotSimilaritiesGpu.copyToHost(gotSimilaritiesCpu);
+  cudaDeviceSynchronize();
+  EXPECT_THAT(gotSimilaritiesCpu, testing::Pointwise(testing::DoubleNear(1e-5), wantSimilarities));
+}
+
+INSTANTIATE_TEST_SUITE_P(CrossSimilarity,
+                         CrossSimilarityParamTestFixture,
+                         testing::Combine(testing::Values(1, 10, 100),
+                                          testing::Values(1, 10, 100),
+                                          testing::Values(128, 2048),
+                                          testing::Values(SimMetric::Tanimoto, SimMetric::Cosine)),
+                         CrossTestName);
+
+// --------------------------------
+// Parameterized self-similarity tests (N, bits, metric)
+// --------------------------------
+
+using SelfParams = std::tuple<int, int, SimMetric>;  // N, bits, metric
+
+class SelfSimilarityParamTestFixture : public testing::TestWithParam<SelfParams> {
+ protected:
+  SelfSimilarityParamTestFixture() { InitializeMols(mols_); }
+
+  std::vector<std::unique_ptr<ROMol>> mols_;
+};
+
+static std::string SelfTestName(const testing::TestParamInfo<SelfParams>& info) {
+  const auto [n, bits, metric] = info.param;
+  return SimMetricToString(metric) + std::string("_N") + std::to_string(n) + "_B" + std::to_string(bits);
+}
+
+TEST_P(SelfSimilarityParamTestFixture, SelfCpuGpuAgree) {
+  const auto [N, kNumBits, metric] = GetParam();
+
+  std::vector<std::unique_ptr<ExplicitBitVect>> explicitVects;
+  explicitVects.reserve(N);
+  for (int i = 0; i < N; ++i) {
+    const size_t idx = static_cast<size_t>(i) % mols_.size();
+    explicitVects.emplace_back(MorganFingerprints::getFingerprintAsBitVect(*mols_[idx], 3, kNumBits));
+  }
+
+  std::vector<double> wantSimilarities;
+  wantSimilarities.reserve(static_cast<size_t>(N) * static_cast<size_t>(N));
+  for (const auto& a : explicitVects) {
+    for (const auto& b : explicitVects) {
+      if (metric == SimMetric::Tanimoto) {
+        wantSimilarities.push_back(TanimotoSimilarity(*a, *b));
+      } else {
+        wantSimilarities.push_back(CosineSimilarity(*a, *b));
+      }
+    }
+  }
+
   std::vector<std::uint64_t> bits;
   for (const auto& bitVec : explicitVects) {
     boost::to_block_range(*bitVec->dp_bits, std::back_inserter(bits));
   }
+
   AsyncDeviceVector<std::uint64_t> bitsGpu(bits.size());
   bitsGpu.copyFromHost(bits);
   auto bitsGpuSpan = castAsSpanOfSmallerType<std::uint64_t, std::uint32_t>(bitsGpu);
 
-  AsyncDeviceVector<double> gotSimilaritiesGpu = crossTanimotoSimilarityGpuResult(bitsGpuSpan, 1024);
+  AsyncDeviceVector<double> gotSimilaritiesGpu = (metric == SimMetric::Tanimoto) ?
+                                                   crossTanimotoSimilarityGpuResult(bitsGpuSpan, kNumBits) :
+                                                   crossCosineSimilarityGpuResult(bitsGpuSpan, kNumBits);
   std::vector<double>       gotSimilaritiesCpu(gotSimilaritiesGpu.size());
   gotSimilaritiesGpu.copyToHost(gotSimilaritiesCpu);
   cudaDeviceSynchronize();
   EXPECT_THAT(gotSimilaritiesCpu, testing::Pointwise(testing::DoubleNear(1e-5), wantSimilarities));
 }
 
-// --------------------------------
-// Cosine similarity tests
-// --------------------------------
-
-TEST_F(SimilarityTestFixture, CrossCosineGPUCrossResultsCorrect) {
-  const int    kNumBits = 1024;
-  const size_t nMols    = mols_.size();
-
-  std::vector<std::unique_ptr<ExplicitBitVect>> explicitVects;
-
-  explicitVects.reserve(nMols);
-  std::vector<double> wantSimilarities;
-  wantSimilarities.reserve(nMols);
-
-  for (const auto& mol : mols_) {
-    explicitVects.emplace_back(MorganFingerprints::getFingerprintAsBitVect(*mol,
-                                                                           /*radius=*/3,
-                                                                           /*nBits=*/kNumBits,
-                                                                           /*invariants=*/nullptr,
-                                                                           /*fromAtoms=*/nullptr,
-                                                                           /*useChirality=*/false,
-                                                                           /*useBondTypes=*/true,
-                                                                           /*onlyNonzeroInvariants=*/false,
-                                                                           /*atomsSettingBits=*/nullptr,
-                                                                           /*includeRedundantEnvironments=*/false));
-  }
-  for (const auto& bitVec : explicitVects) {
-    for (const auto& bitVec2 : explicitVects) {
-      wantSimilarities.push_back(CosineSimilarity(*bitVec, *bitVec2));
-    }
-  }
-  std::vector<std::uint64_t> bits;
-  for (const auto& bitVec : explicitVects) {
-    boost::to_block_range(*bitVec->dp_bits, std::back_inserter(bits));
-  }
-  AsyncDeviceVector<std::uint64_t> bitsGpu(bits.size());
-  bitsGpu.copyFromHost(bits);
-  auto bitsGpuSpan = castAsSpanOfSmallerType<std::uint64_t, std::uint32_t>(bitsGpu);
-
-  AsyncDeviceVector<double> gotSimilaritiesGpu = crossCosineSimilarityGpuResult(bitsGpuSpan, 1024);
-  std::vector<double>       gotSimilaritiesCpu(gotSimilaritiesGpu.size());
-  gotSimilaritiesGpu.copyToHost(gotSimilaritiesCpu);
-  cudaDeviceSynchronize();
-  EXPECT_THAT(gotSimilaritiesCpu, testing::Pointwise(testing::DoubleNear(1e-5), wantSimilarities));
-}
+INSTANTIATE_TEST_SUITE_P(SelfSimilarity,
+                         SelfSimilarityParamTestFixture,
+                         testing::Combine(testing::Values(1, 10, 100),
+                                          testing::Values(128, 2048),
+                                          testing::Values(SimMetric::Tanimoto, SimMetric::Cosine)),
+                         SelfTestName);
