@@ -569,14 +569,12 @@ void launchCrossTanimotoSimilarity(const cuda::std::span<const std::uint32_t> bi
   cudaCheckError(cudaGetLastError());
 }
 
-
 template void launchCrossTanimotoSimilarity<typename std::uint32_t>(
   const AsyncDeviceVector<internal::kBlockType>& bitsOne,
   const AsyncDeviceVector<internal::kBlockType>& bitsTwo,
   const size_t                                   numBitsPerMolecule,
   AsyncDeviceVector<double>&                     results,
   const size_t                                   offset);
-
 
 namespace {
 // --------------------------------

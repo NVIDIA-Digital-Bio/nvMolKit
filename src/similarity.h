@@ -44,7 +44,6 @@ struct BulkFingerprintOptions {
 // Tanimoto similarity wrapper functions
 // --------------------------------
 
-
 AsyncDeviceVector<double> crossTanimotoSimilarityGpuResult(const cuda::std::span<const std::uint32_t> bits, int fpSize);
 
 AsyncDeviceVector<double> crossTanimotoSimilarityGpuResult(const cuda::std::span<const std::uint32_t> bitsOneBuffer,

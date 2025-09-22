@@ -70,7 +70,7 @@ TEST(FingerprintSimIntegrationTest, Basics) {
   const cuda::std::span<const std::uint32_t> spanBitsTwo = {bitsOnePtr,
                                                             mols.size() * fpSize / (8 * sizeof(std::uint32_t))};
 
-  auto gpuSimilarities = nvMolKit::crossTanimotoSimilarityGpuResult(spanBitsOne, spanBitsTwo, fpSize);
+  auto                gpuSimilarities = nvMolKit::crossTanimotoSimilarityGpuResult(spanBitsOne, spanBitsTwo, fpSize);
   std::vector<double> cpuSimilarities(gpuSimilarities.size());
   gpuSimilarities.copyToHost(cpuSimilarities);
   cudaDeviceSynchronize();

@@ -58,7 +58,6 @@ void launchCrossTanimotoSimilarity(const cuda::std::span<const std::uint32_t> bi
 // Tanimoto similarity explicit template instantiations
 // --------------------------------
 
-
 extern template void launchCrossTanimotoSimilarity<typename std::uint32_t>(
   const AsyncDeviceVector<internal::kBlockType>& bitsOne,
   const AsyncDeviceVector<internal::kBlockType>& bitsTwo,
@@ -67,7 +66,6 @@ extern template void launchCrossTanimotoSimilarity<typename std::uint32_t>(
   const size_t                                   offset
 
 );
-
 
 // --------------------------------
 // Cosine similarity launch functions

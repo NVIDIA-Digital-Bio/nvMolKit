@@ -19,8 +19,6 @@
 
 #include "array_helpers.h"
 #include "similarity.h"
-#include "similarity_cpu.h"
-
 
 template <typename T> boost::python::list vectorToList(const std::vector<T>& vec) {
   boost::python::list list;
@@ -113,4 +111,3 @@ BOOST_PYTHON_MODULE(_DataStructs) {
     },
     boost::python::return_value_policy<boost::python::manage_new_object>());
 }
-

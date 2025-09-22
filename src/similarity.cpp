@@ -38,7 +38,6 @@ constexpr int                    kBitsPerByte               = 8;
 constexpr int    kMaxBitsWith32BitSubdivision = 1024;
 constexpr size_t kNBitsInBoostBitSet          = kBitsPerByte * sizeof(kBlockType);
 
-
 }  // namespace
 
 // --------------------------------
@@ -65,12 +64,9 @@ AsyncDeviceVector<double> crossTanimotoSimilarityGpuResult(const cuda::std::span
   return similarities_d;
 }
 
-
 // --------------------------------
 // Cosine similarity wrapper functions
 // --------------------------------
-
-
 
 AsyncDeviceVector<double> crossCosineSimilarityGpuResult(const cuda::std::span<const std::uint32_t> bits, int fpSize) {
   const size_t              nElementsPerFp = fpSize / (kBitsPerByte * sizeof(std::uint32_t));
