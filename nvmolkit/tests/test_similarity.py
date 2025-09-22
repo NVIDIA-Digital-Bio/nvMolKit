@@ -12,11 +12,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import math
 import pytest
+import psutil
+
+import numpy as np
 import torch
+
 from rdkit.Chem import rdFingerprintGenerator
 from rdkit.DataStructs import BulkCosineSimilarity, BulkTanimotoSimilarity
+from rdkit.DataStructs import ExplicitBitVect
 
 from nvmolkit.similarity import (
     crossCosineSimilarity,
@@ -54,6 +59,52 @@ def make_rdkit_and_gpu_fps(mols, target_len, fp_size=1024):
     assert t.shape == (target_len, fp_size // 32)
     assert t.device.type == 'cuda'
     return rdkit_fps, t
+
+
+@pytest.mark.parametrize('metric', ('tanimoto', 'cosine'))
+def test_memory_constrained_segmented_path_large_cross(metric):
+
+    gpu_free, _ = torch.cuda.mem_get_info()
+    cpu_avail =psutil.virtual_memory().available
+    if cpu_avail <= 0:
+        pytest.skip('Could not determine CPU available memory')
+
+    # Choose a target result size that exceeds GPU free mem but fits comfortably in CPU (10%)
+    target_bytes = min(int(cpu_avail * 0.10), int(gpu_free * 2))
+    # Ensure we exceed GPU free memory to exercise segmented path
+    if target_bytes <= gpu_free:
+        pytest.skip('Insufficient CPU/GPU memory delta to force segmented path')
+
+    # Choose N and M such that N*M*8 ~ target_bytes and N != M
+    N = int(math.sqrt(max(1, target_bytes // 8)))
+    M = max(1, int(N * 3 // 2))  # 1.5x to ensure non-square cross
+    # Recompute to keep within target_bytes and caps
+    if (N * M * 8) > target_bytes:
+        M = max(1, target_bytes // (8 * N))
+    # Cap to keep runtime reasonable
+    N = min(N, 1500)
+    M = min(M, 1500)
+    if min(N, M) < 128:
+        pytest.skip('Computed N or M too small to be meaningful')
+
+    # Build synthetic packed fingerprints on GPU
+    fp_bits = 1024
+    from nvmolkit.fingerprints import pack_fingerprint
+    bool_fps_a = torch.randint(0, 2, (N, fp_bits), dtype=torch.bool, device='cuda')
+    bool_fps_b = torch.randint(0, 2, (M, fp_bits), dtype=torch.bool, device='cuda')
+    packed_a = pack_fingerprint(bool_fps_a)
+    packed_b = pack_fingerprint(bool_fps_b)
+
+    if metric == 'tanimoto':
+        got = crossTanimotoSimilarityMemoryConstrained(packed_a, packed_b)
+    else:
+        got = crossCosineSimilarityMemoryConstrained(packed_a, packed_b)
+
+    # Basic sanity checks without full RDKit reference to avoid huge CPU compute
+    assert got.shape == (N, M)
+    # Values within [0,1]
+    assert float(np.nanmin(got)) >= 0.0
+    assert float(np.nanmax(got)) <= 1.0
 
 # --------------------------------
 # Edge cases and failure tests.
@@ -127,7 +178,6 @@ def test_nxm_cross_tanimoto_similarity_from_packing(nxmdims):
 
     bitvects_a = []
     bitvects_b = []
-    from rdkit.DataStructs import ExplicitBitVect
     for i in range(d1):
         bv = ExplicitBitVect(2048)
         for bit in range(2048):
