@@ -35,9 +35,6 @@ namespace {
 const std::unordered_set<size_t> kSupportedFingerprintSizes = {64, 128, 256, 512, 1024, 2048};
 constexpr int                    kBitsPerByte               = 8;
 
-constexpr int    kMaxBitsWith32BitSubdivision = 1024;
-constexpr size_t kNBitsInBoostBitSet          = kBitsPerByte * sizeof(kBlockType);
-
 }  // namespace
 
 // --------------------------------
