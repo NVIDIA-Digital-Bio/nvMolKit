@@ -35,33 +35,6 @@ using kBlockType                                      = boost::dynamic_bitset<>:
 // Tanimoto similarity launch functions
 // --------------------------------
 
-//! Launches a kernel to compute the Tanimoto similarity between a 32bit fingerprint and a list of 32bit fingerprints.
-//! \param bitsOne The first fingerprint
-//! \param bitsTwo The list of fingerprints
-//! \param results The output similarity, not safe to use until a sync.
-void launchBulkTanimotoSimilarity(const AsyncDevicePtr<std::uint32_t>&    bitsOne,
-                                  const AsyncDeviceVector<std::uint32_t>& bitsTwo,
-                                  AsyncDeviceVector<float>&               results);
-//! Launches a kernel to compute the Tanimoto similarity between an arbitrary fingerprint and a list of same sized
-//! fingerprints. \param bitsOne The first fingerprint \param bitsTwo The list of fingerprints \param results The output
-//! similarity, not safe to use until a sync.
-template <typename T>
-void launchBulkTanimotoSimilarity(const AsyncDeviceVector<internal::kBlockType>& bitsOne,
-                                  const AsyncDeviceVector<internal::kBlockType>& bitsTwo,
-                                  const size_t                                   elementsPerMolecule,
-                                  const size_t                                   batchSize,
-
-                                  AsyncDeviceVector<double>& results,
-                                  const size_t               offset,
-                                  const cudaStream_t         stream);
-
-template <typename blockType>
-void launchBulkTanimotoSimilarity(const cuda::std::span<const blockType> bitsOneBuffer,
-                                  const cuda::std::span<const blockType> bitsTwoBuffer,
-                                  const size_t                           elementsPerMolecule,
-                                  AsyncDeviceVector<double>&             results,
-                                  const cudaStream_t                     stream);
-
 //! Launches a kernel to compute the all-to-all Tanimoto similarity between a list of fingerprints.
 //! \param bits The list of fingerprints
 //! \param results The output similarity, not safe to use until a sync.
@@ -85,23 +58,6 @@ void launchCrossTanimotoSimilarity(const cuda::std::span<const std::uint32_t> bi
 // Tanimoto similarity explicit template instantiations
 // --------------------------------
 
-extern template void launchBulkTanimotoSimilarity<std::uint32_t>(const AsyncDeviceVector<internal::kBlockType>& bitsOne,
-                                                                 const AsyncDeviceVector<internal::kBlockType>& bitsTwo,
-                                                                 const size_t elementsPerMolecule,
-                                                                 const size_t batchSize,
-
-                                                                 AsyncDeviceVector<double>& results,
-                                                                 const size_t               offset,
-                                                                 const cudaStream_t         stream);
-extern template void launchBulkTanimotoSimilarity<std::uint64_t>(const AsyncDeviceVector<internal::kBlockType>& bitsOne,
-                                                                 const AsyncDeviceVector<internal::kBlockType>& bitsTwo,
-                                                                 const size_t elementsPerMolecule,
-                                                                 const size_t batchSize,
-
-                                                                 AsyncDeviceVector<double>& results,
-                                                                 const size_t               offset,
-                                                                 const cudaStream_t         stream);
-
 extern template void launchCrossTanimotoSimilarity<typename std::uint32_t>(
   const AsyncDeviceVector<internal::kBlockType>& bitsOne,
   const AsyncDeviceVector<internal::kBlockType>& bitsTwo,
@@ -111,49 +67,9 @@ extern template void launchCrossTanimotoSimilarity<typename std::uint32_t>(
 
 );
 
-extern template void launchBulkTanimotoSimilarity<std::uint32_t>(
-  const cuda::std::span<const std::uint32_t> bitsOneBuffer,
-  const cuda::std::span<const std::uint32_t> bitsTwoBuffer,
-  const size_t                               elementsPerMolecule,
-  AsyncDeviceVector<double>&                 results,
-  const cudaStream_t                         stream);
-extern template void launchBulkTanimotoSimilarity<std::uint64_t>(
-  const cuda::std::span<const std::uint64_t> bitsOneBuffer,
-  const cuda::std::span<const std::uint64_t> bitsTwoBuffer,
-  const size_t                               elementsPerMolecule,
-  AsyncDeviceVector<double>&                 results,
-  const cudaStream_t                         stream);
-
 // --------------------------------
 // Cosine similarity launch functions
 // --------------------------------
-
-//! Launches a kernel to compute the Cosine similarity between a 32bit fingerprint and a list of 32bit fingerprints.
-//! \param bitsOne The first fingerprint
-//! \param bitsTwo The list of fingerprints
-//! \param results The output similarity, not safe to use until a sync.
-void launchBulkCosineSimilarity(const AsyncDevicePtr<std::uint32_t>&    bitsOne,
-                                const AsyncDeviceVector<std::uint32_t>& bitsTwo,
-                                AsyncDeviceVector<float>&               results);
-//! Launches a kernel to compute the Cosine similarity between an arbitrary fingerprint and a list of same sized
-//! fingerprints. \param bitsOne The first fingerprint \param bitsTwo The list of fingerprints \param results The output
-//! similarity, not safe to use until a sync.
-template <typename T>
-void launchBulkCosineSimilarity(const AsyncDeviceVector<internal::kBlockType>& bitsOne,
-                                const AsyncDeviceVector<internal::kBlockType>& bitsTwo,
-                                const size_t                                   elementsPerMolecule,
-                                const size_t                                   batchSize,
-
-                                AsyncDeviceVector<double>& results,
-                                const size_t               offset,
-                                const cudaStream_t         stream);
-
-template <typename blockType>
-void launchBulkCosineSimilarity(const cuda::std::span<const blockType> bitsOneBuffer,
-                                const cuda::std::span<const blockType> bitsTwoBuffer,
-                                const size_t                           elementsPerMolecule,
-                                AsyncDeviceVector<double>&             results,
-                                const cudaStream_t                     stream);
 
 //! Launches a kernel to compute the all-to-all Cosine similarity between a list of fingerprints.
 //! \param bits The list of fingerprints
@@ -178,23 +94,6 @@ void launchCrossCosineSimilarity(const cuda::std::span<const std::uint32_t> bits
 // Cosine similarity explicit template instantiations
 // --------------------------------
 
-extern template void launchBulkCosineSimilarity<std::uint32_t>(const AsyncDeviceVector<internal::kBlockType>& bitsOne,
-                                                               const AsyncDeviceVector<internal::kBlockType>& bitsTwo,
-                                                               const size_t elementsPerMolecule,
-                                                               const size_t batchSize,
-
-                                                               AsyncDeviceVector<double>& results,
-                                                               const size_t               offset,
-                                                               const cudaStream_t         stream);
-extern template void launchBulkCosineSimilarity<std::uint64_t>(const AsyncDeviceVector<internal::kBlockType>& bitsOne,
-                                                               const AsyncDeviceVector<internal::kBlockType>& bitsTwo,
-                                                               const size_t elementsPerMolecule,
-                                                               const size_t batchSize,
-
-                                                               AsyncDeviceVector<double>& results,
-                                                               const size_t               offset,
-                                                               const cudaStream_t         stream);
-
 extern template void launchCrossCosineSimilarity<typename std::uint32_t>(
   const AsyncDeviceVector<internal::kBlockType>& bitsOne,
   const AsyncDeviceVector<internal::kBlockType>& bitsTwo,
@@ -204,16 +103,6 @@ extern template void launchCrossCosineSimilarity<typename std::uint32_t>(
 
 );
 
-extern template void launchBulkCosineSimilarity<std::uint32_t>(const cuda::std::span<const std::uint32_t> bitsOneBuffer,
-                                                               const cuda::std::span<const std::uint32_t> bitsTwoBuffer,
-                                                               const size_t               elementsPerMolecule,
-                                                               AsyncDeviceVector<double>& results,
-                                                               const cudaStream_t         stream);
-extern template void launchBulkCosineSimilarity<std::uint64_t>(const cuda::std::span<const std::uint64_t> bitsOneBuffer,
-                                                               const cuda::std::span<const std::uint64_t> bitsTwoBuffer,
-                                                               const size_t               elementsPerMolecule,
-                                                               AsyncDeviceVector<double>& results,
-                                                               const cudaStream_t         stream);
 }  // namespace nvMolKit
 
 #endif  // SIMILARITY_KERNELS_H

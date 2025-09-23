@@ -28,7 +28,7 @@ target_link_libraries(similarity_kernels PRIVATE cuda_error_check device)
 target_include_directories(similarity_kernels
                            PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(similarity_kernels PUBLIC ${Boost_INCLUDE_DIRS})
-add_library(Similarity similarity.cpp similarity_cpu.cpp)
+add_library(Similarity similarity.cpp)
 
 target_link_libraries(
   Similarity

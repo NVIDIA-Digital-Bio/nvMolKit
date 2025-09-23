@@ -79,7 +79,7 @@ nvMolKit currently supports the following features:
     * Supports fingerprint sizes 128, 256, 512, 1024, and 2048 bits
     * Does not yet support countSimulation and other non-default options
 
-* **Molecular Similarity**: Fast GPU-accelerated similarity calculations
+* **Molecular Similarity**: Fast GPU-accelerated similarity calculations (see :doc:`similarity`)
     * Tanimoto and cosine Similarity
     * Supports all-to-all comparisons between fingerprints in a batch or between two batches of fingerprints
 
@@ -163,6 +163,22 @@ An example:
     options.batchesPerGpu = 4
     EmbedMolecules(mols, ..., hardwareOptions=options)
 
+ 
+ 
+.. toctree::
+   :maxdepth: 1
+   :hidden:
+
+   Overview <self>
+
+
+Guides
+------
+
+.. toctree::
+   :maxdepth: 1
+
+   similarity
 
 
 API Reference

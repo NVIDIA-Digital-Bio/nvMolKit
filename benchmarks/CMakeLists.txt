@@ -22,15 +22,6 @@ target_link_libraries(
   MorganFpBench PRIVATE nanobench ${RDKit_LIBS} OpenMP::OpenMP_CXX
                         morganFingerprint)
 
-add_executable(SimilarityBench similarity_bench.cpp)
-target_link_libraries(
-  SimilarityBench PRIVATE Similarity nanobench ${RDKit_LIBS} OpenMP::OpenMP_CXX
-                          molData)
-
-add_executable(CrossSimilarityBench cross_similarity_bench.cu)
-target_link_libraries(CrossSimilarityBench PRIVATE Similarity nanobench
-                                                   ${RDKit_LIBS} molData)
-
 add_executable(BitVectorBench bit_vector.cpp)
 target_link_libraries(BitVectorBench PRIVATE nanobench ${RDKit_LIBS}
                                              flatBitVect)
