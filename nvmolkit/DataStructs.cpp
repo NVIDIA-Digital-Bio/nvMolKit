@@ -163,14 +163,14 @@ BOOST_PYTHON_MODULE(_DataStructs) {
       heapVec.release();
 
       const Py_intptr_t shape_arr[2]   = {static_cast<Py_intptr_t>(numMolsOne), static_cast<Py_intptr_t>(numMolsTwo)};
-      const Py_intptr_t strides_arr[2] = {static_cast<Py_intptr_t>(numMolsTwo * sizeof(double)), static_cast<Py_intptr_t>(sizeof(double))};
+      const Py_intptr_t strides_arr[2] = {static_cast<Py_intptr_t>(numMolsTwo * sizeof(double)),
+                                          static_cast<Py_intptr_t>(sizeof(double))};
 
-      auto arr = boost::python::numpy::from_data(
-        dataPtr,
-        boost::python::numpy::dtype::get_builtin<double>(),
-        boost::python::make_tuple(shape_arr[0], shape_arr[1]),
-        boost::python::make_tuple(strides_arr[0], strides_arr[1]),
-        owner);
+      auto arr = boost::python::numpy::from_data(dataPtr,
+                                                 boost::python::numpy::dtype::get_builtin<double>(),
+                                                 boost::python::make_tuple(shape_arr[0], shape_arr[1]),
+                                                 boost::python::make_tuple(strides_arr[0], strides_arr[1]),
+                                                 owner);
       return arr;
     });
 
@@ -215,14 +215,14 @@ BOOST_PYTHON_MODULE(_DataStructs) {
       heapVec.release();
 
       const Py_intptr_t shape_arr[2]   = {static_cast<Py_intptr_t>(numMolsOne), static_cast<Py_intptr_t>(numMolsTwo)};
-      const Py_intptr_t strides_arr[2] = {static_cast<Py_intptr_t>(numMolsTwo * sizeof(double)), static_cast<Py_intptr_t>(sizeof(double))};
+      const Py_intptr_t strides_arr[2] = {static_cast<Py_intptr_t>(numMolsTwo * sizeof(double)),
+                                          static_cast<Py_intptr_t>(sizeof(double))};
 
-      auto arr = boost::python::numpy::from_data(
-        dataPtr,
-        boost::python::numpy::dtype::get_builtin<double>(),
-        boost::python::make_tuple(shape_arr[0], shape_arr[1]),
-        boost::python::make_tuple(strides_arr[0], strides_arr[1]),
-        owner);
+      auto arr = boost::python::numpy::from_data(dataPtr,
+                                                 boost::python::numpy::dtype::get_builtin<double>(),
+                                                 boost::python::make_tuple(shape_arr[0], shape_arr[1]),
+                                                 boost::python::make_tuple(strides_arr[0], strides_arr[1]),
+                                                 owner);
       return arr;
     });
 }

@@ -133,13 +133,6 @@ void InitializeMols(std::vector<std::unique_ptr<ROMol>>& mols) {
   }
 }
 
-class SimilarityTestFixture : public testing::Test {
- protected:
-  SimilarityTestFixture() { InitializeMols(mols_); }
-
-  std::vector<std::unique_ptr<ROMol>> mols_;
-};
-
 template <typename ParamType> class SimilarityParamTestFixture : public testing::TestWithParam<ParamType> {
  protected:
   SimilarityParamTestFixture() { InitializeMols(mols_); }

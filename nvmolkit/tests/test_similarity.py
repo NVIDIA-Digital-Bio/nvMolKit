@@ -306,5 +306,8 @@ def test_memory_constrained_segmented_path_large_cross(metric):
     # Spot check a random row
     row_5_N = bool_fps_a[5, :]
     row_5_union = row_5_N & bool_fps_b
-    want = row_5_union.sum(axis=1) / (row_5_N.sum() + bool_fps_b.sum(axis=1) - row_5_union.sum(axis=1)).cpu().numpy()
+    if metric == 'tanimoto':
+        want = (row_5_union.sum(axis=1) / (row_5_N.sum() + bool_fps_b.sum(axis=1) - row_5_union.sum(axis=1))).cpu().numpy()
+    else:
+        want = (row_5_union.sum(axis=1) / torch.sqrt((row_5_N.sum() * bool_fps_b.sum(axis=1)))).cpu().numpy()
     np.testing.assert_allclose(got[5, :], want, rtol=1e-5, atol=1e-5)

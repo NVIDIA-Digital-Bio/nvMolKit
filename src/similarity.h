@@ -18,10 +18,8 @@
 
 #include <DataStructs/ExplicitBitVect.h>
 
-#include <cstdint>
 #include <cuda/std/span>
 #include <optional>
-#include <vector>
 
 #include "device_vector.h"
 
@@ -31,13 +29,6 @@ namespace nvMolKit {
 struct CrossSimilarityOptions {
   //! Overrides autodetect of maximum memory on device for chunking compute.
   std::optional<std::size_t> maxDeviceMemoryBytes = std::nullopt;
-};
-//! Options for bulk fingerprinting
-struct BulkFingerprintOptions {
-  //! Batch size for bulk fingerprinting. If nullopt, no batching is done.
-  std::optional<std::size_t> batchSize  = 8192;
-  //! Max number of concurrent streams
-  size_t                     maxStreams = 1024;
 };
 
 // --------------------------------
@@ -49,10 +40,11 @@ AsyncDeviceVector<double> crossTanimotoSimilarityGpuResult(cuda::std::span<const
 AsyncDeviceVector<double> crossTanimotoSimilarityGpuResult(cuda::std::span<const std::uint32_t> bitsOneBuffer,
                                                            cuda::std::span<const std::uint32_t> bitsTwoBuffer,
                                                            int                                  fpSize);
-std::vector<double>       crossTanimotoSimilarityCPUResult(cuda::std::span<const std::uint32_t> bitsOneBuffer,
-                                                           cuda::std::span<const std::uint32_t> bitsTwoBuffer,
-                                                           int                                  fpSize,
-                                                           const CrossSimilarityOptions& options = CrossSimilarityOptions());
+
+std::vector<double> crossTanimotoSimilarityCPUResult(cuda::std::span<const std::uint32_t> bitsOneBuffer,
+                                                     cuda::std::span<const std::uint32_t> bitsTwoBuffer,
+                                                     int                                  fpSize,
+                                                     const CrossSimilarityOptions& options = CrossSimilarityOptions());
 // --------------------------------
 // Cosine similarity wrapper functions
 // --------------------------------
