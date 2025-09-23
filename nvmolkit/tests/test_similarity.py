@@ -197,7 +197,7 @@ def test_nxm_cross_cosine_similarity_from_nvmolkit_fp(size_limited_mols, nxmdims
 
 
 # --------------------------------
-# Memory-constrained CPU result tests (Python wrappers)
+# Memory-constrained CPU result tests
 # --------------------------------
 
 def test_memory_constrained_tanimoto_self(size_limited_mols):
@@ -259,6 +259,8 @@ def test_memory_constrained_cosine_cross(size_limited_mols, nxmdims):
     got = crossCosineSimilarityMemoryConstrained(t1, t2)
     np.testing.assert_allclose(got, ref.cpu().numpy(), rtol=1e-5, atol=1e-5)
 
+# Test large N x M where N != M to exercise segmented path without overwhelming CPU RAM
+# Will skip on many machines.
 @pytest.mark.parametrize('metric', ('tanimoto', 'cosine'))
 def test_memory_constrained_segmented_path_large_cross(metric):
 

@@ -34,12 +34,9 @@ df = pd.read_csv("data/benchmark_smiles.csv")
 smis = df.iloc[:, 0].to_list()[:2000]
 mols = [MolFromSmiles(smi) for smi in smis]
 
-parser = argparse.ArgumentParser(description="Cross Similarity benchmark")
-parser.add_argument("--mode", choices=["gpu", "cpu"], default="gpu", help="Which backend to run (gpu launches kernels; cpu returns host vector)")
-args, extra = parser.parse_known_args()
 
 runner = pyperf.Runner(min_time=0.01, values=3, processes=1, loops=3)
-runner.metadata['description'] = f"Cross Similarity benchmark ({args.mode})"
+runner.metadata['description'] = f"Cross Similarity benchmark"
 
 def rdkit_sim(fps, sim_type):
     if sim_type.lower() == "tanimoto":
@@ -72,8 +69,6 @@ def nvmolkit_sim_cpu_collect(fps, sim_type):
         out = crossTanimotoSimilarityMemoryConstrained(fps)
     elif sim_type.lower() == "cosine":
         out = crossCosineSimilarityMemoryConstrained(fps)
-    # Ensure work is done; move maybe redundant but standardize cost
-    _ = out.numpy()
 
 for sim_type in ("tanimoto", "cosine"):
     for molNum in (100, 1000, 2000,):
@@ -97,9 +92,8 @@ for sim_type in ("tanimoto", "cosine"):
             nvmolkit_fpgen = MorganFingerprintGenerator(radius=3, fpSize=fpsize)
 
             nvmolkit_fps_cu = torch.as_tensor(nvmolkit_fpgen.GetFingerprints(mols[:molNum]), device='cuda')
-            if args.mode == "gpu":
-                name3 = f"nvmolkit_gpu-only_{sim_type}sim_fpsize_{fpsize}_{molNum}mols_gpu_only"
-                runner.bench_func(name3, nvmolkit_sim_gpu_only, nvmolkit_fps_cu, sim_type, metadata={"name": str(name3)})
-            else:
-                name3 = f"nvmolkit_cpu-collect_{sim_type}sim_fpsize_{fpsize}_{molNum}mols_cpu"
-                runner.bench_func(name3, nvmolkit_sim_cpu_collect, nvmolkit_fps_cu, sim_type, metadata={"name": str(name3)})
+            name3 = f"nvmolkit_gpu-only_{sim_type}sim_fpsize_{fpsize}_{molNum}mols_gpu_only"
+            runner.bench_func(name3, nvmolkit_sim_gpu_only, nvmolkit_fps_cu, sim_type, metadata={"name": str(name3)})
+
+            name4 = f"nvmolkit_cpu-collect_{sim_type}sim_fpsize_{fpsize}_{molNum}mols_cpu_result"
+            runner.bench_func(name4, nvmolkit_sim_cpu_collect, nvmolkit_fps_cu, sim_type, metadata={"name": str(name4)})

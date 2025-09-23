@@ -58,12 +58,10 @@ struct SimilaritiesRotBuffers {
   AsyncDeviceVector<double> bufferB;
 
   bool                       useA = true;
+  void rotate() { useA = !useA; }
   [[nodiscard]] cudaStream_t currentStream() const { return useA ? streamA.stream() : streamB.stream(); }
   AsyncDeviceVector<double>& currentBuffer() { return useA ? bufferA : bufferB; }
 };
-// Send compute A
-// Copy A, send compute B
-// Await copy A
 
 std::vector<double> crossTanimotoSimilarityCPUResult(const cuda::std::span<const std::uint32_t> bitsOneBuffer,
                                                      const cuda::std::span<const std::uint32_t> bitsTwoBuffer,
@@ -104,6 +102,7 @@ std::vector<double> crossTanimotoSimilarityCPUResult(const cuda::std::span<const
                                   0,
                                   currentStream);
     currentBuffer.copyToHost(res, currentBatchSizeA * nFps2, startIdx * nFps2);
+    rotBuffers.rotate();
   }
   cudaStreamSynchronize(rotBuffers.streamA.stream());
   cudaStreamSynchronize(rotBuffers.streamB.stream());
