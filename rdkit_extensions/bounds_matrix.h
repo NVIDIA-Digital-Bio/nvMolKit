@@ -9,7 +9,7 @@ struct CrystalFFDetails;
 }
 
 namespace RDKit::DGeomHelpers {
-class EmbedParameters;
+struct EmbedParameters;
 void initETKDG(ROMol* mol, const EmbedParameters& params, ForceFields::CrystalFF::CrystalFFDetails& etkdgDetails);
 
 //! Normalize distance matrices as is done in the RDKit ETKDG code.

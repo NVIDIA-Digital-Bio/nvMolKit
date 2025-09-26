@@ -8,6 +8,9 @@
 
 #include <vector>
 
+// Don't lint RDKit ports
+// NOLINTBEGIN
+
 namespace RDKit {
 class Conformer;
 } // namespace RDKit
@@ -108,6 +111,7 @@ bool _isConfFarFromRest(
 }// namespace DGeomHelpers
 
 
+// NOLINTEND
 
 } // namespace RDKit
 
@@ -115,15 +119,13 @@ namespace nvmolkit {
 //! Adds existing conformers to the molecule, performing RMS based pruning if that option is set in parameters.
 void addConformersToMoleculeWithPruning(RDKit::ROMol& mol, std::vector<std::unique_ptr<RDKit::Conformer>>& confs,
   const RDKit::DGeomHelpers::EmbedParameters& params) {
-  std::vector<RDKit::Conformer*> uniqueConformers;
 
   std::vector<std::vector<unsigned int>> selfMatches;
   if (params.pruneRmsThresh > 0.0) {
     selfMatches = RDKit::DGeomHelpers::getMolSelfMatches(mol, params);
   }
 
-  for (unsigned int ci = 0; ci < confs.size(); ++ci) {
-    auto &conf = confs[ci];
+  for (auto& conf: confs) {
      // check if we are pruning away conformations and
       // a close-by conformation has already been chosen :
       if (params.pruneRmsThresh <= 0.0 ||
@@ -133,3 +135,4 @@ void addConformersToMoleculeWithPruning(RDKit::ROMol& mol, std::vector<std::uniq
   }
 }
 } // namespace nvmolkit
+

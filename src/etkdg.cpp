@@ -325,10 +325,10 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
   }
 
 #pragma omp parallel for num_threads(numThreads) default(none) schedule(dynamic) shared(mols, conformers, params)
-  for (int i = 0; i < mols.size(); ++i) {
-    auto it = conformers.find(mols[i]);
-    if (it != conformers.end()) {
-      nvmolkit::addConformersToMoleculeWithPruning(*mols[i], it->second, params);
+  for (const auto& mol : mols) {
+    auto iter = conformers.find(mol);
+    if (iter != conformers.end()) {
+      nvmolkit::addConformersToMoleculeWithPruning(*mol, iter->second, params);
     }
   }
 }
