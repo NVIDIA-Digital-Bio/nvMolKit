@@ -18,6 +18,7 @@
 #include <omp.h>
 
 #include <atomic>
+#include <unordered_map>
 #include <mutex>
 
 #include "device.h"
@@ -182,7 +183,7 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
   std::atomic<bool> workComplete{false};
   std::atomic<bool> allFinished{false};
 
-  std::vector<std::vector<std::unique_ptr<Conformer>>> conformers(mols.size());
+  std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<Conformer>>> conformers;
 
   // Process molecules using Scheduler dispatch in parallel
 #pragma omp parallel num_threads(numThreadsGpuBatching) default(none) shared(streamsPerThread,     \
@@ -323,12 +324,15 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
       }
     }
   }
-  if (params.pruneRmsThresh > 0.0) {
+
+
 #pragma omp parallel for num_threads(numThreads) default(none) schedule(dynamic) shared(mols, conformers, params)
     for (int i = 0; i < mols.size(); ++i) {
-      nvmolkit::addConformersToMoleculeWithPruning(*mols[i], conformers[i], params);
+      auto it = conformers.find(mols[i]);
+      if (it != conformers.end()) {
+        nvmolkit::addConformersToMoleculeWithPruning(*mols[i], it->second, params);
+      }
     }
-  }
 }
 
 }  // namespace nvMolKit

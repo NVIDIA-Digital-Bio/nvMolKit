@@ -19,6 +19,7 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <unordered_map>
 
 #include "device.h"
 #include "dist_geom.h"
@@ -455,11 +456,13 @@ TEST_F(ETKDGPipelineInitTestFixture, UpdateConformersStage) {
   context.systemDevice.positions.copyFromHost(refPositions);
 
   // Create and execute the stage
-  std::vector<std::vector<std::unique_ptr<Conformer>>> conformers(mols_.size());
+  std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<Conformer>>> conformers;
   nvMolKit::detail::ETKDGUpdateConformersStage stage(mols_, eargs, conformers, nullptr, nullptr, -1);
   stage.execute(context);
   for (int i = 0; i < mols_.size(); ++i) {
-    nvmolkit::addConformersToMoleculeWithPruning(*mols_[i], conformers[i], params);
+    auto it = conformers.find(mols_[i]);
+    ASSERT_NE(it, conformers.end());
+    nvmolkit::addConformersToMoleculeWithPruning(*mols_[i], it->second, params);
   }
 
   // Verify positions in conformers match reference positions
@@ -515,11 +518,16 @@ TEST_F(ETKDGPipelineInitTestFixture, UpdateConformersStageWithInactiveMolecule) 
 
   // Create and execute the stage
   auto params = DGeomHelpers::ETKDGv3;
-  std::vector<std::vector<std::unique_ptr<Conformer>>> conformers(mols_.size());
+  std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<Conformer>>> conformers;
   nvMolKit::detail::ETKDGUpdateConformersStage stage(mols_, eargs, conformers, nullptr, nullptr, -1);
   stage.execute(context);
   for (int i = 0; i < mols_.size(); ++i) {
-    nvmolkit::addConformersToMoleculeWithPruning(*mols_[i], conformers[i], params);
+    if (i == 1) {
+      continue;
+    }
+    auto it = conformers.find(mols_[i]);
+    ASSERT_NE(it, conformers.end());
+    nvmolkit::addConformersToMoleculeWithPruning(*mols_[i], it->second, params);
   }
   // Verify positions in conformers match reference positions
   for (size_t i = 0; i < mols_.size(); ++i) {

@@ -17,6 +17,7 @@
 #define NVMOLKIT_ETKDG_STAGE_UPDATE_CONFORMERS_H
 
 #include <mutex>
+#include <unordered_map>
 #include <vector>
 
 #include "etkdg_impl.h"
@@ -28,7 +29,7 @@ class ETKDGUpdateConformersStage final : public ETKDGStage {
  public:
   ETKDGUpdateConformersStage(const std::vector<RDKit::ROMol*>& mols,
                              const std::vector<EmbedArgs>&     eargs,
-                             std::vector<std::vector<std::unique_ptr<RDKit::Conformer>>>& conformers,
+                             std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<RDKit::Conformer>>>& conformers,
                              cudaStream_t                      stream              = nullptr,
                              std::mutex*                       conformer_mutex     = nullptr,
                              int                               maxConformersPerMol = -1);
@@ -39,7 +40,7 @@ class ETKDGUpdateConformersStage final : public ETKDGStage {
  private:
   const std::vector<RDKit::ROMol*>& mols_;
   const std::vector<EmbedArgs>&     eargs_;
-  std::vector<std::vector<std::unique_ptr<RDKit::Conformer>>>& conformers_;
+  std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<RDKit::Conformer>>>& conformers_;
   cudaStream_t                      stream_;
   std::mutex*                       conformer_mutex_;
   int                               maxConformersPerMol_;
