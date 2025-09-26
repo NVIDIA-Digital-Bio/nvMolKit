@@ -126,7 +126,8 @@ target_link_libraries(
           dist_geom
           etkdg_stages
           etkdg
-          embedder_utils)
+          embedder_utils
+          conformer_pruning)
 
 add_executable(test_etkdg_coordgen test_etkdg_coordgen.cu)
 target_link_libraries(

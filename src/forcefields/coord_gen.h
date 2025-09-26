@@ -22,7 +22,7 @@
 namespace RDKit {
 class ROMol;
 namespace DGeomHelpers {
-class EmbedParameters;
+struct EmbedParameters;
 }  // namespace DGeomHelpers
 }  // namespace RDKit
 

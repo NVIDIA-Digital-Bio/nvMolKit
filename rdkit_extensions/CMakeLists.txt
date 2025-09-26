@@ -52,3 +52,8 @@ add_library(rdkit_bounds_matrix bounds_matrix.cpp)
 target_link_libraries(rdkit_bounds_matrix PRIVATE ${RDKit_LIBS})
 target_include_directories(rdkit_bounds_matrix
                            PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_library(conformer_pruning conformer_pruning.cpp)
+target_link_libraries(conformer_pruning PRIVATE ${RDKit_LIBS})
+target_include_directories(conformer_pruning
+        PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

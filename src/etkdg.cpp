@@ -19,7 +19,9 @@
 
 #include <atomic>
 #include <mutex>
+#include <unordered_map>
 
+#include "conformer_pruning.h"
 #include "device.h"
 #include "etkdg_stage_coordgen.h"
 #include "etkdg_stage_etk_minimization.h"
@@ -180,11 +182,14 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
   std::atomic<bool> workComplete{false};
   std::atomic<bool> allFinished{false};
 
+  std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<Conformer>>> conformers;
+
   // Process molecules using Scheduler dispatch in parallel
 #pragma omp parallel num_threads(numThreadsGpuBatching) default(none) shared(streamsPerThread,     \
                                                                                devicesPerThread,   \
                                                                                sortedMols,         \
                                                                                eargs,              \
+                                                                               conformers,         \
                                                                                paramsCopy,         \
                                                                                debugMode,          \
                                                                                failures,           \
@@ -273,6 +278,7 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
       // Writeback
       stages.push_back(std::make_unique<detail::ETKDGUpdateConformersStage>(batchMolsWithConfs,
                                                                             batchEargs,
+                                                                            conformers,
                                                                             streamPtr,
                                                                             &conformer_mutex,
                                                                             confsPerMolecule));
@@ -315,6 +321,14 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
           }
         }
       }
+    }
+  }
+
+#pragma omp parallel for num_threads(numThreads) default(none) schedule(dynamic) shared(mols, conformers, params)
+  for (const auto& mol : mols) {
+    auto iter = conformers.find(mol);
+    if (iter != conformers.end()) {
+      nvmolkit::addConformersToMoleculeWithPruning(*mol, iter->second, params);
     }
   }
 }
