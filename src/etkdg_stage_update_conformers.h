@@ -27,23 +27,24 @@ namespace detail {
 
 class ETKDGUpdateConformersStage final : public ETKDGStage {
  public:
-  ETKDGUpdateConformersStage(const std::vector<RDKit::ROMol*>& mols,
-                             const std::vector<EmbedArgs>&     eargs,
-                             std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<RDKit::Conformer>>>& conformers,
-                             cudaStream_t                      stream              = nullptr,
-                             std::mutex*                       conformer_mutex     = nullptr,
-                             int                               maxConformersPerMol = -1);
+  ETKDGUpdateConformersStage(
+    const std::vector<RDKit::ROMol*>&                                                        mols,
+    const std::vector<EmbedArgs>&                                                            eargs,
+    std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<RDKit::Conformer>>>& conformers,
+    cudaStream_t                                                                             stream          = nullptr,
+    std::mutex*                                                                              conformer_mutex = nullptr,
+    int                                                                                      maxConformersPerMol = -1);
 
   void        execute(ETKDGContext& ctx) override;
   std::string name() const override { return "Update Conformers"; }
 
  private:
-  const std::vector<RDKit::ROMol*>& mols_;
-  const std::vector<EmbedArgs>&     eargs_;
+  const std::vector<RDKit::ROMol*>&                                                        mols_;
+  const std::vector<EmbedArgs>&                                                            eargs_;
   std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<RDKit::Conformer>>>& conformers_;
-  cudaStream_t                      stream_;
-  std::mutex*                       conformer_mutex_;
-  int                               maxConformersPerMol_;
+  cudaStream_t                                                                             stream_;
+  std::mutex*                                                                              conformer_mutex_;
+  int                                                                                      maxConformersPerMol_;
 };
 
 }  // namespace detail

@@ -20,12 +20,13 @@
 namespace nvMolKit {
 namespace detail {
 
-ETKDGUpdateConformersStage::ETKDGUpdateConformersStage(const std::vector<RDKit::ROMol*>& mols,
-                                                       const std::vector<EmbedArgs>&     eargs,
-                                                       std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<RDKit::Conformer>>>& conformers,
-                                                       cudaStream_t                      stream,
-                                                       std::mutex*                       conformer_mutex,
-                                                       const int                               maxConformersPerMol)
+ETKDGUpdateConformersStage::ETKDGUpdateConformersStage(
+  const std::vector<RDKit::ROMol*>&                                                        mols,
+  const std::vector<EmbedArgs>&                                                            eargs,
+  std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<RDKit::Conformer>>>& conformers,
+  cudaStream_t                                                                             stream,
+  std::mutex*                                                                              conformer_mutex,
+  const int                                                                                maxConformersPerMol)
     : mols_(mols),
       eargs_(eargs),
       conformers_(conformers),
@@ -67,7 +68,7 @@ void ETKDGUpdateConformersStage::execute(ETKDGContext& ctx) {
     // Thread-safe conformer addition with count checking
     if (conformer_mutex_) {
       std::lock_guard<std::mutex> lock(*conformer_mutex_);
-      auto& confVec = conformers_[mol];
+      auto&                       confVec = conformers_[mol];
       if (maxConformersPerMol_ <= 0 || static_cast<int>(confVec.size()) < maxConformersPerMol_) {
         confVec.push_back(std::move(newConf));
       }

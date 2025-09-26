@@ -18,9 +18,10 @@
 #include <omp.h>
 
 #include <atomic>
-#include <unordered_map>
 #include <mutex>
+#include <unordered_map>
 
+#include "conformer_pruning.h"
 #include "device.h"
 #include "etkdg_stage_coordgen.h"
 #include "etkdg_stage_etk_minimization.h"
@@ -29,8 +30,6 @@
 #include "etkdg_stage_stereochem_checks.h"
 #include "etkdg_stage_update_conformers.h"
 #include "nvtx.h"
-
-#include "conformer_pruning.h"
 
 namespace nvMolKit {
 namespace {
@@ -190,7 +189,7 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
                                                                                devicesPerThread,   \
                                                                                sortedMols,         \
                                                                                eargs,              \
-                                                                               conformers,          \
+                                                                               conformers,         \
                                                                                paramsCopy,         \
                                                                                debugMode,          \
                                                                                failures,           \
@@ -325,14 +324,13 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
     }
   }
 
-
 #pragma omp parallel for num_threads(numThreads) default(none) schedule(dynamic) shared(mols, conformers, params)
-    for (int i = 0; i < mols.size(); ++i) {
-      auto it = conformers.find(mols[i]);
-      if (it != conformers.end()) {
-        nvmolkit::addConformersToMoleculeWithPruning(*mols[i], it->second, params);
-      }
+  for (int i = 0; i < mols.size(); ++i) {
+    auto it = conformers.find(mols[i]);
+    if (it != conformers.end()) {
+      nvmolkit::addConformersToMoleculeWithPruning(*mols[i], it->second, params);
     }
+  }
 }
 
 }  // namespace nvMolKit

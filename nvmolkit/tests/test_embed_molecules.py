@@ -374,3 +374,13 @@ def test_embed_molecules_oversized_atom_limit_interleaved():
 
     with pytest.raises(ValueError, match=r"maximum supported is 256"):
         embed.EmbedMolecules([small1, big, small2], params, confsPerMolecule=1)
+
+
+def test_embed_molecules_prune_rmsthresh():
+    mols = [Chem.MolFromSmiles('c1ccccc1'), Chem.MolFromSmiles('C' * 30)]
+    params = EmbedParameters()
+    params.useRandomCoords = True
+    params.pruneRmsThresh = 0.5
+    embed.EmbedMolecules(mols, params, confsPerMolecule=5)
+    assert mols[0].GetNumConformers() == 1
+    assert mols[1].GetNumConformers() == 5

@@ -21,6 +21,7 @@
 #include <filesystem>
 #include <unordered_map>
 
+#include "conformer_pruning.h"
 #include "device.h"
 #include "dist_geom.h"
 #include "embedder_utils.h"
@@ -28,7 +29,6 @@
 #include "etkdg_impl.h"
 #include "etkdg_stage_coordgen.h"
 #include "etkdg_stage_update_conformers.h"
-#include "conformer_pruning.h"
 #include "test_utils.h"
 
 using ::nvMolKit::detail::ETKDGContext;
@@ -425,7 +425,7 @@ TEST_F(ETKDGPipelineInitTestFixture, InitMultipleMolecules) {
 
 TEST_F(ETKDGPipelineInitTestFixture, UpdateConformersStage) {
   // Create eargs with dim=3 for all molecules
-  auto params = DGeomHelpers::ETKDGv3;
+  auto                                     params = DGeomHelpers::ETKDGv3;
   std::vector<nvMolKit::detail::EmbedArgs> eargs;
   for (size_t i = 0; i < mols_.size(); ++i) {
     auto& earg = eargs.emplace_back();
@@ -517,7 +517,7 @@ TEST_F(ETKDGPipelineInitTestFixture, UpdateConformersStageWithInactiveMolecule) 
   context.systemDevice.positions.copyFromHost(refPositions);
 
   // Create and execute the stage
-  auto params = DGeomHelpers::ETKDGv3;
+  auto                                                                             params = DGeomHelpers::ETKDGv3;
   std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<Conformer>>> conformers;
   nvMolKit::detail::ETKDGUpdateConformersStage stage(mols_, eargs, conformers, nullptr, nullptr, -1);
   stage.execute(context);
@@ -867,4 +867,23 @@ TEST(ETKDGAtomLimit, OversizedMoleculeInterleavedThrows) {
   std::vector<RDKit::ROMol*>     mols = {small1.get(), big.get(), small2.get()};
   nvMolKit::BatchHardwareOptions hw;
   EXPECT_THROW(nvMolKit::embedMolecules(mols, params, 1, -1, false, nullptr, hw), std::invalid_argument);
+}
+
+TEST(ETKDGDeduplicationTest, MultipleMoleculesSomeDuplicationLikely) {
+  const auto benzene = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol("c1ccccc1"));
+  ASSERT_NE(benzene, nullptr);
+
+  const std::string longChainSmiles(30, 'C');
+  const auto        longChain = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol(longChainSmiles));
+  ASSERT_NE(longChain, nullptr);
+
+  const std::vector<RDKit::ROMol*> mols   = {benzene.get(), longChain.get()};
+  auto                             params = RDKit::DGeomHelpers::ETKDGv3;
+  params.useRandomCoords                  = true;
+  params.pruneRmsThresh                   = 0.5;
+  nvMolKit::embedMolecules(mols, params, /*confsPerMolecule=*/5);
+  // Benzene only ever has one conformer
+  EXPECT_EQ(benzene->getNumConformers(), 1);
+  // Long chain should all be sufficiently sepa
+  EXPECT_EQ(longChain->getNumConformers(), 5);
 }
