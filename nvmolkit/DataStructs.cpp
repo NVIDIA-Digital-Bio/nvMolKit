@@ -46,8 +46,8 @@ template <typename blockT> cuda::std::span<const blockT> getSpanFromDictElems(vo
 // Shared CPU-result wrapper for cosine and tanimoto similarity
 template <typename ComputeFn>
 boost::python::numpy::ndarray crossSimilarityCPUFromRawBuffers(const boost::python::dict& bitsOne,
-                                                              const boost::python::dict& bitsTwo,
-                                                              ComputeFn                  compute) {
+                                                               const boost::python::dict& bitsTwo,
+                                                               ComputeFn                  compute) {
   // Extract boost::python::tuple from dict['shape']
   boost::python::tuple shapeOne = boost::python::extract<boost::python::tuple>(bitsOne["shape"]);
   boost::python::tuple shapeTwo = boost::python::extract<boost::python::tuple>(bitsTwo["shape"]);

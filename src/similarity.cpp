@@ -73,7 +73,9 @@ struct SimilaritiesRotBuffers {
   ScopedCudaEvent eventB0;
   ScopedCudaEvent eventB1;
 
-  [[nodiscard]] cudaStream_t streamForThread(int tid) { return (tid % 2 == 0) ? streamA.stream() : streamB.stream(); }
+  [[nodiscard]] cudaStream_t streamForThread(int tid) const {
+    return (tid % 2 == 0) ? streamA.stream() : streamB.stream();
+  }
   AsyncDeviceVector<double>& bufferForThread(int tid) { return (tid % 2 == 0) ? bufferA : bufferB; }
   PinnedHostVector<double>&  pinnedForThreadBuffer(int tid, int bufIdx) {
     const bool isA = (tid % 2 == 0);
@@ -82,7 +84,7 @@ struct SimilaritiesRotBuffers {
     }
     return (bufIdx == 0) ? pinnedB0 : pinnedB1;
   }
-  cudaEvent_t eventForThreadBuffer(int tid, int bufIdx) {
+  [[nodiscard]] cudaEvent_t eventForThreadBuffer(int tid, unsigned int bufIdx) const {
     const bool isA = (tid % 2 == 0);
     if (isA) {
       return (bufIdx == 0) ? eventA0.event() : eventA1.event();
@@ -91,16 +93,17 @@ struct SimilaritiesRotBuffers {
   }
 };
 
+namespace {
 // Shared implementation for cross similarity on CPU with GPU offload and chunked D2H.
 // The provided launchKernel lambda is responsible for dispatching the correct GPU kernel
 // (e.g., Tanimoto or Cosine) with the signature:
 //   launchKernel(bitsA, bitsB, nElementsPerFp, outSpan, /*tile*/0, stream)
 template <typename LaunchKernelFn>
-static std::vector<double> crossSimilarityImpl(const cuda::std::span<const std::uint32_t> bitsOneBuffer,
-                                               const cuda::std::span<const std::uint32_t> bitsTwoBuffer,
-                                               const int                                  fpSize,
-                                               const CrossSimilarityOptions&              options,
-                                               LaunchKernelFn                             launchKernel) {
+std::vector<double> crossSimilarityImpl(const cuda::std::span<const std::uint32_t> bitsOneBuffer,
+                                        const cuda::std::span<const std::uint32_t> bitsTwoBuffer,
+                                        const int                                  fpSize,
+                                        const CrossSimilarityOptions&              options,
+                                        LaunchKernelFn                             launchKernel) {
   const size_t nElementsPerFp = fpSize / (kBitsPerByte * sizeof(std::uint32_t));
   const size_t nFps1          = bitsOneBuffer.size() / nElementsPerFp;
   const size_t nFps2          = bitsTwoBuffer.size() / nElementsPerFp;
@@ -109,7 +112,7 @@ static std::vector<double> crossSimilarityImpl(const cuda::std::span<const std::
   // If there is enough memory, compute in one shot on the device then copy to host
   if (freeBytes >= nFps1 * nFps2 * sizeof(double)) {
     AsyncDeviceVector<double> similarities_d(nFps1 * nFps2);
-    launchKernel(bitsOneBuffer, bitsTwoBuffer, nElementsPerFp, toSpan(similarities_d), 0, /*stream*/ 0);
+    launchKernel(bitsOneBuffer, bitsTwoBuffer, nElementsPerFp, toSpan(similarities_d), 0, /*stream*/ nullptr);
     std::vector<double> res(similarities_d.size());
     similarities_d.copyToHost(res);
     cudaDeviceSynchronize();
@@ -168,12 +171,12 @@ static std::vector<double> crossSimilarityImpl(const cuda::std::span<const std::
 
     // Double-buffered chunked D2H into pinned buffers with overlap of CPU memcpy
     const size_t batchElemsTotal = currentBatchSizeA * nFps2;
-    int          bufIdx          = 0;  // 0 -> use pinnedBuffer0, 1 -> pinnedBuffer1
+    unsigned int bufIdx          = 0;  // 0 -> use pinnedBuffer0, 1 -> pinnedBuffer1
     bool         hasPrev         = false;
     size_t       prevOffset      = 0;
     size_t       prevSize        = 0;
     int          prevBufIdx      = 0;
-    for (size_t chunkOffset = 0; chunkOffset < batchElemsTotal; chunkOffset += pinnedCapacityDoubles, bufIdx ^= 1) {
+    for (size_t chunkOffset = 0; chunkOffset < batchElemsTotal; chunkOffset += pinnedCapacityDoubles, bufIdx ^= 1U) {
       const size_t chunkSize  = std::min(pinnedCapacityDoubles, batchElemsTotal - chunkOffset);
       auto&        pinnedBuf  = (bufIdx == 0) ? pinnedBuffer0 : pinnedBuffer1;
       auto&        prevPinned = (bufIdx == 0) ? pinnedBuffer1 : pinnedBuffer0;
@@ -222,6 +225,7 @@ static std::vector<double> crossSimilarityImpl(const cuda::std::span<const std::
 
   return res;
 }
+}  // namespace
 
 std::vector<double> crossTanimotoSimilarityCPUResult(const cuda::std::span<const std::uint32_t> bitsOneBuffer,
                                                      const cuda::std::span<const std::uint32_t> bitsTwoBuffer,
@@ -232,12 +236,12 @@ std::vector<double> crossTanimotoSimilarityCPUResult(const cuda::std::span<const
     bitsTwoBuffer,
     fpSize,
     options,
-    [](const cuda::std::span<const std::uint32_t> a,
-       const cuda::std::span<const std::uint32_t> b,
+    [](const cuda::std::span<const std::uint32_t> bufA,
+       const cuda::std::span<const std::uint32_t> bufB,
        size_t                                     nElementsPerFp,
        const cuda::std::span<double>              out,
        int /*tile*/,
-       cudaStream_t stream) { launchCrossTanimotoSimilarity(a, b, nElementsPerFp, out, 0, stream); });
+       cudaStream_t stream) { launchCrossTanimotoSimilarity(bufA, bufB, nElementsPerFp, out, 0, stream); });
 }
 
 // --------------------------------
@@ -272,12 +276,12 @@ std::vector<double> crossCosineSimilarityCPUResult(const cuda::std::span<const s
     bitsTwoBuffer,
     fpSize,
     options,
-    [](const cuda::std::span<const std::uint32_t> a,
-       const cuda::std::span<const std::uint32_t> b,
+    [](const cuda::std::span<const std::uint32_t> bufA,
+       const cuda::std::span<const std::uint32_t> bufB,
        size_t                                     nElementsPerFp,
        const cuda::std::span<double>              out,
        int /*tile*/,
-       cudaStream_t stream) { launchCrossCosineSimilarity(a, b, nElementsPerFp, out, 0, stream); });
+       cudaStream_t stream) { launchCrossCosineSimilarity(bufA, bufB, nElementsPerFp, out, 0, stream); });
 }
 
 }  // namespace nvMolKit
