@@ -20,17 +20,16 @@
 
 #include "nvtx3/nvToolsExt.h"
 
-
 namespace nvMolKit {
 
 class ScopedNvtxRange {
  public:
   explicit ScopedNvtxRange(const std::string& name) { nvtxRangePushA(name.c_str()); }
   explicit ScopedNvtxRange(const char* name) { nvtxRangePushA(name); }
-  ScopedNvtxRange(const ScopedNvtxRange&) = delete;
+  ScopedNvtxRange(const ScopedNvtxRange&)            = delete;
   ScopedNvtxRange& operator=(const ScopedNvtxRange&) = delete;
   ScopedNvtxRange(ScopedNvtxRange&&)                 = delete;
-  ScopedNvtxRange& operator=(ScopedNvtxRange&&) = delete;
+  ScopedNvtxRange& operator=(ScopedNvtxRange&&)      = delete;
 
   void pop() noexcept {
     if (!popped_) {
