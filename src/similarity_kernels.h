@@ -52,7 +52,8 @@ void launchCrossTanimotoSimilarity(const cuda::std::span<const std::uint32_t> bi
                                    const cuda::std::span<const std::uint32_t> bitsTwo,
                                    const size_t                               numBitsPerMolecule,
                                    const cuda::std::span<double>              results,
-                                   const size_t                               offset);
+                                   const size_t                               offset,
+                                   cudaStream_t                               stream = nullptr);
 
 // --------------------------------
 // Tanimoto similarity explicit template instantiations
@@ -88,7 +89,8 @@ void launchCrossCosineSimilarity(const cuda::std::span<const std::uint32_t> bits
                                  const cuda::std::span<const std::uint32_t> bitsTwo,
                                  const size_t                               numBitsPerMolecule,
                                  const cuda::std::span<double>              results,
-                                 const size_t                               offset);
+                                 const size_t                               offset,
+                                 cudaStream_t                               stream = nullptr);
 
 // --------------------------------
 // Cosine similarity explicit template instantiations

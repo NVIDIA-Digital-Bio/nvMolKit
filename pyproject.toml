@@ -19,6 +19,8 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
+    "pandas",
+    "psutil",
     "pytest",
     "ruff",
 ]

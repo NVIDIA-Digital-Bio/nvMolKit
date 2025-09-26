@@ -1,8 +1,11 @@
-from typing import Dict, List, Optional, Union
-import torch
-from rdkit.DataStructs import ExplicitBitVect
+from typing import Dict
+import numpy as np
 from nvmolkit.types import AsyncGpuResult
 
 def CrossTanimotoSimilarityRawBuffers(fp1: Dict, fp2: Dict) -> AsyncGpuResult: ...
 
+def CrossTanimotoSimilarityCPURawBuffers(fp1: Dict, fp2: Dict) -> np.ndarray: ...
+
 def CrossCosineSimilarityRawBuffers(fp1: Dict, fp2: Dict) -> AsyncGpuResult: ...
+
+def CrossCosineSimilarityCPURawBuffers(fp1: Dict, fp2: Dict) -> np.ndarray: ...

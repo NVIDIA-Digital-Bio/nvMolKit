@@ -15,14 +15,21 @@
 
 #ifndef NVMOLKIT_UTILS_NVTX_H
 #define NVMOLKIT_UTILS_NVTX_H
+
+#include <string>
+
 #include "nvtx3/nvToolsExt.h"
 
 namespace nvMolKit {
 
 class ScopedNvtxRange {
  public:
-  ScopedNvtxRange(const std::string& name) { nvtxRangePushA(name.c_str()); }
-  ScopedNvtxRange(const char* name) { nvtxRangePushA(name); }
+  explicit ScopedNvtxRange(const std::string& name) { nvtxRangePushA(name.c_str()); }
+  explicit ScopedNvtxRange(const char* name) { nvtxRangePushA(name); }
+  ScopedNvtxRange(const ScopedNvtxRange&)            = delete;
+  ScopedNvtxRange& operator=(const ScopedNvtxRange&) = delete;
+  ScopedNvtxRange(ScopedNvtxRange&&)                 = delete;
+  ScopedNvtxRange& operator=(ScopedNvtxRange&&)      = delete;
 
   void pop() noexcept {
     if (!popped_) {

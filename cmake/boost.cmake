@@ -23,6 +23,9 @@ else()
   if(NVMOLKIT_BUILD_PYTHON_BINDINGS)
     list(APPEND BOOST_TARGET_LIBS
          "python${Python_VERSION_MAJOR}${Python_VERSION_MINOR}")
+    # Link Boost.Python.Numpy as we use boost::python::numpy in DataStructs.cpp
+    list(APPEND BOOST_TARGET_LIBS
+         "numpy${Python_VERSION_MAJOR}${Python_VERSION_MINOR}")
   endif()
   message(STATUS "Finding boost libs: ${BOOST_TARGET_LIBS}")
   find_package(Boost REQUIRED COMPONENTS ${BOOST_TARGET_LIBS})
