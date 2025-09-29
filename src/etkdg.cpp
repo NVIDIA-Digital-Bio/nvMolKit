@@ -256,8 +256,13 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
       // Second + 3rd minimize, then double bond checks.
       stages.push_back(
         std::make_unique<detail::FourthDimMinimizeStage>(constMolPtrs, batchEargs, paramsCopy, context, streamPtr));
-      stages.push_back(
-        std::make_unique<detail::ETKMinimizationStage>(constMolPtrs, batchEargs, paramsCopy, context, streamPtr));
+      
+      // (ET)(K)DG: Add experimental torsion minimization stage only if needed
+      // This matches RDKit's logic: if (embedParams.useExpTorsionAnglePrefs || embedParams.useBasicKnowledge)
+      if (paramsCopy.useExpTorsionAnglePrefs || paramsCopy.useBasicKnowledge) {
+        stages.push_back(
+          std::make_unique<detail::ETKMinimizationStage>(constMolPtrs, batchEargs, paramsCopy, context, streamPtr));
+      }
 
       // Final chiral and stereochem checks
       stages.push_back(
