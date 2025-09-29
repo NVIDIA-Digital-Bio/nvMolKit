@@ -64,17 +64,11 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
     throw std::runtime_error("ETKDG requires useRandomCoords to be true. Please set it in the EmbedParameters.");
   }
 
-  // Enforce maximum supported atoms per molecule
-  constexpr unsigned int kMaxSupportedAtoms = 256;
+  // Validate inputs (allow large molecules)
   for (size_t i = 0; i < mols.size(); ++i) {
     const auto* mol = mols[i];
     if (mol == nullptr) {
       throw std::invalid_argument("Invalid molecule pointer at index " + std::to_string(i));
-    }
-    const unsigned int numAtoms = mol->getNumAtoms();
-    if (numAtoms > kMaxSupportedAtoms) {
-      throw std::invalid_argument("Molecule at index " + std::to_string(i) + " has " + std::to_string(numAtoms) +
-                                  " atoms; maximum supported is " + std::to_string(kMaxSupportedAtoms));
     }
   }
 

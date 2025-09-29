@@ -183,6 +183,7 @@ TEST_P(BFGSHessianTest, SingleSystem) {
                                 hessDgrad.data(),
                                 gpuGrad.data(),
                                 dataDim,
+                                /*largeMol=*/false,
                                 activeSystemIndices.data());
 
   // Copy results back from GPU
@@ -196,6 +197,83 @@ TEST_P(BFGSHessianTest, SingleSystem) {
   cudaCheckError(cudaDeviceSynchronize());
 
   EXPECT_THAT(resInvHessianHost, ::testing::Pointwise(::testing::DoubleNear(1e-5), cpuInvHessian));
+  EXPECT_THAT(resDGradHost, ::testing::Pointwise(::testing::DoubleNear(1e-5), cpuDGrad));
+  EXPECT_THAT(resXiHost, ::testing::Pointwise(::testing::DoubleNear(1e-5), cpuXi));
+}
+
+TEST_P(BFGSHessianTest, SingleSystemLarge) {
+  const int  dataDim         = std::get<0>(GetParam());
+  const bool identityHessian = std::get<1>(GetParam());
+
+  constexpr int       numAtoms = 300;
+  const int           dim      = numAtoms * dataDim;
+  std::vector<double> cpuInvHessian, cpuDGrad, cpuXi, cpuGrad;
+  generateRandomSystem(dim, cpuInvHessian, cpuDGrad, cpuXi, cpuGrad, identityHessian);
+
+  AsyncDeviceVector<double> gpuInvHessian(cpuInvHessian.size());
+  AsyncDeviceVector<double> gpuDGrad(cpuDGrad.size());
+  AsyncDeviceVector<double> gpuXi(cpuXi.size());
+  AsyncDeviceVector<double> gpuGrad(cpuGrad.size());
+  AsyncDeviceVector<int>    atomStarts(2);  // One extra element for the end
+  AsyncDeviceVector<int>    hessianStarts(2);
+  AsyncDeviceVector<double> hessDgrad(cpuDGrad.size());
+  hessDgrad.zero();
+
+  std::vector<int> atomStartsHost    = {0, numAtoms};
+  std::vector<int> hessianStartsHost = {0, dim * dim};
+
+  // Copy data to GPU
+  gpuInvHessian.copyFromHost(cpuInvHessian);
+  gpuDGrad.copyFromHost(cpuDGrad);
+  gpuXi.copyFromHost(cpuXi);
+  gpuGrad.copyFromHost(cpuGrad);
+  atomStarts.copyFromHost(atomStartsHost);
+  hessianStarts.copyFromHost(hessianStartsHost);
+
+  // Run CPU version
+  std::vector<double> cpuHessDGrad(cpuDGrad.size());  // Match size with dGrad
+
+  updateInverseHessianBFGSCPU(dim,
+                              cpuInvHessian.data(),
+                              cpuHessDGrad.data(),
+                              cpuDGrad.data(),
+                              cpuXi.data(),
+                              cpuGrad.data());
+
+  PinnedHostVector<int> activeSystemIndicesHost;
+  activeSystemIndicesHost.resize(1);
+  activeSystemIndicesHost[0] = 0;
+  AsyncDeviceVector<int> activeSystemIndices(1);
+  activeSystemIndices.zero();
+
+  // Run GPU version
+  updateInverseHessianBFGSBatch(1,
+                                nullptr,
+                                hessianStarts.data(),
+                                atomStarts.data(),
+                                gpuInvHessian.data(),
+                                gpuDGrad.data(),
+                                gpuXi.data(),
+                                hessDgrad.data(),
+                                gpuGrad.data(),
+                                dataDim,
+                                /*largeMol=*/true,
+                                activeSystemIndices.data());
+
+  // Copy results back from GPU
+  std::vector<double> resInvHessianHost(cpuInvHessian.size());
+  std::vector<double> resHessDGradHost(cpuHessDGrad.size());
+  std::vector<double> resDGradHost(cpuDGrad.size());
+  std::vector<double> resXiHost(cpuXi.size());
+
+  gpuInvHessian.copyToHost(resInvHessianHost);
+  hessDgrad.copyToHost(resHessDGradHost);
+  gpuDGrad.copyToHost(resDGradHost);
+  gpuXi.copyToHost(resXiHost);
+  cudaCheckError(cudaDeviceSynchronize());
+
+  EXPECT_THAT(resInvHessianHost, ::testing::Pointwise(::testing::DoubleNear(1e-5), cpuInvHessian));
+  EXPECT_THAT(resHessDGradHost, ::testing::Pointwise(::testing::DoubleNear(1e-5), cpuHessDGrad));
   EXPECT_THAT(resDGradHost, ::testing::Pointwise(::testing::DoubleNear(1e-5), cpuDGrad));
   EXPECT_THAT(resXiHost, ::testing::Pointwise(::testing::DoubleNear(1e-5), cpuXi));
 }
@@ -283,6 +361,7 @@ TEST_P(BFGSHessianTest, MultiSystem) {
                                 hessDgrad.data(),
                                 gpuGrad.data(),
                                 dataDim,
+                                /*largeMol=*/false,
                                 activeSystemIndices.data());
   // Copy results back from GPU
   std::vector<double> resInvHessianHost(gpuInvHessian.size());
@@ -383,6 +462,7 @@ TEST_P(BFGSHessianTest, SkipInvHessianUpdateDueToIncorrectSigns) {
                                 hessDgrad.data(),
                                 gpuGrad.data(),
                                 dataDim,
+                                /*largeMol=*/false,
                                 activeSystemIndices.data());
 
   // Copy results back from GPU

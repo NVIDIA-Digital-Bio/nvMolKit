@@ -32,6 +32,7 @@ void updateInverseHessianBFGSBatch(int            numActiveSystems,
                                    double*        hessDGrads,
                                    const double*  grads,
                                    int            dataDim,
+                                   bool           hasLargeMolecule,
                                    const int*     activeSystemIndices,
                                    cudaStream_t   stream = nullptr);
 

@@ -829,7 +829,31 @@ TEST_F(ETKDGPipelineEnergyDiverseTestFixture, MultiGPUSpecificIds) {
   testConformerEnergyComparison(testMols, 2, customOptions);
 }
 
-TEST(ETKDGAtomLimit, OversizedMoleculeInterleavedThrows) {
+TEST(ETKDGAllowsLargeMol, LargeMoleculeSoloEmbeds) {
+  // Small molecules
+
+
+
+  // Oversized linear hydrocarbon (>256 atoms)
+  const std::string bigSmiles(100, 'C');
+  auto              big = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol(bigSmiles));
+  RDKit::MolOps::addHs(*big);
+  ASSERT_NE(big, nullptr);
+  ASSERT_GT(big->getNumAtoms(), 256u);
+
+  // Params
+  RDKit::DGeomHelpers::EmbedParameters params = RDKit::DGeomHelpers::ETKDGv3;
+  params.useRandomCoords                      = true;
+  params.maxIterations = 10;
+
+  std::vector<RDKit::ROMol*>     mols = {big.get()};
+  std::vector<std::vector<int16_t>> failures;
+  nvMolKit::embedMolecules(mols, params, 1, -1, false, &failures);
+  EXPECT_EQ(big->getNumConformers(), 1);
+}
+
+
+TEST(ETKDGAllowsLargeMol, LargeMoleculeInterleavedEmbeds) {
   // Small molecules
   auto small1 = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol("CCCCCC"));
   auto small2 = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol("CCC"));
@@ -837,16 +861,21 @@ TEST(ETKDGAtomLimit, OversizedMoleculeInterleavedThrows) {
   ASSERT_NE(small2, nullptr);
 
   // Oversized linear hydrocarbon (>256 atoms)
-  const std::string bigSmiles(300, 'C');
+  const std::string bigSmiles(100, 'C');
   auto              big = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol(bigSmiles));
+  RDKit::MolOps::addHs(*big);
   ASSERT_NE(big, nullptr);
   ASSERT_GT(big->getNumAtoms(), 256u);
 
   // Params
   RDKit::DGeomHelpers::EmbedParameters params = RDKit::DGeomHelpers::ETKDGv3;
   params.useRandomCoords                      = true;
+  params.maxIterations = 5;
 
   std::vector<RDKit::ROMol*>     mols = {small1.get(), big.get(), small2.get()};
-  nvMolKit::BatchHardwareOptions hw;
-  EXPECT_THROW(nvMolKit::embedMolecules(mols, params, 1, -1, false, nullptr, hw), std::invalid_argument);
+  std::vector<std::vector<int16_t>> failures;
+  nvMolKit::embedMolecules(mols, params, 1, -1, false, &failures);
+  EXPECT_EQ(small1->getNumConformers(), 1);
+  EXPECT_EQ(small2->getNumConformers(), 1);
+  EXPECT_EQ(big->getNumConformers(), 1);
 }

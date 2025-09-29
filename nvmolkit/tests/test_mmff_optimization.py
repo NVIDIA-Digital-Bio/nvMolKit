@@ -224,18 +224,20 @@ def test_mmff_optimization_invalid_input():
         nvmolkit_mmff.MMFFOptimizeMoleculesConfs([None])
 
 
-def test_mmff_optimization_oversized_atom_limit_interleaved():
-    """Ensure an oversized (>256 atoms) molecule in batch raises an error."""
+def test_mmff_optimization_allows_large_molecule_interleaved():
+    """Ensure a large (>256 atoms) molecule in batch is accepted and optimized."""
     small1 = Chem.MolFromSmiles('CCCCCC')  # 6 atoms
     small2 = Chem.MolFromSmiles('CCC')     # 3 atoms
-    # Oversized straight-chain hydrocarbon
     big = Chem.MolFromSmiles('C' * 300)
     assert big.GetNumAtoms() > 256
 
-    # Need conformers for MMFF
     rdDistGeom.EmbedMultipleConfs(small1, numConfs=1)
     rdDistGeom.EmbedMultipleConfs(small2, numConfs=1)
     rdDistGeom.EmbedMultipleConfs(big, numConfs=1)
 
-    with pytest.raises(ValueError, match=r"maximum supported is 256"):
-        nvmolkit_mmff.MMFFOptimizeMoleculesConfs([small1, big, small2])
+    energies = nvmolkit_mmff.MMFFOptimizeMoleculesConfs([small1, big, small2], maxIters=50, nonBondedThreshold=100.0)
+    assert len(energies) == 3
+    # Each has one conformer; energies are finite
+    for per_mol in energies:
+        assert len(per_mol) == 1
+        assert abs(per_mol[0]) < 1e9

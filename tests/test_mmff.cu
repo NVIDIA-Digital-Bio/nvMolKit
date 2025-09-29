@@ -1542,14 +1542,12 @@ TEST(MMFFMultiGPU, MultiGPUSpecificIds) {
   }
 }
 
-TEST(MMFFAtomLimit, OversizedMoleculeInterleavedThrows) {
-  // Small molecules
+TEST(MMFFAllowsLargeMol, LargeMoleculeInterleavedOptimizes) {
   auto small1 = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol("CCCCCC"));
   auto small2 = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol("CCC"));
   ASSERT_NE(small1, nullptr);
   ASSERT_NE(small2, nullptr);
 
-  // Oversized linear hydrocarbon (>256 atoms)
   const std::string bigSmiles(300, 'C');
   auto              big = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol(bigSmiles));
   ASSERT_NE(big, nullptr);
@@ -1562,5 +1560,10 @@ TEST(MMFFAtomLimit, OversizedMoleculeInterleavedThrows) {
 
   std::vector<RDKit::ROMol*>     molPtrs = {small1.get(), big.get(), small2.get()};
   nvMolKit::BatchHardwareOptions options;
-  EXPECT_THROW(nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molPtrs, 200, 100.0, options), std::invalid_argument);
+  auto energies = nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molPtrs, 50, 100.0, options);
+  ASSERT_EQ(energies.size(), 3);
+  for (const auto& perMol : energies) {
+    ASSERT_EQ(perMol.size(), 1);
+    EXPECT_LT(std::abs(perMol[0]), 1e9);
+  }
 }

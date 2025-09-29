@@ -414,8 +414,16 @@ void BfgsBatchMinimizer::initialize(const std::vector<int>& atomStartsHost,
   }
   cudaCheckError(cudaGetLastError());
 
-  numSystems_    = numSystems;
-  numAtomsTotal_ = atomStartsHost.back();
+  numSystems_     = numSystems;
+  numAtomsTotal_  = atomStartsHost.back();
+  hasLargeSystem_ = false;
+  for (int i = 0; i < numSystems_; ++i) {
+    const int numAtoms = atomStartsHost[i + 1] - atomStartsHost[i];
+    if (numAtoms > 256) {
+      hasLargeSystem_ = true;
+      break;
+    }
+  }
 
   activeSystemIndices_.resize(numSystems_);
   allSystemIndices_.resize(numSystems_);
@@ -797,6 +805,8 @@ void BfgsBatchMinimizer::updateDGrad() {
 
 void BfgsBatchMinimizer::updateHessian() {
   const ScopedNvtxRange bfgsUpdateHessian("BfgsBatchMinimizer::updateHessian");
+  // Determine if any active system exceeds the shared-memory-optimized limit
+  bool largeMol = hasLargeSystem_;
   nvMolKit::updateInverseHessianBFGSBatch(numUnfinishedSystems_,
                                           statuses_.data(),
                                           hessianStarts_.data(),
@@ -807,6 +817,7 @@ void BfgsBatchMinimizer::updateHessian() {
                                           hessDGrad_.data(),
                                           gradDevice,
                                           dataDim_,
+                                          largeMol,
                                           activeSystemIndices_.data(),
                                           stream_);
 }
