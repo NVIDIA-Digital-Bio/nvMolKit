@@ -29,9 +29,6 @@
 using namespace RDKit;
 using namespace nvMolKit;
 
-constexpr std::uint32_t kRefAllOnes  = 0x1111;
-constexpr std::uint32_t kRefAllZeros = 0x0000;
-
 namespace {
 
 // --------------------------------
