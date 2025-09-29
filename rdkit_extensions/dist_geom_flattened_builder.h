@@ -24,7 +24,8 @@ nvMolKit::DistGeom::Energy3DForceContribsHost construct3DForceFieldContribs(
   const ::DistGeom::BoundsMatrix&                   mmat,
   const ::ForceFields::CrystalFF::CrystalFFDetails& etkdgDetails,
   const std::vector<double>&                        positions,
-  int                                               dim);
+  int                                               dim,
+  bool                                              useBasicKnowledge = true);
 
 }  // namespace DistGeom
 }  // namespace nvMolKit
