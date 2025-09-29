@@ -459,7 +459,7 @@ TEST_F(ETKDGPipelineInitTestFixture, UpdateConformersStage) {
   std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<Conformer>>> conformers;
   nvMolKit::detail::ETKDGUpdateConformersStage stage(mols_, eargs, conformers, nullptr, nullptr, -1);
   stage.execute(context);
-  for (int i = 0; i < mols_.size(); ++i) {
+  for (size_t i = 0; i < mols_.size(); ++i) {
     auto it = conformers.find(mols_[i]);
     ASSERT_NE(it, conformers.end());
     nvmolkit::addConformersToMoleculeWithPruning(*mols_[i], it->second, params);
@@ -521,7 +521,7 @@ TEST_F(ETKDGPipelineInitTestFixture, UpdateConformersStageWithInactiveMolecule) 
   std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<Conformer>>> conformers;
   nvMolKit::detail::ETKDGUpdateConformersStage stage(mols_, eargs, conformers, nullptr, nullptr, -1);
   stage.execute(context);
-  for (int i = 0; i < mols_.size(); ++i) {
+  for (size_t i = 0; i < mols_.size(); ++i) {
     if (i == 1) {
       continue;
     }
