@@ -196,7 +196,12 @@ void addMoleculeToMolecularSystem3D(const Energy3DForceContribsHost& contribs,
     contribHolder.improperTorsionTerms.C2.push_back(contribs.improperTorsionTerms.C2[i]);
     contribHolder.improperTorsionTerms.forceConstant.push_back(contribs.improperTorsionTerms.forceConstant[i]);
   }
-  contribHolder.improperTorsionTerms.numImpropers.push_back(contribs.improperTorsionTerms.numImpropers[0]);
+  // Add numImpropers count (0 if no improper torsions, otherwise the count from the source)
+  if (contribs.improperTorsionTerms.numImpropers.empty()) {
+    contribHolder.improperTorsionTerms.numImpropers.push_back(0);
+  } else {
+    contribHolder.improperTorsionTerms.numImpropers.push_back(contribs.improperTorsionTerms.numImpropers[0]);
+  }
 
   // 1-2 distance terms
   for (size_t i = 0; i < contribs.dist12Terms.idx1.size(); i++) {
