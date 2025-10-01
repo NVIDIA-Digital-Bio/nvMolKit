@@ -1,9 +1,9 @@
 #include <cuda_runtime.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdlib>
-#include <cctype>
 #include <exception>
 #include <iomanip>
 #include <iostream>
@@ -20,21 +20,22 @@ using nvMolKit::checkReturnCode;
 
 namespace {
 
-constexpr int kDataDim = 4;
+constexpr int kDataDim        = 4;
 constexpr int kMaxAtomsShared = 256;
-constexpr int kNumRuns = 10;
-constexpr int kMaxSupported = 1000;
+constexpr int kNumRuns        = 10;
+constexpr int kMaxSupported   = 1000;
 
 bool parseBoolArg(const std::string& arg) {
   std::string lowered;
   lowered.resize(arg.size());
-  std::transform(arg.begin(), arg.end(), lowered.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  std::transform(arg.begin(), arg.end(), lowered.begin(), [](unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
   return lowered == "1" || lowered == "true" || lowered == "yes" || lowered == "on";
 }
 
 [[noreturn]] void printUsageAndExit(const char* prog) {
-  std::cerr << "Usage: " << prog
-            << " <atoms_per_system> <batch_size> <use_large_kernel (true|false)>" << std::endl;
+  std::cerr << "Usage: " << prog << " <atoms_per_system> <batch_size> <use_large_kernel (true|false)>" << std::endl;
   std::exit(EXIT_FAILURE);
 }
 
@@ -59,6 +60,7 @@ double computeStdDev(const std::vector<float>& timings, double mean) {
   return std::sqrt(accum / static_cast<double>(count));
 }
 
+// Seed deterministic vectors so the benchmark is reproducible across runs and hosts.
 std::vector<double> makeVector(size_t size, double scale) {
   std::vector<double> data(size);
   for (size_t i = 0; i < size; ++i) {
@@ -67,8 +69,9 @@ std::vector<double> makeVector(size_t size, double scale) {
   return data;
 }
 
+// Populate a symmetric positive definite Hessian deterministically. Pure RNG might activate the error path.
 std::vector<double> makeHessian(size_t systems, int dim) {
-  const size_t totalSize = systems * static_cast<size_t>(dim) * static_cast<size_t>(dim);
+  const size_t        totalSize = systems * static_cast<size_t>(dim) * static_cast<size_t>(dim);
   std::vector<double> data(totalSize, 0.0);
   for (size_t sys = 0; sys < systems; ++sys) {
     const double base = 1.0 + 0.01 * static_cast<double>(sys + 1);
@@ -95,9 +98,9 @@ int main(int argc, char** argv) {
       printUsageAndExit(argv[0]);
     }
 
-    const int atomsPerSystem = std::stoi(argv[1]);
-    const int batchSize      = std::stoi(argv[2]);
-    const bool useLarge      = parseBoolArg(argv[3]);
+    const int  atomsPerSystem = std::stoi(argv[1]);
+    const int  batchSize      = std::stoi(argv[2]);
+    const bool useLarge       = parseBoolArg(argv[3]);
 
     if (atomsPerSystem <= 0 || batchSize <= 0) {
       throw std::runtime_error("atoms_per_system and batch_size must be positive integers");
@@ -119,8 +122,8 @@ int main(int argc, char** argv) {
     std::vector<int> activeSystemIndices(numSystems, 0);
 
     for (int i = 0; i < numSystems; ++i) {
-      atomStarts[i + 1]   = atomStarts[i] + atomsPerSystem;
-      hessianStarts[i + 1] = hessianStarts[i] + dim * dim;
+      atomStarts[i + 1]      = atomStarts[i] + atomsPerSystem;
+      hessianStarts[i + 1]   = hessianStarts[i] + dim * dim;
       activeSystemIndices[i] = i;
     }
 
@@ -151,7 +154,6 @@ int main(int argc, char** argv) {
     nvMolKit::AsyncDeviceVector<int>    dRowToLocalRowMap;
     nvMolKit::AsyncDeviceVector<double> dIntermediateSums;
 
-
     std::vector<float> timings;
     timings.reserve(kNumRuns);
 
@@ -160,7 +162,7 @@ int main(int argc, char** argv) {
     cudaCheckError(cudaEventCreate(&startEvent));
     cudaCheckError(cudaEventCreate(&stopEvent));
 
-    for (int iter = 0; iter < kNumRuns; ++iter) {
+    for (int iter = 0; iter < kNumRuns + 1; ++iter) {
       dInvHessian.copyFromHost(hostInvHessian);
       dDGrad.copyFromHost(hostDGrad);
       dXi.copyFromHost(hostXi);
@@ -172,24 +174,26 @@ int main(int argc, char** argv) {
 
       cudaCheckError(cudaEventRecord(startEvent));
 
-        nvMolKit::updateInverseHessianBFGSBatch(numSystems,
-                                                      nullptr,
-                                                      dHessianStarts.data(),
-                                                      dAtomStarts.data(),
-                                                      dInvHessian.data(),
-                                                      dDGrad.data(),
-                                                      dXi.data(),
-                                                      dHessDGrad.data(),
-                                                      dGrad.data(),
-                                                      kDataDim,
-                                                      useLarge,
-                                                      dActiveSystemIndices.data());
+      nvMolKit::updateInverseHessianBFGSBatch(numSystems,
+                                              nullptr,
+                                              dHessianStarts.data(),
+                                              dAtomStarts.data(),
+                                              dInvHessian.data(),
+                                              dDGrad.data(),
+                                              dXi.data(),
+                                              dHessDGrad.data(),
+                                              dGrad.data(),
+                                              kDataDim,
+                                              useLarge,
+                                              dActiveSystemIndices.data());
       cudaCheckError(cudaEventRecord(stopEvent));
       cudaCheckError(cudaEventSynchronize(stopEvent));
 
       float elapsedMs = 0.0f;
       cudaCheckError(cudaEventElapsedTime(&elapsedMs, startEvent, stopEvent));
-      timings.push_back(elapsedMs);
+      if (iter > 0) {
+        timings.push_back(elapsedMs);
+      }
     }
 
     cudaCheckError(cudaEventDestroy(startEvent));
@@ -202,8 +206,7 @@ int main(int argc, char** argv) {
     std::cout << std::setprecision(6);
     std::cout << "Atoms: " << std::setw(4) << atomsPerSystem << ", batchsize: " << std::setw(4) << batchSize
               << ", kernel: " << std::setw(6) << std::left << (useLarge ? "large" : "shared") << std::right
-              << ", time: " << std::setw(11) << mean << " milliseconds, std: " << std::setw(11) << stdDev
-              << std::endl;
+              << ", time: " << std::setw(11) << mean << " milliseconds, std: " << std::setw(11) << stdDev << std::endl;
 
     return EXIT_SUCCESS;
   } catch (const std::exception& ex) {

@@ -832,8 +832,6 @@ TEST_F(ETKDGPipelineEnergyDiverseTestFixture, MultiGPUSpecificIds) {
 TEST(ETKDGAllowsLargeMol, LargeMoleculeSoloEmbeds) {
   // Small molecules
 
-
-
   // Oversized linear hydrocarbon (>256 atoms)
   const std::string bigSmiles(100, 'C');
   auto              big = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol(bigSmiles));
@@ -844,14 +842,13 @@ TEST(ETKDGAllowsLargeMol, LargeMoleculeSoloEmbeds) {
   // Params
   RDKit::DGeomHelpers::EmbedParameters params = RDKit::DGeomHelpers::ETKDGv3;
   params.useRandomCoords                      = true;
-  params.maxIterations = 10;
+  params.maxIterations                        = 10;
 
-  std::vector<RDKit::ROMol*>     mols = {big.get()};
+  std::vector<RDKit::ROMol*>        mols = {big.get()};
   std::vector<std::vector<int16_t>> failures;
   nvMolKit::embedMolecules(mols, params, 1, -1, false, &failures);
   EXPECT_EQ(big->getNumConformers(), 1);
 }
-
 
 TEST(ETKDGAllowsLargeMol, LargeMoleculeInterleavedEmbeds) {
   // Small molecules
@@ -870,9 +867,9 @@ TEST(ETKDGAllowsLargeMol, LargeMoleculeInterleavedEmbeds) {
   // Params
   RDKit::DGeomHelpers::EmbedParameters params = RDKit::DGeomHelpers::ETKDGv3;
   params.useRandomCoords                      = true;
-  params.maxIterations = 5;
+  params.maxIterations                        = 5;
 
-  std::vector<RDKit::ROMol*>     mols = {small1.get(), big.get(), small2.get()};
+  std::vector<RDKit::ROMol*>        mols = {small1.get(), big.get(), small2.get()};
   std::vector<std::vector<int16_t>> failures;
   nvMolKit::embedMolecules(mols, params, 1, -1, false, &failures);
   EXPECT_EQ(small1->getNumConformers(), 1);

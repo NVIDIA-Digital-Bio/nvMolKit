@@ -64,7 +64,7 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
     throw std::runtime_error("ETKDG requires useRandomCoords to be true. Please set it in the EmbedParameters.");
   }
 
-  // Validate inputs (allow large molecules)
+  // Validate inputs
   for (size_t i = 0; i < mols.size(); ++i) {
     const auto* mol = mols[i];
     if (mol == nullptr) {

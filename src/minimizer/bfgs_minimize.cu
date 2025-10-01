@@ -806,7 +806,7 @@ void BfgsBatchMinimizer::updateDGrad() {
 void BfgsBatchMinimizer::updateHessian() {
   const ScopedNvtxRange bfgsUpdateHessian("BfgsBatchMinimizer::updateHessian");
   // Determine if any active system exceeds the shared-memory-optimized limit
-  bool largeMol = hasLargeSystem_;
+  bool                  largeMol = hasLargeSystem_;
   nvMolKit::updateInverseHessianBFGSBatch(numUnfinishedSystems_,
                                           statuses_.data(),
                                           hessianStarts_.data(),

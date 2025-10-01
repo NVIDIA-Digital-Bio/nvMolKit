@@ -132,8 +132,8 @@ struct BfgsBatchMinimizer {
   AsyncDeviceVector<double> inverseHessian_;
   AsyncDeviceVector<double> hessDGrad_;
 
-  int  dataDim_    = 3;     // Dimensionality of positions.
-  bool scaleGrads_ = true;  // Whether to scale gradients to match RDKit forcefield.
+  int  dataDim_        = 3;      // Dimensionality of positions.
+  bool scaleGrads_     = true;   // Whether to scale gradients to match RDKit forcefield.
   bool hasLargeSystem_ = false;  // Whether any system exceeds shared-memory kernel limit
 
   // Tracking variables to determine if system needs initializing.
