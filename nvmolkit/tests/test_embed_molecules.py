@@ -362,13 +362,14 @@ def test_embed_molecules_with_hardware_options(embed_test_mols):
 
 def test_embed_molecules_allows_large_molecule_interleaved():
     """Ensure a large (>256 atoms) molecule in batch is accepted and embedded."""
-    small1 = Chem.MolFromSmiles('CCCCCC')  # 6 atoms
-    small2 = Chem.MolFromSmiles('CCC')     # 3 atoms
-    big = Chem.MolFromSmiles('C' * 300)
+    small1 = Chem.AddHs(Chem.MolFromSmiles('CCCCCC'))  # 6 atoms
+    small2 = Chem.AddHs(Chem.MolFromSmiles('CCC'))     # 3 atoms
+    big = Chem.AddHs(Chem.MolFromSmiles('C' * 100))
     assert big.GetNumAtoms() > 256
 
     params = EmbedParameters()
     params.useRandomCoords = True
+    params.maxIterations = 5
 
     embed.EmbedMolecules([small1, big, small2], params, confsPerMolecule=1)
     assert small1.GetNumConformers() == 1

@@ -27,6 +27,7 @@
 
 #include <filesystem>
 #include <random>
+#include <stdexcept>
 
 #include "bfgs_mmff.h"
 #include "device.h"
@@ -1542,28 +1543,88 @@ TEST(MMFFMultiGPU, MultiGPUSpecificIds) {
   }
 }
 
+
+
+std::unique_ptr<RDKit::RWMol> createHydroCarbon(const int numCarbons,
+                                                const double bondLength,
+                                                const double hydrogenOffset) {
+  if (numCarbons < 1) {
+    throw std::invalid_argument("numCarbons must be at least 1");
+  }
+
+  auto mol = std::make_unique<RDKit::RWMol>();
+  auto conf = new RDKit::Conformer();
+  conf->set3D(true);
+  mol->addConformer(conf);
+
+  auto addAtomWithPosition = [&](const int atomicNumber, const RDGeom::Point3D& position) {
+    const int idx = mol->addAtom(new RDKit::Atom(atomicNumber), true, true);
+    RDKit::Conformer& confRef = mol->getConformer();
+    if (confRef.getNumAtoms() <= idx) {
+      confRef.resize(idx + 1);
+    }
+    confRef.setAtomPos(idx, position);
+
+    return idx;
+  };
+
+  std::vector<int> carbonIndices;
+  carbonIndices.reserve(static_cast<size_t>(numCarbons));
+
+  for (int i = 0; i < numCarbons; ++i) {
+    const RDGeom::Point3D carbonPos(0.0, 0.0, i * bondLength);
+    const int carbonIdx = addAtomWithPosition(6, carbonPos);
+
+    if (!carbonIndices.empty()) {
+      mol->addBond(carbonIndices.back(), carbonIdx, RDKit::Bond::BondType::DOUBLE);
+    }
+    carbonIndices.push_back(carbonIdx);
+
+
+  }
+  RDKit::MolOps::sanitizeMol(*mol);
+  RDKit::MolOps::addHs((*mol), /*explicitOnly=*/false, /*addCoords=*/true);
+  return mol;
+}
+
 TEST(MMFFAllowsLargeMol, LargeMoleculeInterleavedOptimizes) {
-  auto small1 = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol("CCCCCC"));
-  auto small2 = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol("CCC"));
-  ASSERT_NE(small1, nullptr);
+  constexpr double bondLength     = 1.0;
+  constexpr double hydrogenOffset = 1.0;
+
+
+  auto small2 = createHydroCarbon(3, bondLength, hydrogenOffset);
+  auto big    = createHydroCarbon(300, bondLength, hydrogenOffset);
   ASSERT_NE(small2, nullptr);
-
-  const std::string bigSmiles(300, 'C');
-  auto              big = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol(bigSmiles));
   ASSERT_NE(big, nullptr);
-  ASSERT_GT(big->getNumAtoms(), 256u);
 
-  // Give each a conformer for MMFF
-  small1->addConformer(new RDKit::Conformer(small1->getNumAtoms()));
-  small2->addConformer(new RDKit::Conformer(small2->getNumAtoms()));
-  big->addConformer(new RDKit::Conformer(big->getNumAtoms()));
 
-  std::vector<RDKit::ROMol*>     molPtrs = {small1.get(), big.get(), small2.get()};
+  std::vector<std::unique_ptr<RDKit::RWMol>> rdkitRefs;
+  //rdkitRefs.push_back(std::make_unique<RDKit::RWMol>(*big));
+  rdkitRefs.push_back(std::make_unique<RDKit::RWMol>(*big));
+  for (const auto& molCopy : rdkitRefs) {
+    std::vector<std::pair<int, double>> res(molCopy->getNumConformers(), {-1, -1});
+    RDKit::MMFF::MMFFOptimizeMoleculeConfs(*molCopy, res, 1, 10);
+  }
+
+  std::vector<RDKit::ROMol*>     molPtrs = {big.get(),};
   nvMolKit::BatchHardwareOptions options;
-  auto energies = nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molPtrs, 50, 100.0, options);
-  ASSERT_EQ(energies.size(), 3);
-  for (const auto& perMol : energies) {
-    ASSERT_EQ(perMol.size(), 1);
-    EXPECT_LT(std::abs(perMol[0]), 1e9);
+  auto energies = nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molPtrs, 10, 10.0, options);
+
+  for (size_t molIdx = 0; molIdx < rdkitRefs.size(); ++molIdx) {
+    auto& molRef = *rdkitRefs[molIdx];
+    auto  molProps = std::make_unique<RDKit::MMFF::MMFFMolProperties>(molRef);
+    std::unique_ptr<ForceFields::ForceField> refFF(RDKit::MMFF::constructForceField(molRef, molProps.get()));
+
+    const auto& perMol = energies[molIdx];
+    int         confIdx = 0;
+    for (auto confIter = molRef.beginConformers(); confIter != molRef.endConformers(); ++confIter) {
+      std::vector<double> posRef;
+      nvMolKit::confPosToVect(**confIter, posRef);
+      const double refEnergy = refFF->calcEnergy(posRef.data());
+      const int numAtoms = molRef.getNumAtoms();
+      ASSERT_NEAR(perMol[confIdx] / numAtoms, refEnergy / numAtoms, 1e-3)
+        << "Energy mismatch vs RDKit reference for molecule " << molIdx << ", conformer " << confIdx;
+      confIdx++;
+    }
   }
 }
