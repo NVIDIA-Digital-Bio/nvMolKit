@@ -1583,7 +1583,6 @@ TEST_F(ETK3DGpuTestFixture, Angle13EnergyMultiMol) {
   std::vector<double> wantEnergy = getReferenceETK3DEnergyTerms(molsPtrs_, term, positionsHost.data(), atomStartsHost);
   std::vector<double> gotEnergy  = getETK3DEnergyTerms(systemDevice, atomStartsDevice, positionsDevice, term);
   EXPECT_THAT(gotEnergy, ::testing::Pointwise(::testing::DoubleNear(1e-4), wantEnergy));
-  FAIL();
 }
 
 TEST_F(ETK3DGpuTestFixture, Angle13GradMultiMol) {
