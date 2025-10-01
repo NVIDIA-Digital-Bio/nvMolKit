@@ -34,6 +34,63 @@ constexpr int blockSize = 512;
 constexpr int numWarp   = blockSize / warpSize;
 constexpr int maxAtom   = 256;
 
+__device__ __forceinline__ void computeBfgsSums(const double*                    dGrad,
+                                                const double*                    xi,
+                                                const double*                    hessDGrad,
+                                                double*                          facShared,
+                                                double*                          faeShared,
+                                                double*                          sumDGradShared,
+                                                double*                          sumXiShared,
+                                                cg::thread_block_tile<warpSize>& warp,
+                                                int                              warpIdx,
+                                                int                              laneIdx,
+                                                int                              dim) {
+  double sumTerm = 0.0;
+  if (warpIdx == 0) {
+    for (int i = laneIdx; i < dim; i += warpSize) {
+      sumTerm += dGrad[i] * xi[i];
+    }
+    cg::reduce_store_async(warp, &facShared[0], sumTerm, cg::plus<double>{});
+  } else if (warpIdx == 1) {
+    for (int i = laneIdx; i < dim; i += warpSize) {
+      sumTerm += dGrad[i] * hessDGrad[i];
+    }
+    cg::reduce_store_async(warp, &faeShared[0], sumTerm, cg::plus<double>{});
+  } else if (warpIdx == 2) {
+    for (int i = laneIdx; i < dim; i += warpSize) {
+      sumTerm += dGrad[i] * dGrad[i];
+    }
+    cg::reduce_store_async(warp, &sumDGradShared[0], sumTerm, cg::plus<double>{});
+  } else if (warpIdx == 3) {
+    for (int i = laneIdx; i < dim; i += warpSize) {
+      sumTerm += xi[i] * xi[i];
+    }
+    cg::reduce_store_async(warp, &sumXiShared[0], sumTerm, cg::plus<double>{});
+  }
+}
+
+__device__ __forceinline__ void computeUpdateFlag(int     idxWithinSystem,
+                                                  double* facShared,
+                                                  double* faeShared,
+                                                  double* fadShared,
+                                                  double* sumDGradShared,
+                                                  double* sumXiShared,
+                                                  bool*   needUpdateInverseHessian) {
+  if (idxWithinSystem == 0) {
+    constexpr double EPS                  = 3e-8;
+    const double     sumXi                = sumXiShared[0];
+    const double     sumDGrad             = sumDGradShared[0];
+    const double     fac                  = facShared[0];
+    const double     fae                  = faeShared[0];
+    bool             updateInverseHessian = fac > sqrt(EPS * sumDGrad * sumXi);
+    if (updateInverseHessian) {
+      facShared[0] = 1.0 / fac;
+      fadShared[0] = 1.0 / fae;
+    }
+    needUpdateInverseHessian[0] = updateInverseHessian;
+  }
+}
+
 // Shared-memory optimized kernel used when all systems have <= maxAtom atoms
 template <int dataDim>
 __global__ void updateInverseHessianBFGSBatchKernelShared(const int16_t* statuses,
@@ -102,47 +159,29 @@ __global__ void updateInverseHessianBFGSBatchKernelShared(const int16_t* statuse
 
   block.sync();
 
-  // Compute BFGS sums
-  // Compute BFGS sums: Compute 4 dot products using 4 warps
-  double sumTerm = 0.0;
-  if (warpIdx == 0) {
-    for (int i = laneIdx; i < dim; i += warpSize) {
-      sumTerm += cachedDGrads[i] * cachedXis[i];
-    }
-    cg::reduce_store_async(warp, &facShared[0], sumTerm, cg::plus<double>{});
-  } else if (warpIdx == 1) {
-    for (int i = laneIdx; i < dim; i += warpSize) {
-      sumTerm += cachedDGrads[i] * cachedHessDGrads[i];
-    }
-    cg::reduce_store_async(warp, &faeShared[0], sumTerm, cg::plus<double>{});
-  } else if (warpIdx == 2) {
-    for (int i = laneIdx; i < dim; i += warpSize) {
-      sumTerm += cachedDGrads[i] * cachedDGrads[i];
-    }
-    cg::reduce_store_async(warp, &sumDGradShared[0], sumTerm, cg::plus<double>{});
-  } else if (warpIdx == 3) {
-    for (int i = laneIdx; i < dim; i += warpSize) {
-      sumTerm += cachedXis[i] * cachedXis[i];
-    }
-    cg::reduce_store_async(warp, &sumXiShared[0], sumTerm, cg::plus<double>{});
-  }
+  // Compute BFGS sums: four dot products using four warps
+  computeBfgsSums(cachedDGrads,
+                  cachedXis,
+                  cachedHessDGrads,
+                  facShared,
+                  faeShared,
+                  sumDGradShared,
+                  sumXiShared,
+                  warp,
+                  warpIdx,
+                  laneIdx,
+                  dim);
 
   block.sync();
 
   // Compute BFGS sums: compute the update flag
-  if (idxWithinSystem == 0) {
-    constexpr double EPS                  = 3e-8;
-    const double     sumXi                = sumXiShared[0];
-    const double     sumDGrad             = sumDGradShared[0];
-    const double     fac                  = facShared[0];
-    const double     fae                  = faeShared[0];
-    bool             updateInverseHessian = fac > sqrt(EPS * sumDGrad * sumXi);
-    if (updateInverseHessian) {
-      facShared[0] = 1.0 / fac;
-      fadShared[0] = 1.0 / fae;
-    }
-    needUpdateInverseHessian[0] = updateInverseHessian;
-  }
+  computeUpdateFlag(idxWithinSystem,
+                    facShared,
+                    faeShared,
+                    fadShared,
+                    sumDGradShared,
+                    sumXiShared,
+                    needUpdateInverseHessian);
 
   block.sync();
 
@@ -252,44 +291,27 @@ __global__ void updateInverseHessianBFGSBatchKernelGlobal(const int16_t* statuse
   block.sync();
 
   // Compute BFGS sums using global memory
-  double sumTerm = 0.0;
-  if (warpIdx == 0) {
-    for (int i = laneIdx; i < dim; i += warpSize) {
-      sumTerm += localDGrad[i] * localXi[i];
-    }
-    cg::reduce_store_async(warp, &facShared[0], sumTerm, cg::plus<double>{});
-  } else if (warpIdx == 1) {
-    for (int i = laneIdx; i < dim; i += warpSize) {
-      sumTerm += localDGrad[i] * localHessDGrad[i];
-    }
-    cg::reduce_store_async(warp, &faeShared[0], sumTerm, cg::plus<double>{});
-  } else if (warpIdx == 2) {
-    for (int i = laneIdx; i < dim; i += warpSize) {
-      sumTerm += localDGrad[i] * localDGrad[i];
-    }
-    cg::reduce_store_async(warp, &sumDGradShared[0], sumTerm, cg::plus<double>{});
-  } else if (warpIdx == 3) {
-    for (int i = laneIdx; i < dim; i += warpSize) {
-      sumTerm += localXi[i] * localXi[i];
-    }
-    cg::reduce_store_async(warp, &sumXiShared[0], sumTerm, cg::plus<double>{});
-  }
+  computeBfgsSums(localDGrad,
+                  localXi,
+                  localHessDGrad,
+                  facShared,
+                  faeShared,
+                  sumDGradShared,
+                  sumXiShared,
+                  warp,
+                  warpIdx,
+                  laneIdx,
+                  dim);
 
   block.sync();
 
-  if (idxWithinSystem == 0) {
-    constexpr double EPS                  = 3e-8;
-    const double     sumXi                = sumXiShared[0];
-    const double     sumDGrad             = sumDGradShared[0];
-    const double     fac                  = facShared[0];
-    const double     fae                  = faeShared[0];
-    bool             updateInverseHessian = fac > sqrt(EPS * sumDGrad * sumXi);
-    if (updateInverseHessian) {
-      facShared[0] = 1.0 / fac;
-      fadShared[0] = 1.0 / fae;
-    }
-    needUpdateInverseHessian[0] = updateInverseHessian;
-  }
+  computeUpdateFlag(idxWithinSystem,
+                    facShared,
+                    faeShared,
+                    fadShared,
+                    sumDGradShared,
+                    sumXiShared,
+                    needUpdateInverseHessian);
 
   block.sync();
 
