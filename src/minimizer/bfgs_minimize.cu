@@ -21,6 +21,7 @@
 #include "bfgs_hessian.h"
 #include "bfgs_minimize.h"
 #include "device_vector.h"
+#include "minimizer_api.h"
 #include "nvtx.h"
 namespace nvMolKit {
 constexpr double FUNCTOL = 1e-4;  //!< Default tolerance for function convergence in the minimizer

@@ -15,6 +15,8 @@
 
 #include "bfgs_distgeom.h"
 
+#include <memory>
+
 #include "bfgs_minimize.h"
 #include "dist_geom.h"
 
@@ -56,22 +58,11 @@ void DistGeomMinimizeBFGS(BatchedMolecularSystemHost&    molSystemHost,
   };
 
   // Create and configure BFGS minimizer
-  nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dataDim=*/dim, nvMolKit::DebugLevel::NONE, true, stream);
+  std::unique_ptr<nvMolKit::BatchMinimizer> minimizer =
+    std::make_unique<nvMolKit::BfgsBatchMinimizer>(/*dataDim=*/dim, nvMolKit::DebugLevel::NONE, true, stream);
 
   // Run minimization
-  bool needsMore = bfgsMinimizer.minimize(maxIters,
-                                          gradTol,
-                                          context.systemHost.atomStarts,
-                                          context.systemDevice.atomStarts,
-                                          context.systemDevice.positions,
-                                          molSystemDevice.grad,
-                                          molSystemDevice.energyOuts,
-                                          molSystemDevice.energyBuffer,
-                                          eFunc,
-                                          gFunc,
-                                          context.activeThisStage.data());
-  while (needsMore && repeatUntilConverged) {
-    needsMore = bfgsMinimizer.minimize(maxIters,
+  bool needsMore = minimizer->minimize(maxIters,
                                        gradTol,
                                        context.systemHost.atomStarts,
                                        context.systemDevice.atomStarts,
@@ -82,6 +73,18 @@ void DistGeomMinimizeBFGS(BatchedMolecularSystemHost&    molSystemHost,
                                        eFunc,
                                        gFunc,
                                        context.activeThisStage.data());
+  while (needsMore && repeatUntilConverged) {
+    needsMore = minimizer->minimize(maxIters,
+                                    gradTol,
+                                    context.systemHost.atomStarts,
+                                    context.systemDevice.atomStarts,
+                                    context.systemDevice.positions,
+                                    molSystemDevice.grad,
+                                    molSystemDevice.energyOuts,
+                                    molSystemDevice.energyBuffer,
+                                    eFunc,
+                                    gFunc,
+                                    context.activeThisStage.data());
   }
 }
 

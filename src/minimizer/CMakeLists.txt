@@ -13,7 +13,7 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-add_library(bfgs bfgs_minimize.cu bfgs_hessian.cu)
+add_library(bfgs bfgs_minimize.cu bfgs_hessian.cu minimizer_api.h)
 target_link_libraries(bfgs PRIVATE ${RDKit_LIBS} rdkit_mmff_flattened
                                    device_vector)
 target_include_directories(bfgs PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

@@ -18,6 +18,8 @@
 #include <GraphMol/ROMol.h>
 #include <omp.h>
 
+#include <memory>
+
 #include "bfgs_minimize.h"
 #include "device.h"
 #include "ff_utils.h"
@@ -152,18 +154,19 @@ std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKi
     auto eFunc = [&](const double* positions) { nvMolKit::MMFF::computeEnergy(systemDevice, positions, streamPtr); };
     auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(systemDevice, streamPtr); };
 
-    nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dataDim=*/3, nvMolKit::DebugLevel::NONE, true, streamPtr);
-    constexpr double             gradTol = 1e-4;  // hard-coded in RDKit.
-    bfgsMinimizer.minimize(maxIters,
-                           gradTol,
-                           systemHost.indices.atomStarts,
-                           systemDevice.indices.atomStarts,
-                           systemDevice.positions,
-                           systemDevice.grad,
-                           systemDevice.energyOuts,
-                           systemDevice.energyBuffer,
-                           eFunc,
-                           gFunc);
+    std::unique_ptr<nvMolKit::BatchMinimizer> minimizer =
+      std::make_unique<nvMolKit::BfgsBatchMinimizer>(/*dataDim=*/3, nvMolKit::DebugLevel::NONE, true, streamPtr);
+    constexpr double gradTol = 1e-4;  // hard-coded in RDKit.
+    minimizer->minimize(maxIters,
+                        gradTol,
+                        systemHost.indices.atomStarts,
+                        systemDevice.indices.atomStarts,
+                        systemDevice.positions,
+                        systemDevice.grad,
+                        systemDevice.energyOuts,
+                        systemDevice.energyBuffer,
+                        eFunc,
+                        gFunc);
 
     std::vector<double> finalPos(systemHost.positions.size());
     systemDevice.positions.copyToHost(finalPos);

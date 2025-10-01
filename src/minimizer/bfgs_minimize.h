@@ -18,42 +18,33 @@
 
 #include <device_vector.h>
 
-#include <functional>
 #include <vector>
 
 #include "host_vector.h"
+#include "minimizer_api.h"
 
 namespace nvMolKit {
-
-//! Compute energies, optionally on an external set of positions. If nullptr, expect to find in internal coordinates.
-using EnergyFunctor = std::function<void(const double*)>;
-//! Compute gradients on internal positions writing to internal buffer.
-using GradFunctor   = std::function<void()>;
 
 enum class DebugLevel {
   NONE     = 0,
   STEPWISE = 1,
 };
 
-//! BFGS Batch Minimizer
+//! BFGS minimizer implementation for batches of systems.
 //!
-//! This class implements a BFGS minimizer for batch systems, should be a 1:1 port of the RDKit BFGS minimizer.
-//! \param dataDim Dimensionality of positions, default is 3 for 3D systems.
-//! \param debugLevel Debug level, default is NONE. STEPWISE will collect stepwise data for debugging.
-//! \param scaleGrads Whether to dynamically scale down gradients to match RDKit forcefield calculations, default is
-//! true.
-//!                   Note that when true, simple systems may not converge as well, but it is necessary for
-//!                   compatibility with RDKit forcefield calculations.
-//! TODO: Constructor should be parameter struct based, now that we have more parameters.
-struct BfgsBatchMinimizer {
+//! Should remain equivalent to the RDKit MMFF BFGS minimizer.
+//! @param dataDim Number of coordinates per atom (typically 3 for 3D).
+//! @param debugLevel Amount of debug information to collect per iteration.
+//! @param scaleGrads Whether to rescale gradients to match RDKit behavior.
+//! @param stream CUDA stream used for asynchronous operations.
+struct BfgsBatchMinimizer final : public BatchMinimizer {
   explicit BfgsBatchMinimizer(int          dataDim    = 3,
                               DebugLevel   debugLevel = DebugLevel::NONE,
                               bool         scaleGrads = true,
                               cudaStream_t stream     = nullptr);
-  ~BfgsBatchMinimizer();
+  ~BfgsBatchMinimizer() override;
 
-  //! Run up to numIters iterations of BFGS minimization
-  //! Returns 0 if all systems converged, 1 if some systems did not converge.
+  //! Run the BFGS solver with the provided buffers and functors.
   bool minimize(int                           numIters,
                 double                        gradTol,
                 const std::vector<int>&       atomStartsHost,
@@ -64,9 +55,9 @@ struct BfgsBatchMinimizer {
                 AsyncDeviceVector<double>&    energyBuffer,
                 EnergyFunctor                 eFunc,
                 GradFunctor                   gFunc,
-                const uint8_t*                activeThisStage = nullptr);
+                const uint8_t*                activeThisStage = nullptr) override;
 
-  // Set up the minimizer for a new system.
+  //! Initialize device state to work on a new batch of systems.
   void initialize(const std::vector<int>& atomStartsHost,
                   const int*              atomStarts,
                   double*                 positions,

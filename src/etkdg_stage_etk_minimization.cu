@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <memory>
+
 #include "dist_geom_flattened_builder.h"
 #include "etkdg_stage_etk_minimization.h"
 #include "minimizer/bfgs_minimize.h"
@@ -167,21 +169,22 @@ void ETKMinimizationStage::execute(ETKDGContext& ctx) {
 
   // Create and configure BFGS minimizer
   // TODO: Reuse between iterations.
-  BfgsBatchMinimizer bfgsMinimizer(/*dataDim=*/dim, nvMolKit::DebugLevel::NONE, true, stream_);
+  std::unique_ptr<BatchMinimizer> minimizer =
+    std::make_unique<BfgsBatchMinimizer>(/*dataDim=*/dim, nvMolKit::DebugLevel::NONE, true, stream_);
 
   // Run minimization
   constexpr int maxIters = 300;  // Taken from hard-coded RDKit value.
-  bfgsMinimizer.minimize(maxIters,
-                         embedParam_.optimizerForceTol,
-                         ctx.systemHost.atomStarts,
-                         ctx.systemDevice.atomStarts,
-                         ctx.systemDevice.positions,
-                         molSystemDevice.grad,
-                         molSystemDevice.energyOuts,
-                         molSystemDevice.energyBuffer,
-                         eFunc,
-                         gFunc,
-                         ctx.activeThisStage.data());
+  minimizer->minimize(maxIters,
+                      embedParam_.optimizerForceTol,
+                      ctx.systemHost.atomStarts,
+                      ctx.systemDevice.atomStarts,
+                      ctx.systemDevice.positions,
+                      molSystemDevice.grad,
+                      molSystemDevice.energyOuts,
+                      molSystemDevice.energyBuffer,
+                      eFunc,
+                      gFunc,
+                      ctx.activeThisStage.data());
 
   // 3. Check planar tolerance.
   DistGeom::computePlanarEnergy(molSystemDevice,
