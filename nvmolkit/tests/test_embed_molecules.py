@@ -375,3 +375,13 @@ def test_embed_molecules_allows_large_molecule_interleaved():
     assert small1.GetNumConformers() == 1
     assert small2.GetNumConformers() == 1
     assert big.GetNumConformers() == 1
+
+
+def test_embed_molecules_prune_rmsthresh():
+    mols = [Chem.MolFromSmiles('c1ccccc1'), Chem.MolFromSmiles('C' * 30)]
+    params = EmbedParameters()
+    params.useRandomCoords = True
+    params.pruneRmsThresh = 0.5
+    embed.EmbedMolecules(mols, params, confsPerMolecule=5)
+    assert mols[0].GetNumConformers() == 1
+    assert mols[1].GetNumConformers() == 5

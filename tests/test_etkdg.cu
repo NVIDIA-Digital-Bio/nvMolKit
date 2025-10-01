@@ -19,7 +19,9 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <unordered_map>
 
+#include "conformer_pruning.h"
 #include "device.h"
 #include "dist_geom.h"
 #include "embedder_utils.h"
@@ -423,6 +425,7 @@ TEST_F(ETKDGPipelineInitTestFixture, InitMultipleMolecules) {
 
 TEST_F(ETKDGPipelineInitTestFixture, UpdateConformersStage) {
   // Create eargs with dim=3 for all molecules
+  auto                                     params = DGeomHelpers::ETKDGv3;
   std::vector<nvMolKit::detail::EmbedArgs> eargs;
   for (size_t i = 0; i < mols_.size(); ++i) {
     auto& earg = eargs.emplace_back();
@@ -453,8 +456,14 @@ TEST_F(ETKDGPipelineInitTestFixture, UpdateConformersStage) {
   context.systemDevice.positions.copyFromHost(refPositions);
 
   // Create and execute the stage
-  nvMolKit::detail::ETKDGUpdateConformersStage stage(mols_, eargs, nullptr, nullptr, -1);
+  std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<Conformer>>> conformers;
+  nvMolKit::detail::ETKDGUpdateConformersStage stage(mols_, eargs, conformers, nullptr, nullptr, -1);
   stage.execute(context);
+  for (int i = 0; i < mols_.size(); ++i) {
+    auto it = conformers.find(mols_[i]);
+    ASSERT_NE(it, conformers.end());
+    nvmolkit::addConformersToMoleculeWithPruning(*mols_[i], it->second, params);
+  }
 
   // Verify positions in conformers match reference positions
   for (size_t i = 0; i < mols_.size(); ++i) {
@@ -508,9 +517,18 @@ TEST_F(ETKDGPipelineInitTestFixture, UpdateConformersStageWithInactiveMolecule) 
   context.systemDevice.positions.copyFromHost(refPositions);
 
   // Create and execute the stage
-  nvMolKit::detail::ETKDGUpdateConformersStage stage(mols_, eargs, nullptr, nullptr, -1);
+  auto                                                                             params = DGeomHelpers::ETKDGv3;
+  std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<Conformer>>> conformers;
+  nvMolKit::detail::ETKDGUpdateConformersStage stage(mols_, eargs, conformers, nullptr, nullptr, -1);
   stage.execute(context);
-
+  for (int i = 0; i < mols_.size(); ++i) {
+    if (i == 1) {
+      continue;
+    }
+    auto it = conformers.find(mols_[i]);
+    ASSERT_NE(it, conformers.end());
+    nvmolkit::addConformersToMoleculeWithPruning(*mols_[i], it->second, params);
+  }
   // Verify positions in conformers match reference positions
   for (size_t i = 0; i < mols_.size(); ++i) {
     const auto& mol = mols_[i];
@@ -875,4 +893,23 @@ TEST(ETKDGAllowsLargeMol, LargeMoleculeInterleavedEmbeds) {
   EXPECT_EQ(small1->getNumConformers(), 1);
   EXPECT_EQ(small2->getNumConformers(), 1);
   EXPECT_EQ(big->getNumConformers(), 1);
+}
+
+TEST(ETKDGDeduplicationTest, MultipleMoleculesSomeDuplicationLikely) {
+  const auto benzene = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol("c1ccccc1"));
+  ASSERT_NE(benzene, nullptr);
+
+  const std::string longChainSmiles(30, 'C');
+  const auto        longChain = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol(longChainSmiles));
+  ASSERT_NE(longChain, nullptr);
+
+  const std::vector<RDKit::ROMol*> mols   = {benzene.get(), longChain.get()};
+  auto                             params = RDKit::DGeomHelpers::ETKDGv3;
+  params.useRandomCoords                  = true;
+  params.pruneRmsThresh                   = 0.5;
+  nvMolKit::embedMolecules(mols, params, /*confsPerMolecule=*/5);
+  // Benzene only ever has one conformer
+  EXPECT_EQ(benzene->getNumConformers(), 1);
+  // Long chain should all be sufficiently sepa
+  EXPECT_EQ(longChain->getNumConformers(), 5);
 }
