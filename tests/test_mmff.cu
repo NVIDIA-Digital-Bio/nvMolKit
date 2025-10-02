@@ -1541,9 +1541,7 @@ TEST(MMFFMultiGPU, MultiGPUSpecificIds) {
   }
 }
 
-std::unique_ptr<RDKit::RWMol> createHydroCarbon(const int    numCarbons,
-                                                const double bondLength,
-                                                const double hydrogenOffset) {
+std::unique_ptr<RDKit::RWMol> createHydroCarbon(const int numCarbons, const double bondLength) {
   if (numCarbons < 1) {
     throw std::invalid_argument("numCarbons must be at least 1");
   }
@@ -1556,7 +1554,7 @@ std::unique_ptr<RDKit::RWMol> createHydroCarbon(const int    numCarbons,
   auto addAtomWithPosition = [&](const int atomicNumber, const RDGeom::Point3D& position) {
     const int         idx     = mol->addAtom(new RDKit::Atom(atomicNumber), true, true);
     RDKit::Conformer& confRef = mol->getConformer();
-    if (confRef.getNumAtoms() <= idx) {
+    if (confRef.getNumAtoms() <= static_cast<unsigned int>(idx)) {
       confRef.resize(idx + 1);
     }
     confRef.setAtomPos(idx, position);
@@ -1584,12 +1582,11 @@ std::unique_ptr<RDKit::RWMol> createHydroCarbon(const int    numCarbons,
 }
 
 TEST(MMFFAllowsLargeMol, LargeMoleculeInterleavedOptimizes) {
-  constexpr double bondLength     = 1.0;
-  constexpr double hydrogenOffset = 1.0;
+  constexpr double bondLength = 1.0;
 
-  const auto small1 = createHydroCarbon(5, bondLength, hydrogenOffset);
-  const auto small2 = createHydroCarbon(3, bondLength, hydrogenOffset);
-  const auto big    = createHydroCarbon(300, bondLength, hydrogenOffset);
+  const auto small1 = createHydroCarbon(5, bondLength);
+  const auto small2 = createHydroCarbon(3, bondLength);
+  const auto big    = createHydroCarbon(300, bondLength);
   ASSERT_NE(small2, nullptr);
   ASSERT_NE(big, nullptr);
 
