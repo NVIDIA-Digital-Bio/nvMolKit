@@ -29,3 +29,7 @@ target_link_libraries(
   bfgs_distgeom PRIVATE ${RDKit_LIBS} dist_geom rdkit_dist_geom_flattened
                         device_vector etkdg bfgs)
 target_include_directories(bfgs_distgeom PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_library(fire_minimizer fire_minimizer.cu fire_minimizer.h)
+target_link_libraries(fire_minimizer PRIVATE device_vector)
+target_include_directories(fire_minimizer PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
