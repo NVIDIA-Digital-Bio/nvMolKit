@@ -13,15 +13,272 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "fire_minimizer.h"
-
 #include <cub/cub.cuh>
+#include <numeric>
 
+#include "../testutils/conformer_checkers.h"
+#include "fire_minimizer.h"
 #include "nvtx.h"
 
 namespace nvMolKit {
 
-FireBatchMinimizer::FireBatchMinimizer() = default;
+namespace {
+// TODO - consolidate this
+template <typename T> __global__ void setAllKernel(const int numElements, T value, T* dst) {
+  const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < numElements) {
+    dst[idx] = value;
+  }
+}
+template <typename T> void setAll(AsyncDeviceVector<T>& vec, const T& value) {
+  const int          numElements = vec.size();
+  const cudaStream_t stream      = vec.stream();
+  if (numElements == 0) {
+    return;
+  }
+  constexpr int blockSize = 128;
+  const int     numBlocks = (numElements + blockSize - 1) / blockSize;
+  setAllKernel<<<numBlocks, blockSize, 0, stream>>>(numElements, value, vec.data());
+  cudaCheckError(cudaGetLastError());
+}
+
+template <typename T>
+__device__ __forceinline__ cuda::std::span<T> getSystemSpan(const cuda::std::span<T>         data,
+                                                            const cuda::std::span<const int> atomStarts,
+                                                            const int                        sysIdx,
+                                                            const int                        dataDim) {
+  return data.subspan(atomStarts[sysIdx] * dataDim, (atomStarts[sysIdx + 1] - atomStarts[sysIdx]) * dataDim);
+}
+
+constexpr int   updatePowerBlockSize = 256;
+__global__ void fireV1Kernel(const cuda::std::span<const int> atomStarts,
+                             const cuda::std::span<double>    x,
+                             const cuda::std::span<double>    v,
+                             const cuda::std::span<double>    f,
+                             const int                        dataDim,
+                             const cuda::std::span<double>    alphas,
+                             const cuda::std::span<double>    dt,
+                             const cuda::std::span<int>       numStepsWithPositivePower,
+                             const int                        positiveStepIncrementDelay,
+                             const double                     dtIncrementFactor,
+                             const double                     dtDecrementFactor,
+                             const double                     maxDt,
+                             const double                     alphaStart,
+                             const double                     alphaDecrementFactor,
+                             const double                     gradTol,
+                             uint8_t*                         activeSystems) {
+  namespace cg     = cooperative_groups;
+  auto      block  = cg::this_thread_block();
+  const int sysIdx = blockIdx.x;
+  if (activeSystems != nullptr && activeSystems[sysIdx] == 0) {
+    return;
+  }
+  __shared__ bool hadNegativePowerShared[1];
+  __shared__ bool metConvergenceCriteria[1];
+  if (block.thread_rank() == 0) {
+    *hadNegativePowerShared = false;
+    *metConvergenceCriteria = false;
+  }
+
+  // Compute v * F power.
+  const auto   vSys  = getSystemSpan(v, atomStarts, sysIdx, dataDim);
+  const auto   fSys  = getSystemSpan(f, atomStarts, sysIdx, dataDim);
+  const double alpha = alphas[sysIdx];
+
+  // TODO consolidate dot product implementations.
+  // TODO this is just zero on step 0, so could be skipped.
+  double power             = 0.0;
+  int    gradLargerThanTol = 0;
+  for (int i = block.thread_rank(); i < vSys.size(); i += updatePowerBlockSize) {
+    power += vSys[i] * fSys[i];
+    gradLargerThanTol += fabs(fSys[i]) > gradTol;
+  }
+
+  using BlockReduce = cub::BlockReduce<double, updatePowerBlockSize>;
+  __shared__ BlockReduce::TempStorage tempStorage;
+  const double                        powerSum = BlockReduce(tempStorage).Sum(power);
+  block.sync();
+  const int gradLargerThanTolSum = BlockReduce(tempStorage).Sum(gradLargerThanTol);
+
+  // -----------------------------------------------------------------
+  // Update counting vars, alphas and dt based on powerSum.
+  // This set of operations is per system, so only do it on one thread.
+  // -----------------------------------------------------------------
+  if (block.thread_rank() == 0) {
+    if (gradLargerThanTolSum == 0) {
+      *metConvergenceCriteria = true;
+    }
+    if (powerSum >= 0.0) {
+      const int numStepsPositive        = numStepsWithPositivePower[sysIdx] + 1;
+      // Equivalent to numStepsPositive++ but we saved the new value locally too.
+      numStepsWithPositivePower[sysIdx] = numStepsPositive;
+      if (numStepsPositive > positiveStepIncrementDelay) {
+        alphas[sysIdx] = alpha * alphaDecrementFactor;
+        dt[sysIdx]     = fmin(dtIncrementFactor * dt[sysIdx], maxDt);
+      }
+    } else {
+      *hadNegativePowerShared           = true;
+      numStepsWithPositivePower[sysIdx] = 0;
+      alphas[sysIdx]                    = alphaStart;
+      dt[sysIdx] *= dtDecrementFactor;
+    }
+  }
+  // END per system compute ^^^, all threads now active again (if they were before).
+  block.sync();
+  if (*metConvergenceCriteria) {
+    if (block.thread_rank() == 0 && activeSystems != nullptr) {
+      activeSystems[sysIdx] = 0;
+    }
+    return;
+  }
+  if (*hadNegativePowerShared) {
+    // Reset case.
+    for (int i = block.thread_rank(); i < vSys.size(); i += updatePowerBlockSize) {
+      vSys[i] = 0.0;
+    }
+  } else {
+    // Note we're using the non-updated alpha that was taken before the increment.
+    double vDot = 0.0;
+    for (int i = block.thread_rank(); i < vSys.size(); i += updatePowerBlockSize) {
+      vDot += vSys[i] * vSys[i];
+    }
+    const double vDotSum = BlockReduce(tempStorage).Sum(vDot);
+    block.sync();  // To reuse the temp storage.
+    double fDot = 0.0;
+    for (int i = block.thread_rank(); i < vSys.size(); i += updatePowerBlockSize) {
+      fDot += fSys[i] * fSys[i];
+    }
+    const double fDotSum      = BlockReduce(tempStorage).Sum(fDot);
+    const double constFactor1 = (1.0 - alpha);
+    const double constFactor2 = alpha * sqrt(vDotSum) / sqrt(fDotSum);
+    for (int i = block.thread_rank(); i < vSys.size(); i += updatePowerBlockSize) {
+      // v = (1-alpha)*v + alpha* v_norm * F_unitvec
+      vSys[i] = constFactor1 * vSys[i] + constFactor2 * fSys[i];
+    }
+  }
+
+  // Update V with force/dt with or without above mixing
+  for (int i = block.thread_rank(); i < vSys.size(); i += updatePowerBlockSize) {
+    // v = (1-alpha)*v + alpha* v_norm * F_unitvec
+    vSys[i] += fSys[i] * dt[sysIdx];
+  }
+
+  // Now integrate positions
+  const auto xSys = getSystemSpan(x, atomStarts, sysIdx, dataDim);
+  for (int i = block.thread_rank(); i < xSys.size(); i += updatePowerBlockSize) {
+    xSys[i] += vSys[i] * dt[sysIdx];
+  }
+}
+
+}  // namespace
+
+FireBatchMinimizer::FireBatchMinimizer(const int dataDim, const FireOptions& options, cudaStream_t stream)
+    : dataDim_(dataDim),
+      fireOptions_(options),
+      stream_(stream) {
+  velocities_.setStream(stream_);
+  prevVelocities_.setStream(stream_);
+  statuses_.setStream(stream_);
+  dt_.setStream(stream_);
+  alpha_.setStream(stream_);
+  allSystemIndices_.setStream(stream_);
+  activeSystemIndices_.setStream(stream_);
+  numStepsWithNegativePower_.setStream(stream_);
+  numStepsWithPositivePower_.setStream(stream_);
+  countFinished_.setStream(stream_);
+  countTempStorage_.setStream(stream_);
+  powers_.setStream(stream_);
+  loopStatusHost_.resize(1);
+  loopStatusHost_[0] = 0;
+}
+
+void FireBatchMinimizer::fireV1(const double                  gradTol,
+                                const AsyncDeviceVector<int>& atomStarts,
+                                AsyncDeviceVector<double>&    positions,
+                                AsyncDeviceVector<double>&    grad) {
+  const int numSystems = atomStarts.size() - 1;
+  fireV1Kernel<<<numSystems, updatePowerBlockSize, 0, stream_>>>(toSpan(atomStarts),
+                                                                 toSpan(positions),
+                                                                 toSpan(velocities_),
+                                                                 toSpan(grad),
+                                                                 dataDim_,
+                                                                 toSpan(alpha_),
+                                                                 toSpan(dt_),
+                                                                 toSpan(numStepsWithPositivePower_),
+                                                                 fireOptions_.nMinForIncrease,
+                                                                 fireOptions_.timeStepIncrement,
+                                                                 fireOptions_.timeStepDecrement,
+                                                                 fireOptions_.dtMax,
+                                                                 fireOptions_.alphaInit,
+                                                                 fireOptions_.alphaDecrement,
+                                                                 gradTol,
+                                                                 statuses_.data());
+}
+
+void FireBatchMinimizer::initialize(const std::vector<int>& atomStartsHost, const uint8_t* activeSystems) {
+  const int totalAtoms = atomStartsHost.back();
+  const int numSystems = atomStartsHost.size() - 1;
+
+  // Resize datadim * N buffers.
+  velocities_.resize(totalAtoms * dataDim_);
+  prevVelocities_.resize(totalAtoms * dataDim_);
+  velocities_.zero();
+  prevVelocities_.zero();
+
+  // Resize and set per-system buffers.
+  statuses_.resize(numSystems);
+  if (activeSystems != nullptr) {
+    // Copy activeThisStage to statuses_ with type conversion
+    cudaMemcpyAsync(statuses_.data(), activeSystems, numSystems * sizeof(uint8_t), cudaMemcpyDefault, stream_);
+  } else {
+    setAll(statuses_, static_cast<uint8_t>(1));
+  }
+
+  // Note that if activeSystem above has inactive systems, they won't be pruned until the end of
+  // the first step, but the actual minimization won't run on step 0 due to in-kernel checks.
+  activeSystemIndices_.resize(numSystems);
+  allSystemIndices_.resize(numSystems);
+  std::vector<int> activeSystemIndicesHost(numSystems);
+  std::iota(activeSystemIndicesHost.begin(), activeSystemIndicesHost.end(), 0);
+  allSystemIndices_.setFromVector(activeSystemIndicesHost);
+  activeSystemIndices_.setFromVector(activeSystemIndicesHost);
+  powers_.resize(numSystems);
+  powers_.zero();
+  numStepsWithNegativePower_.resize(numSystems);
+  numStepsWithNegativePower_.zero();
+  numStepsWithPositivePower_.resize(numSystems);
+  numStepsWithPositivePower_.zero();
+  alpha_.resize(numSystems);
+  setAll(alpha_, fireOptions_.alphaInit);
+  dt_.resize(numSystems);
+  setAll(dt_, fireOptions_.dtInit);
+
+  // Compute CUB temp storage requirements and allocate.
+  size_t tempStorageBytes = 0;
+  cudaCheckError(cub::DeviceSelect::Flagged(nullptr,
+                                            tempStorageBytes,
+                                            allSystemIndices_.data(),
+                                            countTempStorage_.data(),
+                                            activeSystemIndices_.data(),
+                                            countFinished_.data(),
+                                            allSystemIndices_.size(),
+                                            nullptr));
+
+  if (tempStorageBytes > countTempStorage_.size()) {
+    countTempStorage_.resize(tempStorageBytes);
+  }
+}
+
+bool FireBatchMinimizer::step(const double                  gradTol,
+                              const AsyncDeviceVector<int>& atomStarts,
+                              AsyncDeviceVector<double>&    positions,
+                              AsyncDeviceVector<double>&    grad,
+                              const GradFunctor&            gFunc) {
+  const int numSystems = atomStarts.size() - 1;
+  gFunc();
+  fireV1(gradTol, atomStarts, positions, grad);
+  return compactAndCountConverged() == numSystems ? 0 : 1;
+}
 
 bool FireBatchMinimizer::minimize(const int                     numIters,
                                   const double                  gradTol,
@@ -32,41 +289,23 @@ bool FireBatchMinimizer::minimize(const int                     numIters,
                                   AsyncDeviceVector<double>&    energyOuts,
                                   AsyncDeviceVector<double>&    energyBuffer,
                                   EnergyFunctor                 eFunc,
-                                  GradFunctor                   gFunc,
+                                  const GradFunctor             gFunc,
                                   const uint8_t*                activeThisStage) {
-  (void)numIters;
-  (void)gradTol;
-  (void)atomStartsHost;
-  (void)atomStarts;
-  (void)positions;
-  (void)grad;
-  (void)energyOuts;
-  (void)energyBuffer;
-  (void)eFunc;
-  (void)gFunc;
-  (void)activeThisStage;
-  return compactAndCountConverged() == 0;
+  initialize(atomStartsHost);
+
+  for (int i = 0; i < numIters; ++i) {
+    if (step(gradTol, atomStarts, positions, grad, gFunc)) {
+      return true;
+    }
+  }
+  return false;
 }
 
-int FireBatchMinimizer::compactAndCountConverged() const {
+int FireBatchMinimizer::compactAndCountConverged() {
   const ScopedNvtxRange fireCompact("FireBatchMinimizer::compactAndCountConverged");
-  size_t                temp_storage_bytes = countTempStorage_.size();
-
-  cudaCheckError(cub::DeviceSelect::Flagged(nullptr,
-                                            temp_storage_bytes,
-                                            allSystemIndices_.data(),
-                                            countTempStorage_.data(),
-                                            activeSystemIndices_.data(),
-                                            countFinished_.data(),
-                                            allSystemIndices_.size(),
-                                            nullptr));
-
-  if (temp_storage_bytes > countTempStorage_.size()) {
-    countTempStorage_.resize(temp_storage_bytes);
-  }
-
+  size_t                unusedBytes = 0;
   cudaCheckError(cub::DeviceSelect::Flagged(countTempStorage_.data(),
-                                            temp_storage_bytes,
+                                            unusedBytes,
                                             allSystemIndices_.data(),
                                             countTempStorage_.data(),
                                             activeSystemIndices_.data(),
@@ -82,5 +321,3 @@ int FireBatchMinimizer::compactAndCountConverged() const {
 }
 
 }  // namespace nvMolKit
-
-
