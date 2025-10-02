@@ -488,7 +488,9 @@ TEST_F(ETKDGPipelineUpdateConformersTestFixture, UpdateConformersStageWithInacti
 namespace {
 
 // Helper function to test energy improvement for molecules
-void testEnergyImprovement(const std::vector<RDKit::ROMol*>& mols, int confsPerMolecule = 1) {
+void testEnergyImprovement(const std::vector<RDKit::ROMol*>&    mols,
+                           int                                  confsPerMolecule = 1,
+                           RDKit::DGeomHelpers::EmbedParameters params           = RDKit::DGeomHelpers::ETKDGv3) {
   // Store initial energies for each molecule
   std::vector<double> initialEnergies;
   initialEnergies.reserve(mols.size());
@@ -513,9 +515,8 @@ void testEnergyImprovement(const std::vector<RDKit::ROMol*>& mols, int confsPerM
   }
 
   // Run embedding for all molecules
-  RDKit::DGeomHelpers::EmbedParameters params = RDKit::DGeomHelpers::ETKDGv3;
-  params.useRandomCoords                      = true;
-  params.basinThresh                          = 1e8;
+  params.useRandomCoords = true;
+  params.basinThresh     = 1e8;
 
   nvMolKit::BatchHardwareOptions hardwareOptions;
   hardwareOptions.preprocessingThreads = 10;
@@ -559,9 +560,10 @@ void testEnergyImprovement(const std::vector<RDKit::ROMol*>& mols, int confsPerM
 }
 
 // Helper function to compare conformer energies between RDKit and nvMolKit
-void testConformerEnergyComparison(const std::vector<RDKit::ROMol*>& mols,
-                                   int                               confsPerMolecule = 1,
-                                   nvMolKit::BatchHardwareOptions    hardwareOptions  = {10, 7, 10}) {
+void testConformerEnergyComparison(const std::vector<RDKit::ROMol*>&    mols,
+                                   int                                  confsPerMolecule = 1,
+                                   RDKit::DGeomHelpers::EmbedParameters params           = RDKit::DGeomHelpers::ETKDGv3,
+                                   nvMolKit::BatchHardwareOptions       hardwareOptions  = {10, 7, 10}) {
   // Create hard copies of input molecules
   std::vector<std::unique_ptr<RDKit::RWMol>> molCopies;
   std::vector<RDKit::ROMol*>                 molCopyPtrs;
@@ -569,9 +571,8 @@ void testConformerEnergyComparison(const std::vector<RDKit::ROMol*>& mols,
     molCopies.push_back(std::make_unique<RDKit::RWMol>(*mol));
     molCopyPtrs.push_back(molCopies.back().get());
   }
-  RDKit::DGeomHelpers::EmbedParameters params = RDKit::DGeomHelpers::ETKDGv3;
-  params.useRandomCoords                      = true;
-  params.basinThresh                          = 1e8;
+  params.useRandomCoords = true;
+  params.basinThresh     = 1e8;
   // Generate conformers using RDKit for copied molecules
   for (size_t i = 0; i < molCopyPtrs.size(); ++i) {
     auto*                       molCopy = molCopyPtrs[i];
@@ -624,7 +625,7 @@ void testConformerEnergyComparison(const std::vector<RDKit::ROMol*>& mols,
 
 }  // anonymous namespace
 
-class ETKDGPipelineEnergyTestFixture : public ::testing::Test {
+class ETKDGPipelineEnergyTestFixture : public ::testing::TestWithParam<ETKDGOption> {
  public:
   ETKDGPipelineEnergyTestFixture() { testDataFolderPath_ = getTestDataFolderPath(); }
 
@@ -655,51 +656,61 @@ class ETKDGPipelineEnergyTestFixture : public ::testing::Test {
   std::vector<RDKit::ROMol*>                 mols_;
 };
 
-TEST_F(ETKDGPipelineEnergyTestFixture, SingleMoleculeEnergyImprovement) {
+TEST_P(ETKDGPipelineEnergyTestFixture, SingleMoleculeEnergyImprovement) {
+  auto                       params    = getETKDGOption(GetParam());
   std::vector<RDKit::ROMol*> singleMol = {mols_[0]};
-  testEnergyImprovement(singleMol);
+  testEnergyImprovement(singleMol, 1, params);
 }
 
-TEST_F(ETKDGPipelineEnergyTestFixture, MultipleMoleculesEnergyImprovement) {
-  testEnergyImprovement(mols_);
+TEST_P(ETKDGPipelineEnergyTestFixture, MultipleMoleculesEnergyImprovement) {
+  auto params = getETKDGOption(GetParam());
+  testEnergyImprovement(mols_, 1, params);
 }
 
-TEST_F(ETKDGPipelineEnergyTestFixture, SingleMoleculeMultipleConformers) {
+TEST_P(ETKDGPipelineEnergyTestFixture, SingleMoleculeMultipleConformers) {
+  auto                       params    = getETKDGOption(GetParam());
   std::vector<RDKit::ROMol*> singleMol = {mols_[0]};
-  testEnergyImprovement(singleMol, 5);
+  testEnergyImprovement(singleMol, 5, params);
 }
 
-TEST_F(ETKDGPipelineEnergyTestFixture, MultipleMoleculesMultipleConformers) {
-  testEnergyImprovement(mols_, 3);
+TEST_P(ETKDGPipelineEnergyTestFixture, MultipleMoleculesMultipleConformers) {
+  auto params = getETKDGOption(GetParam());
+  testEnergyImprovement(mols_, 3, params);
 }
 
-TEST_F(ETKDGPipelineEnergyTestFixture, SingleMoleculeConformerEnergyComparison) {
+TEST_P(ETKDGPipelineEnergyTestFixture, SingleMoleculeConformerEnergyComparison) {
+  auto                       params    = getETKDGOption(GetParam());
   std::vector<RDKit::ROMol*> singleMol = {mols_[0]};
-  testConformerEnergyComparison(singleMol);
+  testConformerEnergyComparison(singleMol, 1, params);
 }
 
-TEST_F(ETKDGPipelineEnergyTestFixture, MultipleMoleculesConformerEnergyComparison) {
-  testConformerEnergyComparison(mols_);
+TEST_P(ETKDGPipelineEnergyTestFixture, MultipleMoleculesConformerEnergyComparison) {
+  auto params = getETKDGOption(GetParam());
+  testConformerEnergyComparison(mols_, 1, params);
 }
 
-TEST_F(ETKDGPipelineEnergyTestFixture, SingleMoleculeMultipleConformersEnergyComparison) {
+TEST_P(ETKDGPipelineEnergyTestFixture, SingleMoleculeMultipleConformersEnergyComparison) {
+  auto                       params    = getETKDGOption(GetParam());
   std::vector<RDKit::ROMol*> singleMol = {mols_[0]};
-  testConformerEnergyComparison(singleMol, 10);
+  testConformerEnergyComparison(singleMol, 10, params);
 }
 
-TEST_F(ETKDGPipelineEnergyTestFixture, MultipleMoleculesMultipleConformersEnergyComparison) {
-  testConformerEnergyComparison(mols_, 10);
+TEST_P(ETKDGPipelineEnergyTestFixture, MultipleMoleculesMultipleConformersEnergyComparison) {
+  auto params = getETKDGOption(GetParam());
+  testConformerEnergyComparison(mols_, 10, params);
 }
 
-TEST_F(ETKDGPipelineEnergyTestFixture, DefaultHardwareOptionsOpenMPMaxThreads) {
+TEST_P(ETKDGPipelineEnergyTestFixture, DefaultHardwareOptionsOpenMPMaxThreads) {
   // Test using default BatchHardwareOptions which should use omp_get_max_threads()
+  auto                                 params = getETKDGOption(GetParam());
   const nvMolKit::BatchHardwareOptions defaultOptions;                   // Uses -1 values for automatic detection
   const std::vector<RDKit::ROMol*>     testMols = {mols_[0], mols_[1]};  // Use subset for efficiency
-  testConformerEnergyComparison(testMols, 2, defaultOptions);
+  testConformerEnergyComparison(testMols, 2, params, defaultOptions);
 }
 
-TEST_F(ETKDGPipelineEnergyTestFixture, SpecificGpuIds) {
+TEST_P(ETKDGPipelineEnergyTestFixture, SpecificGpuIds) {
   // Test using GPU ID 0 (should always be available if CUDA is working)
+  auto                           params = getETKDGOption(GetParam());
   nvMolKit::BatchHardwareOptions customOptions;
   customOptions.preprocessingThreads = 1;
   customOptions.batchSize            = 5;
@@ -707,16 +718,17 @@ TEST_F(ETKDGPipelineEnergyTestFixture, SpecificGpuIds) {
   customOptions.gpuIds.push_back(0);  // Use GPU 0
 
   const std::vector<RDKit::ROMol*> testMols = {mols_[0]};
-  testConformerEnergyComparison(testMols, 2, customOptions);
+  testConformerEnergyComparison(testMols, 2, params, customOptions);
 }
 
-TEST_F(ETKDGPipelineEnergyTestFixture, NonZeroGPUID) {
+TEST_P(ETKDGPipelineEnergyTestFixture, NonZeroGPUID) {
   // Requires multiple GPUs
   const int numDevices = nvMolKit::countCudaDevices();
   if (numDevices < 2) {
     GTEST_SKIP() << "Test requires multiple GPUs, only " << numDevices << " available";
   }
 
+  auto                           params = getETKDGOption(GetParam());
   nvMolKit::BatchHardwareOptions customOptions;
   customOptions.preprocessingThreads = 1;
   customOptions.batchSize            = 5;
@@ -724,16 +736,17 @@ TEST_F(ETKDGPipelineEnergyTestFixture, NonZeroGPUID) {
   customOptions.gpuIds.push_back(1);  // Use GPU 1 (second GPU)
 
   const std::vector<RDKit::ROMol*> testMols = {mols_[0]};
-  testConformerEnergyComparison(testMols, 2, customOptions);
+  testConformerEnergyComparison(testMols, 2, params, customOptions);
 }
 
-TEST_F(ETKDGPipelineEnergyTestFixture, MultiGPUSpecificIds) {
+TEST_P(ETKDGPipelineEnergyTestFixture, MultiGPUSpecificIds) {
   // Requires multiple GPUs
   const int numDevices = nvMolKit::countCudaDevices();
   if (numDevices < 2) {
     GTEST_SKIP() << "Test requires multiple GPUs, only " << numDevices << " available";
   }
 
+  auto                           params = getETKDGOption(GetParam());
   nvMolKit::BatchHardwareOptions customOptions;
   customOptions.preprocessingThreads = 1;
   customOptions.batchSize            = 5;
@@ -742,8 +755,21 @@ TEST_F(ETKDGPipelineEnergyTestFixture, MultiGPUSpecificIds) {
   customOptions.gpuIds.push_back(1);
 
   const std::vector<RDKit::ROMol*> testMols = {mols_[0], mols_[1], mols_[2]};
-  testConformerEnergyComparison(testMols, 2, customOptions);
+  testConformerEnergyComparison(testMols, 2, params, customOptions);
 }
+
+// Instantiate parameterized tests for different ETKDG variants
+INSTANTIATE_TEST_SUITE_P(ETKDGVariants,
+                         ETKDGPipelineEnergyTestFixture,
+                         ::testing::Values(ETKDGOption::ETKDG,
+                                           ETKDGOption::ETKDGv2,
+                                           ETKDGOption::srETKDGv3,
+                                           ETKDGOption::ETKDGv3,
+                                           ETKDGOption::KDG,
+                                           ETKDGOption::ETDG),
+                         [](const ::testing::TestParamInfo<ETKDGOption>& info) {
+                           return getETKDGOptionName(info.param);
+                         });
 
 TEST(ETKDGAllowsLargeMol, LargeMoleculeSoloEmbeds) {
   // Small molecules
