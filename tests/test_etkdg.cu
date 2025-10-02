@@ -34,7 +34,6 @@
 using ::nvMolKit::detail::ETKDGContext;
 using ::nvMolKit::detail::ETKDGDriver;
 using ::nvMolKit::detail::ETKDGStage;
-using ::nvMolKit::detail::initETKDGPipeline;
 
 class ProgrammableStep : public ETKDGStage {
  public:
@@ -332,9 +331,9 @@ TEST_F(ETKDGDriverTest, MultiStageMixed) {
   EXPECT_THAT(completed, testing::ElementsAre(0, 1, 1, 0));
 }
 
-class ETKDGPipelineInitTestFixture : public ::testing::Test {
+class ETKDGPipelineUpdateConformersTestFixture : public ::testing::Test {
  public:
-  ETKDGPipelineInitTestFixture() { testDataFolderPath_ = getTestDataFolderPath(); }
+  ETKDGPipelineUpdateConformersTestFixture() { testDataFolderPath_ = getTestDataFolderPath(); }
 
   void SetUp() override {
     // Load three molecules
@@ -355,75 +354,7 @@ class ETKDGPipelineInitTestFixture : public ::testing::Test {
   std::vector<RDKit::ROMol*>                 mols_;
 };
 
-TEST_F(ETKDGPipelineInitTestFixture, InitSingleMolecule) {
-  // Test with just the first molecule
-  std::vector<RDKit::ROMol*>               singleMol = {mols_[0]};
-  std::vector<nvMolKit::detail::EmbedArgs> eargs;
-  ETKDGContext                             context;
-
-  // Initialize pipeline with forced 3D dimensionality
-  nvMolKit::detail::initETKDGContext(singleMol, context);
-  initETKDGPipeline(singleMol, eargs, RDKit::DGeomHelpers::ETKDGv3, nvMolKit::DGeomHelpers::Dimensionality::DIM_4D);
-
-  // Check eargs
-  ASSERT_EQ(eargs.size(), 1);
-  EXPECT_EQ(eargs[0].dim, 4);
-
-  // Check context
-  EXPECT_EQ(context.nTotalSystems, 1);
-
-  // Check systemHost.atomStarts
-  ASSERT_EQ(context.systemHost.atomStarts.size(), 2);  // Start and end positions
-  EXPECT_EQ(context.systemHost.atomStarts[0], 0);
-  EXPECT_EQ(context.systemHost.atomStarts[1], singleMol[0]->getNumAtoms());
-
-  // Check positions
-  const size_t expectedPositionsSize = singleMol[0]->getNumAtoms() * 4;
-  ASSERT_EQ(context.systemHost.positions.size(), expectedPositionsSize);
-  // Check all positions are initialized to 0
-  std::vector<double> expectedPositions(expectedPositionsSize, 0.0);
-  EXPECT_THAT(context.systemHost.positions, testing::ElementsAreArray(expectedPositions));
-}
-
-TEST_F(ETKDGPipelineInitTestFixture, InitMultipleMolecules) {
-  std::vector<nvMolKit::detail::EmbedArgs> eargs;
-  ETKDGContext                             context;
-
-  // Initialize pipeline with forced 3D dimensionality
-  initETKDGPipeline(mols_, eargs, RDKit::DGeomHelpers::ETKDGv3, nvMolKit::DGeomHelpers::Dimensionality::DIM_4D);
-  nvMolKit::detail::initETKDGContext(mols_, context);
-  // Check eargs
-  ASSERT_EQ(eargs.size(), 3);
-  for (const auto& earg : eargs) {
-    EXPECT_EQ(earg.dim, 4);
-  }
-
-  // Calculate expected values
-  std::vector<int> expectedAtomStarts = {0};
-  int              totalAtoms         = 0;
-  for (const auto& mol : mols_) {
-    totalAtoms += mol->getNumAtoms();
-    expectedAtomStarts.push_back(totalAtoms);
-  }
-
-  // Check context
-  EXPECT_EQ(context.nTotalSystems, 3);
-
-  // Check systemHost.atomStarts
-  ASSERT_EQ(context.systemHost.atomStarts.size(), expectedAtomStarts.size());
-  for (size_t i = 0; i < expectedAtomStarts.size(); ++i) {
-    EXPECT_EQ(context.systemHost.atomStarts[i], expectedAtomStarts[i]);
-  }
-
-  // Check positions
-  const size_t expectedPositionsSize = totalAtoms * 4;
-  ASSERT_EQ(context.systemHost.positions.size(), expectedPositionsSize);
-  // Check all positions are initialized to 0
-  std::vector<double> expectedPositions(expectedPositionsSize, 0.0);
-  EXPECT_THAT(context.systemHost.positions, testing::ElementsAreArray(expectedPositions));
-}
-
-TEST_F(ETKDGPipelineInitTestFixture, UpdateConformersStage) {
+TEST_F(ETKDGPipelineUpdateConformersTestFixture, UpdateConformersStage) {
   // Create eargs with dim=3 for all molecules
   auto                                     params = DGeomHelpers::ETKDGv3;
   std::vector<nvMolKit::detail::EmbedArgs> eargs;
@@ -484,7 +415,7 @@ TEST_F(ETKDGPipelineInitTestFixture, UpdateConformersStage) {
   }
 }
 
-TEST_F(ETKDGPipelineInitTestFixture, UpdateConformersStageWithInactiveMolecule) {
+TEST_F(ETKDGPipelineUpdateConformersTestFixture, UpdateConformersStageWithInactiveMolecule) {
   // Create eargs with dim=3 for all molecules
   std::vector<nvMolKit::detail::EmbedArgs> eargs;
   for (size_t i = 0; i < mols_.size(); ++i) {
