@@ -27,6 +27,8 @@
 
 RDKit::DGeomHelpers::EmbedParameters getETKDGOption(ETKDGOption opt) {
   switch (opt) {
+    case ETKDGOption::srETKDGv3:
+      return RDKit::DGeomHelpers::srETKDGv3;
     case ETKDGOption::ETKDGv3:
       return RDKit::DGeomHelpers::ETKDGv3;
     case ETKDGOption::ETKDGv2:
@@ -44,6 +46,8 @@ RDKit::DGeomHelpers::EmbedParameters getETKDGOption(ETKDGOption opt) {
 
 std::string getETKDGOptionName(ETKDGOption opt) {
   switch (opt) {
+    case ETKDGOption::srETKDGv3:
+      return "srETKDGv3";
     case ETKDGOption::ETKDGv3:
       return "ETKDGv3";
     case ETKDGOption::ETKDGv2:
