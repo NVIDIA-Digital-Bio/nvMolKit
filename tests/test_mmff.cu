@@ -26,6 +26,7 @@
 #include <filesystem>
 #include <random>
 #include <stdexcept>
+#include <string>
 
 #include "bfgs_mmff.h"
 #include "device.h"
@@ -37,6 +38,20 @@
 #include "mmff_optimize.h"
 #include "test_utils.h"
 using namespace nvMolKit::MMFF;
+
+namespace {
+
+std::string backendToString(const nvMolKit::MMFF::OptimizerOptions::Backend backend) {
+  switch (backend) {
+    case nvMolKit::MMFF::OptimizerOptions::Backend::BFGS:
+      return "BFGS";
+    case nvMolKit::MMFF::OptimizerOptions::Backend::FIRE:
+      return "FIRE";
+  }
+  return "UNKNOWN";
+}
+
+}  // namespace
 
 enum class FFTerm {
   BondStretch,
@@ -676,12 +691,33 @@ TEST_F(MMffGpuEdgeCases3Atoms, OneEightyThetaAngleStretchBend) {
 
 class MMFFValidationSuiteFixture : public ::testing::Test {
  public:
-  MMFFValidationSuiteFixture() { testDataFolderPath_ = getTestDataFolderPath(); }
+  MMFFValidationSuiteFixture() : testDataFolderPath_(getTestDataFolderPath()) {}
 
+ protected:
   void runTestInBatch(const std::string& fileName);
   void runTestInSerial(const std::string& fileName);
 
   std::string         testDataFolderPath_;
+  std::vector<double> positions;
+};
+
+class MMFFMinimizerParameterizedFixture : public ::testing::TestWithParam<nvMolKit::MMFF::OptimizerOptions::Backend> {
+ public:
+  MMFFMinimizerParameterizedFixture() : testDataFolderPath_(getTestDataFolderPath()) {}
+
+ protected:
+  static std::vector<std::vector<double>> runMinimizer(std::vector<RDKit::ROMol*>&               molPtrs,
+                                                       nvMolKit::MMFF::OptimizerOptions::Backend backend) {
+    nvMolKit::MMFF::OptimizerOptions optimizerOptions;
+    optimizerOptions.backend = backend;
+    return nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molPtrs,
+                                                          200,
+                                                          100.0,
+                                                          nvMolKit::BatchHardwareOptions(),
+                                                          optimizerOptions);
+  }
+
+  const std::string   testDataFolderPath_;
   std::vector<double> positions;
 };
 
@@ -933,7 +969,6 @@ void MMFFValidationSuiteFixture::runTestInSerial(const std::string& fileName) {
       }
     }
     if (foundFailure) {
-      // Calc each grad component for the breakdown, find the max delta
       getGradTermBreakdown(systemDevice, mol.get(), gradFailures.back());
     }
   }
@@ -955,6 +990,20 @@ TEST_F(MMFFValidationSuiteFixture, MMFF94_dative_batched) {
 TEST_F(MMFFValidationSuiteFixture, MMFF94_hypervalent_batched) {
   runTestInBatch(testDataFolderPath_ + "/MMFF94_hypervalent.sdf");
 }
+
+namespace {
+
+std::string backendParamName(const ::testing::TestParamInfo<nvMolKit::MMFF::OptimizerOptions::Backend>& info) {
+  return backendToString(info.param);
+}
+
+}  // namespace
+
+INSTANTIATE_TEST_SUITE_P(MMFFMinimizerBackends,
+                         MMFFMinimizerParameterizedFixture,
+                         ::testing::Values(nvMolKit::MMFF::OptimizerOptions::Backend::BFGS,
+                                           nvMolKit::MMFF::OptimizerOptions::Backend::FIRE),
+                         backendParamName);
 
 void perturbConformer(RDKit::Conformer& conf, const float delta = 0.1, const int seed = 0) {
   std::mt19937                          gen(seed);  // Mersenne Twister engine
@@ -991,7 +1040,7 @@ void printEnergies(const std::vector<RDKit::ROMol*>& mols) {
   }
 }
 
-TEST_F(MMFFValidationSuiteFixture, MinimizeBFGSMultipleConfsSameMolecule) {
+TEST_P(MMFFMinimizerParameterizedFixture, MinimizeMultipleConfsSameMolecule) {
   constexpr int    numConfs   = 50;
   constexpr double wantEnergy = 26.8743;
 
@@ -1000,14 +1049,14 @@ TEST_F(MMFFValidationSuiteFixture, MinimizeBFGSMultipleConfsSameMolecule) {
   auto& mol = *mols[0];
 
   std::vector<uint32_t> confIds = {0};
-  // We start with one conformer, so index from there.
   for (int i = 1; i < numConfs; i++) {
     auto conf = new RDKit::Conformer(mol.getConformer());
     perturbConformer(*conf, 0.5, i + 5);
     confIds.push_back(mols[0]->addConformer(conf, true));
   }
-  std::vector<RDKit::ROMol*>               molPtrs     = {&mol};
-  const std::vector<double>                gotEnergies = MMFFOptimizeMoleculesConfsBfgs(molPtrs)[0];
+  std::vector<RDKit::ROMol*> molPtrs = {&mol};
+
+  auto                                     gotEnergies = runMinimizer(molPtrs, GetParam())[0];
   auto                                     molProps    = std::make_unique<RDKit::MMFF::MMFFMolProperties>(mol);
   std::unique_ptr<ForceFields::ForceField> outMolFF(RDKit::MMFF::constructForceField(mol, molProps.get()));
   ASSERT_EQ(confIds.size(), numConfs);
@@ -1016,38 +1065,33 @@ TEST_F(MMFFValidationSuiteFixture, MinimizeBFGSMultipleConfsSameMolecule) {
     std::vector<double> pos;
     nvMolKit::confPosToVect(**confIter, pos);
     const double outEnergy = outMolFF->calcEnergy(pos.data());
-    ASSERT_NEAR(gotEnergies[i], outEnergy, 1e-4);  // Inconsistency between output positions and reported energy.
-    EXPECT_NEAR(wantEnergy, outEnergy, 1e-4) << "Energy mismatch for conformer " << i;
+    ASSERT_NEAR(gotEnergies[i], outEnergy, 1e-4);
+    EXPECT_NEAR(wantEnergy, outEnergy, 1e-4)
+      << "Backend " << backendToString(GetParam()) << ": energy mismatch for conformer " << i;
     i++;
   }
 }
 
-TEST_F(MMFFValidationSuiteFixture, MinimizeBFGSMultipleConfsMultipleMolecules) {
-  constexpr int numMols        = 4;   // Use first 4 molecules from the dataset
-  constexpr int numConfsPerMol = 10;  // Add multiple conformers per molecule
-
-  // Expected minimum energies for the first 4 molecules from MMFF94_dative.sdf
-  const std::vector<double> wantEnergies = {26.8743, 66.1801, -18.7326, -207.436};
+TEST_P(MMFFMinimizerParameterizedFixture, MinimizeMultipleConfsMultipleMolecules) {
+  constexpr int             numMols        = 4;
+  constexpr int             numConfsPerMol = 10;
+  const std::vector<double> wantEnergies   = {26.8743, 66.1801, -18.7326, -207.436};
 
   std::vector<std::unique_ptr<RDKit::ROMol>> mols;
   getMols(getTestDataFolderPath() + "/MMFF94_dative.sdf", mols, numMols);
 
-  // Convert to vector of pointers and add multiple conformers to each molecule
   std::vector<RDKit::ROMol*> molPtrs;
   for (auto& mol : mols) {
-    // Add additional conformers by perturbing the original
     for (int i = 1; i < numConfsPerMol; i++) {
       auto conf = new RDKit::Conformer(mol->getConformer());
-      perturbConformer(*conf, 0.5, i + mol->getNumAtoms());  // Use mol size as seed variation
+      perturbConformer(*conf, 0.5, i + mol->getNumAtoms());
       mol->addConformer(conf, true);
     }
     molPtrs.push_back(mol.get());
   }
 
-  // Test our new API that optimizes multiple molecules with multiple conformers
-  std::vector<std::vector<double>> gotEnergies = MMFFOptimizeMoleculesConfsBfgs(molPtrs);
+  const auto gotEnergies = runMinimizer(molPtrs, GetParam());
 
-  // Verify results by comparing with RDKit energies for each optimized conformer
   ASSERT_EQ(gotEnergies.size(), numMols);
 
   for (size_t molIdx = 0; molIdx < mols.size(); ++molIdx) {
@@ -1064,22 +1108,20 @@ TEST_F(MMFFValidationSuiteFixture, MinimizeBFGSMultipleConfsMultipleMolecules) {
       nvMolKit::confPosToVect(**confIter, pos);
       const double outEnergy = outMolFF->calcEnergy(pos.data());
 
-      // Compare our reported energy with RDKit's calculation on the optimized positions
       ASSERT_NEAR(energiesForMol[confIdx], outEnergy, 1e-4)
-        << "Energy mismatch for molecule " << molIdx << ", conformer " << confIdx;
+        << "Backend " << backendToString(GetParam()) << ": energy mismatch for molecule " << molIdx << ", conformer "
+        << confIdx;
 
-      // Verify that each conformer reaches the expected minimum energy
       EXPECT_NEAR(wantEnergies[molIdx], outEnergy, 1e-4)
-        << "Optimized energy mismatch for molecule " << molIdx << ", conformer " << confIdx
-        << " (expected: " << wantEnergies[molIdx] << ", got: " << outEnergy << ")";
+        << "Backend " << backendToString(GetParam()) << ": expected " << wantEnergies[molIdx] << ", got: " << outEnergy
+        << " for molecule " << molIdx << ", conformer " << confIdx;
 
       confIdx++;
     }
   }
 }
 
-// Size 50, should trigger the large molecule paths in cuda kernels.
-TEST_F(MMFFValidationSuiteFixture, MinimizeBFGSLargeMol) {
+TEST_P(MMFFMinimizerParameterizedFixture, MinimizeLargeMol) {
   constexpr double                           wantEnergy = 33.0842;
   std::vector<std::unique_ptr<RDKit::ROMol>> mols;
   getMols(getTestDataFolderPath() + "/50_atom_mol.sdf", mols, 1);
@@ -1091,14 +1133,16 @@ TEST_F(MMFFValidationSuiteFixture, MinimizeBFGSLargeMol) {
   auto                                     molProps = std::make_unique<RDKit::MMFF::MMFFMolProperties>(mol);
   std::unique_ptr<ForceFields::ForceField> outMolFF(RDKit::MMFF::constructForceField(mol, molProps.get()));
   std::vector<RDKit::ROMol*>               molPtrs     = {&mol};
-  const std::vector<double>                gotEnergies = MMFFOptimizeMoleculesConfsBfgs(molPtrs)[0];
+  const std::vector<double>                gotEnergies = runMinimizer(molPtrs, GetParam())[0];
   int                                      i           = 0;
   for (auto confIter = mol.beginConformers(); confIter != mol.endConformers(); ++confIter) {
     std::vector<double> pos;
     nvMolKit::confPosToVect(**confIter, pos);
     const double outEnergy = outMolFF->calcEnergy(pos.data());
-    ASSERT_NEAR(gotEnergies[i], outEnergy, 1e-3);  // Inconsistency between output positions and reported energy.
-    EXPECT_NEAR(wantEnergy, outEnergy, 1e-3) << "Energy mismatch for conformer " << i;
+    ASSERT_NEAR(gotEnergies[i], outEnergy, 1e-3)
+      << "Backend " << backendToString(GetParam()) << ": energy mismatch for conformer " << i;
+    EXPECT_NEAR(wantEnergy, outEnergy, 1e-3)
+      << "Backend " << backendToString(GetParam()) << ": energy mismatch for conformer " << i;
     i++;
   }
 }

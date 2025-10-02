@@ -26,16 +26,26 @@ class ROMol;
 
 namespace nvMolKit::MMFF {
 
+struct OptimizerOptions {
+  enum class Backend {
+    BFGS,
+    FIRE
+  };
+  Backend backend = Backend::BFGS;
+};
+
 //! \brief Optimize conformers for multiple molecules using MMFF force field
 //! \param mols The molecules to optimize
 //! \param maxIters The maximum number of iterations to perform
 //! \param nonBondedThreshold The radius threshold for non-bonded interactions
 //! \param perfOptions Performance tuning options (threading, batching)
+//! \param optimizerOptions Selection of the numerical optimizer backend
 //! \return A vector of vectors of energies, where each inner vector contains energies for conformers of one molecule
 std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKit::ROMol*>& mols,
                                                                 int                         maxIters           = 200,
                                                                 double                      nonBondedThreshold = 100.0,
-                                                                const BatchHardwareOptions& perfOptions        = {});
+                                                                const BatchHardwareOptions& perfOptions        = {},
+                                                                const OptimizerOptions&     optimizerOptions   = {});
 
 }  // namespace nvMolKit::MMFF
 #endif  // NVMOLKIT_BFGS_MMFF_H

@@ -282,6 +282,7 @@ bool FireBatchMinimizer::step(const double                  gradTol,
                               AsyncDeviceVector<double>&    grad,
                               const GradFunctor&            gFunc) {
   const int numSystems = atomStarts.size() - 1;
+  grad.zero();
   gFunc();
   fireV1(gradTol, atomStarts, positions, grad);
   const int numFinished = compactAndCountConverged();

@@ -38,9 +38,9 @@ __device__ int findSystemIndexForAtom(const int atomIdx, const int* atomStarts, 
   return numSystems - 1;
 }
 
-__global__ void quarticGradientKernel(const int   totalCoords,
-                                      const int*  atomStarts,
-                                      const int   numSystems,
+__global__ void quarticGradientKernel(const int     totalCoords,
+                                      const int*    atomStarts,
+                                      const int     numSystems,
                                       const double* positions,
                                       double*       grad) {
   const int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -48,13 +48,13 @@ __global__ void quarticGradientKernel(const int   totalCoords,
     return;
   }
 
-  const int atomIdx    = idx / kDim;
-  const int systemIdx  = findSystemIndexForAtom(atomIdx, atomStarts, numSystems);
-  const int atomOffset  = atomIdx - atomStarts[systemIdx];
-  const int coordOffset = atomOffset * kDim + (idx % kDim);
-  const double wantVal  = static_cast<double>(coordOffset);
-  const double diff     = positions[idx] - wantVal;
-  grad[idx]            = 4.0 * diff * diff * diff;
+  const int    atomIdx     = idx / kDim;
+  const int    systemIdx   = findSystemIndexForAtom(atomIdx, atomStarts, numSystems);
+  const int    atomOffset  = atomIdx - atomStarts[systemIdx];
+  const int    coordOffset = atomOffset * kDim + (idx % kDim);
+  const double wantVal     = static_cast<double>(coordOffset);
+  const double diff        = positions[idx] - wantVal;
+  grad[idx]                = 4.0 * diff * diff * diff;
 }
 
 double quarticEnergyAtIndex(const double value, const double wantVal) {
@@ -77,8 +77,8 @@ class FireMinimizerQuarticTest : public ::testing::Test {
       for (int atomIdx = atomStarts_[sysIdx]; atomIdx < atomStarts_[sysIdx + 1]; ++atomIdx) {
         const int atomOffset = atomIdx - atomStarts_[sysIdx];
         for (int dim = 0; dim < kDim; ++dim) {
-          const int coordIdx        = atomIdx * kDim + dim;
-          const int coordOffset     = atomOffset * kDim + dim;
+          const int coordIdx       = atomIdx * kDim + dim;
+          const int coordOffset    = atomOffset * kDim + dim;
           hostPositions_[coordIdx] = static_cast<double>(coordOffset) + dist(rng);
         }
       }
@@ -120,23 +120,14 @@ class FireMinimizerQuarticTest : public ::testing::Test {
     for (int i = 0; i < totalCoords_; ++i) {
       const double wantVal = expectedCoordinateValue(i);
       const double diff    = positions[i] - wantVal;
-      grad[i]           = 4.0 * diff * diff * diff;
+      grad[i]              = 4.0 * diff * diff * diff;
     }
     return grad;
   }
 
-  double computeEnergyHost(const std::vector<double>& positions) const {
-    double energy = 0.0;
-    for (int i = 0; i < totalCoords_; ++i) {
-      const double wantVal = expectedCoordinateValue(i);
-      energy += quarticEnergyAtIndex(positions[i], wantVal);
-    }
-    return energy;
-  }
-
   double computeSystemEnergyHost(const std::vector<double>& positions, int systemIdx) const {
-    const int start = atomStarts_[systemIdx] * kDim;
-    const int end   = atomStarts_[systemIdx + 1] * kDim;
+    const int start  = atomStarts_[systemIdx] * kDim;
+    const int end    = atomStarts_[systemIdx + 1] * kDim;
     double    energy = 0.0;
     for (int i = start; i < end; ++i) {
       const double wantVal = expectedCoordinateValue(i);
@@ -151,10 +142,10 @@ class FireMinimizerQuarticTest : public ::testing::Test {
   }
 
   double expectedCoordinateValue(const int coordIdx) const {
-    const int atomIdx      = coordIdx / kDim;
-    const int systemIdx    = findSystemIndexForAtomHost(atomIdx);
-    const int atomOffset   = atomIdx - atomStarts_[systemIdx];
-    const int coordOffset  = atomOffset * kDim + (coordIdx % kDim);
+    const int atomIdx     = coordIdx / kDim;
+    const int systemIdx   = findSystemIndexForAtomHost(atomIdx);
+    const int atomOffset  = atomIdx - atomStarts_[systemIdx];
+    const int coordOffset = atomOffset * kDim + (coordIdx % kDim);
     return static_cast<double>(coordOffset);
   }
 
@@ -239,9 +230,9 @@ TEST_F(FireMinimizerQuarticTest, RespectsActiveSystemMask) {
   const std::vector<double> finalPositions = copyPositionsFromDevice();
   const std::vector<double> finalGrad      = computeGradientHost(finalPositions);
 
-  const int inactiveSystemIdx = 1;
-  const int inactiveStart     = atomStarts_[inactiveSystemIdx] * kDim;
-  const int inactiveEnd       = atomStarts_[inactiveSystemIdx + 1] * kDim;
+  constexpr int inactiveSystemIdx = 1;
+  const int     inactiveStart     = atomStarts_[inactiveSystemIdx] * kDim;
+  const int     inactiveEnd       = atomStarts_[inactiveSystemIdx + 1] * kDim;
 
   for (int i = inactiveStart; i < inactiveEnd; ++i) {
     EXPECT_NEAR(finalPositions[i], initialPositions[i], 1e-9) << "Inactive coordinate changed at index " << i;

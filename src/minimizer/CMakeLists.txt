@@ -21,7 +21,7 @@ target_include_directories(bfgs PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 add_library(bfgs_mmff bfgs_mmff.cpp)
 target_link_libraries(
   bfgs_mmff PRIVATE ${RDKit_LIBS} rdkit_mmff_flattened device device_vector
-                    bfgs OpenMP::OpenMP_CXX)
+                    bfgs fire_minimizer OpenMP::OpenMP_CXX)
 target_include_directories(bfgs_mmff PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(bfgs_distgeom bfgs_distgeom.cpp)

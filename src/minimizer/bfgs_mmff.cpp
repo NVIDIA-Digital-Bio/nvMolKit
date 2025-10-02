@@ -23,6 +23,7 @@
 #include "bfgs_minimize.h"
 #include "device.h"
 #include "ff_utils.h"
+#include "fire_minimizer.h"
 #include "mmff_flattened_builder.h"
 
 namespace nvMolKit::MMFF {
@@ -30,7 +31,8 @@ namespace nvMolKit::MMFF {
 std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKit::ROMol*>& mols,
                                                                 const int                   maxIters,
                                                                 const double                nonBondedThreshold,
-                                                                const BatchHardwareOptions& perfOptions) {
+                                                                const BatchHardwareOptions& perfOptions,
+                                                                const OptimizerOptions&     optimizerOptions) {
   // Extract values from performance options
   const size_t batchSize = perfOptions.batchSize == -1 ? 500 : perfOptions.batchSize;
 
@@ -102,7 +104,8 @@ std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKi
                                                                                           maxIters,           \
                                                                                           nonBondedThreshold, \
                                                                                           streamPool,         \
-                                                                                          devicesPerThread)
+                                                                                          devicesPerThread,   \
+                                                                                          optimizerOptions)
   for (size_t batchStart = 0; batchStart < totalConformers; batchStart += effectiveBatchSize) {
     const int        threadId = omp_get_thread_num();
     const WithDevice dev(devicesPerThread[threadId]);
@@ -154,8 +157,15 @@ std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKi
     auto eFunc = [&](const double* positions) { nvMolKit::MMFF::computeEnergy(systemDevice, positions, streamPtr); };
     auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(systemDevice, streamPtr); };
 
-    std::unique_ptr<nvMolKit::BatchMinimizer> minimizer =
-      std::make_unique<nvMolKit::BfgsBatchMinimizer>(/*dataDim=*/3, nvMolKit::DebugLevel::NONE, true, streamPtr);
+    std::unique_ptr<nvMolKit::BatchMinimizer> minimizer;
+    if (optimizerOptions.backend == OptimizerOptions::Backend::FIRE) {
+      minimizer = std::make_unique<nvMolKit::FireBatchMinimizer>(/*dataDim=*/3, nvMolKit::FireOptions{}, streamPtr);
+    } else {
+      minimizer = std::make_unique<nvMolKit::BfgsBatchMinimizer>(/*dataDim=*/3,
+                                                                 nvMolKit::DebugLevel::NONE,
+                                                                 /*scaleGrads=*/true,
+                                                                 streamPtr);
+    }
     constexpr double gradTol = 1e-4;  // hard-coded in RDKit.
     minimizer->minimize(maxIters,
                         gradTol,

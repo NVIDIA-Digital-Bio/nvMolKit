@@ -36,12 +36,23 @@ template <typename T> boost::python::list vectorOfVectorsToList(const std::vecto
 }
 
 BOOST_PYTHON_MODULE(_mmffOptimization) {
+  namespace mmff = nvMolKit::MMFF;
+
+  boost::python::enum_<mmff::OptimizerOptions::Backend>("OptimizerBackend")
+    .value("BFGS", mmff::OptimizerOptions::Backend::BFGS)
+    .value("FIRE", mmff::OptimizerOptions::Backend::FIRE);
+
+  boost::python::class_<mmff::OptimizerOptions>("OptimizerOptions")
+    .def(boost::python::init<>())
+    .def_readwrite("backend", &mmff::OptimizerOptions::backend);
+
   boost::python::def(
     "MMFFOptimizeMoleculesConfs",
     +[](const boost::python::list&            molecules,
         int                                   maxIters,
         double                                nonBondedThreshold,
-        const nvMolKit::BatchHardwareOptions& hardwareOptions) -> boost::python::list {
+        const nvMolKit::BatchHardwareOptions& hardwareOptions,
+        const mmff::OptimizerOptions&         optimizerOptions) -> boost::python::list {
       // Convert Python list to std::vector<RDKit::ROMol*>
       std::vector<RDKit::ROMol*> molsVec;
       molsVec.reserve(len(molecules));
@@ -56,7 +67,7 @@ BOOST_PYTHON_MODULE(_mmffOptimization) {
 
       // Call the C++ function
       auto result =
-        nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molsVec, maxIters, nonBondedThreshold, hardwareOptions);
+        mmff::MMFFOptimizeMoleculesConfsBfgs(molsVec, maxIters, nonBondedThreshold, hardwareOptions, optimizerOptions);
 
       // Convert result back to Python list of lists
       return vectorOfVectorsToList(result);
@@ -64,7 +75,8 @@ BOOST_PYTHON_MODULE(_mmffOptimization) {
     (boost::python::arg("molecules"),
      boost::python::arg("maxIters")           = 200,
      boost::python::arg("nonBondedThreshold") = 100.0,
-     boost::python::arg("hardwareOptions")    = nvMolKit::BatchHardwareOptions()),
+     boost::python::arg("hardwareOptions")    = nvMolKit::BatchHardwareOptions(),
+     boost::python::arg("optimizerOptions")   = mmff::OptimizerOptions()),
     "Optimize conformers for multiple molecules using MMFF force field.\n"
     "\n"
     "Args:\n"
