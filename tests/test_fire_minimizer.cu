@@ -49,13 +49,13 @@ double quarticEnergyAtIndex(const int idx, const double value) {
 class FireMinimizerQuarticTest : public ::testing::Test {
  protected:
   void setUpSystems(const int seed = 1337) {
-    atomStarts_   = {0, 3, 10, 12};
-    numSystems_   = static_cast<int>(atomStarts_.size()) - 1;
-    totalAtoms_   = atomStarts_.back();
-    totalCoords_  = totalAtoms_ * kDim;
+    atomStarts_  = {0, 3, 10, 12};
+    numSystems_  = static_cast<int>(atomStarts_.size()) - 1;
+    totalAtoms_  = atomStarts_.back();
+    totalCoords_ = totalAtoms_ * kDim;
     hostPositions_.resize(totalCoords_);
 
-    std::mt19937                    rng(seed);
+    std::mt19937                           rng(seed);
     std::uniform_real_distribution<double> dist(-2.0, 2.0);
     for (int i = 0; i < totalCoords_; ++i) {
       hostPositions_[i] = static_cast<double>(i) + dist(rng);
@@ -73,9 +73,9 @@ class FireMinimizerQuarticTest : public ::testing::Test {
 
   std::function<void()> gradientFunctor() const {
     return [this]() {
-      const int totalCoords = totalCoords_;
-      constexpr int blockSize = 128;
-      const int numBlocks     = (totalCoords + blockSize - 1) / blockSize;
+      const int     totalCoords = totalCoords_;
+      constexpr int blockSize   = 128;
+      const int     numBlocks   = (totalCoords + blockSize - 1) / blockSize;
       quarticGradientKernel<<<numBlocks, blockSize>>>(totalCoords, positionsDevice_.data(), gradDevice_.data());
       cudaCheckError(cudaGetLastError());
     };
@@ -106,9 +106,9 @@ class FireMinimizerQuarticTest : public ::testing::Test {
   }
 
   std::vector<int>                    atomStarts_;
-  int                                 numSystems_   = 0;
-  int                                 totalAtoms_   = 0;
-  int                                 totalCoords_  = 0;
+  int                                 numSystems_  = 0;
+  int                                 totalAtoms_  = 0;
+  int                                 totalCoords_ = 0;
   std::vector<double>                 hostPositions_;
   nvMolKit::AsyncDeviceVector<int>    atomStartsDevice_;
   nvMolKit::AsyncDeviceVector<double> positionsDevice_;
@@ -121,13 +121,16 @@ class FireMinimizerQuarticTest : public ::testing::Test {
 
 TEST_F(FireMinimizerQuarticTest, QuarticPotentialConvergesToTargets) {
   setUpSystems();
+  // Check we're unminimized for consistency.
+  const double energyPre = computeEnergyHost(hostPositions_);
+  ASSERT_GE(energyPre, 1.0);
 
   nvMolKit::FireBatchMinimizer minimizer(kDim);
-  auto                         gradFunc  = gradientFunctor();
+  auto                         gradFunc   = gradientFunctor();
   auto                         energyFunc = [](const double*) {};
 
   const bool converged = minimizer.minimize(2000,
-                                            1e-5,
+                                            1e-6,
                                             atomStarts_,
                                             atomStartsDevice_,
                                             positionsDevice_,
@@ -145,7 +148,7 @@ TEST_F(FireMinimizerQuarticTest, QuarticPotentialConvergesToTargets) {
 
   for (int i = 0; i < totalCoords_; ++i) {
     const double want = static_cast<double>(i);
-    EXPECT_NEAR(finalPositions[i], want, 1e-3) << "Mismatch at coordinate " << i;
+    EXPECT_NEAR(finalPositions[i], want, 1e-2) << "Mismatch at coordinate " << i;
   }
 
   const double maxAbsGrad = *std::max_element(finalGradient.begin(), finalGradient.end(), [](double a, double b) {
@@ -153,6 +156,5 @@ TEST_F(FireMinimizerQuarticTest, QuarticPotentialConvergesToTargets) {
   });
 
   EXPECT_NEAR(finalEnergy, 0.0, 1e-6);
-  EXPECT_LT(std::abs(maxAbsGrad), 1e-3);
+  EXPECT_LT(std::abs(maxAbsGrad), 1e-6);
 }
-

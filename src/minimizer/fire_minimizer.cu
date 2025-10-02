@@ -86,25 +86,26 @@ __global__ void fireV1Kernel(const cuda::std::span<const int> atomStarts,
 
   // TODO consolidate dot product implementations.
   // TODO this is just zero on step 0, so could be skipped.
-  double power             = 0.0;
-  int    gradLargerThanTol = 0;
+  double power   = 0.0;
+  double maxGrad = 0.0;
   for (int i = block.thread_rank(); i < vSys.size(); i += updatePowerBlockSize) {
-    power += vSys[i] * fSys[i];
-    gradLargerThanTol += fabs(fSys[i]) > gradTol;
+    power += vSys[i] * -fSys[i];
+    maxGrad = fmax(maxGrad, std::abs(fSys[i]));
   }
 
   using BlockReduce = cub::BlockReduce<double, updatePowerBlockSize>;
   __shared__ BlockReduce::TempStorage tempStorage;
   const double                        powerSum = BlockReduce(tempStorage).Sum(power);
-  block.sync();
-  const int gradLargerThanTolSum = BlockReduce(tempStorage).Sum(gradLargerThanTol);
+  block.sync();  // To reuse the temp storage.
+  const double maxGradReduced = BlockReduce(tempStorage).Reduce(maxGrad, cuda::maximum<>{});
 
   // -----------------------------------------------------------------
   // Update counting vars, alphas and dt based on powerSum.
   // This set of operations is per system, so only do it on one thread.
   // -----------------------------------------------------------------
   if (block.thread_rank() == 0) {
-    if (gradLargerThanTolSum == 0) {
+    if (maxGradReduced <= gradTol) {
+      // printf("Converged system %d with maxGrad %f <= %f\n", sysIdx, maxGradReduced, gradTol);
       *metConvergenceCriteria = true;
     }
     if (powerSum >= 0.0) {
@@ -121,6 +122,13 @@ __global__ void fireV1Kernel(const cuda::std::span<const int> atomStarts,
       alphas[sysIdx]                    = alphaStart;
       dt[sysIdx] *= dtDecrementFactor;
     }
+    // printf("System %d: power=%f, alpha=%f, dt=%f, numPosSteps=%d maxGrad%f\n",
+    //        sysIdx,
+    //        powerSum,
+    //        alphas[sysIdx],
+    //        dt[sysIdx],
+    //        numStepsWithPositivePower[sysIdx],
+    //        maxGradReduced);
   }
   // END per system compute ^^^, all threads now active again (if they were before).
   block.sync();
@@ -152,14 +160,13 @@ __global__ void fireV1Kernel(const cuda::std::span<const int> atomStarts,
     const double constFactor2 = alpha * sqrt(vDotSum) / sqrt(fDotSum);
     for (int i = block.thread_rank(); i < vSys.size(); i += updatePowerBlockSize) {
       // v = (1-alpha)*v + alpha* v_norm * F_unitvec
-      vSys[i] = constFactor1 * vSys[i] + constFactor2 * fSys[i];
+      vSys[i] = constFactor1 * vSys[i] + constFactor2 * -fSys[i];
     }
   }
 
   // Update V with force/dt with or without above mixing
   for (int i = block.thread_rank(); i < vSys.size(); i += updatePowerBlockSize) {
-    // v = (1-alpha)*v + alpha* v_norm * F_unitvec
-    vSys[i] += fSys[i] * dt[sysIdx];
+    vSys[i] += -fSys[i] * dt[sysIdx];
   }
 
   // Now integrate positions
@@ -184,7 +191,7 @@ FireBatchMinimizer::FireBatchMinimizer(const int dataDim, const FireOptions& opt
   activeSystemIndices_.setStream(stream_);
   numStepsWithNegativePower_.setStream(stream_);
   numStepsWithPositivePower_.setStream(stream_);
-  countFinished_.setStream(stream_);
+  countUnfinished_.setStream(stream_);
   countTempStorage_.setStream(stream_);
   powers_.setStream(stream_);
   loopStatusHost_.resize(1);
@@ -260,7 +267,7 @@ void FireBatchMinimizer::initialize(const std::vector<int>& atomStartsHost, cons
                                             allSystemIndices_.data(),
                                             countTempStorage_.data(),
                                             activeSystemIndices_.data(),
-                                            countFinished_.data(),
+                                            countUnfinished_.data(),
                                             allSystemIndices_.size(),
                                             stream_));
 
@@ -277,7 +284,8 @@ bool FireBatchMinimizer::step(const double                  gradTol,
   const int numSystems = atomStarts.size() - 1;
   gFunc();
   fireV1(gradTol, atomStarts, positions, grad);
-  return compactAndCountConverged() == numSystems ? 0 : 1;
+  const int numFinished = compactAndCountConverged();
+  return numFinished == numSystems;
 }
 
 bool FireBatchMinimizer::minimize(const int                     numIters,
@@ -309,15 +317,14 @@ int FireBatchMinimizer::compactAndCountConverged() {
                                             allSystemIndices_.data(),
                                             statuses_.data(),
                                             activeSystemIndices_.data(),
-                                            countFinished_.data(),
+                                            countUnfinished_.data(),
                                             allSystemIndices_.size(),
                                             stream_));
 
   int& unfinishedHost = loopStatusHost_[0];
-  countFinished_.get(unfinishedHost);
-  cudaStreamSynchronize(nullptr);
-  numUnfinishedSystems_ = unfinishedHost;
-  return numUnfinishedSystems_;
+  countUnfinished_.get(unfinishedHost);
+  cudaStreamSynchronize(stream_);
+  return allSystemIndices_.size() - unfinishedHost;
 }
 
 }  // namespace nvMolKit

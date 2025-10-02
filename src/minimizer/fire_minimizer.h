@@ -30,7 +30,7 @@ struct FireOptions {
 
   double maxStep = 0.2;  //!< Maximum distance an atom can move per step.
 
-  double timeStepIncrement = 0.1;  //!< Factor to increase time step when conditions are met
+  double timeStepIncrement = 1.1;  //!< Factor to increase time step when conditions are met
   double timeStepDecrement = 0.5;  //!< Factor to decrease time step when conditions are not met
 
   int nMinForIncrease = 5;  //!< Number of steps with positive power before increasing time step
@@ -91,11 +91,10 @@ class FireBatchMinimizer final : public BatchMinimizer {
 
   // Status trackers.
   AsyncDeviceVector<uint8_t> countTempStorage_;
-  AsyncDevicePtr<int>        countFinished_;
+  AsyncDevicePtr<int>        countUnfinished_;
   PinnedHostVector<int>      loopStatusHost_;
   AsyncDeviceVector<int>     activeSystemIndices_;
   AsyncDeviceVector<int>     allSystemIndices_;
-  int                        numUnfinishedSystems_ = 0;
 };
 
 }  // namespace nvMolKit
