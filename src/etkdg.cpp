@@ -262,8 +262,7 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
       stages.push_back(
         std::make_unique<detail::FourthDimMinimizeStage>(constMolPtrs, batchEargs, paramsCopy, context, streamPtr));
 
-      // (ET)(K)DG: Add experimental torsion minimization stage only if needed
-      // This matches RDKit's logic: if (embedParams.useExpTorsionAnglePrefs || embedParams.useBasicKnowledge)
+      // (ET)(K)DG: Add experimental torsion minimization stage only if needed to match RDKit's logic.
       if (paramsCopy.useExpTorsionAnglePrefs || paramsCopy.useBasicKnowledge) {
         stages.push_back(
           std::make_unique<detail::ETKMinimizationStage>(constMolPtrs, batchEargs, paramsCopy, context, streamPtr));
@@ -279,7 +278,6 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
           // This is a pass-through, don't need to set the stream
           stages.push_back(std::make_unique<detail::ETKDGFinalChiralCenterCheckStage>(*chiralStagePtr));
         }
-        // These stages create their own data and don't need the first chiral stage reference
         stages.push_back(
           std::make_unique<detail::ETKDGChiralDistMatrixCheckStage>(context, batchEargs, dim, streamPtr));
         stages.push_back(
