@@ -519,7 +519,7 @@ class ETKDGPipelineEnergyTestFixture : public ::testing::Test {
 namespace {
 
 // Helper function to test energy improvement for molecules
-void testEnergyImprovement(const std::vector<RDKit::ROMol*>& mols, bool useBFGS, int confsPerMolecule = 1) {
+void testEnergyImprovement(const std::vector<RDKit::ROMol*>& mols, int confsPerMolecule = 1) {
   // Store initial energies for each molecule
   std::vector<double> initialEnergies;
   initialEnergies.reserve(mols.size());
@@ -553,11 +553,7 @@ void testEnergyImprovement(const std::vector<RDKit::ROMol*>& mols, bool useBFGS,
   hardwareOptions.batchSize            = 100;
   hardwareOptions.batchesPerGpu        = 10;
 
-  if (useBFGS) {
-    nvMolKit::embedMolecules(mols, params, confsPerMolecule, -1, true, nullptr, hardwareOptions);
-  } else {
-    nvMolKit::embedMolecules(mols, params, confsPerMolecule, -1, true, nullptr, hardwareOptions);
-  }
+  nvMolKit::embedMolecules(mols, params, confsPerMolecule, -1, true, nullptr, hardwareOptions);
 
   // Calculate and verify final energies for each molecule and conformer
   for (size_t i = 0; i < mols.size(); ++i) {
@@ -690,20 +686,20 @@ class ETKDGPipelineEnergyDiverseTestFixture : public ::testing::Test {
 
 TEST_F(ETKDGPipelineEnergyDiverseTestFixture, SingleMoleculeEnergyImprovementBFGS) {
   std::vector<RDKit::ROMol*> singleMol = {mols_[0]};
-  testEnergyImprovement(singleMol, true);
+  testEnergyImprovement(singleMol);
 }
 
 TEST_F(ETKDGPipelineEnergyDiverseTestFixture, MultipleMoleculesEnergyImprovementBFGS) {
-  testEnergyImprovement(mols_, true);
+  testEnergyImprovement(mols_);
 }
 
 TEST_F(ETKDGPipelineEnergyDiverseTestFixture, SingleMoleculeMultipleConformersBFGS) {
   std::vector<RDKit::ROMol*> singleMol = {mols_[0]};
-  testEnergyImprovement(singleMol, true, 5);
+  testEnergyImprovement(singleMol, 5);
 }
 
 TEST_F(ETKDGPipelineEnergyDiverseTestFixture, MultipleMoleculesMultipleConformersBFGS) {
-  testEnergyImprovement(mols_, true, 3);
+  testEnergyImprovement(mols_, 3);
 }
 
 TEST_F(ETKDGPipelineEnergyDiverseTestFixture, SingleMoleculeConformerEnergyComparison) {
