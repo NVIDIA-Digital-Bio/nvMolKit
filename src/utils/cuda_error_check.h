@@ -26,12 +26,12 @@
 //! Example usage:
 //!     cudaCheckError(cudaMemcpyAsync(dest, src, sizeof(double), cudaMemcpyDefault));
 #define cudaCheckError(ans) \
-  { checkReturnCode<true>((ans), __FILE__, __LINE__); }
+  { nvMolKit::checkReturnCode<true>((ans), __FILE__, __LINE__); }
 
 //! Checks a CUDA return code, but does not throw an error if nonzero.
 //! Useful for debugging where we can't or don't want to throw exceptions - fast OpenMP regions and destructors.
 #define cudaCheckErrorNoThrow(ans) \
-  { checkReturnCode<false>((ans), __FILE__, __LINE__); }
+  { nvMolKit::checkReturnCode<false>((ans), __FILE__, __LINE__); }
 
 namespace nvMolKit {
 

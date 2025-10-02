@@ -148,6 +148,9 @@ target_link_libraries(
 add_executable(test_bfgs_hessian test_bfgs_hessian.cpp)
 target_link_libraries(test_bfgs_hessian PRIVATE bfgs device_vector)
 
+add_executable(test_fire_minimizer test_fire_minimizer.cu)
+target_link_libraries(test_fire_minimizer PRIVATE fire_minimizer device_vector cuda_error_check)
+
 add_executable(test_etkdg_etk_minimize test_etkdg_etk_minimize.cu)
 target_link_libraries(
   test_etkdg_etk_minimize
@@ -195,7 +198,8 @@ set(TEST_LIST
     test_rdkit_comp
     test_rdkit_bounds_matrix
     test_similarity
-    test_work_splitting)
+    test_work_splitting
+    test_fire_minimizer)
 
 # Auto populate the NVMOLKIT_TESTDATA environment variable for ctest.
 foreach(arg ${TEST_LIST})

@@ -16,7 +16,6 @@
 #include <cub/cub.cuh>
 #include <numeric>
 
-#include "../testutils/conformer_checkers.h"
 #include "fire_minimizer.h"
 #include "nvtx.h"
 
@@ -213,6 +212,7 @@ void FireBatchMinimizer::fireV1(const double                  gradTol,
                                                                  fireOptions_.alphaDecrement,
                                                                  gradTol,
                                                                  statuses_.data());
+  cudaCheckError(cudaGetLastError());
 }
 
 void FireBatchMinimizer::initialize(const std::vector<int>& atomStartsHost, const uint8_t* activeSystems) {
@@ -262,7 +262,7 @@ void FireBatchMinimizer::initialize(const std::vector<int>& atomStartsHost, cons
                                             activeSystemIndices_.data(),
                                             countFinished_.data(),
                                             allSystemIndices_.size(),
-                                            nullptr));
+                                            stream_));
 
   if (tempStorageBytes > countTempStorage_.size()) {
     countTempStorage_.resize(tempStorageBytes);
@@ -303,15 +303,15 @@ bool FireBatchMinimizer::minimize(const int                     numIters,
 
 int FireBatchMinimizer::compactAndCountConverged() {
   const ScopedNvtxRange fireCompact("FireBatchMinimizer::compactAndCountConverged");
-  size_t                unusedBytes = 0;
+  size_t                storageBytes = countTempStorage_.size();
   cudaCheckError(cub::DeviceSelect::Flagged(countTempStorage_.data(),
-                                            unusedBytes,
+                                            storageBytes,
                                             allSystemIndices_.data(),
-                                            countTempStorage_.data(),
+                                            statuses_.data(),
                                             activeSystemIndices_.data(),
                                             countFinished_.data(),
                                             allSystemIndices_.size(),
-                                            nullptr));
+                                            stream_));
 
   int& unfinishedHost = loopStatusHost_[0];
   countFinished_.get(unfinishedHost);
