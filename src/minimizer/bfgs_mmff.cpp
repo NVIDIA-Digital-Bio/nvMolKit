@@ -32,17 +32,10 @@ std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKi
   // Extract values from performance options
   const size_t batchSize = perfOptions.batchSize == -1 ? 500 : perfOptions.batchSize;
 
-  // Enforce maximum supported atoms per molecule
-  constexpr unsigned int kMaxSupportedAtoms = 256;
   for (size_t i = 0; i < mols.size(); ++i) {
     const auto* mol = mols[i];
     if (mol == nullptr) {
       throw std::invalid_argument("Invalid molecule pointer at index " + std::to_string(i));
-    }
-    const unsigned int numAtoms = mol->getNumAtoms();
-    if (numAtoms > kMaxSupportedAtoms) {
-      throw std::invalid_argument("Molecule at index " + std::to_string(i) + " has " + std::to_string(numAtoms) +
-                                  " atoms; maximum supported is " + std::to_string(kMaxSupportedAtoms));
     }
   }
 

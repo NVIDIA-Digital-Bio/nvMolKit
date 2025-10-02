@@ -70,3 +70,8 @@ target_link_libraries(
           embedder_utils
           conformer_checkers
           benchmark_utils)
+
+add_executable(UpdateInverseHessianBench updateInverseHessianBench.cu)
+target_link_libraries(
+  UpdateInverseHessianBench
+  PRIVATE CUDA::cudart cuda_error_check device_vector bfgs)

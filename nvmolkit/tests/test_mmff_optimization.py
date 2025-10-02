@@ -78,7 +78,7 @@ def create_hard_copy_mols(molecules):
     return copied_mols
 
 
-def calculate_rdkit_mmff_energies(molecules):
+def calculate_rdkit_mmff_energies(molecules, maxIters=200, nonBondedThreshold=100.0):
     """Calculate MMFF energies using RDKit for all conformers of all molecules.
     
     Args:
@@ -99,8 +99,8 @@ def calculate_rdkit_mmff_energies(molecules):
             
         # Optimize all conformers for this molecule using RDKit
         # The signature shows it's a method on the molecule object
-        results = rdForceFieldHelpers.MMFFOptimizeMoleculeConfs(mol, maxIters=200,
-                                                               mmffVariant='MMFF94', nonBondedThresh=100.0)
+        results = rdForceFieldHelpers.MMFFOptimizeMoleculeConfs(mol, maxIters=maxIters,
+                                                               mmffVariant='MMFF94', nonBondedThresh=nonBondedThreshold)
         
         if results:
             for _, energy in results:
@@ -224,18 +224,34 @@ def test_mmff_optimization_invalid_input():
         nvmolkit_mmff.MMFFOptimizeMoleculesConfs([None])
 
 
-def test_mmff_optimization_oversized_atom_limit_interleaved():
-    """Ensure an oversized (>256 atoms) molecule in batch raises an error."""
-    small1 = Chem.MolFromSmiles('CCCCCC')  # 6 atoms
-    small2 = Chem.MolFromSmiles('CCC')     # 3 atoms
-    # Oversized straight-chain hydrocarbon
-    big = Chem.MolFromSmiles('C' * 300)
+def test_mmff_optimization_allows_large_molecule_interleaved():
+    """Ensure a large (>256 atoms) molecule in batch is accepted and optimized."""
+    small1 = Chem.AddHs(Chem.MolFromSmiles('CCCCCC'), explicitOnly=False)
+    small2 = Chem.AddHs(Chem.MolFromSmiles('CCC'), explicitOnly=False) 
+    big = Chem.AddHs(Chem.MolFromSmiles('C' * 100), explicitOnly=False)
     assert big.GetNumAtoms() > 256
 
-    # Need conformers for MMFF
     rdDistGeom.EmbedMultipleConfs(small1, numConfs=1)
     rdDistGeom.EmbedMultipleConfs(small2, numConfs=1)
     rdDistGeom.EmbedMultipleConfs(big, numConfs=1)
 
-    with pytest.raises(ValueError, match=r"maximum supported is 256"):
-        nvmolkit_mmff.MMFFOptimizeMoleculesConfs([small1, big, small2])
+    mols = [small1, big, small2]
+    rdkit_mols = create_hard_copy_mols(mols)
+    rdkit_energies = calculate_rdkit_mmff_energies(rdkit_mols, maxIters=10, nonBondedThreshold=100.0)
+
+    energies = nvmolkit_mmff.MMFFOptimizeMoleculesConfs(mols, maxIters=10, nonBondedThreshold=100.0)
+    assert len(energies) == 3
+
+    for mol_idx, (rdkit_mol_energies, nvmolkit_mol_energies) in enumerate(zip(rdkit_energies, energies)):
+        assert len(rdkit_mol_energies) == len(nvmolkit_mol_energies), \
+            f"Molecule {mol_idx}: conformer count mismatch: RDKit={len(rdkit_mol_energies)}, nvMolKit={len(nvmolkit_mol_energies)}"
+        
+        # Compare each conformer's energy with tolerance
+        for conf_idx, (rdkit_energy, nvmolkit_energy) in enumerate(zip(rdkit_mol_energies, nvmolkit_mol_energies)):
+            energy_diff = abs(rdkit_energy - nvmolkit_energy)
+            rel_error = energy_diff / abs(rdkit_energy) if abs(rdkit_energy) > 1e-10 else energy_diff
+            
+            assert rel_error < 1e-3, \
+                f"Molecule {mol_idx}, Conformer {conf_idx}: energy mismatch: " \
+                f"RDKit={rdkit_energy:.6f}, nvMolKit={nvmolkit_energy:.6f}, " \
+                f"abs_diff={energy_diff:.6f}, rel_error={rel_error:.6f}"

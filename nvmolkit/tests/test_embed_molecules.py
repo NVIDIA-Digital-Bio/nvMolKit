@@ -360,20 +360,21 @@ def test_embed_molecules_with_hardware_options(embed_test_mols):
             f"Molecule {mol_idx}: expected {confs_per_mol} conformers, got {conf_count}"
 
 
-def test_embed_molecules_oversized_atom_limit_interleaved():
-    """Ensure an oversized (>256 atoms) molecule in batch raises an error."""
-    # Create small molecules
-    small1 = Chem.MolFromSmiles('CCCCCC')  # 6 atoms
-    small2 = Chem.MolFromSmiles('CCC')     # 3 atoms
-    # Create oversized straight-chain hydrocarbon (e.g., 300 carbons)
-    big = Chem.MolFromSmiles('C' * 300)
+def test_embed_molecules_allows_large_molecule_interleaved():
+    """Ensure a large (>256 atoms) molecule in batch is accepted and embedded."""
+    small1 = Chem.AddHs(Chem.MolFromSmiles('CCCCCC'))  # 6 atoms
+    small2 = Chem.AddHs(Chem.MolFromSmiles('CCC'))     # 3 atoms
+    big = Chem.AddHs(Chem.MolFromSmiles('C' * 100))
     assert big.GetNumAtoms() > 256
 
     params = EmbedParameters()
     params.useRandomCoords = True
+    params.maxIterations = 5
 
-    with pytest.raises(ValueError, match=r"maximum supported is 256"):
-        embed.EmbedMolecules([small1, big, small2], params, confsPerMolecule=1)
+    embed.EmbedMolecules([small1, big, small2], params, confsPerMolecule=1)
+    assert small1.GetNumConformers() == 1
+    assert small2.GetNumConformers() == 1
+    assert big.GetNumConformers() == 1
 
 
 def test_embed_molecules_prune_rmsthresh():
