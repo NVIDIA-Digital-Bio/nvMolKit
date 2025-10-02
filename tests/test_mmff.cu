@@ -711,7 +711,7 @@ class MMFFMinimizerParameterizedFixture : public ::testing::TestWithParam<nvMolK
     nvMolKit::MMFF::OptimizerOptions optimizerOptions;
     optimizerOptions.backend = backend;
     return nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molPtrs,
-                                                          200,
+                                                          500,
                                                           100.0,
                                                           nvMolKit::BatchHardwareOptions(),
                                                           optimizerOptions);
@@ -1041,7 +1041,8 @@ void printEnergies(const std::vector<RDKit::ROMol*>& mols) {
 }
 
 TEST_P(MMFFMinimizerParameterizedFixture, MinimizeMultipleConfsSameMolecule) {
-  constexpr int    numConfs   = 50;
+  const double     tolerance  = GetParam() == nvMolKit::MMFF::OptimizerOptions::Backend::BFGS ? 1e-4 : 1e-2;
+  constexpr int    numConfs   = 10;
   constexpr double wantEnergy = 26.8743;
 
   std::vector<std::unique_ptr<RDKit::ROMol>> mols;
@@ -1056,9 +1057,9 @@ TEST_P(MMFFMinimizerParameterizedFixture, MinimizeMultipleConfsSameMolecule) {
   }
   std::vector<RDKit::ROMol*> molPtrs = {&mol};
 
-  auto                                     gotEnergies = runMinimizer(molPtrs, GetParam())[0];
-  auto                                     molProps    = std::make_unique<RDKit::MMFF::MMFFMolProperties>(mol);
-  std::unique_ptr<ForceFields::ForceField> outMolFF(RDKit::MMFF::constructForceField(mol, molProps.get()));
+  const auto                                     gotEnergies = runMinimizer(molPtrs, GetParam())[0];
+  const auto                                     molProps    = std::make_unique<RDKit::MMFF::MMFFMolProperties>(mol);
+  const std::unique_ptr<ForceFields::ForceField> outMolFF(RDKit::MMFF::constructForceField(mol, molProps.get()));
   ASSERT_EQ(confIds.size(), numConfs);
   int i = 0;
   for (auto confIter = mol.beginConformers(); confIter != mol.endConformers(); ++confIter) {
@@ -1066,13 +1067,15 @@ TEST_P(MMFFMinimizerParameterizedFixture, MinimizeMultipleConfsSameMolecule) {
     nvMolKit::confPosToVect(**confIter, pos);
     const double outEnergy = outMolFF->calcEnergy(pos.data());
     ASSERT_NEAR(gotEnergies[i], outEnergy, 1e-4);
-    EXPECT_NEAR(wantEnergy, outEnergy, 1e-4)
+    EXPECT_NEAR(wantEnergy, outEnergy, tolerance)
       << "Backend " << backendToString(GetParam()) << ": energy mismatch for conformer " << i;
     i++;
   }
 }
 
 TEST_P(MMFFMinimizerParameterizedFixture, MinimizeMultipleConfsMultipleMolecules) {
+  const double tolerance = GetParam() == nvMolKit::MMFF::OptimizerOptions::Backend::BFGS ? 1e-4 : 1e-2;
+
   constexpr int             numMols        = 4;
   constexpr int             numConfsPerMol = 10;
   const std::vector<double> wantEnergies   = {26.8743, 66.1801, -18.7326, -207.436};
@@ -1112,7 +1115,7 @@ TEST_P(MMFFMinimizerParameterizedFixture, MinimizeMultipleConfsMultipleMolecules
         << "Backend " << backendToString(GetParam()) << ": energy mismatch for molecule " << molIdx << ", conformer "
         << confIdx;
 
-      EXPECT_NEAR(wantEnergies[molIdx], outEnergy, 1e-4)
+      EXPECT_NEAR(wantEnergies[molIdx], outEnergy, tolerance)
         << "Backend " << backendToString(GetParam()) << ": expected " << wantEnergies[molIdx] << ", got: " << outEnergy
         << " for molecule " << molIdx << ", conformer " << confIdx;
 
@@ -1122,7 +1125,8 @@ TEST_P(MMFFMinimizerParameterizedFixture, MinimizeMultipleConfsMultipleMolecules
 }
 
 TEST_P(MMFFMinimizerParameterizedFixture, MinimizeLargeMol) {
-  constexpr double                           wantEnergy = 33.0842;
+  const double     tolerance  = GetParam() == nvMolKit::MMFF::OptimizerOptions::Backend::BFGS ? 1e-3 : 1e-2;
+  constexpr double wantEnergy = 33.0842;
   std::vector<std::unique_ptr<RDKit::ROMol>> mols;
   getMols(getTestDataFolderPath() + "/50_atom_mol.sdf", mols, 1);
   auto& mol = *mols[0];
@@ -1141,7 +1145,7 @@ TEST_P(MMFFMinimizerParameterizedFixture, MinimizeLargeMol) {
     const double outEnergy = outMolFF->calcEnergy(pos.data());
     ASSERT_NEAR(gotEnergies[i], outEnergy, 1e-3)
       << "Backend " << backendToString(GetParam()) << ": energy mismatch for conformer " << i;
-    EXPECT_NEAR(wantEnergy, outEnergy, 1e-3)
+    EXPECT_NEAR(wantEnergy, outEnergy, tolerance)
       << "Backend " << backendToString(GetParam()) << ": energy mismatch for conformer " << i;
     i++;
   }

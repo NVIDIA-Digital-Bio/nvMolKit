@@ -64,6 +64,7 @@ __global__ void fireV1Kernel(const cuda::std::span<const int> atomStarts,
                              const double                     maxDt,
                              const double                     alphaStart,
                              const double                     alphaDecrementFactor,
+                             const double                     maxStep,
                              const double                     gradTol,
                              uint8_t*                         activeSystems) {
   namespace cg     = cooperative_groups;
@@ -72,11 +73,13 @@ __global__ void fireV1Kernel(const cuda::std::span<const int> atomStarts,
   if (activeSystems != nullptr && activeSystems[sysIdx] == 0) {
     return;
   }
-  __shared__ bool hadNegativePowerShared[1];
-  __shared__ bool metConvergenceCriteria[1];
+  __shared__ bool   hadNegativePowerShared[1];
+  __shared__ bool   metConvergenceCriteria[1];
+  __shared__ double displacementScaleShared[1];
   if (block.thread_rank() == 0) {
-    *hadNegativePowerShared = false;
-    *metConvergenceCriteria = false;
+    *hadNegativePowerShared  = false;
+    *metConvergenceCriteria  = false;
+    *displacementScaleShared = 1.0;
   }
 
   // Compute v * F power.
@@ -105,7 +108,7 @@ __global__ void fireV1Kernel(const cuda::std::span<const int> atomStarts,
   // -----------------------------------------------------------------
   if (block.thread_rank() == 0) {
     if (maxGradReduced <= gradTol) {
-      // printf("Converged system %d with maxGrad %f <= %f\n", sysIdx, maxGradReduced, gradTol);
+      //  printf("Converged system %d with maxGrad %f <= %f\n", sysIdx, maxGradReduced, gradTol);
       *metConvergenceCriteria = true;
     }
     if (powerSum >= 0.0) {
@@ -122,7 +125,7 @@ __global__ void fireV1Kernel(const cuda::std::span<const int> atomStarts,
       alphas[sysIdx]                    = alphaStart;
       dt[sysIdx] *= dtDecrementFactor;
     }
-    // printf("System %d: power=%f, alpha=%f, dt=%f, numPosSteps=%d maxGrad%f\n",
+    // printf("System %d: power=%f, alpha=%f, dt=%f, numPosSteps=%d maxGrad=%f\n",
     //        sysIdx,
     //        powerSum,
     //        alphas[sysIdx],
@@ -165,14 +168,36 @@ __global__ void fireV1Kernel(const cuda::std::span<const int> atomStarts,
   }
 
   // Update V with force/dt with or without above mixing
+  const double dtVal = dt[sysIdx];
   for (int i = block.thread_rank(); i < vSys.size(); i += updatePowerBlockSize) {
-    vSys[i] += -fSys[i] * dt[sysIdx];
+    vSys[i] += -fSys[i] * dtVal;
   }
 
-  // Now integrate positions
-  const auto xSys = getSystemSpan(x, atomStarts, sysIdx, dataDim);
+  block.sync();  // Ensure velocities have been updated before computing displacement norms.
+  double displacementNormSquared = 0.0;
+  for (int i = block.thread_rank(); i < vSys.size(); i += updatePowerBlockSize) {
+    const double dr = vSys[i] * dtVal;
+    displacementNormSquared += dr * dr;
+  }
+  const double displacementNormSquaredSum = BlockReduce(tempStorage).Sum(displacementNormSquared);
+  block.sync();
+  if (block.thread_rank() == 0) {
+    double scale = 1.0;
+    if (displacementNormSquaredSum > 0.0) {
+      const double norm = sqrt(displacementNormSquaredSum);
+      if (norm > maxStep) {
+        scale = maxStep / norm;
+      }
+    }
+    *displacementScaleShared = scale;
+  }
+  block.sync();
+
+  // Now integrate positions using the constrained displacement length if needed.
+  const auto   xSys              = getSystemSpan(x, atomStarts, sysIdx, dataDim);
+  const double displacementScale = *displacementScaleShared;
   for (int i = block.thread_rank(); i < xSys.size(); i += updatePowerBlockSize) {
-    xSys[i] += vSys[i] * dt[sysIdx];
+    xSys[i] += vSys[i] * dtVal * displacementScale;
   }
 }
 
@@ -217,6 +242,7 @@ void FireBatchMinimizer::fireV1(const double                  gradTol,
                                                                  fireOptions_.dtMax,
                                                                  fireOptions_.alphaInit,
                                                                  fireOptions_.alphaDecrement,
+                                                                 fireOptions_.maxStep,
                                                                  gradTol,
                                                                  statuses_.data());
   cudaCheckError(cudaGetLastError());
@@ -274,6 +300,13 @@ void FireBatchMinimizer::initialize(const std::vector<int>& atomStartsHost, cons
   if (tempStorageBytes > countTempStorage_.size()) {
     countTempStorage_.resize(tempStorageBytes);
   }
+}
+
+std::vector<double> debugDump(const AsyncDeviceVector<double>& vec) {
+  std::vector<double> result(vec.size());
+  vec.copyToHost(result);
+  cudaStreamSynchronize(vec.stream());
+  return result;
 }
 
 bool FireBatchMinimizer::step(const double                  gradTol,

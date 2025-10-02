@@ -28,7 +28,7 @@ struct FireOptions {
   double dtInit = 0.1;  //!< Initial time step
   double dtMax  = 1.0;  //!< Maximum time step
 
-  double maxStep = 0.2;  //!< Maximum distance an atom can move per step.
+  double maxStep = 0.2;  //!< Maximum total distance a system can move per step.
 
   double timeStepIncrement = 1.1;  //!< Factor to increase time step when conditions are met
   double timeStepDecrement = 0.5;  //!< Factor to decrease time step when conditions are not met
