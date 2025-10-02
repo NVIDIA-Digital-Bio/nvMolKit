@@ -14,7 +14,6 @@
 // limitations under the License.
 
 #include <ForceField/ForceField.h>
-#include <ForceField/MMFF/BondStretch.h>
 #include <gmock/gmock.h>
 #include <GraphMol/DistGeomHelpers/Embedder.h>
 #include <GraphMol/FileParsers/FileParsers.h>
@@ -22,7 +21,6 @@
 #include <GraphMol/ForceFieldHelpers/MMFF/AtomTyper.h>
 #include <GraphMol/ForceFieldHelpers/MMFF/Builder.h>
 #include <GraphMol/ForceFieldHelpers/MMFF/MMFF.h>
-#include <GraphMol/SmilesParse/SmilesParse.h>
 #include <gtest/gtest.h>
 
 #include <filesystem>
@@ -1568,9 +1566,11 @@ std::unique_ptr<RDKit::RWMol> createHydroCarbon(const int    numCarbons,
 
   std::vector<int> carbonIndices;
   carbonIndices.reserve(static_cast<size_t>(numCarbons));
-
+  std::random_device                     dev;
+  std::mt19937                           rng(dev());
+  std::uniform_real_distribution<double> dist(-0.1, 0.1);
   for (int i = 0; i < numCarbons; ++i) {
-    const RDGeom::Point3D carbonPos(0.0, 0.0, i * bondLength);
+    const RDGeom::Point3D carbonPos(0.0 + dist(rng), 0.0 + dist(rng), i * bondLength + dist(rng));
     const int             carbonIdx = addAtomWithPosition(6, carbonPos);
 
     if (!carbonIndices.empty()) {
@@ -1587,38 +1587,38 @@ TEST(MMFFAllowsLargeMol, LargeMoleculeInterleavedOptimizes) {
   constexpr double bondLength     = 1.0;
   constexpr double hydrogenOffset = 1.0;
 
-  auto small2 = createHydroCarbon(3, bondLength, hydrogenOffset);
-  auto big    = createHydroCarbon(300, bondLength, hydrogenOffset);
+  const auto small1 = createHydroCarbon(5, bondLength, hydrogenOffset);
+  const auto small2 = createHydroCarbon(3, bondLength, hydrogenOffset);
+  const auto big    = createHydroCarbon(300, bondLength, hydrogenOffset);
   ASSERT_NE(small2, nullptr);
   ASSERT_NE(big, nullptr);
 
   std::vector<std::unique_ptr<RDKit::RWMol>> rdkitRefs;
-  // rdkitRefs.push_back(std::make_unique<RDKit::RWMol>(*big));
+  rdkitRefs.push_back(std::make_unique<RDKit::RWMol>(*small1));
   rdkitRefs.push_back(std::make_unique<RDKit::RWMol>(*big));
+  rdkitRefs.push_back(std::make_unique<RDKit::RWMol>(*small2));
+  std::vector<double> wantEnergies;
   for (const auto& molCopy : rdkitRefs) {
     std::vector<std::pair<int, double>> res(molCopy->getNumConformers(), {-1, -1});
     RDKit::MMFF::MMFFOptimizeMoleculeConfs(*molCopy, res, 1, 10);
+    wantEnergies.push_back(res[0].second);
   }
 
-  std::vector<RDKit::ROMol*> molPtrs = {
-    big.get(),
-  };
+  std::vector<RDKit::ROMol*>     molPtrs = {small1.get(), big.get(), small2.get()};
   nvMolKit::BatchHardwareOptions options;
-  auto                           energies = nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molPtrs, 10, 10.0, options);
+  const auto                     energies = nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molPtrs, 10, 10.0, options);
 
   for (size_t molIdx = 0; molIdx < rdkitRefs.size(); ++molIdx) {
-    auto&                                    molRef   = *rdkitRefs[molIdx];
-    auto                                     molProps = std::make_unique<RDKit::MMFF::MMFFMolProperties>(molRef);
-    std::unique_ptr<ForceFields::ForceField> refFF(RDKit::MMFF::constructForceField(molRef, molProps.get()));
+    auto& molRef   = *rdkitRefs[molIdx];
+    auto  molProps = std::make_unique<RDKit::MMFF::MMFFMolProperties>(molRef);
 
     const auto& perMol  = energies[molIdx];
     int         confIdx = 0;
     for (auto confIter = molRef.beginConformers(); confIter != molRef.endConformers(); ++confIter) {
       std::vector<double> posRef;
       nvMolKit::confPosToVect(**confIter, posRef);
-      const double refEnergy = refFF->calcEnergy(posRef.data());
-      const int    numAtoms  = molRef.getNumAtoms();
-      ASSERT_NEAR(perMol[confIdx] / numAtoms, refEnergy / numAtoms, 1e-3)
+      const double refEnergy = wantEnergies[molIdx];
+      ASSERT_NEAR(perMol[confIdx], refEnergy, 1e-4)
         << "Energy mismatch vs RDKit reference for molecule " << molIdx << ", conformer " << confIdx;
       confIdx++;
     }
