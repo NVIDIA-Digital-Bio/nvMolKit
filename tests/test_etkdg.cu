@@ -485,37 +485,6 @@ TEST_F(ETKDGPipelineUpdateConformersTestFixture, UpdateConformersStageWithInacti
   }
 }
 
-class ETKDGPipelineEnergyTestFixture : public ::testing::Test {
- public:
-  ETKDGPipelineEnergyTestFixture() { testDataFolderPath_ = getTestDataFolderPath(); }
-
-  void SetUp() override {
-    const std::string mol2FilePath = testDataFolderPath_ + "/rdkit_smallmol_1.mol2";
-    ASSERT_TRUE(std::filesystem::exists(mol2FilePath)) << "Could not find " << mol2FilePath;
-    molPtr_ = std::unique_ptr<RDKit::RWMol>(RDKit::MolFileToMol(mol2FilePath, false));
-    ASSERT_NE(molPtr_, nullptr);
-    molPtr_->clearConformers();
-    RDKit::MolOps::sanitizeMol(*molPtr_);
-
-    // Create 5 copies
-    for (int i = 0; i < 5; i++) {
-      molsPtrs_.push_back(std::make_unique<RDKit::RWMol>(*molPtr_));
-    }
-
-    // Clear conformers and sanitize all molecules and prepare mols_ vector with pointers
-    for (auto& molPtr : molsPtrs_) {
-      mols_.push_back(molPtr.get());
-    }
-    ASSERT_EQ(mols_.size(), 5) << "Expected 5 molecules";
-  }
-
- protected:
-  std::string                                testDataFolderPath_;
-  std::unique_ptr<RDKit::RWMol>              molPtr_;
-  std::vector<std::unique_ptr<RDKit::RWMol>> molsPtrs_;
-  std::vector<RDKit::ROMol*>                 mols_;
-};
-
 namespace {
 
 // Helper function to test energy improvement for molecules
@@ -533,7 +502,7 @@ void testEnergyImprovement(const std::vector<RDKit::ROMol*>& mols, int confsPerM
     std::vector<std::unique_ptr<RDGeom::Point>> positions;
     std::unique_ptr<ForceFields::ForceField>    field;
 
-    // Setup force field with ETKDGv3 option
+    // Use RDKit's default first minimization force field for energy comparison
     auto option = RDKit::DGeomHelpers::ETKDGv3;
     nvMolKit::DGeomHelpers::setupRDKitFFWithPos(mol, option, field, eargs, positions);
 
@@ -573,6 +542,7 @@ void testEnergyImprovement(const std::vector<RDKit::ROMol*>& mols, int confsPerM
       std::vector<std::unique_ptr<RDGeom::Point>> positions;
       std::unique_ptr<ForceFields::ForceField>    field;
 
+      // Use RDKit's default first minimization force field for energy comparison
       auto option = RDKit::DGeomHelpers::ETKDGv3;
       nvMolKit::DGeomHelpers::setupRDKitFFWithPos(mol, option, field, eargs, positions, confId);
 
@@ -634,6 +604,7 @@ void testConformerEnergyComparison(const std::vector<RDKit::ROMol*>& mols,
       std::vector<std::unique_ptr<RDGeom::Point>> positions1, positions2;
       std::unique_ptr<ForceFields::ForceField>    field1, field2;
 
+      // Use RDKit's default first minimization force field for energy comparison
       auto option = RDKit::DGeomHelpers::ETKDGv3;
       nvMolKit::DGeomHelpers::setupRDKitFFWithPos(mol, option, field1, eargs1, positions1, confId);
       nvMolKit::DGeomHelpers::setupRDKitFFWithPos(molCopy, option, field2, eargs2, positions2, confId);
@@ -653,9 +624,9 @@ void testConformerEnergyComparison(const std::vector<RDKit::ROMol*>& mols,
 
 }  // anonymous namespace
 
-class ETKDGPipelineEnergyDiverseTestFixture : public ::testing::Test {
+class ETKDGPipelineEnergyTestFixture : public ::testing::Test {
  public:
-  ETKDGPipelineEnergyDiverseTestFixture() { testDataFolderPath_ = getTestDataFolderPath(); }
+  ETKDGPipelineEnergyTestFixture() { testDataFolderPath_ = getTestDataFolderPath(); }
 
   void SetUp() override {
     // Load multiple different molecules from MMFF94_dative.sdf
@@ -684,50 +655,50 @@ class ETKDGPipelineEnergyDiverseTestFixture : public ::testing::Test {
   std::vector<RDKit::ROMol*>                 mols_;
 };
 
-TEST_F(ETKDGPipelineEnergyDiverseTestFixture, SingleMoleculeEnergyImprovementBFGS) {
+TEST_F(ETKDGPipelineEnergyTestFixture, SingleMoleculeEnergyImprovement) {
   std::vector<RDKit::ROMol*> singleMol = {mols_[0]};
   testEnergyImprovement(singleMol);
 }
 
-TEST_F(ETKDGPipelineEnergyDiverseTestFixture, MultipleMoleculesEnergyImprovementBFGS) {
+TEST_F(ETKDGPipelineEnergyTestFixture, MultipleMoleculesEnergyImprovement) {
   testEnergyImprovement(mols_);
 }
 
-TEST_F(ETKDGPipelineEnergyDiverseTestFixture, SingleMoleculeMultipleConformersBFGS) {
+TEST_F(ETKDGPipelineEnergyTestFixture, SingleMoleculeMultipleConformers) {
   std::vector<RDKit::ROMol*> singleMol = {mols_[0]};
   testEnergyImprovement(singleMol, 5);
 }
 
-TEST_F(ETKDGPipelineEnergyDiverseTestFixture, MultipleMoleculesMultipleConformersBFGS) {
+TEST_F(ETKDGPipelineEnergyTestFixture, MultipleMoleculesMultipleConformers) {
   testEnergyImprovement(mols_, 3);
 }
 
-TEST_F(ETKDGPipelineEnergyDiverseTestFixture, SingleMoleculeConformerEnergyComparison) {
+TEST_F(ETKDGPipelineEnergyTestFixture, SingleMoleculeConformerEnergyComparison) {
   std::vector<RDKit::ROMol*> singleMol = {mols_[0]};
   testConformerEnergyComparison(singleMol);
 }
 
-TEST_F(ETKDGPipelineEnergyDiverseTestFixture, MultipleMoleculesConformerEnergyComparison) {
+TEST_F(ETKDGPipelineEnergyTestFixture, MultipleMoleculesConformerEnergyComparison) {
   testConformerEnergyComparison(mols_);
 }
 
-TEST_F(ETKDGPipelineEnergyDiverseTestFixture, SingleMoleculeMultipleConformersEnergyComparison) {
+TEST_F(ETKDGPipelineEnergyTestFixture, SingleMoleculeMultipleConformersEnergyComparison) {
   std::vector<RDKit::ROMol*> singleMol = {mols_[0]};
   testConformerEnergyComparison(singleMol, 10);
 }
 
-TEST_F(ETKDGPipelineEnergyDiverseTestFixture, MultipleMoleculesMultipleConformersEnergyComparison) {
+TEST_F(ETKDGPipelineEnergyTestFixture, MultipleMoleculesMultipleConformersEnergyComparison) {
   testConformerEnergyComparison(mols_, 10);
 }
 
-TEST_F(ETKDGPipelineEnergyDiverseTestFixture, DefaultHardwareOptionsOpenMPMaxThreads) {
+TEST_F(ETKDGPipelineEnergyTestFixture, DefaultHardwareOptionsOpenMPMaxThreads) {
   // Test using default BatchHardwareOptions which should use omp_get_max_threads()
   const nvMolKit::BatchHardwareOptions defaultOptions;                   // Uses -1 values for automatic detection
   const std::vector<RDKit::ROMol*>     testMols = {mols_[0], mols_[1]};  // Use subset for efficiency
   testConformerEnergyComparison(testMols, 2, defaultOptions);
 }
 
-TEST_F(ETKDGPipelineEnergyDiverseTestFixture, SpecificGpuIds) {
+TEST_F(ETKDGPipelineEnergyTestFixture, SpecificGpuIds) {
   // Test using GPU ID 0 (should always be available if CUDA is working)
   nvMolKit::BatchHardwareOptions customOptions;
   customOptions.preprocessingThreads = 1;
@@ -739,7 +710,7 @@ TEST_F(ETKDGPipelineEnergyDiverseTestFixture, SpecificGpuIds) {
   testConformerEnergyComparison(testMols, 2, customOptions);
 }
 
-TEST_F(ETKDGPipelineEnergyDiverseTestFixture, NonZeroGPUID) {
+TEST_F(ETKDGPipelineEnergyTestFixture, NonZeroGPUID) {
   // Requires multiple GPUs
   const int numDevices = nvMolKit::countCudaDevices();
   if (numDevices < 2) {
@@ -756,7 +727,7 @@ TEST_F(ETKDGPipelineEnergyDiverseTestFixture, NonZeroGPUID) {
   testConformerEnergyComparison(testMols, 2, customOptions);
 }
 
-TEST_F(ETKDGPipelineEnergyDiverseTestFixture, MultiGPUSpecificIds) {
+TEST_F(ETKDGPipelineEnergyTestFixture, MultiGPUSpecificIds) {
   // Requires multiple GPUs
   const int numDevices = nvMolKit::countCudaDevices();
   if (numDevices < 2) {
