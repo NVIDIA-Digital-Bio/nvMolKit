@@ -29,20 +29,36 @@ namespace {
 
 constexpr int kDim = 4;
 
-__global__ void quarticGradientKernel(const int totalCoords, const double* positions, double* grad) {
+__device__ int findSystemIndexForAtom(const int atomIdx, const int* atomStarts, const int numSystems) {
+  for (int sysIdx = 0; sysIdx < numSystems; ++sysIdx) {
+    if (atomIdx >= atomStarts[sysIdx] && atomIdx < atomStarts[sysIdx + 1]) {
+      return sysIdx;
+    }
+  }
+  return numSystems - 1;
+}
+
+__global__ void quarticGradientKernel(const int   totalCoords,
+                                      const int*  atomStarts,
+                                      const int   numSystems,
+                                      const double* positions,
+                                      double*       grad) {
   const int idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= totalCoords) {
     return;
   }
 
-  const double wantVal = static_cast<double>(idx);
-  const double diff    = positions[idx] - wantVal;
+  const int atomIdx    = idx / kDim;
+  const int systemIdx  = findSystemIndexForAtom(atomIdx, atomStarts, numSystems);
+  const int atomOffset  = atomIdx - atomStarts[systemIdx];
+  const int coordOffset = atomOffset * kDim + (idx % kDim);
+  const double wantVal  = static_cast<double>(coordOffset);
+  const double diff     = positions[idx] - wantVal;
   grad[idx]            = 4.0 * diff * diff * diff;
 }
 
-double quarticEnergyAtIndex(const int idx, const double value) {
-  const double wantVal = static_cast<double>(idx);
-  const double diff    = value - wantVal;
+double quarticEnergyAtIndex(const double value, const double wantVal) {
+  const double diff = value - wantVal;
   return diff * diff * diff * diff;
 }
 
@@ -57,8 +73,15 @@ class FireMinimizerQuarticTest : public ::testing::Test {
 
     std::mt19937                           rng(seed);
     std::uniform_real_distribution<double> dist(-2.0, 2.0);
-    for (int i = 0; i < totalCoords_; ++i) {
-      hostPositions_[i] = static_cast<double>(i) + dist(rng);
+    for (int sysIdx = 0; sysIdx < numSystems_; ++sysIdx) {
+      for (int atomIdx = atomStarts_[sysIdx]; atomIdx < atomStarts_[sysIdx + 1]; ++atomIdx) {
+        const int atomOffset = atomIdx - atomStarts_[sysIdx];
+        for (int dim = 0; dim < kDim; ++dim) {
+          const int coordIdx        = atomIdx * kDim + dim;
+          const int coordOffset     = atomOffset * kDim + dim;
+          hostPositions_[coordIdx] = static_cast<double>(coordOffset) + dist(rng);
+        }
+      }
     }
 
     atomStartsDevice_.setFromVector(atomStarts_);
@@ -76,7 +99,11 @@ class FireMinimizerQuarticTest : public ::testing::Test {
       const int     totalCoords = totalCoords_;
       constexpr int blockSize   = 128;
       const int     numBlocks   = (totalCoords + blockSize - 1) / blockSize;
-      quarticGradientKernel<<<numBlocks, blockSize>>>(totalCoords, positionsDevice_.data(), gradDevice_.data());
+      quarticGradientKernel<<<numBlocks, blockSize>>>(totalCoords,
+                                                      atomStartsDevice_.data(),
+                                                      numSystems_,
+                                                      positionsDevice_.data(),
+                                                      gradDevice_.data());
       cudaCheckError(cudaGetLastError());
     };
   }
@@ -91,7 +118,8 @@ class FireMinimizerQuarticTest : public ::testing::Test {
   std::vector<double> computeGradientHost(const std::vector<double>& positions) const {
     std::vector<double> grad(totalCoords_);
     for (int i = 0; i < totalCoords_; ++i) {
-      const double diff = positions[i] - static_cast<double>(i);
+      const double wantVal = expectedCoordinateValue(i);
+      const double diff    = positions[i] - wantVal;
       grad[i]           = 4.0 * diff * diff * diff;
     }
     return grad;
@@ -100,9 +128,34 @@ class FireMinimizerQuarticTest : public ::testing::Test {
   double computeEnergyHost(const std::vector<double>& positions) const {
     double energy = 0.0;
     for (int i = 0; i < totalCoords_; ++i) {
-      energy += quarticEnergyAtIndex(i, positions[i]);
+      const double wantVal = expectedCoordinateValue(i);
+      energy += quarticEnergyAtIndex(positions[i], wantVal);
     }
     return energy;
+  }
+
+  double computeSystemEnergyHost(const std::vector<double>& positions, int systemIdx) const {
+    const int start = atomStarts_[systemIdx] * kDim;
+    const int end   = atomStarts_[systemIdx + 1] * kDim;
+    double    energy = 0.0;
+    for (int i = start; i < end; ++i) {
+      const double wantVal = expectedCoordinateValue(i);
+      energy += quarticEnergyAtIndex(positions[i], wantVal);
+    }
+    return energy;
+  }
+
+  int findSystemIndexForAtomHost(const int atomIdx) const {
+    auto it = std::upper_bound(atomStarts_.begin() + 1, atomStarts_.end(), atomIdx);
+    return static_cast<int>(std::distance(atomStarts_.begin(), it) - 1);
+  }
+
+  double expectedCoordinateValue(const int coordIdx) const {
+    const int atomIdx      = coordIdx / kDim;
+    const int systemIdx    = findSystemIndexForAtomHost(atomIdx);
+    const int atomOffset   = atomIdx - atomStarts_[systemIdx];
+    const int coordOffset  = atomOffset * kDim + (coordIdx % kDim);
+    return static_cast<double>(coordOffset);
   }
 
   std::vector<int>                    atomStarts_;
@@ -121,9 +174,11 @@ class FireMinimizerQuarticTest : public ::testing::Test {
 
 TEST_F(FireMinimizerQuarticTest, QuarticPotentialConvergesToTargets) {
   setUpSystems();
-  // Check we're unminimized for consistency.
-  const double energyPre = computeEnergyHost(hostPositions_);
-  ASSERT_GE(energyPre, 1.0);
+  std::vector<double> initialSystemEnergies(numSystems_);
+  for (int sysIdx = 0; sysIdx < numSystems_; ++sysIdx) {
+    initialSystemEnergies[sysIdx] = computeSystemEnergyHost(hostPositions_, sysIdx);
+    EXPECT_GT(initialSystemEnergies[sysIdx], 1e-6) << "System " << sysIdx << " unexpectedly minimized";
+  }
 
   nvMolKit::FireBatchMinimizer minimizer(kDim);
   auto                         gradFunc   = gradientFunctor();
@@ -143,11 +198,11 @@ TEST_F(FireMinimizerQuarticTest, QuarticPotentialConvergesToTargets) {
   EXPECT_TRUE(converged);
 
   const std::vector<double> finalPositions = copyPositionsFromDevice();
-  const double              finalEnergy    = computeEnergyHost(finalPositions);
   const std::vector<double> finalGradient  = computeGradientHost(finalPositions);
+  std::vector<double>       finalSystemEnergies(numSystems_);
 
   for (int i = 0; i < totalCoords_; ++i) {
-    const double want = static_cast<double>(i);
+    const double want = expectedCoordinateValue(i);
     EXPECT_NEAR(finalPositions[i], want, 1e-2) << "Mismatch at coordinate " << i;
   }
 
@@ -155,6 +210,58 @@ TEST_F(FireMinimizerQuarticTest, QuarticPotentialConvergesToTargets) {
     return std::abs(a) < std::abs(b);
   });
 
-  EXPECT_NEAR(finalEnergy, 0.0, 1e-6);
+  for (int sysIdx = 0; sysIdx < numSystems_; ++sysIdx) {
+    finalSystemEnergies[sysIdx] = computeSystemEnergyHost(finalPositions, sysIdx);
+    EXPECT_NEAR(finalSystemEnergies[sysIdx], 0.0, 1e-5) << "System " << sysIdx << " energy mismatch";
+  }
   EXPECT_LT(std::abs(maxAbsGrad), 1e-6);
+}
+
+TEST_F(FireMinimizerQuarticTest, RespectsActiveSystemMask) {
+  setUpSystems();
+  const std::vector<double> initialPositions = copyPositionsFromDevice();
+  std::vector<double>       initialSystemEnergies(numSystems_);
+  for (int sysIdx = 0; sysIdx < numSystems_; ++sysIdx) {
+    initialSystemEnergies[sysIdx] = computeSystemEnergyHost(initialPositions, sysIdx);
+  }
+
+  std::vector<uint8_t> activeMask = {1, 0, 1};
+  ASSERT_EQ(static_cast<int>(activeMask.size()), numSystems_);
+
+  nvMolKit::FireBatchMinimizer minimizer(kDim);
+  minimizer.initialize(atomStarts_, activeMask.data());
+
+  auto gradFunc = gradientFunctor();
+  for (int iter = 0; iter < 2000; ++iter) {
+    minimizer.step(1e-6, atomStartsDevice_, positionsDevice_, gradDevice_, gradFunc);
+  }
+
+  const std::vector<double> finalPositions = copyPositionsFromDevice();
+  const std::vector<double> finalGrad      = computeGradientHost(finalPositions);
+
+  const int inactiveSystemIdx = 1;
+  const int inactiveStart     = atomStarts_[inactiveSystemIdx] * kDim;
+  const int inactiveEnd       = atomStarts_[inactiveSystemIdx + 1] * kDim;
+
+  for (int i = inactiveStart; i < inactiveEnd; ++i) {
+    EXPECT_NEAR(finalPositions[i], initialPositions[i], 1e-9) << "Inactive coordinate changed at index " << i;
+  }
+
+  auto expectSystemConverged = [&](int systemIdx) {
+    const int start = atomStarts_[systemIdx] * kDim;
+    const int end   = atomStarts_[systemIdx + 1] * kDim;
+    for (int i = start; i < end; ++i) {
+      const double want = expectedCoordinateValue(i);
+      EXPECT_NEAR(finalPositions[i], want, 1e-2) << "Active coordinate mismatch at index " << i;
+      EXPECT_LT(std::abs(finalGrad[i]), 1e-3) << "Active gradient too large at index " << i;
+    }
+    EXPECT_NEAR(computeSystemEnergyHost(finalPositions, systemIdx), 0.0, 1e-5);
+  };
+
+  expectSystemConverged(0);
+  expectSystemConverged(2);
+
+  const double inactiveEnergy = computeSystemEnergyHost(finalPositions, inactiveSystemIdx);
+  EXPECT_NEAR(inactiveEnergy, initialSystemEnergies[inactiveSystemIdx], 1e-6);
+  EXPECT_GT(inactiveEnergy, 1.0);
 }
