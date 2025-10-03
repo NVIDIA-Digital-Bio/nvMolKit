@@ -90,7 +90,6 @@ std::vector<double> getReferenceEnergy(const std::vector<const RDKit::ROMol*>& m
   results.reserve(mols.size());
   int startIdx = 0;
   for (size_t i = 0; i < mols.size(); ++i) {
-    std::cout << "molecule index: " << i << std::endl;
     const auto& mol = *mols[i];
     if (eargs[i].dim != DIM) {
       throw std::runtime_error("getReferenceEnergy only supports 4D coordinates");
@@ -292,7 +291,8 @@ INSTANTIATE_TEST_SUITE_P(ETKDGVariants,
                                            ETKDGOption::srETKDGv3,
                                            ETKDGOption::ETKDGv3,
                                            ETKDGOption::KDG,
-                                           ETKDGOption::ETDG),
+                                           ETKDGOption::ETDG,
+                                           ETKDGOption::DG),
                          [](const ::testing::TestParamInfo<ETKDGOption>& info) {
                            return getETKDGOptionName(info.param);
                          });
@@ -414,7 +414,8 @@ INSTANTIATE_TEST_SUITE_P(ETKDGVariants,
                                            ETKDGOption::ETKDGv2,
                                            ETKDGOption::srETKDGv3,
                                            ETKDGOption::ETKDGv3,
-                                           ETKDGOption::KDG),
+                                           ETKDGOption::KDG,
+                                           ETKDGOption::DG),
                          [](const ::testing::TestParamInfo<ETKDGOption>& info) {
                            return getETKDGOptionName(info.param);
                          });

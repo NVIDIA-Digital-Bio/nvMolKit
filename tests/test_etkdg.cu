@@ -754,8 +754,7 @@ TEST_P(ETKDGPipelineEnergyTestFixture, MultiGPUSpecificIds) {
   customOptions.gpuIds.push_back(0);
   customOptions.gpuIds.push_back(1);
 
-  const std::vector<RDKit::ROMol*> testMols = {mols_[0], mols_[1], mols_[2]};
-  testConformerEnergyComparison(testMols, 2, params, customOptions);
+  testConformerEnergyComparison(mols_, 2, params, customOptions);
 }
 
 // Instantiate parameterized tests for different ETKDG variants
@@ -766,7 +765,8 @@ INSTANTIATE_TEST_SUITE_P(ETKDGVariants,
                                            ETKDGOption::srETKDGv3,
                                            ETKDGOption::ETKDGv3,
                                            ETKDGOption::KDG,
-                                           ETKDGOption::ETDG),
+                                           ETKDGOption::ETDG,
+                                           ETKDGOption::DG),
                          [](const ::testing::TestParamInfo<ETKDGOption>& info) {
                            return getETKDGOptionName(info.param);
                          });

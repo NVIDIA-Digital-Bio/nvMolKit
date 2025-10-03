@@ -39,6 +39,11 @@ RDKit::DGeomHelpers::EmbedParameters getETKDGOption(ETKDGOption opt) {
       return RDKit::DGeomHelpers::ETDG;
     case ETKDGOption::KDG:
       return RDKit::DGeomHelpers::KDG;
+    case ETKDGOption::DG: {
+      auto params              = RDKit::DGeomHelpers::KDG;
+      params.useBasicKnowledge = false;
+      return params;
+    }
     default:
       throw std::runtime_error("Unknown ETKDG option");
   }
@@ -58,6 +63,8 @@ std::string getETKDGOptionName(ETKDGOption opt) {
       return "ETDG";
     case ETKDGOption::KDG:
       return "KDG";
+    case ETKDGOption::DG:
+      return "DG";
     default:
       return "Unknown";
   }

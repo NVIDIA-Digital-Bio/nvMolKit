@@ -187,7 +187,7 @@ def compare_conformers_rmsd(rdkit_mols, nvmolkit_mols, rmsd_threshold=0.2, min_m
         )
 
 
-@pytest.mark.parametrize("etkdg_variant", ["ETKDG", "ETKDGv2", "ETKDGv3", "srETKDGv3", "KDG", "ETDG"])
+@pytest.mark.parametrize("etkdg_variant", ["ETKDG", "ETKDGv2", "ETKDGv3", "srETKDGv3", "KDG", "ETDG", "DG"])
 def test_embed_molecules_serial_vs_rdkit(embed_test_mols, etkdg_variant):
     """Test nvMolKit EmbedMolecules one molecule at a time against RDKit reference.
 
@@ -213,6 +213,9 @@ def test_embed_molecules_serial_vs_rdkit(embed_test_mols, etkdg_variant):
         params = rdDistGeom.KDG()
     elif etkdg_variant == "ETDG":
         params = rdDistGeom.ETDG()
+    elif etkdg_variant == "DG":
+        params = rdDistGeom.KDG()
+        params.useBasicKnowledge = False
     else:
         raise ValueError(f"Unknown ETKDG variant: {etkdg_variant}")
 
@@ -258,7 +261,7 @@ def test_embed_molecules_serial_vs_rdkit(embed_test_mols, etkdg_variant):
     compare_conformers_rmsd(rdkit_mols, nvmolkit_mols, rmsd_threshold=0.2, min_match_fraction=0.5)
 
 
-@pytest.mark.parametrize("etkdg_variant", ["ETKDG", "ETKDGv2", "ETKDGv3", "srETKDGv3", "KDG", "ETDG"])
+@pytest.mark.parametrize("etkdg_variant", ["ETKDG", "ETKDGv2", "ETKDGv3", "srETKDGv3", "KDG", "ETDG", "DG"])
 @pytest.mark.parametrize("gpu_ids", [[], [0], [1], [0, 1]])
 def test_embed_molecules_batch_vs_rdkit(embed_test_mols, etkdg_variant, gpu_ids):
     """Test nvMolKit EmbedMolecules batch mode against RDKit reference.
@@ -288,6 +291,9 @@ def test_embed_molecules_batch_vs_rdkit(embed_test_mols, etkdg_variant, gpu_ids)
         params = rdDistGeom.KDG()
     elif etkdg_variant == "ETDG":
         params = rdDistGeom.ETDG()
+    elif etkdg_variant == "DG":
+        params = rdDistGeom.KDG()
+        params.useBasicKnowledge = False
     else:
         raise ValueError(f"Unknown ETKDG variant: {etkdg_variant}")
 

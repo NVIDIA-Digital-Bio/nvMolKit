@@ -39,7 +39,8 @@ enum class ETKDGOption {
   ETKDGv2,
   ETKDG,
   ETDG,
-  KDG
+  KDG,
+  DG
 };
 
 /**

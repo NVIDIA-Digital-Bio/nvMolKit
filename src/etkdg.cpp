@@ -273,11 +273,8 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
         std::make_unique<detail::ETKDGDoubleBondGeometryCheckStage>(context, batchEargs, dim, streamPtr));
 
       if (paramsCopy.enforceChirality) {
-        // Only add final chiral check if we have a first chiral stage to reference
-        if (chiralStagePtr != nullptr) {
-          // This is a pass-through, don't need to set the stream
-          stages.push_back(std::make_unique<detail::ETKDGFinalChiralCenterCheckStage>(*chiralStagePtr));
-        }
+        // This is a pass-through, don't need to set the stream
+        stages.push_back(std::make_unique<detail::ETKDGFinalChiralCenterCheckStage>(*chiralStagePtr));
         stages.push_back(
           std::make_unique<detail::ETKDGChiralDistMatrixCheckStage>(context, batchEargs, dim, streamPtr));
         stages.push_back(
