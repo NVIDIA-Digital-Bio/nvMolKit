@@ -21,7 +21,7 @@ from rdkit import Chem
 from rdkit.Chem import rdDistGeom, rdForceFieldHelpers
 
 import nvmolkit.mmffOptimization as nvmolkit_mmff
-from nvmolkit.types import HardwareOptions
+from nvmolkit.types import HardwareOptions, OptimizerOptions, OptimizerBackend
 
 
 @pytest.fixture
@@ -159,10 +159,11 @@ def test_mmff_optimization_serial_vs_rdkit(mmff_test_mols):
                 f"abs_diff={energy_diff:.6f}, rel_error={rel_error:.6f}"
 
 
+@pytest.mark.parametrize("backend", ["BFGS", "FIRE"])
 @pytest.mark.parametrize("gpu_ids", [[0, 1], [0], [1]])
 @pytest.mark.parametrize("batchesize", [0, 2, 5])
 @pytest.mark.parametrize("batches_per_gpu", [1, 3])
-def test_mmff_optimization_batch_vs_rdkit(mmff_test_mols, gpu_ids, batchesize, batches_per_gpu):
+def test_mmff_optimization_batch_vs_rdkit(mmff_test_mols, backend, gpu_ids, batchesize, batches_per_gpu):
     """Test nvMolKit MMFF batch optimization against RDKit reference.
     
     This test compares the energy results when optimizing all molecules together
@@ -178,6 +179,10 @@ def test_mmff_optimization_batch_vs_rdkit(mmff_test_mols, gpu_ids, batchesize, b
     # Get RDKit reference energies
     rdkit_energies = calculate_rdkit_mmff_energies(rdkit_mols)
 
+    tolerance = 1e-3 if backend == "BFGS" else 1e-2
+
+    optimizer_options = OptimizerOptions(getattr(OptimizerBackend, backend))
+
     hardware_options = HardwareOptions(
         gpuIds=gpu_ids,
         batchSize=batchesize,
@@ -189,7 +194,8 @@ def test_mmff_optimization_batch_vs_rdkit(mmff_test_mols, gpu_ids, batchesize, b
         nvmolkit_mols,
         maxIters=200,
         nonBondedThreshold=100.0,
-        hardwareOptions=hardware_options
+        hardwareOptions=hardware_options,
+        optimizerOptions=optimizer_options,
     )
     
     # Verify we have the same number of molecules
@@ -206,8 +212,8 @@ def test_mmff_optimization_batch_vs_rdkit(mmff_test_mols, gpu_ids, batchesize, b
             energy_diff = abs(rdkit_energy - nvmolkit_energy)
             rel_error = energy_diff / abs(rdkit_energy) if abs(rdkit_energy) > 1e-10 else energy_diff
             
-            assert rel_error < 1e-3, \
-                f"Molecule {mol_idx}, Conformer {conf_idx}: energy mismatch: " \
+            assert rel_error < tolerance, \
+                f"Backend {backend}: Molecule {mol_idx}, Conformer {conf_idx}: energy mismatch: " \
                 f"RDKit={rdkit_energy:.6f}, nvMolKit={nvmolkit_energy:.6f}, " \
                 f"abs_diff={energy_diff:.6f}, rel_error={rel_error:.6f}"
 

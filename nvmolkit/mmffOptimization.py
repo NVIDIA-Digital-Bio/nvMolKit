@@ -25,16 +25,17 @@ if TYPE_CHECKING:
     from rdkit.Chem import Mol
 
 from nvmolkit import _mmffOptimization
-from nvmolkit.types import HardwareOptions
+from nvmolkit.types import HardwareOptions, OptimizerOptions, OptimizerBackend
 
 
 def MMFFOptimizeMoleculesConfs(
     molecules: list["Mol"],
     maxIters: int = 200,
     nonBondedThreshold: float = 100.0,
-    hardwareOptions: HardwareOptions | None = None
+    hardwareOptions: HardwareOptions | None = None,
+    optimizerOptions: OptimizerOptions | None = None,
 ) -> list[list[float]]:
-    """Optimize conformers for multiple molecules using MMFF force field with BFGS minimization.
+    """Optimize conformers for multiple molecules using MMFF force field with selectable minimization backend.
     
     This function performs GPU-accelerated MMFF optimization on multiple molecules with
     multiple conformers each. It uses CUDA for GPU acceleration and OpenMP for CPU
@@ -47,6 +48,8 @@ def MMFFOptimizeMoleculesConfs(
         nonBondedThreshold: Radius threshold for non-bonded interactions in Ångströms (default: 100.0)
         numThreads: Number of OpenMP threads for parallel processing (default: 1)
         batchSize: Batch size for processing conformers, 0 for no batching (default: 0)
+        hardwareOptions: Hardware tuning options for GPU execution (default: auto)
+        optimizerOptions: Numerical optimizer selection and configuration (default: BFGS backend)
     
     Returns:
         List of lists of energies, where each inner list contains the optimized energies
@@ -94,9 +97,15 @@ def MMFFOptimizeMoleculesConfs(
     if hardwareOptions is None:
         hardwareOptions = HardwareOptions()
     native_options = hardwareOptions._as_native()
+
+    if optimizerOptions is None:
+        optimizerOptions = OptimizerOptions()
+    native_optimizer_options = optimizerOptions._as_native()
+
     return _mmffOptimization.MMFFOptimizeMoleculesConfs(
         molecules,
         maxIters,
         nonBondedThreshold,
-        native_options
+        native_options,
+        native_optimizer_options,
     )

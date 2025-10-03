@@ -14,9 +14,11 @@
 # limitations under the License.
 
 """Types facilitating GPU-accelerated operations."""
+import enum
 import torch
 from typing import Iterable, List
 from nvmolkit import _embedMolecules  # type: ignore
+from nvmolkit import _mmffOptimization  # type: ignore
 
 
 class HardwareOptions:
@@ -87,6 +89,44 @@ class HardwareOptions:
     def _as_native(self):
         """Internal: return the underlying BatchHardwareOptions object."""
         return self._native
+
+
+class OptimizerBackend(enum.Enum):
+    """Enumeration of supported MMFF optimizer backends."""
+
+    BFGS = _mmffOptimization.OptimizerBackend.BFGS
+    FIRE = _mmffOptimization.OptimizerBackend.FIRE
+
+
+class OptimizerOptions:
+    """Configures the MMFF minimizer backend.
+
+    Parameters:
+        backend: Choice of numerical optimizer. Use ``OptimizerBackend.BFGS`` for
+            BFGS (default) or ``OptimizerBackend.FIRE`` for the
+            Fast Inertial Relaxation Engine.
+    """
+
+    def __init__(self, backend: OptimizerBackend | None = None) -> None:
+        self._native = _mmffOptimization.OptimizerOptions()
+        if backend is not None:
+            self._native.backend = backend.value
+
+    @property
+    def backend(self) -> OptimizerBackend:
+        """Selected optimizer backend."""
+        return OptimizerBackend(self._native.backend)
+
+    @backend.setter
+    def backend(self, value: OptimizerBackend | int) -> None:
+        backend = OptimizerBackend(value) if not isinstance(value, OptimizerBackend) else value
+        self._native.backend = backend.value
+
+
+    def _as_native(self):
+        """Internal: return the underlying OptimizerOptions object."""
+        return self._native
+
 
 class AsyncGpuResult:
     """Handle to a GPU result.
