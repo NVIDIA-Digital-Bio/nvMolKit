@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cooperative_groups.h>
+
 #include <cub/cub.cuh>
 #include <numeric>
 
@@ -100,7 +102,7 @@ __global__ void fireV1Kernel(const cuda::std::span<const int> atomStarts,
   __shared__ BlockReduce::TempStorage tempStorage;
   const double                        powerSum = BlockReduce(tempStorage).Sum(power);
   block.sync();  // To reuse the temp storage.
-  const double maxGradReduced = BlockReduce(tempStorage).Reduce(maxGrad, cuda::maximum<>{});
+  const double maxGradReduced = BlockReduce(tempStorage).Reduce(maxGrad, cub::Max());
 
   // -----------------------------------------------------------------
   // Update counting vars, alphas and dt based on powerSum.
@@ -322,18 +324,18 @@ bool FireBatchMinimizer::step(const double                  gradTol,
   return numFinished == numSystems;
 }
 
-bool FireBatchMinimizer::minimize(const int                     numIters,
-                                  const double                  gradTol,
-                                  const std::vector<int>&       atomStartsHost,
-                                  const AsyncDeviceVector<int>& atomStarts,
-                                  AsyncDeviceVector<double>&    positions,
-                                  AsyncDeviceVector<double>&    grad,
-                                  AsyncDeviceVector<double>&    energyOuts,
-                                  AsyncDeviceVector<double>&    energyBuffer,
-                                  EnergyFunctor                 eFunc,
-                                  const GradFunctor             gFunc,
-                                  const uint8_t*                activeThisStage) {
-  initialize(atomStartsHost);
+bool FireBatchMinimizer::minimize(const int                                   numIters,
+                                  const double                                gradTol,
+                                  const std::vector<int>&                     atomStartsHost,
+                                  const AsyncDeviceVector<int>&               atomStarts,
+                                  AsyncDeviceVector<double>&                  positions,
+                                  AsyncDeviceVector<double>&                  grad,
+                                  [[maybe_unused]] AsyncDeviceVector<double>& energyOuts,
+                                  [[maybe_unused]] AsyncDeviceVector<double>& energyBuffer,
+                                  [[maybe_unused]] EnergyFunctor              eFunc,
+                                  const GradFunctor                           gFunc,
+                                  const uint8_t*                              activeThisStage) {
+  initialize(atomStartsHost, activeThisStage);
 
   for (int i = 0; i < numIters; ++i) {
     if (step(gradTol, atomStarts, positions, grad, gFunc)) {

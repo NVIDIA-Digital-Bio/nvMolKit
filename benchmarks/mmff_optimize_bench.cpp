@@ -19,9 +19,11 @@
 #include <GraphMol/SmilesParse/SmilesParse.h>
 #include <nanobench.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <random>
 
 #include "../tests/test_utils.h"
@@ -84,10 +86,23 @@ std::vector<double> benchRDKit(const std::vector<RDKit::ROMol*>& mols,
   return energies;
 }
 
-std::vector<double> benchNvMolKit(const std::vector<RDKit::ROMol*>& mols,
-                                  const int                         size,
-                                  const int                         numConfs,
-                                  const int                         maxIters) {
+std::optional<nvMolKit::MMFF::OptimizerOptions::Backend> parseMinimizerArg(const std::string& arg) {
+  std::string s = arg;
+  std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+  if (s == "bfgs") {
+    return nvMolKit::MMFF::OptimizerOptions::Backend::BFGS;
+  }
+  if (s == "fire") {
+    return nvMolKit::MMFF::OptimizerOptions::Backend::FIRE;
+  }
+  return std::nullopt;
+}
+
+std::vector<double> benchNvMolKit(const std::vector<RDKit::ROMol*>&         mols,
+                                  const int                                 size,
+                                  const int                                 numConfs,
+                                  const int                                 maxIters,
+                                  nvMolKit::MMFF::OptimizerOptions::Backend minimizer) {
   std::vector<RDKit::ROMol> molsToBench;
   for (const auto& mol : mols) {
     if (static_cast<int>(mol->getNumAtoms()) == size) {
@@ -100,13 +115,21 @@ std::vector<double> benchNvMolKit(const std::vector<RDKit::ROMol*>& mols,
     throw std::runtime_error("No molecules found with the specified size");
   }
 
-  std::string benchName = "nvMolKit, mol_size=" + std::to_string(size) + ", num_confs=" + std::to_string(numConfs);
+  std::string benchName = "nvMolKit, minimizer=" +
+                          std::string(minimizer == nvMolKit::MMFF::OptimizerOptions::Backend::BFGS ? "BFGS" : "FIRE") +
+                          ", mol_size=" + std::to_string(size) + ", num_confs=" + std::to_string(numConfs);
 
   genNConformers(molsToBench[0], numConfs);
   std::vector<double>        energies;
   std::vector<RDKit::ROMol*> molsToBenchPtrs = {&molsToBench[0]};
   ankerl::nanobench::Bench().epochIterations(1).epochs(1).run(benchName, [&]() {
-    energies = nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molsToBenchPtrs, maxIters)[0];
+    nvMolKit::MMFF::OptimizerOptions optimizerOptions;
+    optimizerOptions.backend = minimizer;
+    energies                 = nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molsToBenchPtrs,
+                                                              maxIters,
+                                                              100.0,
+                                                              nvMolKit::BatchHardwareOptions{},
+                                                              optimizerOptions)[0];
   });
   return energies;
 }
@@ -116,7 +139,7 @@ enum class datasets {
   chembl
 };
 
-void runMMFFBench(int s, int n) {
+void runMMFFBench(int s, int n, nvMolKit::MMFF::OptimizerOptions::Backend minimizer) {
   const std::string                          fileName = getTestDataFolderPath() + "/MMFF94_hypervalent.sdf";
   std::vector<std::unique_ptr<RDKit::ROMol>> mols;
   getMols(fileName, mols);
@@ -126,11 +149,11 @@ void runMMFFBench(int s, int n) {
   }
   constexpr int maxIters = 1000;
   printf("Warming up\n");
-  benchNvMolKit(molsPtrs, 10, 100, maxIters);
+  benchNvMolKit(molsPtrs, 10, 100, maxIters, minimizer);
   benchRDKit(molsPtrs, 10, 100, maxIters);
   printf("Warmed up\n");
   if (s != -1 && n != -1) {
-    std::vector<double>                    nvmolkitRes = benchNvMolKit(molsPtrs, s, n, maxIters);
+    std::vector<double>                    nvmolkitRes = benchNvMolKit(molsPtrs, s, n, maxIters, minimizer);
     std::vector<double>                    rdkitRes    = benchRDKit(molsPtrs, s, n, maxIters);
     // Compare the two, count number of differences greater than 1e-3
     int                                    numDiffs    = 0;
@@ -157,7 +180,7 @@ void runMMFFBench(int s, int n) {
   const std::vector<int> numConfs = {220, 240, 260, 280, 300};
   for (const auto size : molSizes) {
     for (const auto numConf : numConfs) {
-      std::vector<double> nvmolkitRes = benchNvMolKit(molsPtrs, size, numConf, maxIters);
+      std::vector<double> nvmolkitRes = benchNvMolKit(molsPtrs, size, numConf, maxIters, minimizer);
       std::vector<double> rdkitRes    = benchRDKit(molsPtrs, size, numConf, maxIters);
 
       // Compare the two, count number of differences greater than 1e-3
@@ -175,7 +198,11 @@ void runMMFFBench(int s, int n) {
   }
 }
 
-void benchChembl(int size, int numConfs, const std::string& path, const int maxIters) {
+void benchChembl(int                                       size,
+                 int                                       numConfs,
+                 const std::string&                        path,
+                 const int                                 maxIters,
+                 nvMolKit::MMFF::OptimizerOptions::Backend minimizer) {
   // Open a csv file, parse the first line, first entry
   std::ifstream file(path + "/molecules_" + std::to_string(size) + "_atoms.csv");
   if (!file.is_open()) {
@@ -216,12 +243,20 @@ void benchChembl(int size, int numConfs, const std::string& path, const int maxI
   genNConformers(nvmolkitMol, numConfs);
   genNConformers(rdkitMol, numConfs);
 
-  std::string benchName      = "nvMolKit, mol_size=" + std::to_string(size) + ", num_confs=" + std::to_string(numConfs);
+  std::string benchName = "nvMolKit, minimizer=" +
+                          std::string(minimizer == nvMolKit::MMFF::OptimizerOptions::Backend::BFGS ? "BFGS" : "FIRE") +
+                          ", mol_size=" + std::to_string(size) + ", num_confs=" + std::to_string(numConfs);
   std::string benchNamerdkit = "RDKit, mol_size=" + std::to_string(size) + ", num_confs=" + std::to_string(numConfs);
 
   std::vector<RDKit::ROMol*> molsToBenchPtrs = {&nvmolkitMol};
   ankerl::nanobench::Bench().epochIterations(1).epochs(1).run(benchName, [&]() {
-    nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molsToBenchPtrs, maxIters);
+    nvMolKit::MMFF::OptimizerOptions optimizerOptions;
+    optimizerOptions.backend = minimizer;
+    nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molsToBenchPtrs,
+                                                   maxIters,
+                                                   100.0,
+                                                   nvMolKit::BatchHardwareOptions{},
+                                                   optimizerOptions);
   });
 
   std::vector<std::pair<int, double>> res;
@@ -232,23 +267,23 @@ void benchChembl(int size, int numConfs, const std::string& path, const int maxI
   // Validate:
 }
 
-void runChemblBench(int s, int n) {
+void runChemblBench(int s, int n, nvMolKit::MMFF::OptimizerOptions::Backend minimizer) {
   const std::string       folder   = "/home/kevin/omg/datasets/chembl/discrete_sizes";
   constexpr int           maxIters = 200;
   static std::vector<int> molSizes = {60, 70, 80, 90, 100};
   static std::vector<int> numConfs = {20, 40, 60, 80, 100, 120, 140, 160, 180, 200, 220, 240, 260, 280, 300};
   printf("Warming up\n");
 
-  benchChembl(60, 20, folder, maxIters);
+  benchChembl(60, 20, folder, maxIters, minimizer);
   printf("Warmed up\n");
   if (s != -1 && n != -1) {
-    benchChembl(s, n, folder, maxIters);
+    benchChembl(s, n, folder, maxIters, minimizer);
     return;
   }
 
   for (const auto size : molSizes) {
     for (const auto numConf : numConfs) {
-      benchChembl(size, numConf, folder, maxIters);
+      benchChembl(size, numConf, folder, maxIters, minimizer);
     }
   }
 }
@@ -260,20 +295,39 @@ int main(int argc, char* argv[]) {
   }
   auto dataset_selected = dataset == "chembl" ? datasets::chembl : datasets::mmff_validation;
 
-  int size     = -1;
-  int numConfs = -1;
-  if (argc == 4) {
+  int                                       size      = -1;
+  int                                       numConfs  = -1;
+  nvMolKit::MMFF::OptimizerOptions::Backend minimizer = nvMolKit::MMFF::OptimizerOptions::Backend::BFGS;
+  if (argc >= 4) {
     printf("Using size %s and numConfs %s\n", argv[2], argv[3]);
     size     = std::stoi(argv[2]);
     numConfs = std::stoi(argv[3]);
+    if (argc >= 5) {
+      const auto minimizerParsed = parseMinimizerArg(argv[4]);
+      if (!minimizerParsed.has_value()) {
+        std::cerr << "Invalid minimizer '" << argv[4] << "'. Expected BFGS or FIRE\n";
+        return 1;
+      }
+      minimizer = *minimizerParsed;
+    }
+  } else if (argc == 3) {
+    const auto minimizerParsed = parseMinimizerArg(argv[2]);
+    if (!minimizerParsed.has_value()) {
+      std::cerr << "Invalid minimizer '" << argv[2] << "'. Expected BFGS or FIRE\n";
+      return 1;
+    }
+    minimizer = *minimizerParsed;
   }
+
+  std::cout << "Minimizer: " << (minimizer == nvMolKit::MMFF::OptimizerOptions::Backend::BFGS ? "BFGS" : "FIRE")
+            << std::endl;
 
   if (dataset_selected == datasets::mmff_validation) {
     std::cout << "Running MMFF validation benchmarks" << std::endl;
-    runMMFFBench(size, numConfs);
+    runMMFFBench(size, numConfs, minimizer);
   } else {
     std::cout << "Running Chembl benchmarks" << std::endl;
-    runChemblBench(size, numConfs);
+    runChemblBench(size, numConfs, minimizer);
   }
 
   return 0;

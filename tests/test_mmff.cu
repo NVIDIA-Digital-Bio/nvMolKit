@@ -1602,7 +1602,7 @@ std::unique_ptr<RDKit::RWMol> createHydroCarbon(const int    numCarbons,
   mol->addConformer(conf);
 
   auto addAtomWithPosition = [&](const int atomicNumber, const RDGeom::Point3D& position) {
-    const int         idx     = mol->addAtom(new RDKit::Atom(atomicNumber), true, true);
+    const size_t      idx     = mol->addAtom(new RDKit::Atom(atomicNumber), true, true);
     RDKit::Conformer& confRef = mol->getConformer();
     if (confRef.getNumAtoms() <= idx) {
       confRef.resize(idx + 1);
