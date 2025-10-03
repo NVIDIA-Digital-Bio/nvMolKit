@@ -676,6 +676,12 @@ bool prepareEmbedderArgs(ROMol&                                      mol,
     throw ValueErrorException("molecule has no atoms");
   }
 
+  if (params.ETversion < 1 || params.ETversion > 2) {
+    throw ValueErrorException(
+      "Only version 1 and 2 of the experimental "
+      "torsion-angle preferences (ETversion) supported");
+  }
+
   if (MolOps::needsHs(mol)) {
     BOOST_LOG(rdWarningLog) << "Molecule does not have explicit Hs. Consider calling AddHs()\n";
   }

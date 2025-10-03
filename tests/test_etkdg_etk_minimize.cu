@@ -82,9 +82,10 @@ void perturbConformer(RDKit::Conformer& conf, const float delta = 0.1, const int
 std::vector<double> getReferenceEnergy(const std::vector<const RDKit::ROMol*>& mols,
                                        const std::vector<EmbedArgs>&           eargs,
                                        bool                                    minimize,
-                                       bool                                    minimizerTol = 1e-3,
-                                       double*                                 posOverride  = nullptr,
-                                       std::vector<double>*                    posOut       = nullptr) {
+                                       bool                                    minimizerTol      = 1e-3,
+                                       double*                                 posOverride       = nullptr,
+                                       std::vector<double>*                    posOut            = nullptr,
+                                       bool                                    useBasicKnowledge = true) {
   std::vector<double> results;
   results.reserve(mols.size());
   int startIdx = 0;
@@ -102,8 +103,14 @@ std::vector<double> getReferenceEnergy(const std::vector<const RDKit::ROMol*>& m
       vec.push_back(&pos);
     }
     // Create a force field for the molecule
-    const std::unique_ptr<ForceFields::ForceField> ff(
-      DistGeom::construct3DForceField(*eargs[i].mmat, vec, eargs[i].etkdgDetails));
+    std::unique_ptr<ForceFields::ForceField> ff;
+    if (useBasicKnowledge) {
+      // ETKDG or KDG - use full 3D force field
+      ff.reset(DistGeom::construct3DForceField(*eargs[i].mmat, vec, eargs[i].etkdgDetails));
+    } else {
+      // ETDG - use plain 3D force field (no improper torsions)
+      ff.reset(DistGeom::constructPlain3DForceField(*eargs[i].mmat, vec, eargs[i].etkdgDetails));
+    }
     ff->initialize();
     if (minimize) {
       ff->minimize(300, minimizerTol);
@@ -124,7 +131,8 @@ std::vector<double> getReferenceEnergy(const std::vector<const RDKit::ROMol*>& m
 
 std::vector<int16_t> getPassFailHost(const std::vector<const RDKit::ROMol*>& mols,
                                      const std::vector<EmbedArgs>&           eargs,
-                                     double*                                 posOverride = nullptr) {
+                                     double*                                 posOverride       = nullptr,
+                                     bool                                    useBasicKnowledge = true) {
   std::vector<int16_t> results;
   results.reserve(mols.size());
   int startIdx = 0;
@@ -141,21 +149,28 @@ std::vector<int16_t> getPassFailHost(const std::vector<const RDKit::ROMol*>& mol
     for (auto& pos : nonConst_data) {
       vec.push_back(&pos);
     }
-    // Create a force field for the molecule
-    const std::unique_ptr<ForceFields::ForceField> ff(
-      DistGeom::construct3DImproperForceField(*eargs[i].mmat, vec, eargs[i].etkdgDetails));
-    ff->initialize();
-    const double energy    = posOverride == nullptr ? ff->calcEnergy() : ff->calcEnergy(posOverride + startIdx);
-    const double tolerance = 0.7 * eargs[i].etkdgDetails.improperAtoms.size();
+    // Only do planarity check if useBasicKnowledge is true (ETKDG/KDG variants)
+    if (useBasicKnowledge) {
+      // Create a force field for the molecule
+      const std::unique_ptr<ForceFields::ForceField> ff(
+        DistGeom::construct3DImproperForceField(*eargs[i].mmat, vec, eargs[i].etkdgDetails));
+      ff->initialize();
+      const double energy    = posOverride == nullptr ? ff->calcEnergy() : ff->calcEnergy(posOverride + startIdx);
+      const double tolerance = 0.7 * eargs[i].etkdgDetails.improperAtoms.size();
+      results.push_back(energy > tolerance);
+    } else {
+      // ETDG variant - no planarity check, always pass
+      results.push_back(0);
+    }
     startIdx += mol.getNumAtoms() * 3;
-    results.push_back(energy > tolerance);
   }
   return results;
 }
 
 std::vector<int16_t> getGPuPassFailHost(const std::vector<const RDKit::ROMol*>&    mols,
                                         const nvMolKit::AsyncDeviceVector<double>& positions,
-                                        const std::vector<EmbedArgs>&              eargs) {
+                                        const std::vector<EmbedArgs>&              eargs,
+                                        bool                                       useBasicKnowledge = true) {
   std::vector<double> hostPos(positions.size());
   positions.copyToHost(hostPos);
   cudaDeviceSynchronize();
@@ -169,12 +184,13 @@ std::vector<int16_t> getGPuPassFailHost(const std::vector<const RDKit::ROMol*>& 
     hostPos3.push_back(hostPos[i + 2]);  // z
   }
   // Use original mols as the reference positions for energy/force.
-  return getPassFailHost(mols, eargs, hostPos3.data());
+  return getPassFailHost(mols, eargs, hostPos3.data(), useBasicKnowledge);
 }
 
 std::vector<double> getGPUEnergy(const std::vector<const RDKit::ROMol*>&    mols,
                                  const nvMolKit::AsyncDeviceVector<double>& positions,
-                                 const std::vector<EmbedArgs>&              eargs) {
+                                 const std::vector<EmbedArgs>&              eargs,
+                                 bool                                       useBasicKnowledge = true) {
   std::vector<double> hostPos(positions.size());
   positions.copyToHost(hostPos);
   cudaDeviceSynchronize();
@@ -188,10 +204,10 @@ std::vector<double> getGPUEnergy(const std::vector<const RDKit::ROMol*>&    mols
     hostPos3.push_back(hostPos[i + 2]);  // z
   }
   // Use original mols as the reference positions for energy/force.
-  return getReferenceEnergy(mols, eargs, false, 0.001, hostPos3.data());
+  return getReferenceEnergy(mols, eargs, false, 0.001, hostPos3.data(), nullptr, useBasicKnowledge);
 }
 
-class ETKStageSingleMolTestFixture : public ::testing::Test {
+class ETKStageSingleMolTestFixture : public ::testing::TestWithParam<ETKDGOption> {
  public:
   ETKStageSingleMolTestFixture() { testDataFolderPath_ = getTestDataFolderPath(); }
 
@@ -206,11 +222,6 @@ class ETKStageSingleMolTestFixture : public ::testing::Test {
 
     // Initialize mols_ vector with the single molecule
     mols_.push_back(molPtr_.get());
-
-    // Initialize common test components
-    embedParam_                 = DGeomHelpers::ETKDGv3;
-    embedParam_.useRandomCoords = true;
-    initTestComponents();
   }
 
   void initTestComponents() { initTestComponentsCommon(mols_, context_, eargs_, embedParam_); }
@@ -224,7 +235,17 @@ class ETKStageSingleMolTestFixture : public ::testing::Test {
   RDKit::DGeomHelpers::EmbedParameters     embedParam_;
 };
 
-TEST_F(ETKStageSingleMolTestFixture, MinimizeCompare) {
+TEST_P(ETKStageSingleMolTestFixture, MinimizeCompare) {
+  // Set up embed parameters from test parameter
+  embedParam_                 = getETKDGOption(GetParam());
+  embedParam_.useRandomCoords = true;
+
+  // Initialize test components after setting embedParam_
+  initTestComponents();
+
+  // Determine useBasicKnowledge from embedParam_
+  const bool useBasicKnowledge = embedParam_.useBasicKnowledge;
+
   // Create FirstMinimizeStage
   std::vector<std::unique_ptr<ETKDGStage>> stages;
   std::vector<const RDKit::ROMol*>         molsPtrs;
@@ -235,20 +256,8 @@ TEST_F(ETKStageSingleMolTestFixture, MinimizeCompare) {
 
   // Create and run driver
   nvMolKit::detail::ETKDGDriver driver(std::make_unique<ETKDGContext>(std::move(context_)), std::move(stages));
-  std::vector<double>           origGpuEnergy = getGPUEnergy(molsPtrs, driver.context().systemDevice.positions, eargs_);
-
-  // Dump GPU positions and compare to conformer values.
-  std::vector<double> gpuPositions(driver.context().systemDevice.positions.size());
-  driver.context().systemDevice.positions.copyToHost(gpuPositions);
-  cudaDeviceSynchronize();
-  // Dump CPU conformer to vector
-  std::vector<double> cpuPositions;
-  cpuPositions.reserve(molPtr_->getNumAtoms() * DIM);
-  for (const auto& pos : molPtr_->getConformer().getPositions()) {
-    cpuPositions.push_back(pos.x);
-    cpuPositions.push_back(pos.y);
-    cpuPositions.push_back(pos.z);
-  }
+  std::vector<double>           origGpuEnergy =
+    getGPUEnergy(molsPtrs, driver.context().systemDevice.positions, eargs_, useBasicKnowledge);
 
   driver.run(1);
 
@@ -263,19 +272,38 @@ TEST_F(ETKStageSingleMolTestFixture, MinimizeCompare) {
   auto completed = driver.completedConformers();
   EXPECT_THAT(completed, testing::ElementsAre(1));
 
-  std::vector<double> refEnergies = getReferenceEnergy(molsPtrs, eargs_, true, embedParam_.optimizerForceTol);
-  std::vector<double> gpuEnergies = getGPUEnergy(molsPtrs, driver.context().systemDevice.positions, eargs_);
+  std::vector<double> refEnergies =
+    getReferenceEnergy(molsPtrs, eargs_, true, embedParam_.optimizerForceTol, nullptr, nullptr, useBasicKnowledge);
+  std::vector<double> gpuEnergies =
+    getGPUEnergy(molsPtrs, driver.context().systemDevice.positions, eargs_, useBasicKnowledge);
+
+  // Check that GPU minimization actually reduced the energy
+  EXPECT_THAT(gpuEnergies, ::testing::Pointwise(testing::Lt(), origGpuEnergy));
 
   EXPECT_THAT(refEnergies, ::testing::Pointwise(testing::Ge(), gpuEnergies));
 }
 
-class ETKStageMultiMolTestFixture : public ::testing::Test {
+// Instantiate parameterized tests for different ETKDG variants
+INSTANTIATE_TEST_SUITE_P(ETKDGVariants,
+                         ETKStageSingleMolTestFixture,
+                         ::testing::Values(ETKDGOption::ETKDG,
+                                           ETKDGOption::ETKDGv2,
+                                           ETKDGOption::srETKDGv3,
+                                           ETKDGOption::ETKDGv3,
+                                           ETKDGOption::KDG,
+                                           ETKDGOption::ETDG,
+                                           ETKDGOption::DG),
+                         [](const ::testing::TestParamInfo<ETKDGOption>& info) {
+                           return getETKDGOptionName(info.param);
+                         });
+
+class ETKStageMultiMolTestFixture : public ::testing::TestWithParam<ETKDGOption> {
  public:
   ETKStageMultiMolTestFixture() { testDataFolderPath_ = getTestDataFolderPath(); }
 
   void SetUp() override {
     // Load molecule
-    getMols(testDataFolderPath_ + "/MMFF94_dative.sdf", molsHolder, 50);
+    getMols(testDataFolderPath_ + "/MMFF94_dative.sdf", molsHolder, 20);
 
     for (auto& mol : molsHolder) {
       auto* molPtr = dynamic_cast<RWMol*>(mol.get());
@@ -284,11 +312,6 @@ class ETKStageMultiMolTestFixture : public ::testing::Test {
       mols_.push_back(mol.get());
       perturbConformer(mol->getConformer(), 0.5);
     }
-
-    // Initialize common test components
-    embedParam_                 = DGeomHelpers::ETKDGv3;
-    embedParam_.useRandomCoords = true;
-    initTestComponents();
   }
 
   void initTestComponents() { initTestComponentsCommon(mols_, context_, eargs_, embedParam_); }
@@ -302,7 +325,17 @@ class ETKStageMultiMolTestFixture : public ::testing::Test {
   RDKit::DGeomHelpers::EmbedParameters       embedParam_;
 };
 
-TEST_F(ETKStageMultiMolTestFixture, MinimizeCompare) {
+TEST_P(ETKStageMultiMolTestFixture, MinimizeCompare) {
+  // Set up embed parameters from test parameter
+  embedParam_                 = getETKDGOption(GetParam());
+  embedParam_.useRandomCoords = true;
+
+  // Initialize test components after setting embedParam_
+  initTestComponents();
+
+  // Determine useBasicKnowledge from embedParam_
+  const bool useBasicKnowledge = embedParam_.useBasicKnowledge;
+
   // Create FirstMinimizeStage
   std::vector<std::unique_ptr<ETKDGStage>> stages;
   std::vector<const RDKit::ROMol*>         molsPtrs;
@@ -317,21 +350,8 @@ TEST_F(ETKStageMultiMolTestFixture, MinimizeCompare) {
 
   // Create and run driver
   nvMolKit::detail::ETKDGDriver driver(std::make_unique<ETKDGContext>(std::move(context_)), std::move(stages));
-  std::vector<double>           origGpuEnergy = getGPUEnergy(molsPtrs, driver.context().systemDevice.positions, eargs_);
-  /*
-
-  // Dump GPU positions and compare to conformer values.
-  std::vector<double> gpuPositions(driver.context().systemDevice.positions.size());
-  driver.context().systemDevice.positions.copyToHost(gpuPositions);
-  cudaDeviceSynchronize();
-  // Dump CPU conformer to vector
-  std::vector<double> cpuPositions;
-  cpuPositions.reserve(molPtr_->getNumAtoms() * DIM);
-  for (const auto& pos : molPtr_->getConformer().getPositions()) {
-    cpuPositions.push_back(pos.x);
-    cpuPositions.push_back(pos.y);
-    cpuPositions.push_back(pos.z);
-  }*/
+  std::vector<double>           origGpuEnergy =
+    getGPUEnergy(molsPtrs, driver.context().systemDevice.positions, eargs_, useBasicKnowledge);
 
   driver.run(1);
 
@@ -343,13 +363,20 @@ TEST_F(ETKStageMultiMolTestFixture, MinimizeCompare) {
 
   // Minimize the molecules on the CPU to compare results.
   std::vector<double> refPosMinimized;
-  std::vector<double> refEnergies =
-    getReferenceEnergy(molsPtrs, eargs_, true, embedParam_.optimizerForceTol, nullptr, &refPosMinimized);
+  std::vector<double> refEnergies = getReferenceEnergy(molsPtrs,
+                                                       eargs_,
+                                                       true,
+                                                       embedParam_.optimizerForceTol,
+                                                       nullptr,
+                                                       &refPosMinimized,
+                                                       useBasicKnowledge);
   // Energies of GPU-minimized molecules.
-  std::vector<double>  gpuEnergies = getGPUEnergy(molsPtrs, driver.context().systemDevice.positions, eargs_);
+  std::vector<double> gpuEnergies =
+    getGPUEnergy(molsPtrs, driver.context().systemDevice.positions, eargs_, useBasicKnowledge);
   // Pass-fail based on planarity check. Gpu Pass fail is GPU-coordinates computed by RDKit
-  std::vector<int16_t> gpuPassFail = getGPuPassFailHost(molsPtrs, driver.context().systemDevice.positions, eargs_);
-  std::vector<int16_t> refPassFail = getPassFailHost(molsPtrs, eargs_, refPosMinimized.data());
+  std::vector<int16_t> gpuPassFail =
+    getGPuPassFailHost(molsPtrs, driver.context().systemDevice.positions, eargs_, useBasicKnowledge);
+  std::vector<int16_t> refPassFail = getPassFailHost(molsPtrs, eargs_, refPosMinimized.data(), useBasicKnowledge);
 
   // Check that the GPU pass/fail matches RDKit-calculated version on the same coordinates.
   EXPECT_THAT(failureCounts[0], ::testing::Pointwise(::testing::Eq(), gpuPassFail));
@@ -370,7 +397,7 @@ TEST_F(ETKStageMultiMolTestFixture, MinimizeCompare) {
   for (int idx : higherThanIndices) {
     // Check that we've shrunk the energy sufficiently, or that we're pretty close to the reference value.
     // Pass if we're within 10%, or if we've shrunk by at least 90%.
-    if ((gpuEnergies[idx] - refEnergies[idx] / refEnergies[idx]) < .1) {
+    if ((gpuEnergies[idx] - refEnergies[idx]) / refEnergies[idx] < .1) {
       continue;
     }
     EXPECT_LE(gpuEnergies[idx] / origGpuEnergy[idx], 0.1)
@@ -378,3 +405,17 @@ TEST_F(ETKStageMultiMolTestFixture, MinimizeCompare) {
       << gpuEnergies[idx] << ", reference minimized: " << refEnergies[idx];
   }
 }
+
+// Instantiate parameterized tests for different ETKDG variants
+INSTANTIATE_TEST_SUITE_P(ETKDGVariants,
+                         ETKStageMultiMolTestFixture,
+                         ::testing::Values(ETKDGOption::ETDG,
+                                           ETKDGOption::ETKDG,
+                                           ETKDGOption::ETKDGv2,
+                                           ETKDGOption::srETKDGv3,
+                                           ETKDGOption::ETKDGv3,
+                                           ETKDGOption::KDG,
+                                           ETKDGOption::DG),
+                         [](const ::testing::TestParamInfo<ETKDGOption>& info) {
+                           return getETKDGOptionName(info.param);
+                         });

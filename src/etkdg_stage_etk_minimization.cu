@@ -106,7 +106,11 @@ ETKMinimizationStage::ETKMinimizationStage(const std::vector<const RDKit::ROMol*
     // Note if we actually cared about the positions for this setup, the 3D/4D stride would be off, but
     // we override the reference positions at execute time.
     // TODO: Fix 3D/4D stride issue anyway for clarity.
-    auto        ffParams = nvMolKit::DistGeom::construct3DForceFieldContribs(*mmat, etkdgDetails, positions, /*dim=*/3);
+    auto        ffParams     = nvMolKit::DistGeom::construct3DForceFieldContribs(*mmat,
+                                                                      etkdgDetails,
+                                                                      positions,
+                                                                      /*dim=*/3,
+                                                                      embedParam.useBasicKnowledge);
     addMoleculeToMolecularSystem3D(ffParams, ctx.systemHost.atomStarts, molSystemHost);
   }
   setupDeviceBuffers3D(molSystemHost, molSystemDevice, positions, mols.size());
@@ -146,13 +150,16 @@ void ETKMinimizationStage::execute(ETKDGContext& ctx) {
   setReferenceValues(ctx);
   // 2. Minimize via BFGS.
   // Create energy and gradient functions
+  // Use PLAIN mode for ETDG (useBasicKnowledge=false), ALL mode for ETKDG/KDG (useBasicKnowledge=true)
+  const auto etkTerm = embedParam_.useBasicKnowledge ? DistGeom::ETKTerm::ALL : DistGeom::ETKTerm::PLAIN;
+
   auto eFunc = [&](const double* pos) {
     computeEnergyETK(molSystemDevice,
                      ctx.systemDevice.atomStarts,
                      ctx.systemDevice.positions,
                      ctx.activeThisStage.data(),
                      pos,
-                     DistGeom::ETKTerm::ALL,
+                     etkTerm,
                      stream_);
   };
 
@@ -161,7 +168,7 @@ void ETKMinimizationStage::execute(ETKDGContext& ctx) {
                         ctx.systemDevice.atomStarts,
                         ctx.systemDevice.positions,
                         ctx.activeThisStage.data(),
-                        DistGeom::ETKTerm::ALL,
+                        etkTerm,
                         stream_);
   };
 
@@ -183,21 +190,23 @@ void ETKMinimizationStage::execute(ETKDGContext& ctx) {
                          gFunc,
                          ctx.activeThisStage.data());
 
-  // 3. Check planar tolerance.
-  DistGeom::computePlanarEnergy(molSystemDevice,
-                                ctx.systemDevice.atomStarts,
-                                ctx.systemDevice.positions,
-                                ctx.activeThisStage.data(),
-                                nullptr,
-                                stream_);
-  const int numSystems = ctx.systemHost.atomStarts.size() - 1;
-  planarToleranceCheck<<<(numSystems + 255) / 256, 256, 0, stream_>>>(
-    numSystems,
-    molSystemDevice.energyOuts.data(),
-    molSystemDevice.contribs.improperTorsionTerms.numImpropers.data(),
-    ctx.activeThisStage.data(),
-    ctx.failedThisStage.data());
-  cudaCheckError(cudaGetLastError());
+  // 3. Check planar tolerance (only if useBasicKnowledge is true - ETKDG/KDG variants)
+  if (embedParam_.useBasicKnowledge) {
+    DistGeom::computePlanarEnergy(molSystemDevice,
+                                  ctx.systemDevice.atomStarts,
+                                  ctx.systemDevice.positions,
+                                  ctx.activeThisStage.data(),
+                                  nullptr,
+                                  stream_);
+    const int numSystems = ctx.systemHost.atomStarts.size() - 1;
+    planarToleranceCheck<<<(numSystems + 255) / 256, 256, 0, stream_>>>(
+      numSystems,
+      molSystemDevice.energyOuts.data(),
+      molSystemDevice.contribs.improperTorsionTerms.numImpropers.data(),
+      ctx.activeThisStage.data(),
+      ctx.failedThisStage.data());
+    cudaCheckError(cudaGetLastError());
+  }
 }
 
 }  // namespace detail

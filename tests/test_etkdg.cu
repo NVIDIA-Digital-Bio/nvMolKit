@@ -34,7 +34,6 @@
 using ::nvMolKit::detail::ETKDGContext;
 using ::nvMolKit::detail::ETKDGDriver;
 using ::nvMolKit::detail::ETKDGStage;
-using ::nvMolKit::detail::initETKDGPipeline;
 
 class ProgrammableStep : public ETKDGStage {
  public:
@@ -332,9 +331,9 @@ TEST_F(ETKDGDriverTest, MultiStageMixed) {
   EXPECT_THAT(completed, testing::ElementsAre(0, 1, 1, 0));
 }
 
-class ETKDGPipelineInitTestFixture : public ::testing::Test {
+class ETKDGPipelineUpdateConformersTestFixture : public ::testing::Test {
  public:
-  ETKDGPipelineInitTestFixture() { testDataFolderPath_ = getTestDataFolderPath(); }
+  ETKDGPipelineUpdateConformersTestFixture() { testDataFolderPath_ = getTestDataFolderPath(); }
 
   void SetUp() override {
     // Load three molecules
@@ -355,75 +354,7 @@ class ETKDGPipelineInitTestFixture : public ::testing::Test {
   std::vector<RDKit::ROMol*>                 mols_;
 };
 
-TEST_F(ETKDGPipelineInitTestFixture, InitSingleMolecule) {
-  // Test with just the first molecule
-  std::vector<RDKit::ROMol*>               singleMol = {mols_[0]};
-  std::vector<nvMolKit::detail::EmbedArgs> eargs;
-  ETKDGContext                             context;
-
-  // Initialize pipeline with forced 3D dimensionality
-  nvMolKit::detail::initETKDGContext(singleMol, context);
-  initETKDGPipeline(singleMol, eargs, RDKit::DGeomHelpers::ETKDGv3, nvMolKit::DGeomHelpers::Dimensionality::DIM_4D);
-
-  // Check eargs
-  ASSERT_EQ(eargs.size(), 1);
-  EXPECT_EQ(eargs[0].dim, 4);
-
-  // Check context
-  EXPECT_EQ(context.nTotalSystems, 1);
-
-  // Check systemHost.atomStarts
-  ASSERT_EQ(context.systemHost.atomStarts.size(), 2);  // Start and end positions
-  EXPECT_EQ(context.systemHost.atomStarts[0], 0);
-  EXPECT_EQ(context.systemHost.atomStarts[1], singleMol[0]->getNumAtoms());
-
-  // Check positions
-  const size_t expectedPositionsSize = singleMol[0]->getNumAtoms() * 4;
-  ASSERT_EQ(context.systemHost.positions.size(), expectedPositionsSize);
-  // Check all positions are initialized to 0
-  std::vector<double> expectedPositions(expectedPositionsSize, 0.0);
-  EXPECT_THAT(context.systemHost.positions, testing::ElementsAreArray(expectedPositions));
-}
-
-TEST_F(ETKDGPipelineInitTestFixture, InitMultipleMolecules) {
-  std::vector<nvMolKit::detail::EmbedArgs> eargs;
-  ETKDGContext                             context;
-
-  // Initialize pipeline with forced 3D dimensionality
-  initETKDGPipeline(mols_, eargs, RDKit::DGeomHelpers::ETKDGv3, nvMolKit::DGeomHelpers::Dimensionality::DIM_4D);
-  nvMolKit::detail::initETKDGContext(mols_, context);
-  // Check eargs
-  ASSERT_EQ(eargs.size(), 3);
-  for (const auto& earg : eargs) {
-    EXPECT_EQ(earg.dim, 4);
-  }
-
-  // Calculate expected values
-  std::vector<int> expectedAtomStarts = {0};
-  int              totalAtoms         = 0;
-  for (const auto& mol : mols_) {
-    totalAtoms += mol->getNumAtoms();
-    expectedAtomStarts.push_back(totalAtoms);
-  }
-
-  // Check context
-  EXPECT_EQ(context.nTotalSystems, 3);
-
-  // Check systemHost.atomStarts
-  ASSERT_EQ(context.systemHost.atomStarts.size(), expectedAtomStarts.size());
-  for (size_t i = 0; i < expectedAtomStarts.size(); ++i) {
-    EXPECT_EQ(context.systemHost.atomStarts[i], expectedAtomStarts[i]);
-  }
-
-  // Check positions
-  const size_t expectedPositionsSize = totalAtoms * 4;
-  ASSERT_EQ(context.systemHost.positions.size(), expectedPositionsSize);
-  // Check all positions are initialized to 0
-  std::vector<double> expectedPositions(expectedPositionsSize, 0.0);
-  EXPECT_THAT(context.systemHost.positions, testing::ElementsAreArray(expectedPositions));
-}
-
-TEST_F(ETKDGPipelineInitTestFixture, UpdateConformersStage) {
+TEST_F(ETKDGPipelineUpdateConformersTestFixture, UpdateConformersStage) {
   // Create eargs with dim=3 for all molecules
   auto                                     params = DGeomHelpers::ETKDGv3;
   std::vector<nvMolKit::detail::EmbedArgs> eargs;
@@ -459,7 +390,7 @@ TEST_F(ETKDGPipelineInitTestFixture, UpdateConformersStage) {
   std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<Conformer>>> conformers;
   nvMolKit::detail::ETKDGUpdateConformersStage stage(mols_, eargs, conformers, nullptr, nullptr, -1);
   stage.execute(context);
-  for (int i = 0; i < mols_.size(); ++i) {
+  for (size_t i = 0; i < mols_.size(); ++i) {
     auto it = conformers.find(mols_[i]);
     ASSERT_NE(it, conformers.end());
     nvmolkit::addConformersToMoleculeWithPruning(*mols_[i], it->second, params);
@@ -484,7 +415,7 @@ TEST_F(ETKDGPipelineInitTestFixture, UpdateConformersStage) {
   }
 }
 
-TEST_F(ETKDGPipelineInitTestFixture, UpdateConformersStageWithInactiveMolecule) {
+TEST_F(ETKDGPipelineUpdateConformersTestFixture, UpdateConformersStageWithInactiveMolecule) {
   // Create eargs with dim=3 for all molecules
   std::vector<nvMolKit::detail::EmbedArgs> eargs;
   for (size_t i = 0; i < mols_.size(); ++i) {
@@ -521,7 +452,7 @@ TEST_F(ETKDGPipelineInitTestFixture, UpdateConformersStageWithInactiveMolecule) 
   std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<Conformer>>> conformers;
   nvMolKit::detail::ETKDGUpdateConformersStage stage(mols_, eargs, conformers, nullptr, nullptr, -1);
   stage.execute(context);
-  for (int i = 0; i < mols_.size(); ++i) {
+  for (size_t i = 0; i < mols_.size(); ++i) {
     if (i == 1) {
       continue;
     }
@@ -554,41 +485,12 @@ TEST_F(ETKDGPipelineInitTestFixture, UpdateConformersStageWithInactiveMolecule) 
   }
 }
 
-class ETKDGPipelineEnergyTestFixture : public ::testing::Test {
- public:
-  ETKDGPipelineEnergyTestFixture() { testDataFolderPath_ = getTestDataFolderPath(); }
-
-  void SetUp() override {
-    const std::string mol2FilePath = testDataFolderPath_ + "/rdkit_smallmol_1.mol2";
-    ASSERT_TRUE(std::filesystem::exists(mol2FilePath)) << "Could not find " << mol2FilePath;
-    molPtr_ = std::unique_ptr<RDKit::RWMol>(RDKit::MolFileToMol(mol2FilePath, false));
-    ASSERT_NE(molPtr_, nullptr);
-    molPtr_->clearConformers();
-    RDKit::MolOps::sanitizeMol(*molPtr_);
-
-    // Create 5 copies
-    for (int i = 0; i < 5; i++) {
-      molsPtrs_.push_back(std::make_unique<RDKit::RWMol>(*molPtr_));
-    }
-
-    // Clear conformers and sanitize all molecules and prepare mols_ vector with pointers
-    for (auto& molPtr : molsPtrs_) {
-      mols_.push_back(molPtr.get());
-    }
-    ASSERT_EQ(mols_.size(), 5) << "Expected 5 molecules";
-  }
-
- protected:
-  std::string                                testDataFolderPath_;
-  std::unique_ptr<RDKit::RWMol>              molPtr_;
-  std::vector<std::unique_ptr<RDKit::RWMol>> molsPtrs_;
-  std::vector<RDKit::ROMol*>                 mols_;
-};
-
 namespace {
 
 // Helper function to test energy improvement for molecules
-void testEnergyImprovement(const std::vector<RDKit::ROMol*>& mols, bool useBFGS, int confsPerMolecule = 1) {
+void testEnergyImprovement(const std::vector<RDKit::ROMol*>&    mols,
+                           int                                  confsPerMolecule = 1,
+                           RDKit::DGeomHelpers::EmbedParameters params           = RDKit::DGeomHelpers::ETKDGv3) {
   // Store initial energies for each molecule
   std::vector<double> initialEnergies;
   initialEnergies.reserve(mols.size());
@@ -602,7 +504,7 @@ void testEnergyImprovement(const std::vector<RDKit::ROMol*>& mols, bool useBFGS,
     std::vector<std::unique_ptr<RDGeom::Point>> positions;
     std::unique_ptr<ForceFields::ForceField>    field;
 
-    // Setup force field with ETKDGv3 option
+    // Use RDKit's default first minimization force field for energy comparison
     auto option = RDKit::DGeomHelpers::ETKDGv3;
     nvMolKit::DGeomHelpers::setupRDKitFFWithPos(mol, option, field, eargs, positions);
 
@@ -613,20 +515,15 @@ void testEnergyImprovement(const std::vector<RDKit::ROMol*>& mols, bool useBFGS,
   }
 
   // Run embedding for all molecules
-  RDKit::DGeomHelpers::EmbedParameters params = RDKit::DGeomHelpers::ETKDGv3;
-  params.useRandomCoords                      = true;
-  params.basinThresh                          = 1e8;
+  params.useRandomCoords = true;
+  params.basinThresh     = 1e8;
 
   nvMolKit::BatchHardwareOptions hardwareOptions;
   hardwareOptions.preprocessingThreads = 10;
   hardwareOptions.batchSize            = 100;
   hardwareOptions.batchesPerGpu        = 10;
 
-  if (useBFGS) {
-    nvMolKit::embedMolecules(mols, params, confsPerMolecule, -1, true, nullptr, hardwareOptions);
-  } else {
-    nvMolKit::embedMolecules(mols, params, confsPerMolecule, -1, true, nullptr, hardwareOptions);
-  }
+  nvMolKit::embedMolecules(mols, params, confsPerMolecule, -1, true, nullptr, hardwareOptions);
 
   // Calculate and verify final energies for each molecule and conformer
   for (size_t i = 0; i < mols.size(); ++i) {
@@ -646,6 +543,7 @@ void testEnergyImprovement(const std::vector<RDKit::ROMol*>& mols, bool useBFGS,
       std::vector<std::unique_ptr<RDGeom::Point>> positions;
       std::unique_ptr<ForceFields::ForceField>    field;
 
+      // Use RDKit's default first minimization force field for energy comparison
       auto option = RDKit::DGeomHelpers::ETKDGv3;
       nvMolKit::DGeomHelpers::setupRDKitFFWithPos(mol, option, field, eargs, positions, confId);
 
@@ -662,9 +560,10 @@ void testEnergyImprovement(const std::vector<RDKit::ROMol*>& mols, bool useBFGS,
 }
 
 // Helper function to compare conformer energies between RDKit and nvMolKit
-void testConformerEnergyComparison(const std::vector<RDKit::ROMol*>& mols,
-                                   int                               confsPerMolecule = 1,
-                                   nvMolKit::BatchHardwareOptions    hardwareOptions  = {10, 7, 10}) {
+void testConformerEnergyComparison(const std::vector<RDKit::ROMol*>&    mols,
+                                   int                                  confsPerMolecule = 1,
+                                   RDKit::DGeomHelpers::EmbedParameters params           = RDKit::DGeomHelpers::ETKDGv3,
+                                   nvMolKit::BatchHardwareOptions       hardwareOptions  = {10, 7, 10}) {
   // Create hard copies of input molecules
   std::vector<std::unique_ptr<RDKit::RWMol>> molCopies;
   std::vector<RDKit::ROMol*>                 molCopyPtrs;
@@ -672,9 +571,8 @@ void testConformerEnergyComparison(const std::vector<RDKit::ROMol*>& mols,
     molCopies.push_back(std::make_unique<RDKit::RWMol>(*mol));
     molCopyPtrs.push_back(molCopies.back().get());
   }
-  RDKit::DGeomHelpers::EmbedParameters params = RDKit::DGeomHelpers::ETKDGv3;
-  params.useRandomCoords                      = true;
-  params.basinThresh                          = 1e8;
+  params.useRandomCoords = true;
+  params.basinThresh     = 1e8;
   // Generate conformers using RDKit for copied molecules
   for (size_t i = 0; i < molCopyPtrs.size(); ++i) {
     auto*                       molCopy = molCopyPtrs[i];
@@ -707,6 +605,7 @@ void testConformerEnergyComparison(const std::vector<RDKit::ROMol*>& mols,
       std::vector<std::unique_ptr<RDGeom::Point>> positions1, positions2;
       std::unique_ptr<ForceFields::ForceField>    field1, field2;
 
+      // Use RDKit's default first minimization force field for energy comparison
       auto option = RDKit::DGeomHelpers::ETKDGv3;
       nvMolKit::DGeomHelpers::setupRDKitFFWithPos(mol, option, field1, eargs1, positions1, confId);
       nvMolKit::DGeomHelpers::setupRDKitFFWithPos(molCopy, option, field2, eargs2, positions2, confId);
@@ -726,9 +625,9 @@ void testConformerEnergyComparison(const std::vector<RDKit::ROMol*>& mols,
 
 }  // anonymous namespace
 
-class ETKDGPipelineEnergyDiverseTestFixture : public ::testing::Test {
+class ETKDGPipelineEnergyTestFixture : public ::testing::TestWithParam<ETKDGOption> {
  public:
-  ETKDGPipelineEnergyDiverseTestFixture() { testDataFolderPath_ = getTestDataFolderPath(); }
+  ETKDGPipelineEnergyTestFixture() { testDataFolderPath_ = getTestDataFolderPath(); }
 
   void SetUp() override {
     // Load multiple different molecules from MMFF94_dative.sdf
@@ -757,51 +656,61 @@ class ETKDGPipelineEnergyDiverseTestFixture : public ::testing::Test {
   std::vector<RDKit::ROMol*>                 mols_;
 };
 
-TEST_F(ETKDGPipelineEnergyDiverseTestFixture, SingleMoleculeEnergyImprovementBFGS) {
+TEST_P(ETKDGPipelineEnergyTestFixture, SingleMoleculeEnergyImprovement) {
+  auto                       params    = getETKDGOption(GetParam());
   std::vector<RDKit::ROMol*> singleMol = {mols_[0]};
-  testEnergyImprovement(singleMol, true);
+  testEnergyImprovement(singleMol, 1, params);
 }
 
-TEST_F(ETKDGPipelineEnergyDiverseTestFixture, MultipleMoleculesEnergyImprovementBFGS) {
-  testEnergyImprovement(mols_, true);
+TEST_P(ETKDGPipelineEnergyTestFixture, MultipleMoleculesEnergyImprovement) {
+  auto params = getETKDGOption(GetParam());
+  testEnergyImprovement(mols_, 1, params);
 }
 
-TEST_F(ETKDGPipelineEnergyDiverseTestFixture, SingleMoleculeMultipleConformersBFGS) {
+TEST_P(ETKDGPipelineEnergyTestFixture, SingleMoleculeMultipleConformers) {
+  auto                       params    = getETKDGOption(GetParam());
   std::vector<RDKit::ROMol*> singleMol = {mols_[0]};
-  testEnergyImprovement(singleMol, true, 5);
+  testEnergyImprovement(singleMol, 5, params);
 }
 
-TEST_F(ETKDGPipelineEnergyDiverseTestFixture, MultipleMoleculesMultipleConformersBFGS) {
-  testEnergyImprovement(mols_, true, 3);
+TEST_P(ETKDGPipelineEnergyTestFixture, MultipleMoleculesMultipleConformers) {
+  auto params = getETKDGOption(GetParam());
+  testEnergyImprovement(mols_, 3, params);
 }
 
-TEST_F(ETKDGPipelineEnergyDiverseTestFixture, SingleMoleculeConformerEnergyComparison) {
+TEST_P(ETKDGPipelineEnergyTestFixture, SingleMoleculeConformerEnergyComparison) {
+  auto                       params    = getETKDGOption(GetParam());
   std::vector<RDKit::ROMol*> singleMol = {mols_[0]};
-  testConformerEnergyComparison(singleMol);
+  testConformerEnergyComparison(singleMol, 1, params);
 }
 
-TEST_F(ETKDGPipelineEnergyDiverseTestFixture, MultipleMoleculesConformerEnergyComparison) {
-  testConformerEnergyComparison(mols_);
+TEST_P(ETKDGPipelineEnergyTestFixture, MultipleMoleculesConformerEnergyComparison) {
+  auto params = getETKDGOption(GetParam());
+  testConformerEnergyComparison(mols_, 1, params);
 }
 
-TEST_F(ETKDGPipelineEnergyDiverseTestFixture, SingleMoleculeMultipleConformersEnergyComparison) {
+TEST_P(ETKDGPipelineEnergyTestFixture, SingleMoleculeMultipleConformersEnergyComparison) {
+  auto                       params    = getETKDGOption(GetParam());
   std::vector<RDKit::ROMol*> singleMol = {mols_[0]};
-  testConformerEnergyComparison(singleMol, 10);
+  testConformerEnergyComparison(singleMol, 10, params);
 }
 
-TEST_F(ETKDGPipelineEnergyDiverseTestFixture, MultipleMoleculesMultipleConformersEnergyComparison) {
-  testConformerEnergyComparison(mols_, 10);
+TEST_P(ETKDGPipelineEnergyTestFixture, MultipleMoleculesMultipleConformersEnergyComparison) {
+  auto params = getETKDGOption(GetParam());
+  testConformerEnergyComparison(mols_, 10, params);
 }
 
-TEST_F(ETKDGPipelineEnergyDiverseTestFixture, DefaultHardwareOptionsOpenMPMaxThreads) {
+TEST_P(ETKDGPipelineEnergyTestFixture, DefaultHardwareOptionsOpenMPMaxThreads) {
   // Test using default BatchHardwareOptions which should use omp_get_max_threads()
+  auto                                 params = getETKDGOption(GetParam());
   const nvMolKit::BatchHardwareOptions defaultOptions;                   // Uses -1 values for automatic detection
   const std::vector<RDKit::ROMol*>     testMols = {mols_[0], mols_[1]};  // Use subset for efficiency
-  testConformerEnergyComparison(testMols, 2, defaultOptions);
+  testConformerEnergyComparison(testMols, 2, params, defaultOptions);
 }
 
-TEST_F(ETKDGPipelineEnergyDiverseTestFixture, SpecificGpuIds) {
+TEST_P(ETKDGPipelineEnergyTestFixture, SpecificGpuIds) {
   // Test using GPU ID 0 (should always be available if CUDA is working)
+  auto                           params = getETKDGOption(GetParam());
   nvMolKit::BatchHardwareOptions customOptions;
   customOptions.preprocessingThreads = 1;
   customOptions.batchSize            = 5;
@@ -809,16 +718,17 @@ TEST_F(ETKDGPipelineEnergyDiverseTestFixture, SpecificGpuIds) {
   customOptions.gpuIds.push_back(0);  // Use GPU 0
 
   const std::vector<RDKit::ROMol*> testMols = {mols_[0]};
-  testConformerEnergyComparison(testMols, 2, customOptions);
+  testConformerEnergyComparison(testMols, 2, params, customOptions);
 }
 
-TEST_F(ETKDGPipelineEnergyDiverseTestFixture, NonZeroGPUID) {
+TEST_P(ETKDGPipelineEnergyTestFixture, NonZeroGPUID) {
   // Requires multiple GPUs
   const int numDevices = nvMolKit::countCudaDevices();
   if (numDevices < 2) {
     GTEST_SKIP() << "Test requires multiple GPUs, only " << numDevices << " available";
   }
 
+  auto                           params = getETKDGOption(GetParam());
   nvMolKit::BatchHardwareOptions customOptions;
   customOptions.preprocessingThreads = 1;
   customOptions.batchSize            = 5;
@@ -826,16 +736,17 @@ TEST_F(ETKDGPipelineEnergyDiverseTestFixture, NonZeroGPUID) {
   customOptions.gpuIds.push_back(1);  // Use GPU 1 (second GPU)
 
   const std::vector<RDKit::ROMol*> testMols = {mols_[0]};
-  testConformerEnergyComparison(testMols, 2, customOptions);
+  testConformerEnergyComparison(testMols, 2, params, customOptions);
 }
 
-TEST_F(ETKDGPipelineEnergyDiverseTestFixture, MultiGPUSpecificIds) {
+TEST_P(ETKDGPipelineEnergyTestFixture, MultiGPUSpecificIds) {
   // Requires multiple GPUs
   const int numDevices = nvMolKit::countCudaDevices();
   if (numDevices < 2) {
     GTEST_SKIP() << "Test requires multiple GPUs, only " << numDevices << " available";
   }
 
+  auto                           params = getETKDGOption(GetParam());
   nvMolKit::BatchHardwareOptions customOptions;
   customOptions.preprocessingThreads = 1;
   customOptions.batchSize            = 5;
@@ -843,9 +754,22 @@ TEST_F(ETKDGPipelineEnergyDiverseTestFixture, MultiGPUSpecificIds) {
   customOptions.gpuIds.push_back(0);
   customOptions.gpuIds.push_back(1);
 
-  const std::vector<RDKit::ROMol*> testMols = {mols_[0], mols_[1], mols_[2]};
-  testConformerEnergyComparison(testMols, 2, customOptions);
+  testConformerEnergyComparison(mols_, 2, params, customOptions);
 }
+
+// Instantiate parameterized tests for different ETKDG variants
+INSTANTIATE_TEST_SUITE_P(ETKDGVariants,
+                         ETKDGPipelineEnergyTestFixture,
+                         ::testing::Values(ETKDGOption::ETKDG,
+                                           ETKDGOption::ETKDGv2,
+                                           ETKDGOption::srETKDGv3,
+                                           ETKDGOption::ETKDGv3,
+                                           ETKDGOption::KDG,
+                                           ETKDGOption::ETDG,
+                                           ETKDGOption::DG),
+                         [](const ::testing::TestParamInfo<ETKDGOption>& info) {
+                           return getETKDGOptionName(info.param);
+                         });
 
 TEST(ETKDGAllowsLargeMol, LargeMoleculeSoloEmbeds) {
   // Small molecules

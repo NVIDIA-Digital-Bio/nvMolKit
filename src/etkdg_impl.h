@@ -181,13 +181,6 @@ class ETKDGDriver {
 
 void initETKDGContext(const std::vector<RDKit::ROMol*>& mols, ETKDGContext& context, int confsPerMol = 1);
 
-void initETKDGPipeline(std::vector<RDKit::ROMol*>&                 mols,
-                       std::vector<EmbedArgs>&                     eargs,
-                       const RDKit::DGeomHelpers::EmbedParameters& params = RDKit::DGeomHelpers::ETKDGv3,
-                       DGeomHelpers::Dimensionality dimensionality        = DGeomHelpers::Dimensionality::DIM_4D,
-                       int                          confsPerMol           = 1,
-                       int                          numThreads            = 1);
-
 /**
  * @brief Tracks conformer generation results and dispatches molecule IDs for processing
  *
