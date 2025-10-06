@@ -33,7 +33,7 @@ add_library(Similarity similarity.cpp)
 target_link_libraries(
   Similarity
   PUBLIC CUDA::cudart device_vector
-  PRIVATE similarity_kernels ${RDKit_LIBS} device_vector device
+  PRIVATE similarity_kernels ${RDKit_LIBS} device_vector device openmp_helpers
           OpenMP::OpenMP_CXX)
 target_include_directories(Similarity PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(Similarity SYSTEM PRIVATE ${Boost_INCLUDE_DIRS})
@@ -52,7 +52,7 @@ add_library(
                     morgan_fingerprint_cpu.cpp morgan_fingerprint_common.cpp)
 target_link_libraries(
   morganFingerprint
-  PRIVATE ${RDKit_LIBS} OpenMP::OpenMP_CXX device
+  PRIVATE ${RDKit_LIBS} OpenMP::OpenMP_CXX device openmp_helpers
   PUBLIC morganFingerprintKernels)
 target_include_directories(morganFingerprint PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -108,5 +108,6 @@ target_link_libraries(
           rdkit_dist_geom_flattened
           etkdg_impl
           etkdg_stages
+          openmp_helpers
           OpenMP::OpenMP_CXX)
 target_include_directories(etkdg PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

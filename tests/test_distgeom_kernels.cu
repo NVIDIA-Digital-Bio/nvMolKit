@@ -1630,7 +1630,8 @@ TEST_F(ETK3DGpuTestFixture, CombinedEnergiesMultiMol) {
   std::vector<double> wantEnergy(molsPtrs_.size(), 0.0);
   for (size_t molIdx = 0; molIdx < molsPtrs_.size(); ++molIdx) {
     for (const auto& term : allETK3DTerms) {
-      const double e = getReferenceETK3DEnergyTerm(molsPtrs_[molIdx], term, positionsHost.data() + 3 * atomStartsHost[molIdx]);
+      const double e =
+        getReferenceETK3DEnergyTerm(molsPtrs_[molIdx], term, positionsHost.data() + 3 * atomStartsHost[molIdx]);
       wantEnergy[molIdx] += e;
     }
   }
@@ -1652,7 +1653,8 @@ TEST_F(ETK3DGpuTestFixture, CombinedGradientsMultiMol) {
   for (size_t molIdx = 0; molIdx < molsPtrs_.size(); ++molIdx) {
     std::vector<double> molGradients(4 * molsPtrs_[molIdx]->getNumAtoms(), 0.0);
     for (const auto& term : allETK3DTerms) {
-      auto termGrad = getReferenceETK3DGradientTerm(molsPtrs_[molIdx], term, positionsHost.data() + 3 * atomStartsHost[molIdx]);
+      auto termGrad =
+        getReferenceETK3DGradientTerm(molsPtrs_[molIdx], term, positionsHost.data() + 3 * atomStartsHost[molIdx]);
       for (size_t i = 0; i < molGradients.size(); ++i) {
         molGradients[i] += termGrad[i];
       }
@@ -1662,7 +1664,8 @@ TEST_F(ETK3DGpuTestFixture, CombinedGradientsMultiMol) {
 
   std::vector<std::vector<double>> gotGradSplit = splitCombinedGrads(gotGrad, atomStartsHost);
   for (size_t i = 0; i < wantGradients.size(); ++i) {
-    EXPECT_THAT(gotGradSplit[i], ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients[i])) << "For system " << i;
+    EXPECT_THAT(gotGradSplit[i], ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients[i]))
+      << "For system " << i;
   }
 }
 
@@ -1684,7 +1687,10 @@ TEST_F(ETK3DGpuTestFixture, PlainCombinedEnergiesMultiMol) {
   std::vector<double> wantEnergy(molsPtrs_.size(), 0.0);
   for (size_t molIdx = 0; molIdx < molsPtrs_.size(); ++molIdx) {
     for (const auto& term : plainETK3DTerms) {
-      const double e = getReferenceETK3DEnergyTerm(molsPtrs_[molIdx], term, positionsHost.data() + 3 * atomStartsHost[molIdx], DGeomHelpers::ETDG);
+      const double e = getReferenceETK3DEnergyTerm(molsPtrs_[molIdx],
+                                                   term,
+                                                   positionsHost.data() + 3 * atomStartsHost[molIdx],
+                                                   DGeomHelpers::ETDG);
       wantEnergy[molIdx] += e;
     }
   }
@@ -1710,7 +1716,10 @@ TEST_F(ETK3DGpuTestFixture, PlainCombinedGradientsMultiMol) {
   for (size_t molIdx = 0; molIdx < molsPtrs_.size(); ++molIdx) {
     std::vector<double> molGradients(4 * molsPtrs_[molIdx]->getNumAtoms(), 0.0);
     for (const auto& term : plainETK3DTerms) {
-      auto termGrad = getReferenceETK3DGradientTerm(molsPtrs_[molIdx], term, positionsHost.data() + 3 * atomStartsHost[molIdx], DGeomHelpers::ETDG);
+      auto termGrad = getReferenceETK3DGradientTerm(molsPtrs_[molIdx],
+                                                    term,
+                                                    positionsHost.data() + 3 * atomStartsHost[molIdx],
+                                                    DGeomHelpers::ETDG);
       for (size_t i = 0; i < molGradients.size(); ++i) {
         molGradients[i] += termGrad[i];
       }
@@ -1720,6 +1729,7 @@ TEST_F(ETK3DGpuTestFixture, PlainCombinedGradientsMultiMol) {
 
   std::vector<std::vector<double>> gotGradSplit = splitCombinedGrads(gotGrad, atomStartsHost);
   for (size_t i = 0; i < wantGradients.size(); ++i) {
-    EXPECT_THAT(gotGradSplit[i], ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients[i])) << "For system " << i;
+    EXPECT_THAT(gotGradSplit[i], ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients[i]))
+      << "For system " << i;
   }
 }

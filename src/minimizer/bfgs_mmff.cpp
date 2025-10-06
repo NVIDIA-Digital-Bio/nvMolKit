@@ -22,6 +22,7 @@
 #include "device.h"
 #include "ff_utils.h"
 #include "mmff_flattened_builder.h"
+#include "openmp_helpers.h"
 
 namespace nvMolKit::MMFF {
 
@@ -92,7 +93,7 @@ std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKi
     streamPool.emplace_back();
     devicesPerThread[i] = gpuId;  // Round-robin assignment of devices
   }
-
+  detail::OpenMPExceptionRegistry exceptionHandler;
 #pragma omp parallel for num_threads(numThreads) schedule(dynamic) default(none) shared(allConformers,        \
                                                                                           moleculeEnergies,   \
                                                                                           totalConformers,    \
@@ -100,101 +101,106 @@ std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKi
                                                                                           maxIters,           \
                                                                                           nonBondedThreshold, \
                                                                                           streamPool,         \
-                                                                                          devicesPerThread)
+                                                                                          devicesPerThread,   \
+                                                                                          exceptionHandler)
   for (size_t batchStart = 0; batchStart < totalConformers; batchStart += effectiveBatchSize) {
-    const int        threadId = omp_get_thread_num();
-    const WithDevice dev(devicesPerThread[threadId]);
-    const size_t     batchEnd = std::min(batchStart + effectiveBatchSize, totalConformers);
+    try {
+      const int        threadId = omp_get_thread_num();
+      const WithDevice dev(devicesPerThread[threadId]);
+      const size_t     batchEnd = std::min(batchStart + effectiveBatchSize, totalConformers);
 
-    // Create batch subset of conformers
-    std::vector<ConformerInfo> batchConformers(allConformers.begin() + batchStart, allConformers.begin() + batchEnd);
+      // Create batch subset of conformers
+      std::vector<ConformerInfo> batchConformers(allConformers.begin() + batchStart, allConformers.begin() + batchEnd);
 
-    // Get thread-local stream from pool
-    cudaStream_t streamPtr = streamPool[threadId].stream();
+      // Get thread-local stream from pool
+      cudaStream_t streamPtr = streamPool[threadId].stream();
 
-    // Process this batch
-    BatchedMolecularSystemHost    systemHost;
-    BatchedMolecularDeviceBuffers systemDevice;
-    std::vector<double>           pos;
+      // Process this batch
+      BatchedMolecularSystemHost    systemHost;
+      BatchedMolecularDeviceBuffers systemDevice;
+      std::vector<double>           pos;
 
-    // Track conformer atom start positions for molecules with different sizes
-    std::vector<uint32_t> conformerAtomStarts;
-    uint32_t              currentAtomOffset = 0;
+      // Track conformer atom start positions for molecules with different sizes
+      std::vector<uint32_t> conformerAtomStarts;
+      uint32_t              currentAtomOffset = 0;
 
-    // Prepare batch - each conformer becomes a separate "molecule" in the batch
-    for (const auto& confInfo : batchConformers) {
-      auto*          mol      = confInfo.mol;
-      const uint32_t numAtoms = mol->getNumAtoms();
+      // Prepare batch - each conformer becomes a separate "molecule" in the batch
+      for (const auto& confInfo : batchConformers) {
+        auto*          mol      = confInfo.mol;
+        const uint32_t numAtoms = mol->getNumAtoms();
 
-      auto             ffParams = constructForcefieldContribs(*mol, nonBondedThreshold);
-      std::vector<int> atomNumbers;
-      atomNumbers.reserve(numAtoms);
-      for (uint32_t i = 0; i < numAtoms; ++i) {
-        atomNumbers.push_back(mol->getAtomWithIdx(i)->getAtomicNum());
+        auto             ffParams = constructForcefieldContribs(*mol, nonBondedThreshold);
+        std::vector<int> atomNumbers;
+        atomNumbers.reserve(numAtoms);
+        for (uint32_t i = 0; i < numAtoms; ++i) {
+          atomNumbers.push_back(mol->getAtomWithIdx(i)->getAtomicNum());
+        }
+
+        // Add this conformer to the batch
+        conformerAtomStarts.push_back(currentAtomOffset);
+        currentAtomOffset += numAtoms;
+
+        nvMolKit::confPosToVect(*confInfo.conformer, pos);
+        nvMolKit::MMFF::addMoleculeToBatch(ffParams, pos, systemHost, &atomNumbers);
       }
 
-      // Add this conformer to the batch
-      conformerAtomStarts.push_back(currentAtomOffset);
-      currentAtomOffset += numAtoms;
+      // Send to device and set up streams
+      nvMolKit::MMFF::sendContribsAndIndicesToDevice(systemHost, systemDevice);
+      nvMolKit::MMFF::setStreams(systemDevice, streamPtr);
+      nvMolKit::MMFF::allocateIntermediateBuffers(systemHost, systemDevice);
+      systemDevice.positions.setFromVector(systemHost.positions);
+      systemDevice.grad.resize(systemHost.positions.size());
+      systemDevice.grad.zero();
 
-      nvMolKit::confPosToVect(*confInfo.conformer, pos);
-      nvMolKit::MMFF::addMoleculeToBatch(ffParams, pos, systemHost, &atomNumbers);
-    }
+      auto eFunc = [&](const double* positions) { nvMolKit::MMFF::computeEnergy(systemDevice, positions, streamPtr); };
+      auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(systemDevice, streamPtr); };
 
-    // Send to device and set up streams
-    nvMolKit::MMFF::sendContribsAndIndicesToDevice(systemHost, systemDevice);
-    nvMolKit::MMFF::setStreams(systemDevice, streamPtr);
-    nvMolKit::MMFF::allocateIntermediateBuffers(systemHost, systemDevice);
-    systemDevice.positions.setFromVector(systemHost.positions);
-    systemDevice.grad.resize(systemHost.positions.size());
-    systemDevice.grad.zero();
+      nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dataDim=*/3, nvMolKit::DebugLevel::NONE, true, streamPtr);
+      constexpr double             gradTol = 1e-4;  // hard-coded in RDKit.
+      bfgsMinimizer.minimize(maxIters,
+                             gradTol,
+                             systemHost.indices.atomStarts,
+                             systemDevice.indices.atomStarts,
+                             systemDevice.positions,
+                             systemDevice.grad,
+                             systemDevice.energyOuts,
+                             systemDevice.energyBuffer,
+                             eFunc,
+                             gFunc);
 
-    auto eFunc = [&](const double* positions) { nvMolKit::MMFF::computeEnergy(systemDevice, positions, streamPtr); };
-    auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(systemDevice, streamPtr); };
+      std::vector<double> finalPos(systemHost.positions.size());
+      systemDevice.positions.copyToHost(finalPos);
 
-    nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dataDim=*/3, nvMolKit::DebugLevel::NONE, true, streamPtr);
-    constexpr double             gradTol = 1e-4;  // hard-coded in RDKit.
-    bfgsMinimizer.minimize(maxIters,
-                           gradTol,
-                           systemHost.indices.atomStarts,
-                           systemDevice.indices.atomStarts,
-                           systemDevice.positions,
-                           systemDevice.grad,
-                           systemDevice.energyOuts,
-                           systemDevice.energyBuffer,
-                           eFunc,
-                           gFunc);
+      // Compute final energies
+      std::vector<double> gotEnergies(systemDevice.energyOuts.size(), 0.0);
+      systemDevice.energyBuffer.zero();
+      systemDevice.energyOuts.zero();
+      nvMolKit::MMFF::computeEnergy(systemDevice, nullptr, streamPtr);
+      systemDevice.energyOuts.copyToHost(gotEnergies);
+      cudaStreamSynchronize(streamPtr);
 
-    std::vector<double> finalPos(systemHost.positions.size());
-    systemDevice.positions.copyToHost(finalPos);
+      // Update conformer positions and store energies
+      for (size_t i = 0; i < batchConformers.size(); ++i) {
+        const auto&    confInfo     = batchConformers[i];
+        const uint32_t numAtoms     = confInfo.mol->getNumAtoms();
+        const uint32_t atomStartIdx = conformerAtomStarts[i];
 
-    // Compute final energies
-    std::vector<double> gotEnergies(systemDevice.energyOuts.size(), 0.0);
-    systemDevice.energyBuffer.zero();
-    systemDevice.energyOuts.zero();
-    nvMolKit::MMFF::computeEnergy(systemDevice, nullptr, streamPtr);
-    systemDevice.energyOuts.copyToHost(gotEnergies);
-    cudaStreamSynchronize(streamPtr);
+        // Update conformer positions
+        for (uint32_t j = 0; j < numAtoms; ++j) {
+          confInfo.conformer->setAtomPos(j,
+                                         RDGeom::Point3D(finalPos[3 * (atomStartIdx + j) + 0],
+                                                         finalPos[3 * (atomStartIdx + j) + 1],
+                                                         finalPos[3 * (atomStartIdx + j) + 2]));
+        }
 
-    // Update conformer positions and store energies
-    for (size_t i = 0; i < batchConformers.size(); ++i) {
-      const auto&    confInfo     = batchConformers[i];
-      const uint32_t numAtoms     = confInfo.mol->getNumAtoms();
-      const uint32_t atomStartIdx = conformerAtomStarts[i];
-
-      // Update conformer positions
-      for (uint32_t j = 0; j < numAtoms; ++j) {
-        confInfo.conformer->setAtomPos(j,
-                                       RDGeom::Point3D(finalPos[3 * (atomStartIdx + j) + 0],
-                                                       finalPos[3 * (atomStartIdx + j) + 1],
-                                                       finalPos[3 * (atomStartIdx + j) + 2]));
+        // Store energy result - thread-safe since each thread writes to different indices
+        moleculeEnergies[confInfo.molIdx][confInfo.confIdx] = gotEnergies[i];
       }
-
-      // Store energy result - thread-safe since each thread writes to different indices
-      moleculeEnergies[confInfo.molIdx][confInfo.confIdx] = gotEnergies[i];
+    } catch (...) {
+      exceptionHandler.store(std::current_exception());
     }
   }
-
+  exceptionHandler.rethrow();
   return moleculeEnergies;
 }
 
