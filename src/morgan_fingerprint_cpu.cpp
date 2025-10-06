@@ -21,6 +21,8 @@
 
 #include <RDGeneral/hash/hash.hpp>
 
+#include "openmp_helpers.h"
+
 namespace nvMolKit {
 
 namespace {
@@ -327,11 +329,17 @@ std::vector<std::unique_ptr<ExplicitBitVect>> MorganFingerprintCpuGenerator::Get
   // cppcheck-suppress-end unreadVariable
 
   std::vector<std::unique_ptr<ExplicitBitVect>> fingerprints(mols.size());
-#pragma omp parallel for default(none) shared(fingerprints, mols) num_threads(numCpuThreads)
+  detail::OpenMPExceptionRegistry               exceptionRegistry;
+#pragma omp parallel for default(none) shared(fingerprints, mols, exceptionRegistry) num_threads(numCpuThreads)
   for (size_t i = 0; i < mols.size(); i++) {
-    const RDKit::ROMol* mol = mols[i];
-    fingerprints[i]         = internal::getFingerprintImpl(*mol, radius_, fpSize_);
+    try {
+      const RDKit::ROMol* mol = mols[i];
+      fingerprints[i]         = internal::getFingerprintImpl(*mol, radius_, fpSize_);
+    } catch (...) {
+      exceptionRegistry.store(std::current_exception());
+    }
   }
+  exceptionRegistry.rethrow();
   return fingerprints;
 }
 

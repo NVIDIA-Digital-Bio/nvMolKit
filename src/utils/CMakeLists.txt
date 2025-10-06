@@ -44,3 +44,7 @@ target_include_directories(work_splitting INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 add_library(nvtx INTERFACE)
 target_link_libraries(nvtx INTERFACE CUDA::nvtx3)
 target_include_directories(nvtx INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_library(openmp_helpers openmp_helpers.cpp)
+target_link_libraries(openmp_helpers PRIVATE OpenMP::OpenMP_CXX)
+target_include_directories(openmp_helpers INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})

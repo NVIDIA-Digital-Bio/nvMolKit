@@ -29,6 +29,7 @@
 #include "morgan_fingerprint_cpu.h"
 #include "morgan_fingerprint_kernels.h"
 #include "nvtx.h"
+#include "openmp_helpers.h"
 #include "utils/host_vector.h"
 namespace nvMolKit {
 
@@ -153,22 +154,27 @@ void extractResultsFromGPUBatch(const AsyncDeviceVector<FlatBitVect<fpSize>>& ou
 }
 
 template <int nBits>
-void        populateResults(const std::vector<FlatBitVect<nBits>>&         resultsGpuVec,
-                            std::vector<std::unique_ptr<ExplicitBitVect>>& results,
-                            const int                                      numThreads) {
-#pragma omp parallel for default(none) num_threads(numThreads) shared(resultsGpuVec, results)
-
+void populateResults(const std::vector<FlatBitVect<nBits>>&         resultsGpuVec,
+                     std::vector<std::unique_ptr<ExplicitBitVect>>& results,
+                     const int                                      numThreads) {
+  detail::OpenMPExceptionRegistry exceptionRegistry;
+#pragma omp parallel for default(none) num_threads(numThreads) shared(resultsGpuVec, results, exceptionRegistry)
   for (size_t vecIndex = 0; vecIndex < resultsGpuVec.size(); ++vecIndex) {
-    const auto& tempResult    = resultsGpuVec[vecIndex];
-    auto        resultBitVect = std::make_unique<ExplicitBitVect>(nBits);
+    try {
+      const auto& tempResult    = resultsGpuVec[vecIndex];
+      auto        resultBitVect = std::make_unique<ExplicitBitVect>(nBits);
 
-    for (int i = 0; i < nBits; i++) {
-      if (tempResult[i]) {
-        resultBitVect->setBit(i);
+      for (int i = 0; i < nBits; i++) {
+        if (tempResult[i]) {
+          resultBitVect->setBit(i);
+        }
       }
+      results[vecIndex] = std::move(resultBitVect);
+    } catch (...) {
+      exceptionRegistry.store(std::current_exception());
     }
-    results[vecIndex] = std::move(resultBitVect);
   }
+  exceptionRegistry.rethrow();
 }
 
 template <int fpSize>
@@ -255,10 +261,11 @@ AsyncDeviceVector<FlatBitVect<fpSize>> computeFingerprintsCuImpl(const std::vect
       workLarge.push_back(i);
     }
   }
-  const size_t numThreads32    = (work32.size() + dispatchChunkSize - 1) / dispatchChunkSize;
-  const size_t numThreads64    = (work64.size() + dispatchChunkSize - 1) / dispatchChunkSize;
-  const size_t numThreads128   = (work128.size() + dispatchChunkSize - 1) / dispatchChunkSize;
-  const size_t numThreadsTotal = numThreads32 + numThreads64 + numThreads128;
+  const size_t                    numThreads32    = (work32.size() + dispatchChunkSize - 1) / dispatchChunkSize;
+  const size_t                    numThreads64    = (work64.size() + dispatchChunkSize - 1) / dispatchChunkSize;
+  const size_t                    numThreads128   = (work128.size() + dispatchChunkSize - 1) / dispatchChunkSize;
+  const size_t                    numThreadsTotal = numThreads32 + numThreads64 + numThreads128;
+  detail::OpenMPExceptionRegistry exceptionRegistry;
 
 #pragma omp parallel for num_threads(nThreadsActual) default(none) shared(numThreadsTotal,     \
                                                                             threadBuffers,     \
@@ -269,158 +276,170 @@ AsyncDeviceVector<FlatBitVect<fpSize>> computeFingerprintsCuImpl(const std::vect
                                                                             workLarge,         \
                                                                             work32,            \
                                                                             work64,            \
-                                                                            work128)
+                                                                            work128,           \
+                                                                            exceptionRegistry)
   for (size_t i = 0; i < numThreadsTotal; i++) {
-    std::vector<std::pair<FlatBitVect<fpSize>, int>> largeResults;
+    try {
+      std::vector<std::pair<FlatBitVect<fpSize>, int>> largeResults;
 
-    auto&             threadCpuBuffers = threadBuffers[omp_get_thread_num()];
-    const WithDevice  dev(0);
-    // Do large molecules while we're waiting for the previous cycle, if possible
-    const std::string rangeName =
-      "LargeMolecules processing during downtime in main run thread " + std::to_string(omp_get_thread_num());
-    ScopedNvtxRange range3(rangeName.c_str());
-    while (cudaEventQuery(threadCpuBuffers.prevMemcpyDoneEvent.event()) == cudaErrorNotReady) {
-      auto batch = workLarge.get_n(1);
-      if (batch.empty()) {
-        break;  // No more large work to steal during wait
+      auto&             threadCpuBuffers = threadBuffers[omp_get_thread_num()];
+      const WithDevice  dev(0);
+      // Do large molecules while we're waiting for the previous cycle, if possible
+      const std::string rangeName =
+        "LargeMolecules processing during downtime in main run thread " + std::to_string(omp_get_thread_num());
+      ScopedNvtxRange range3(rangeName.c_str());
+      while (cudaEventQuery(threadCpuBuffers.prevMemcpyDoneEvent.event()) == cudaErrorNotReady) {
+        auto batch = workLarge.get_n(1);
+        if (batch.empty()) {
+          break;  // No more large work to steal during wait
+        }
+        const int molIdxLarge = batch[0];
+        auto      fingerprint = processSingleLargeMolecule<fpSize>(*mols[molIdxLarge], maxRadius);
+        largeResults.emplace_back(std::make_pair(std::move(fingerprint), molIdxLarge));
       }
-      const int molIdxLarge = batch[0];
-      auto      fingerprint = processSingleLargeMolecule<fpSize>(*mols[molIdxLarge], maxRadius);
-      largeResults.emplace_back(std::make_pair(std::move(fingerprint), molIdxLarge));
+      range3.pop();
+
+      const std::string rangeName2 =
+        "Wait for previous memcpy after large mol processing Main run thread " + std::to_string(omp_get_thread_num());
+      ScopedNvtxRange range2(rangeName2.c_str());
+      cudaCheckError(cudaEventSynchronize(threadCpuBuffers.prevMemcpyDoneEvent.event()));
+      range2.pop();
+
+      const std::string rangemainName = "Main run processing mols: thread " + std::to_string(omp_get_thread_num());
+      ScopedNvtxRange   rangeMain(rangemainName.c_str());
+
+      std::fill(threadCpuBuffers.nAtomsPerMol.begin(), threadCpuBuffers.nAtomsPerMol.end(), 0);
+
+      ScopedNvtxRange rangeGetDispatch("Get mol ids from dispatcher");
+
+      int thisRoundNumAtoms = 0;
+      int scopedChunkSize   = 0;
+      {
+        if (const size_t taken = work32.copy_n(threadCpuBuffers.h_outputIndices, dispatchChunkSize); taken > 0) {
+          thisRoundNumAtoms = 32;
+          scopedChunkSize   = static_cast<int>(taken);
+        }
+      }
+      if (thisRoundNumAtoms == 0) {
+        // Try with 64
+        if (const size_t taken = work64.copy_n(threadCpuBuffers.h_outputIndices, dispatchChunkSize); taken > 0) {
+          thisRoundNumAtoms = 64;
+          scopedChunkSize   = static_cast<int>(taken);
+        }
+      }
+      if (thisRoundNumAtoms == 0) {
+        // Try with 128
+        if (const size_t taken = work128.copy_n(threadCpuBuffers.h_outputIndices, dispatchChunkSize); taken > 0) {
+          thisRoundNumAtoms = 128;
+          scopedChunkSize   = static_cast<int>(taken);
+        }
+      }
+      rangeGetDispatch.pop();
+      if (scopedChunkSize > 0) {
+        std::vector<const RDKit::ROMol*> molsView;
+        int                              relIdx = 0;
+        ScopedNvtxRange                  rangeComputeInvars("Compute invariants");
+        for (int j = 0; j < scopedChunkSize; j++) {
+          const int idx = threadCpuBuffers.h_outputIndices[j];
+          molsView.push_back(mols[idx]);
+          const RDKit::ROMol& mol               = *mols[idx];
+          threadCpuBuffers.nAtomsPerMol[relIdx] = std::int16_t(mol.getNumAtoms());
+          relIdx++;
+        }
+        // Compute invariants directly into pinned host buffers to avoid copies
+        if (thisRoundNumAtoms == 32) {
+          MorganInvariantsGenerator::ComputeInvariantsInto(molsView,
+                                                           thisRoundNumAtoms,
+                                                           threadCpuBuffers.h_atomInvariants32.data(),
+                                                           threadCpuBuffers.h_bondInvariants32.data(),
+                                                           threadCpuBuffers.h_bondIndices32.data(),
+                                                           threadCpuBuffers.h_bondOtherAtomIndices32.data());
+        } else if (thisRoundNumAtoms == 64) {
+          MorganInvariantsGenerator::ComputeInvariantsInto(molsView,
+                                                           thisRoundNumAtoms,
+                                                           threadCpuBuffers.h_atomInvariants64.data(),
+                                                           threadCpuBuffers.h_bondInvariants64.data(),
+                                                           threadCpuBuffers.h_bondIndices64.data(),
+                                                           threadCpuBuffers.h_bondOtherAtomIndices64.data());
+        } else {  // 128
+          MorganInvariantsGenerator::ComputeInvariantsInto(molsView,
+                                                           thisRoundNumAtoms,
+                                                           threadCpuBuffers.h_atomInvariants128.data(),
+                                                           threadCpuBuffers.h_bondInvariants128.data(),
+                                                           threadCpuBuffers.h_bondIndices128.data(),
+                                                           threadCpuBuffers.h_bondOtherAtomIndices128.data());
+        }
+        rangeComputeInvars.pop();
+        ScopedNvtxRange rangeMemcpy("Memcpy to GPU");
+        auto&           buffersToUse = thisRoundNumAtoms == 32 ? threadCpuBuffers.gpuBuffers32 :
+                                                                 (thisRoundNumAtoms == 64 ? threadCpuBuffers.gpuBuffers64 :
+                                                                                            threadCpuBuffers.gpuBuffers128);
+        cudaStream_t    stream       = threadCpuBuffers.stream.stream();
+
+        // Send using pinned host buffers
+        if (thisRoundNumAtoms == 32) {
+          buffersToUse->atomInvariants.copyFromHost(threadCpuBuffers.h_atomInvariants32.data(),
+                                                    thisRoundNumAtoms * scopedChunkSize);
+          buffersToUse->bondInvariants.copyFromHost(threadCpuBuffers.h_bondInvariants32.data(),
+                                                    thisRoundNumAtoms * scopedChunkSize);
+          buffersToUse->bondIndices.copyFromHost(threadCpuBuffers.h_bondIndices32.data(),
+                                                 thisRoundNumAtoms * scopedChunkSize * kMaxBondsPerAtom);
+          buffersToUse->bondOtherAtomIndices.copyFromHost(threadCpuBuffers.h_bondOtherAtomIndices32.data(),
+                                                          thisRoundNumAtoms * scopedChunkSize * kMaxBondsPerAtom);
+        } else if (thisRoundNumAtoms == 64) {
+          buffersToUse->atomInvariants.copyFromHost(threadCpuBuffers.h_atomInvariants64.data(),
+                                                    thisRoundNumAtoms * scopedChunkSize);
+          buffersToUse->bondInvariants.copyFromHost(threadCpuBuffers.h_bondInvariants64.data(),
+                                                    thisRoundNumAtoms * scopedChunkSize);
+          buffersToUse->bondIndices.copyFromHost(threadCpuBuffers.h_bondIndices64.data(),
+                                                 thisRoundNumAtoms * scopedChunkSize * kMaxBondsPerAtom);
+          buffersToUse->bondOtherAtomIndices.copyFromHost(threadCpuBuffers.h_bondOtherAtomIndices64.data(),
+                                                          thisRoundNumAtoms * scopedChunkSize * kMaxBondsPerAtom);
+        } else {
+          buffersToUse->atomInvariants.copyFromHost(threadCpuBuffers.h_atomInvariants128.data(),
+                                                    thisRoundNumAtoms * scopedChunkSize);
+          buffersToUse->bondInvariants.copyFromHost(threadCpuBuffers.h_bondInvariants128.data(),
+                                                    thisRoundNumAtoms * scopedChunkSize);
+          buffersToUse->bondIndices.copyFromHost(threadCpuBuffers.h_bondIndices128.data(),
+                                                 thisRoundNumAtoms * scopedChunkSize * kMaxBondsPerAtom);
+          buffersToUse->bondOtherAtomIndices.copyFromHost(threadCpuBuffers.h_bondOtherAtomIndices128.data(),
+                                                          thisRoundNumAtoms * scopedChunkSize * kMaxBondsPerAtom);
+        }
+
+        // nAtomsPerMol and output indices
+        buffersToUse->nAtomsPerMol.copyFromHost(threadCpuBuffers.nAtomsPerMol.data(), dispatchChunkSize);
+        buffersToUse->outputIndices.copyFromHost(threadCpuBuffers.h_outputIndices.data(), scopedChunkSize);
+        cudaCheckError(cudaEventRecord(threadCpuBuffers.prevMemcpyDoneEvent.event(), stream));
+        rangeMemcpy.pop();
+        solveOnGPUBatch<fpSize>(*buffersToUse,
+                                outputAccumulator,
+                                maxRadius,
+                                thisRoundNumAtoms,
+                                scopedChunkSize,
+                                stream);
+      }
+      rangeMain.pop();
+      // Take any remaining large molecules
+      const std::string name =
+        "LargeMolecules processing after main run thread " + std::to_string(omp_get_thread_num());
+      ScopedNvtxRange range(name.c_str());
+      while (true) {
+        auto batch = workLarge.get_n(1);
+        if (batch.empty()) {
+          break;
+        }
+        const int molIdxLarge = batch[0];
+        auto      fingerprint = processSingleLargeMolecule<fpSize>(*mols[molIdxLarge], maxRadius);
+        largeResults.emplace_back(std::make_pair(std::move(fingerprint), molIdxLarge));
+      }
+      range.pop();
+
+      sendLargeResultsToOutput<fpSize>(largeResults, outputAccumulator);
+    } catch (...) {
+      exceptionRegistry.store(std::current_exception());
     }
-    range3.pop();
-
-    const std::string rangeName2 =
-      "Wait for previous memcpy after large mol processing Main run thread " + std::to_string(omp_get_thread_num());
-    ScopedNvtxRange range2(rangeName2.c_str());
-    cudaCheckError(cudaEventSynchronize(threadCpuBuffers.prevMemcpyDoneEvent.event()));
-    range2.pop();
-
-    const std::string rangemainName = "Main run processing mols: thread " + std::to_string(omp_get_thread_num());
-    ScopedNvtxRange   rangeMain(rangemainName.c_str());
-
-    std::fill(threadCpuBuffers.nAtomsPerMol.begin(), threadCpuBuffers.nAtomsPerMol.end(), 0);
-
-    ScopedNvtxRange rangeGetDispatch("Get mol ids from dispatcher");
-
-    int thisRoundNumAtoms = 0;
-    int scopedChunkSize   = 0;
-    {
-      if (const size_t taken = work32.copy_n(threadCpuBuffers.h_outputIndices, dispatchChunkSize); taken > 0) {
-        thisRoundNumAtoms = 32;
-        scopedChunkSize   = static_cast<int>(taken);
-      }
-    }
-    if (thisRoundNumAtoms == 0) {
-      // Try with 64
-      if (const size_t taken = work64.copy_n(threadCpuBuffers.h_outputIndices, dispatchChunkSize); taken > 0) {
-        thisRoundNumAtoms = 64;
-        scopedChunkSize   = static_cast<int>(taken);
-      }
-    }
-    if (thisRoundNumAtoms == 0) {
-      // Try with 128
-      if (const size_t taken = work128.copy_n(threadCpuBuffers.h_outputIndices, dispatchChunkSize); taken > 0) {
-        thisRoundNumAtoms = 128;
-        scopedChunkSize   = static_cast<int>(taken);
-      }
-    }
-    rangeGetDispatch.pop();
-    if (scopedChunkSize > 0) {
-      std::vector<const RDKit::ROMol*> molsView;
-      int                              relIdx = 0;
-      ScopedNvtxRange                  rangeComputeInvars("Compute invariants");
-      for (int j = 0; j < scopedChunkSize; j++) {
-        const int idx = threadCpuBuffers.h_outputIndices[j];
-        molsView.push_back(mols[idx]);
-        const RDKit::ROMol& mol               = *mols[idx];
-        threadCpuBuffers.nAtomsPerMol[relIdx] = std::int16_t(mol.getNumAtoms());
-        relIdx++;
-      }
-      // Compute invariants directly into pinned host buffers to avoid copies
-      if (thisRoundNumAtoms == 32) {
-        MorganInvariantsGenerator::ComputeInvariantsInto(molsView,
-                                                         thisRoundNumAtoms,
-                                                         threadCpuBuffers.h_atomInvariants32.data(),
-                                                         threadCpuBuffers.h_bondInvariants32.data(),
-                                                         threadCpuBuffers.h_bondIndices32.data(),
-                                                         threadCpuBuffers.h_bondOtherAtomIndices32.data());
-      } else if (thisRoundNumAtoms == 64) {
-        MorganInvariantsGenerator::ComputeInvariantsInto(molsView,
-                                                         thisRoundNumAtoms,
-                                                         threadCpuBuffers.h_atomInvariants64.data(),
-                                                         threadCpuBuffers.h_bondInvariants64.data(),
-                                                         threadCpuBuffers.h_bondIndices64.data(),
-                                                         threadCpuBuffers.h_bondOtherAtomIndices64.data());
-      } else {  // 128
-        MorganInvariantsGenerator::ComputeInvariantsInto(molsView,
-                                                         thisRoundNumAtoms,
-                                                         threadCpuBuffers.h_atomInvariants128.data(),
-                                                         threadCpuBuffers.h_bondInvariants128.data(),
-                                                         threadCpuBuffers.h_bondIndices128.data(),
-                                                         threadCpuBuffers.h_bondOtherAtomIndices128.data());
-      }
-      rangeComputeInvars.pop();
-      ScopedNvtxRange rangeMemcpy("Memcpy to GPU");
-      auto&           buffersToUse = thisRoundNumAtoms == 32 ?
-                                       threadCpuBuffers.gpuBuffers32 :
-                                       (thisRoundNumAtoms == 64 ? threadCpuBuffers.gpuBuffers64 : threadCpuBuffers.gpuBuffers128);
-      cudaStream_t    stream       = threadCpuBuffers.stream.stream();
-
-      // Send using pinned host buffers
-      if (thisRoundNumAtoms == 32) {
-        buffersToUse->atomInvariants.copyFromHost(threadCpuBuffers.h_atomInvariants32.data(),
-                                                  thisRoundNumAtoms * scopedChunkSize);
-        buffersToUse->bondInvariants.copyFromHost(threadCpuBuffers.h_bondInvariants32.data(),
-                                                  thisRoundNumAtoms * scopedChunkSize);
-        buffersToUse->bondIndices.copyFromHost(threadCpuBuffers.h_bondIndices32.data(),
-                                               thisRoundNumAtoms * scopedChunkSize * kMaxBondsPerAtom);
-        buffersToUse->bondOtherAtomIndices.copyFromHost(threadCpuBuffers.h_bondOtherAtomIndices32.data(),
-                                                        thisRoundNumAtoms * scopedChunkSize * kMaxBondsPerAtom);
-      } else if (thisRoundNumAtoms == 64) {
-        buffersToUse->atomInvariants.copyFromHost(threadCpuBuffers.h_atomInvariants64.data(),
-                                                  thisRoundNumAtoms * scopedChunkSize);
-        buffersToUse->bondInvariants.copyFromHost(threadCpuBuffers.h_bondInvariants64.data(),
-                                                  thisRoundNumAtoms * scopedChunkSize);
-        buffersToUse->bondIndices.copyFromHost(threadCpuBuffers.h_bondIndices64.data(),
-                                               thisRoundNumAtoms * scopedChunkSize * kMaxBondsPerAtom);
-        buffersToUse->bondOtherAtomIndices.copyFromHost(threadCpuBuffers.h_bondOtherAtomIndices64.data(),
-                                                        thisRoundNumAtoms * scopedChunkSize * kMaxBondsPerAtom);
-      } else {
-        buffersToUse->atomInvariants.copyFromHost(threadCpuBuffers.h_atomInvariants128.data(),
-                                                  thisRoundNumAtoms * scopedChunkSize);
-        buffersToUse->bondInvariants.copyFromHost(threadCpuBuffers.h_bondInvariants128.data(),
-                                                  thisRoundNumAtoms * scopedChunkSize);
-        buffersToUse->bondIndices.copyFromHost(threadCpuBuffers.h_bondIndices128.data(),
-                                               thisRoundNumAtoms * scopedChunkSize * kMaxBondsPerAtom);
-        buffersToUse->bondOtherAtomIndices.copyFromHost(threadCpuBuffers.h_bondOtherAtomIndices128.data(),
-                                                        thisRoundNumAtoms * scopedChunkSize * kMaxBondsPerAtom);
-      }
-
-      // nAtomsPerMol and output indices
-      buffersToUse->nAtomsPerMol.copyFromHost(threadCpuBuffers.nAtomsPerMol.data(), dispatchChunkSize);
-      buffersToUse->outputIndices.copyFromHost(threadCpuBuffers.h_outputIndices.data(), scopedChunkSize);
-      cudaCheckError(cudaEventRecord(threadCpuBuffers.prevMemcpyDoneEvent.event(), stream));
-      rangeMemcpy.pop();
-      solveOnGPUBatch<fpSize>(*buffersToUse, outputAccumulator, maxRadius, thisRoundNumAtoms, scopedChunkSize, stream);
-    }
-    rangeMain.pop();
-    // Take any remaining large molecules
-    const std::string name = "LargeMolecules processing after main run thread " + std::to_string(omp_get_thread_num());
-    ScopedNvtxRange   range(name.c_str());
-    while (true) {
-      auto batch = workLarge.get_n(1);
-      if (batch.empty()) {
-        break;
-      }
-      const int molIdxLarge = batch[0];
-      auto      fingerprint = processSingleLargeMolecule<fpSize>(*mols[molIdxLarge], maxRadius);
-      largeResults.emplace_back(std::make_pair(std::move(fingerprint), molIdxLarge));
-    }
-    range.pop();
-
-    sendLargeResultsToOutput<fpSize>(largeResults, outputAccumulator);
   }
+  exceptionRegistry.rethrow();
   return outputAccumulator;
 }
 

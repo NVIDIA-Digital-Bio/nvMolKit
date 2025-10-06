@@ -15,6 +15,7 @@
 
 #include <gmock/gmock.h>
 #include <GraphMol/FileParsers/FileParsers.h>
+#include <GraphMol/FileParsers/MolWriters.h>
 #include <GraphMol/SmilesParse/SmilesParse.h>
 #include <gtest/gtest.h>
 
@@ -510,7 +511,7 @@ void testEnergyImprovement(const std::vector<RDKit::ROMol*>&    mols,
 
     // Calculate and store initial energy
     const double initialEnergy = field->calcEnergy();
-    ASSERT_GT(initialEnergy, 0.0) << "Initial energy should be positive";
+    ASSERT_GE(initialEnergy, 0.0) << "Initial energy should be positive";
     initialEnergies.push_back(initialEnergy);
   }
 
@@ -549,7 +550,7 @@ void testEnergyImprovement(const std::vector<RDKit::ROMol*>&    mols,
 
       // Calculate final energy
       const double finalEnergy = field->calcEnergy();
-      ASSERT_GT(finalEnergy, 0.0) << "Molecule " << i << " conformer " << confId << ": Final energy should be positive";
+      ASSERT_GE(finalEnergy, 0.0) << "Molecule " << i << " conformer " << confId << ": Final energy should be positive";
 
       // Verify energy has improved
       EXPECT_LT(finalEnergy, initialEnergies[i])

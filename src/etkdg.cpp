@@ -30,6 +30,7 @@
 #include "etkdg_stage_stereochem_checks.h"
 #include "etkdg_stage_update_conformers.h"
 #include "nvtx.h"
+#include "openmp_helpers.h"
 
 namespace nvMolKit {
 namespace {
@@ -116,18 +117,25 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
   });
 
   // Prepare embedder args for each unique molecule (without duplication)
-#pragma omp          parallel for num_threads(numThreads) default(none) shared(sortedMols, eargs, paramsCopy)
+  detail::OpenMPExceptionRegistry prepareExceptionRegistry;
+#pragma omp parallel for num_threads(numThreads) default(none) \
+  shared(sortedMols, eargs, paramsCopy, prepareExceptionRegistry)
   for (int i = 0; i < static_cast<int>(sortedMols.size()); i++) {
-    RDKit::ROMol* mol  = sortedMols[i];
-    auto&         earg = eargs[i];
+    try {
+      RDKit::ROMol* mol  = sortedMols[i];
+      auto&         earg = eargs[i];
 
-    if (!nvMolKit::DGeomHelpers::prepareEmbedderArgs(*mol, paramsCopy, earg)) {
-      throw std::runtime_error("Failed to prepare ETKDG parameters for molecule");
+      if (!nvMolKit::DGeomHelpers::prepareEmbedderArgs(*mol, paramsCopy, earg)) {
+        throw std::runtime_error("Failed to prepare ETKDG parameters for molecule");
+      }
+
+      // Set dimensionality to 4D for ETKDG
+      earg.dim = 4;
+    } catch (...) {
+      prepareExceptionRegistry.store(std::current_exception());
     }
-
-    // Set dimensionality to 4D for ETKDG
-    earg.dim = 4;
   }
+  prepareExceptionRegistry.rethrow();
 
   // Set max iterations if not specified
   if (maxIterations == -1) {
@@ -179,166 +187,163 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
   std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<Conformer>>> conformers;
 
   // Process molecules using Scheduler dispatch in parallel
-#pragma omp parallel num_threads(numThreadsGpuBatching) default(none) shared(streamsPerThread,     \
-                                                                               devicesPerThread,   \
-                                                                               sortedMols,         \
-                                                                               eargs,              \
-                                                                               conformers,         \
-                                                                               paramsCopy,         \
-                                                                               debugMode,          \
-                                                                               failures,           \
-                                                                               Scheduler,          \
-                                                                               workComplete,       \
-                                                                               conformer_mutex,    \
-                                                                               failure_mutex,      \
-                                                                               effectiveBatchSize, \
-                                                                               maxIterations,      \
-                                                                               numUniqueMols,      \
-                                                                               confsPerMolecule,   \
-                                                                               allFinished) firstprivate(dim)
+  detail::OpenMPExceptionRegistry dispatchExceptionRegistry;
+#pragma omp parallel num_threads(numThreadsGpuBatching) default(shared)
   {
-    while (!workComplete.load()) {
-      // Dispatch work for this thread
-      std::vector<int> molIds = Scheduler.dispatch(effectiveBatchSize);
+    try {
+      while (!workComplete.load()) {
+        // Dispatch work for this thread
+        std::vector<int> molIds = Scheduler.dispatch(effectiveBatchSize);
 
-      if (molIds.empty()) {
-        workComplete.store(true);
-        // Work may be complete due to all passes, or if we've hit the maximum iteration count.
-        // In the latter case, we still need to finish outstanding runs.
-        if (Scheduler.allFinished()) {
-          allFinished.store(true);
-        }
-        break;
-      }
-      cudaStream_t     streamPtr = streamsPerThread[omp_get_thread_num()].stream();
-      const int        deviceId  = devicesPerThread[omp_get_thread_num()];
-      const WithDevice dev(deviceId);
-
-      // Create batch of molecules and eargs for the dispatched work
-      std::vector<RDKit::ROMol*>     batchMolsWithConfs;
-      std::vector<detail::EmbedArgs> batchEargs;
-
-      batchMolsWithConfs.reserve(molIds.size());
-      batchEargs.reserve(molIds.size());
-
-      for (const int molId : molIds) {
-        // Use the original unique molecules and their prepared eargs
-        batchMolsWithConfs.push_back(sortedMols[molId]);
-        batchEargs.push_back(eargs[molId]);
-      }
-
-      detail::ETKDGContext context;
-      detail::setStreams(context, streamPtr);
-      // Treat each conformer attempt as an individual molecule (confsPerMolecule = 1)
-      detail::initETKDGContext(batchMolsWithConfs, context, 1);
-
-      ScopedNvtxRange                                  stageSetupRange("Setup ETKDG Stages");
-      // Create stages in order
-      std::vector<std::unique_ptr<detail::ETKDGStage>> stages;
-
-      // Convert to const pointers for stages that require them
-      const std::vector<const RDKit::ROMol*> constMolPtrs(batchMolsWithConfs.begin(), batchMolsWithConfs.end());
-
-      // Create coordinate generation stage based on parameter
-      // FIXME: arguments still involve useRDKitcoordgen.
-      stages.push_back(
-        std::make_unique<detail::ETKDGCoordGenRDKitStage>(paramsCopy, constMolPtrs, batchEargs, streamPtr));
-
-      // First minimize, then first round of chiral checks.
-      stages.push_back(
-        std::make_unique<detail::FirstMinimizeStage>(constMolPtrs, batchEargs, paramsCopy, context, streamPtr));
-      stages.push_back(std::make_unique<detail::ETKDGTetrahedralCheckStage>(context, batchEargs, dim, streamPtr));
-
-      // Only add first chiral check if enforceChirality is enabled
-      detail::ETKDGFirstChiralCenterCheckStage* chiralStagePtr = nullptr;
-      if (paramsCopy.enforceChirality) {
-        auto chiralStage =
-          std::make_unique<detail::ETKDGFirstChiralCenterCheckStage>(context, batchEargs, dim, streamPtr);
-        chiralStagePtr = chiralStage.get();
-        stages.push_back(std::move(chiralStage));
-      }
-
-      // Second + 3rd minimize, then double bond checks.
-      stages.push_back(
-        std::make_unique<detail::FourthDimMinimizeStage>(constMolPtrs, batchEargs, paramsCopy, context, streamPtr));
-
-      // (ET)(K)DG: Add experimental torsion minimization stage only if needed to match RDKit's logic.
-      if (paramsCopy.useExpTorsionAnglePrefs || paramsCopy.useBasicKnowledge) {
-        stages.push_back(
-          std::make_unique<detail::ETKMinimizationStage>(constMolPtrs, batchEargs, paramsCopy, context, streamPtr));
-      }
-
-      // Final chiral and stereochem checks
-      stages.push_back(
-        std::make_unique<detail::ETKDGDoubleBondGeometryCheckStage>(context, batchEargs, dim, streamPtr));
-
-      if (paramsCopy.enforceChirality) {
-        // This is a pass-through, don't need to set the stream
-        stages.push_back(std::make_unique<detail::ETKDGFinalChiralCenterCheckStage>(*chiralStagePtr));
-        stages.push_back(
-          std::make_unique<detail::ETKDGChiralDistMatrixCheckStage>(context, batchEargs, dim, streamPtr));
-        stages.push_back(
-          std::make_unique<detail::ETKDGChiralCenterVolumeCheckStage>(context, batchEargs, dim, streamPtr));
-        stages.push_back(
-          std::make_unique<detail::ETKDGDoubleBondStereoCheckStage>(context, batchEargs, dim, streamPtr));
-      }
-
-      // Writeback
-      stages.push_back(std::make_unique<detail::ETKDGUpdateConformersStage>(batchMolsWithConfs,
-                                                                            batchEargs,
-                                                                            conformers,
-                                                                            streamPtr,
-                                                                            &conformer_mutex,
-                                                                            confsPerMolecule));
-
-      // Create and run driver
-      auto                context_ptr = std::make_unique<detail::ETKDGContext>(std::move(context));
-      detail::ETKDGDriver driver(std::move(context_ptr), std::move(stages), debugMode, streamPtr, &allFinished);
-      stageSetupRange.pop();
-
-      const ScopedNvtxRange runRange("ETKDG execute");
-      driver.run(1);
-
-      // Get results and record them back to Scheduler
-      const std::vector<int16_t> finishedOnIteration = driver.getFinishedOnIterations();
-      Scheduler.record(molIds, finishedOnIteration);
-
-      // Handle failures if requested
-      if (failures != nullptr) {
-        auto batchFailures = driver.getFailures();
-
-        const std::lock_guard<std::mutex> failureLock(failure_mutex);
-        // Initialize failures structure on first batch (outer vector is per stage, inner per conformer)
-        if (failures->empty() && !batchFailures.empty()) {
-          failures->resize(batchFailures.size());
-          for (size_t stageIdx = 0; stageIdx < batchFailures.size(); ++stageIdx) {
-            (*failures)[stageIdx].resize(numUniqueMols * confsPerMolecule, 0);
+        if (molIds.empty()) {
+          workComplete.store(true);
+          // Work may be complete due to all passes, or if we've hit the maximum iteration count.
+          // In the latter case, we still need to finish outstanding runs.
+          if (Scheduler.allFinished()) {
+            allFinished.store(true);
           }
+          break;
+        }
+        cudaStream_t     streamPtr = streamsPerThread[omp_get_thread_num()].stream();
+        const int        deviceId  = devicesPerThread[omp_get_thread_num()];
+        const WithDevice dev(deviceId);
+
+        // Create batch of molecules and eargs for the dispatched work
+        std::vector<RDKit::ROMol*>     batchMolsWithConfs;
+        std::vector<detail::EmbedArgs> batchEargs;
+
+        batchMolsWithConfs.reserve(molIds.size());
+        batchEargs.reserve(molIds.size());
+
+        for (const int molId : molIds) {
+          // Use the original unique molecules and their prepared eargs
+          batchMolsWithConfs.push_back(sortedMols[molId]);
+          batchEargs.push_back(eargs[molId]);
         }
 
-        // Merge batch failures into main failures vector
-        // Note: This is a simplified approach - we're mapping each batch result to a global conformer index
-        // In a more sophisticated implementation, we'd need to track which specific conformer each attempt represents
-        for (size_t stageIdx = 0; stageIdx < batchFailures.size(); ++stageIdx) {
-          for (size_t batchIdx = 0; batchIdx < batchFailures[stageIdx].size() && batchIdx < molIds.size(); ++batchIdx) {
-            // For now, we'll use a simple mapping - this may need refinement based on exact requirements
-            const size_t globalConformerIdx = molIds[batchIdx] * confsPerMolecule;  // Simplified mapping
-            if (globalConformerIdx < (*failures)[stageIdx].size()) {
-              (*failures)[stageIdx][globalConformerIdx] += batchFailures[stageIdx][batchIdx];
+        detail::ETKDGContext context;
+        detail::setStreams(context, streamPtr);
+        // Treat each conformer attempt as an individual molecule (confsPerMolecule = 1)
+        detail::initETKDGContext(batchMolsWithConfs, context, 1);
+
+        ScopedNvtxRange                                  stageSetupRange("Setup ETKDG Stages");
+        // Create stages in order
+        std::vector<std::unique_ptr<detail::ETKDGStage>> stages;
+
+        // Convert to const pointers for stages that require them
+        const std::vector<const RDKit::ROMol*> constMolPtrs(batchMolsWithConfs.begin(), batchMolsWithConfs.end());
+
+        // Create coordinate generation stage based on parameter
+        // FIXME: arguments still involve useRDKitcoordgen.
+        stages.push_back(
+          std::make_unique<detail::ETKDGCoordGenRDKitStage>(paramsCopy, constMolPtrs, batchEargs, streamPtr));
+
+        // First minimize, then first round of chiral checks.
+        stages.push_back(
+          std::make_unique<detail::FirstMinimizeStage>(constMolPtrs, batchEargs, paramsCopy, context, streamPtr));
+        stages.push_back(std::make_unique<detail::ETKDGTetrahedralCheckStage>(context, batchEargs, dim, streamPtr));
+
+        // Only add first chiral check if enforceChirality is enabled
+        detail::ETKDGFirstChiralCenterCheckStage* chiralStagePtr = nullptr;
+        if (paramsCopy.enforceChirality) {
+          auto chiralStage =
+            std::make_unique<detail::ETKDGFirstChiralCenterCheckStage>(context, batchEargs, dim, streamPtr);
+          chiralStagePtr = chiralStage.get();
+          stages.push_back(std::move(chiralStage));
+        }
+
+        // Second + 3rd minimize, then double bond checks.
+        stages.push_back(
+          std::make_unique<detail::FourthDimMinimizeStage>(constMolPtrs, batchEargs, paramsCopy, context, streamPtr));
+
+        // (ET)(K)DG: Add experimental torsion minimization stage only if needed to match RDKit's logic.
+        if (paramsCopy.useExpTorsionAnglePrefs || paramsCopy.useBasicKnowledge) {
+          stages.push_back(
+            std::make_unique<detail::ETKMinimizationStage>(constMolPtrs, batchEargs, paramsCopy, context, streamPtr));
+        }
+
+        // Final chiral and stereochem checks
+        stages.push_back(
+          std::make_unique<detail::ETKDGDoubleBondGeometryCheckStage>(context, batchEargs, dim, streamPtr));
+
+        if (paramsCopy.enforceChirality) {
+          // This is a pass-through, don't need to set the stream
+          stages.push_back(std::make_unique<detail::ETKDGFinalChiralCenterCheckStage>(*chiralStagePtr));
+          stages.push_back(
+            std::make_unique<detail::ETKDGChiralDistMatrixCheckStage>(context, batchEargs, dim, streamPtr));
+          stages.push_back(
+            std::make_unique<detail::ETKDGChiralCenterVolumeCheckStage>(context, batchEargs, dim, streamPtr));
+          stages.push_back(
+            std::make_unique<detail::ETKDGDoubleBondStereoCheckStage>(context, batchEargs, dim, streamPtr));
+        }
+
+        // Writeback
+        stages.push_back(std::make_unique<detail::ETKDGUpdateConformersStage>(batchMolsWithConfs,
+                                                                              batchEargs,
+                                                                              conformers,
+                                                                              streamPtr,
+                                                                              &conformer_mutex,
+                                                                              confsPerMolecule));
+
+        // Create and run driver
+        auto                context_ptr = std::make_unique<detail::ETKDGContext>(std::move(context));
+        detail::ETKDGDriver driver(std::move(context_ptr), std::move(stages), debugMode, streamPtr, &allFinished);
+        stageSetupRange.pop();
+
+        ScopedNvtxRange runRange("ETKDG execute");
+        driver.run(1);
+        runRange.pop();
+        // Get results and record them back to Scheduler
+        const std::vector<int16_t> finishedOnIteration = driver.getFinishedOnIterations();
+        Scheduler.record(molIds, finishedOnIteration);
+
+        // Handle failures if requested
+        if (failures != nullptr) {
+          auto batchFailures = driver.getFailures();
+
+          const std::lock_guard<std::mutex> failureLock(failure_mutex);
+          // Initialize failures structure on first batch (outer vector is per stage, inner per conformer)
+          if (failures->empty() && !batchFailures.empty()) {
+            failures->resize(batchFailures.size());
+            for (size_t stageIdx = 0; stageIdx < batchFailures.size(); ++stageIdx) {
+              (*failures)[stageIdx].resize(numUniqueMols * confsPerMolecule, 0);
+            }
+          }
+
+          // Merge batch failures into main failures vector
+          // Note: This is a simplified approach - we're mapping each batch result to a global conformer index
+          // In a more sophisticated implementation, we'd need to track which specific conformer each attempt represents
+          for (size_t stageIdx = 0; stageIdx < batchFailures.size(); ++stageIdx) {
+            for (size_t batchIdx = 0; batchIdx < batchFailures[stageIdx].size() && batchIdx < molIds.size();
+                 ++batchIdx) {
+              // For now, we'll use a simple mapping - this may need refinement based on exact requirements
+              const size_t globalConformerIdx = molIds[batchIdx] * confsPerMolecule;  // Simplified mapping
+              if (globalConformerIdx < (*failures)[stageIdx].size()) {
+                (*failures)[stageIdx][globalConformerIdx] += batchFailures[stageIdx][batchIdx];
+              }
             }
           }
         }
       }
+    } catch (...) {
+      dispatchExceptionRegistry.store(std::current_exception());
     }
   }
 
-#pragma omp parallel for num_threads(numThreads) default(none) schedule(dynamic) shared(mols, conformers, params)
+  detail::OpenMPExceptionRegistry updateExceptionRegistry;
+#pragma omp parallel for num_threads(numThreads) default(none) schedule(dynamic) \
+  shared(mols, conformers, params, updateExceptionRegistry)
   for (const auto& mol : mols) {
-    auto iter = conformers.find(mol);
-    if (iter != conformers.end()) {
-      nvmolkit::addConformersToMoleculeWithPruning(*mol, iter->second, params);
+    try {
+      auto iter = conformers.find(mol);
+      if (iter != conformers.end()) {
+        nvmolkit::addConformersToMoleculeWithPruning(*mol, iter->second, params);
+      }
+    } catch (...) {
+      updateExceptionRegistry.store(std::current_exception());
     }
   }
+  updateExceptionRegistry.rethrow();
 }
 
 }  // namespace nvMolKit

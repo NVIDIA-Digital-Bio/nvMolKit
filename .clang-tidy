@@ -29,7 +29,6 @@ Checks: '
    -modernize-use-trailing-return-type,
   mpi-*,
   openmp-*,
-    -openmp-exception-escape,
     -openmp-use-default-none
   performance-*,
   readability-*,
