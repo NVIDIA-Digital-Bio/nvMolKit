@@ -13,13 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import copy
 import os
 import pytest
 import torch
 from rdkit import Chem
 from rdkit.Chem import rdDistGeom, rdForceFieldHelpers
+from rdkit.Chem.AllChem import ETKDGv3
 
+from nvmolkit.embedMolecules import EmbedMolecules
 import nvmolkit.mmffOptimization as nvmolkit_mmff
 from nvmolkit.types import HardwareOptions
 
@@ -255,3 +256,18 @@ def test_mmff_optimization_allows_large_molecule_interleaved():
                 f"Molecule {mol_idx}, Conformer {conf_idx}: energy mismatch: " \
                 f"RDKit={rdkit_energy:.6f}, nvMolKit={nvmolkit_energy:.6f}, " \
                 f"abs_diff={energy_diff:.6f}, rel_error={rel_error:.6f}"
+
+
+# Testing github issue 9 - openmp error handling
+def test_error_case_throws_properly():
+    smiles = "CC1(C)OB(CC2=CC=CC=C2)OC1(C)C"
+    mol = Chem.AddHs(Chem.MolFromSmiles(smiles))
+
+    params = ETKDGv3()
+    params.useRandomCoords = True
+    EmbedMolecules([mol], params, confsPerMolecule=1)
+
+    with pytest.raises(RuntimeError):
+        nvmolkit_mmff.MMFFOptimizeMoleculesConfs(
+            [mol], maxIters=200
+        )
