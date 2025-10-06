@@ -66,7 +66,8 @@ enum class ETKTerm {
   DISTANCE_12,
   DISTANCE_13,
   ANGLE_13,
-  LONGDISTANCE
+  LONGDISTANCE,
+  PLAIN  // Plain mode: excludes improper torsion terms (for ETDG variant)
 };
 
 struct TorsionAngleContribTerms {

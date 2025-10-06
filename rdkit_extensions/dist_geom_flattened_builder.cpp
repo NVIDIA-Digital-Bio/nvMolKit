@@ -494,7 +494,8 @@ nvMolKit::DistGeom::Energy3DForceContribsHost construct3DForceFieldContribs(
   const ::DistGeom::BoundsMatrix&                   mmat,
   const ::ForceFields::CrystalFF::CrystalFFDetails& etkdgDetails,
   const std::vector<double>&                        positions,
-  int                                               dim) {
+  int                                               dim,
+  bool                                              useBasicKnowledge) {
   nvMolKit::DistGeom::Energy3DForceContribsHost contribs;
   const unsigned int                            numAtoms = mmat.numRows();
 
@@ -504,14 +505,16 @@ nvMolKit::DistGeom::Energy3DForceContribsHost construct3DForceFieldContribs(
   // 1. addExperimentalTorsionTerms
   addExperimentalTorsionTerms(contribs, etkdgDetails, numAtoms, atomPairs);
 
-  // 2. addImproperTorsionTerms
+  // 2. addImproperTorsionTerms (only if useBasicKnowledge is true)
   boost::dynamic_bitset<> isImproperConstrained(numAtoms);
-  addImproperTorsionTerms(contribs, etkdgDetails, numAtoms, IMPROPER_TORSION_FORCE_SCALING, isImproperConstrained);
+  if (useBasicKnowledge) {
+    addImproperTorsionTerms(contribs, etkdgDetails, numAtoms, IMPROPER_TORSION_FORCE_SCALING, isImproperConstrained);
+  }
 
   // 3. add12Terms
   add12Terms(contribs, etkdgDetails, atomPairs, positions, dim, KNOWN_DIST_FORCE_CONSTANT, numAtoms);
 
-  // 4. add13Terms
+  // 4. add13Terms (pass useBasicKnowledge parameter)
   add13Terms(contribs,
              etkdgDetails,
              atomPairs,
@@ -519,7 +522,7 @@ nvMolKit::DistGeom::Energy3DForceContribsHost construct3DForceFieldContribs(
              dim,
              KNOWN_DIST_FORCE_CONSTANT,
              isImproperConstrained,
-             true,
+             useBasicKnowledge,
              mmat,
              numAtoms);
 

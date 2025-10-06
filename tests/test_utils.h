@@ -34,11 +34,13 @@
  * @brief Enum representing different ETKDG options
  */
 enum class ETKDGOption {
+  srETKDGv3,
   ETKDGv3,
   ETKDGv2,
   ETKDG,
   ETDG,
-  KDG
+  KDG,
+  DG
 };
 
 /**

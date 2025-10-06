@@ -196,7 +196,12 @@ void addMoleculeToMolecularSystem3D(const Energy3DForceContribsHost& contribs,
     contribHolder.improperTorsionTerms.C2.push_back(contribs.improperTorsionTerms.C2[i]);
     contribHolder.improperTorsionTerms.forceConstant.push_back(contribs.improperTorsionTerms.forceConstant[i]);
   }
-  contribHolder.improperTorsionTerms.numImpropers.push_back(contribs.improperTorsionTerms.numImpropers[0]);
+  // Add numImpropers count (0 if no improper torsions, otherwise the count from the source)
+  if (contribs.improperTorsionTerms.numImpropers.empty()) {
+    contribHolder.improperTorsionTerms.numImpropers.push_back(0);
+  } else {
+    contribHolder.improperTorsionTerms.numImpropers.push_back(contribs.improperTorsionTerms.numImpropers[0]);
+  }
 
   // 1-2 distance terms
   for (size_t i = 0; i < contribs.dist12Terms.idx1.size(); i++) {
@@ -678,7 +683,7 @@ cudaError_t computeEnergyETK(BatchedMolecular3DDeviceBuffers&           molSyste
   cudaError_t err = cudaSuccess;
 
   // Experimental torsion terms
-  if ((term == ETKTerm::ALL || term == ETKTerm::EXPERIMANTAL_TORSION) &&
+  if ((term == ETKTerm::ALL || term == ETKTerm::PLAIN || term == ETKTerm::EXPERIMANTAL_TORSION) &&
       contribs.experimentalTorsionTerms.idx1.size() > 0) {
     err = launchTorsionAngleEnergyKernel(contribs.experimentalTorsionTerms.idx1.size(),
                                          contribs.experimentalTorsionTerms.idx1.data(),
@@ -722,7 +727,7 @@ cudaError_t computeEnergyETK(BatchedMolecular3DDeviceBuffers&           molSyste
   }
 
   // 1-2 distance terms
-  if (err == cudaSuccess && (term == ETKTerm::ALL || term == ETKTerm::DISTANCE_12) &&
+  if (err == cudaSuccess && (term == ETKTerm::ALL || term == ETKTerm::PLAIN || term == ETKTerm::DISTANCE_12) &&
       contribs.dist12Terms.idx1.size() > 0) {
     err = launchDistanceConstraintEnergyKernel(contribs.dist12Terms.idx1.size(),
                                                contribs.dist12Terms.idx1.data(),
@@ -741,7 +746,7 @@ cudaError_t computeEnergyETK(BatchedMolecular3DDeviceBuffers&           molSyste
   }
 
   // 1-3 distance terms
-  if (err == cudaSuccess && (term == ETKTerm::ALL || term == ETKTerm::DISTANCE_13) &&
+  if (err == cudaSuccess && (term == ETKTerm::ALL || term == ETKTerm::PLAIN || term == ETKTerm::DISTANCE_13) &&
       contribs.dist13Terms.idx1.size() > 0) {
     err = launchDistanceConstraintEnergyKernel(contribs.dist13Terms.idx1.size(),
                                                contribs.dist13Terms.idx1.data(),
@@ -760,7 +765,7 @@ cudaError_t computeEnergyETK(BatchedMolecular3DDeviceBuffers&           molSyste
   }
 
   // 1-3 angle terms
-  if (err == cudaSuccess && (term == ETKTerm::ALL || term == ETKTerm::ANGLE_13) &&
+  if (err == cudaSuccess && (term == ETKTerm::ALL || term == ETKTerm::PLAIN || term == ETKTerm::ANGLE_13) &&
       contribs.angle13Terms.idx1.size() > 0) {
     err = launchAngleConstraintEnergyKernel(contribs.angle13Terms.idx1.size(),
                                             contribs.angle13Terms.idx1.data(),
@@ -780,7 +785,7 @@ cudaError_t computeEnergyETK(BatchedMolecular3DDeviceBuffers&           molSyste
   }
 
   // Long range distance terms
-  if (err == cudaSuccess && (term == ETKTerm::ALL || term == ETKTerm::LONGDISTANCE) &&
+  if (err == cudaSuccess && (term == ETKTerm::ALL || term == ETKTerm::PLAIN || term == ETKTerm::LONGDISTANCE) &&
       contribs.longRangeDistTerms.idx1.size() > 0) {
     err = launchDistanceConstraintEnergyKernel(contribs.longRangeDistTerms.idx1.size(),
                                                contribs.longRangeDistTerms.idx1.data(),
@@ -822,7 +827,7 @@ cudaError_t computeGradientsETK(BatchedMolecular3DDeviceBuffers&           molSy
   cudaError_t err = cudaSuccess;
 
   // Experimental torsion terms
-  if ((term == ETKTerm::ALL || term == ETKTerm::EXPERIMANTAL_TORSION) &&
+  if ((term == ETKTerm::ALL || term == ETKTerm::PLAIN || term == ETKTerm::EXPERIMANTAL_TORSION) &&
       contribs.experimentalTorsionTerms.idx1.size() > 0) {
     err = launchTorsionAngleGradientKernel(contribs.experimentalTorsionTerms.idx1.size(),
                                            contribs.experimentalTorsionTerms.idx1.data(),
@@ -862,7 +867,7 @@ cudaError_t computeGradientsETK(BatchedMolecular3DDeviceBuffers&           molSy
   }
 
   // 1-2 distance terms
-  if (err == cudaSuccess && (term == ETKTerm::ALL || term == ETKTerm::DISTANCE_12) &&
+  if (err == cudaSuccess && (term == ETKTerm::ALL || term == ETKTerm::PLAIN || term == ETKTerm::DISTANCE_12) &&
       contribs.dist12Terms.idx1.size() > 0) {
     err = launchDistanceConstraintGradientKernel(contribs.dist12Terms.idx1.size(),
                                                  contribs.dist12Terms.idx1.data(),
@@ -879,7 +884,7 @@ cudaError_t computeGradientsETK(BatchedMolecular3DDeviceBuffers&           molSy
   }
 
   // 1-3 distance terms
-  if (err == cudaSuccess && (term == ETKTerm::ALL || term == ETKTerm::DISTANCE_13) &&
+  if (err == cudaSuccess && (term == ETKTerm::ALL || term == ETKTerm::PLAIN || term == ETKTerm::DISTANCE_13) &&
       contribs.dist13Terms.idx1.size() > 0) {
     err = launchDistanceConstraintGradientKernel(contribs.dist13Terms.idx1.size(),
                                                  contribs.dist13Terms.idx1.data(),
@@ -896,7 +901,7 @@ cudaError_t computeGradientsETK(BatchedMolecular3DDeviceBuffers&           molSy
   }
 
   // 1-3 angle terms
-  if (err == cudaSuccess && (term == ETKTerm::ALL || term == ETKTerm::ANGLE_13) &&
+  if (err == cudaSuccess && (term == ETKTerm::ALL || term == ETKTerm::PLAIN || term == ETKTerm::ANGLE_13) &&
       contribs.angle13Terms.idx1.size() > 0) {
     err = launchAngleConstraintGradientKernel(contribs.angle13Terms.idx1.size(),
                                               contribs.angle13Terms.idx1.data(),
@@ -914,7 +919,7 @@ cudaError_t computeGradientsETK(BatchedMolecular3DDeviceBuffers&           molSy
   }
 
   // Long range distance terms
-  if (err == cudaSuccess && (term == ETKTerm::ALL || term == ETKTerm::LONGDISTANCE) &&
+  if (err == cudaSuccess && (term == ETKTerm::ALL || term == ETKTerm::PLAIN || term == ETKTerm::LONGDISTANCE) &&
       contribs.longRangeDistTerms.idx1.size() > 0) {
     err = launchDistanceConstraintGradientKernel(contribs.longRangeDistTerms.idx1.size(),
                                                  contribs.longRangeDistTerms.idx1.data(),

@@ -248,26 +248,40 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
       stages.push_back(
         std::make_unique<detail::FirstMinimizeStage>(constMolPtrs, batchEargs, paramsCopy, context, streamPtr));
       stages.push_back(std::make_unique<detail::ETKDGTetrahedralCheckStage>(context, batchEargs, dim, streamPtr));
-      auto chiralStage =
-        std::make_unique<detail::ETKDGFirstChiralCenterCheckStage>(context, batchEargs, dim, streamPtr);
-      auto& chiralStageRef = *chiralStage;
-      stages.push_back(std::move(chiralStage));
+
+      // Only add first chiral check if enforceChirality is enabled
+      detail::ETKDGFirstChiralCenterCheckStage* chiralStagePtr = nullptr;
+      if (paramsCopy.enforceChirality) {
+        auto chiralStage =
+          std::make_unique<detail::ETKDGFirstChiralCenterCheckStage>(context, batchEargs, dim, streamPtr);
+        chiralStagePtr = chiralStage.get();
+        stages.push_back(std::move(chiralStage));
+      }
 
       // Second + 3rd minimize, then double bond checks.
       stages.push_back(
         std::make_unique<detail::FourthDimMinimizeStage>(constMolPtrs, batchEargs, paramsCopy, context, streamPtr));
-      stages.push_back(
-        std::make_unique<detail::ETKMinimizationStage>(constMolPtrs, batchEargs, paramsCopy, context, streamPtr));
+
+      // (ET)(K)DG: Add experimental torsion minimization stage only if needed to match RDKit's logic.
+      if (paramsCopy.useExpTorsionAnglePrefs || paramsCopy.useBasicKnowledge) {
+        stages.push_back(
+          std::make_unique<detail::ETKMinimizationStage>(constMolPtrs, batchEargs, paramsCopy, context, streamPtr));
+      }
 
       // Final chiral and stereochem checks
       stages.push_back(
         std::make_unique<detail::ETKDGDoubleBondGeometryCheckStage>(context, batchEargs, dim, streamPtr));
-      // This is a pass-through, don't need to set the stream
-      stages.push_back(std::make_unique<detail::ETKDGFinalChiralCenterCheckStage>(chiralStageRef));
-      stages.push_back(std::make_unique<detail::ETKDGChiralDistMatrixCheckStage>(context, batchEargs, dim, streamPtr));
-      stages.push_back(
-        std::make_unique<detail::ETKDGChiralCenterVolumeCheckStage>(context, batchEargs, dim, streamPtr));
-      stages.push_back(std::make_unique<detail::ETKDGDoubleBondStereoCheckStage>(context, batchEargs, dim, streamPtr));
+
+      if (paramsCopy.enforceChirality) {
+        // This is a pass-through, don't need to set the stream
+        stages.push_back(std::make_unique<detail::ETKDGFinalChiralCenterCheckStage>(*chiralStagePtr));
+        stages.push_back(
+          std::make_unique<detail::ETKDGChiralDistMatrixCheckStage>(context, batchEargs, dim, streamPtr));
+        stages.push_back(
+          std::make_unique<detail::ETKDGChiralCenterVolumeCheckStage>(context, batchEargs, dim, streamPtr));
+        stages.push_back(
+          std::make_unique<detail::ETKDGDoubleBondStereoCheckStage>(context, batchEargs, dim, streamPtr));
+      }
 
       // Writeback
       stages.push_back(std::make_unique<detail::ETKDGUpdateConformersStage>(batchMolsWithConfs,
