@@ -26,5 +26,5 @@ Currently supported functionality:
 - ETKDG conformer generation for multiple molecules
 - MMFF optimization for multiple molecules and conformers
 """
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 __version__ = VERSION
