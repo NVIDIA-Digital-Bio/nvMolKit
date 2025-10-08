@@ -45,7 +45,7 @@ template <std::size_t NBits> struct FlatBitVectStorage {
   static_assert(kStorageCount > 0, "kStorageCount must be greater than 0");
 
   // Default constructor does not initialize.
-  CUDA_CALLABLE_MEMBER FlatBitVectStorage() = default;  // cppcheck-suppress uninitMemberVar
+  FlatBitVectStorage() = default;  // cppcheck-suppress uninitMemberVar
   CUDA_CALLABLE_MEMBER FlatBitVectStorage(const FlatBitVectStorage& other) {
     for (std::size_t i = 0; i < kStorageCount; ++i) {
       bits[i] = other.bits[i];
@@ -111,15 +111,16 @@ template <std::size_t NBits> class FlatBitVect {
   template <size_t otherSize> friend class FlatBitVect;
 
  public:
-  CUDA_CALLABLE_MEMBER FlatBitVect() = default;
+  FlatBitVect() = default;
   CUDA_CALLABLE_MEMBER explicit FlatBitVect(bool fillValue) {
     const int fillValExpanded = fillValue ? 0xFFFF : 0x0000;
     std::memset(bits_.bits, fillValExpanded, kStorageBytes * kStorageCount);
   }
-  CUDA_CALLABLE_MEMBER              FlatBitVect(const FlatBitVect& other) = default;
-  CUDA_CALLABLE_MEMBER              FlatBitVect(FlatBitVect&& other)      = default;
-  CUDA_CALLABLE_MEMBER FlatBitVect& operator=(const FlatBitVect& other)   = default;
-  CUDA_CALLABLE_MEMBER FlatBitVect& operator=(FlatBitVect&& other)        = default;
+  FlatBitVect(const FlatBitVect& other)            = default;
+  FlatBitVect(FlatBitVect&& other)                 = default;
+  FlatBitVect& operator=(const FlatBitVect& other) = default;
+  FlatBitVect& operator=(FlatBitVect&& other)      = default;
+  ~FlatBitVect() noexcept                          = default;
 
   CUDA_CALLABLE_MEMBER bool operator[](const std::size_t i) const {
     const std::size_t storageIdx = i / kStorageBits;
