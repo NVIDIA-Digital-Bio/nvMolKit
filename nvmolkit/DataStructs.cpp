@@ -34,10 +34,10 @@ template <typename T> boost::python::list vectorToList(const std::vector<T>& vec
 namespace {
 
 template <typename blockT> cuda::std::span<const blockT> getSpanFromDictElems(void* data, boost::python::tuple& shape) {
-  int size = boost::python::extract<int>(shape[0]);
+  size_t size = boost::python::extract<size_t>(shape[0]);
   // multiply by any other dimensions
   for (int i = 1; i < len(shape); i++) {
-    size *= boost::python::extract<int>(shape[i]);
+    size *= boost::python::extract<size_t>(shape[i]);
   }
 
   return cuda::std::span<blockT>(reinterpret_cast<blockT*>(data), size);
@@ -52,17 +52,17 @@ boost::python::numpy::ndarray crossSimilarityCPUFromRawBuffers(const boost::pyth
   boost::python::tuple shapeOne = boost::python::extract<boost::python::tuple>(bitsOne["shape"]);
   boost::python::tuple shapeTwo = boost::python::extract<boost::python::tuple>(bitsTwo["shape"]);
 
-  const size_t numMolsOne = boost::python::extract<int>(shapeOne[0]);
-  const size_t numMolsTwo = boost::python::extract<int>(shapeTwo[0]);
+  const size_t numMolsOne = boost::python::extract<size_t>(shapeOne[0]);
+  const size_t numMolsTwo = boost::python::extract<size_t>(shapeTwo[0]);
 
-  const int nInts    = boost::python::extract<int>(shapeOne[1]);
-  const int nIntsTwo = boost::python::extract<int>(shapeTwo[1]);
+  const size_t nInts    = boost::python::extract<size_t>(shapeOne[1]);
+  const size_t nIntsTwo = boost::python::extract<size_t>(shapeTwo[1]);
   if (nInts != nIntsTwo) {
     throw std::invalid_argument("Shape of bitsOne and bitsTwo dim 1 must be the same");
   }
 
-  const int            nBytes       = sizeof(std::uint32_t);
-  const int            fpSize       = nInts * 8 * nBytes;
+  const size_t         nBytes       = sizeof(std::uint32_t);
+  const size_t         fpSize       = nInts * 8 * nBytes;
   boost::python::tuple data1        = boost::python::extract<boost::python::tuple>(bitsOne["data"]);
   size_t               data1Pointer = boost::python::extract<std::size_t>(data1[0]);
   boost::python::tuple data2        = boost::python::extract<boost::python::tuple>(bitsTwo["data"]);
@@ -113,18 +113,18 @@ BOOST_PYTHON_MODULE(_DataStructs) {
       boost::python::tuple shapeOne = boost::python::extract<boost::python::tuple>(bitsOne["shape"]);
       boost::python::tuple shapeTwo = boost::python::extract<boost::python::tuple>(bitsTwo["shape"]);
 
-      const int nInts    = boost::python::extract<int>(shapeOne[1]);
-      const int nIntsTwo = boost::python::extract<int>(shapeTwo[1]);
+      const size_t nInts    = boost::python::extract<size_t>(shapeOne[1]);
+      const size_t nIntsTwo = boost::python::extract<size_t>(shapeTwo[1]);
       if (nInts != nIntsTwo) {
         throw std::invalid_argument("Shape of bitsOne and bitsTwo dim 1 must be the same");
       }
-      const size_t numMolsOne = boost::python::extract<int>(shapeOne[0]);
-      const size_t numMolsTwo = boost::python::extract<int>(shapeTwo[0]);
+      const size_t numMolsOne = boost::python::extract<size_t>(shapeOne[0]);
+      const size_t numMolsTwo = boost::python::extract<size_t>(shapeTwo[0]);
 
       // Extract the datatype string, and check the number of bytes
-      const int nBytes = sizeof(std::uint32_t);
+      const size_t nBytes = sizeof(std::uint32_t);
 
-      const int            fpSize       = nInts * 8 * nBytes;
+      const size_t         fpSize       = nInts * 8 * nBytes;
       boost::python::tuple data1        = boost::python::extract<boost::python::tuple>(bitsOne["data"]);
       size_t               data1Pointer = boost::python::extract<std::size_t>(data1[0]);
       boost::python::tuple data2        = boost::python::extract<boost::python::tuple>(bitsTwo["data"]);
@@ -149,22 +149,22 @@ BOOST_PYTHON_MODULE(_DataStructs) {
       boost::python::tuple shapeOne = boost::python::extract<boost::python::tuple>(bitsOne["shape"]);
       boost::python::tuple shapeTwo = boost::python::extract<boost::python::tuple>(bitsTwo["shape"]);
 
-      const int nInts    = boost::python::extract<int>(shapeOne[1]);
-      const int nIntsTwo = boost::python::extract<int>(shapeTwo[1]);
+      const size_t nInts    = boost::python::extract<size_t>(shapeOne[1]);
+      const size_t nIntsTwo = boost::python::extract<size_t>(shapeTwo[1]);
       if (nInts != nIntsTwo) {
         throw std::invalid_argument("Shape of bitsOne and bitsTwo dim 1 must be the same");
       }
-      const size_t numMolsOne = boost::python::extract<int>(shapeOne[0]);
-      const size_t numMolsTwo = boost::python::extract<int>(shapeTwo[0]);
+      const size_t numMolsOne = boost::python::extract<size_t>(shapeOne[0]);
+      const size_t numMolsTwo = boost::python::extract<size_t>(shapeTwo[0]);
 
       // Extract the datatype string, and check the number of bytes
-      const int nBytes = sizeof(std::uint32_t);
+      const size_t nBytes = sizeof(std::uint32_t);
 
-      const int            fpSize       = nInts * 8 * nBytes;
+      const size_t         fpSize       = nInts * 8 * nBytes;
       boost::python::tuple data1        = boost::python::extract<boost::python::tuple>(bitsOne["data"]);
-      size_t               data1Pointer = boost::python::extract<std::size_t>(data1[0]);
+      const size_t         data1Pointer = boost::python::extract<std::size_t>(data1[0]);
       boost::python::tuple data2        = boost::python::extract<boost::python::tuple>(bitsTwo["data"]);
-      size_t               data2Pointer = boost::python::extract<std::size_t>(data2[0]);
+      const size_t         data2Pointer = boost::python::extract<std::size_t>(data2[0]);
 
       auto span1 = getSpanFromDictElems<std::uint32_t>(reinterpret_cast<void*>(data1Pointer), shapeOne);
       auto span2 = getSpanFromDictElems<std::uint32_t>(reinterpret_cast<void*>(data2Pointer), shapeTwo);

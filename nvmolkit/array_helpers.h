@@ -24,8 +24,18 @@
 namespace nvMolKit {
 
 struct PyArray {
+  PyArray() = default;
+  ~PyArray() {
+    if (devicePtr != nullptr) {
+      cudaFreeAsync(devicePtr, stream);
+      devicePtr = nullptr;
+    }
+  }
+
   boost::python::dict __cuda_array_interface__;
   boost::python::dict __array_interface__;
+  void*               devicePtr = nullptr;
+  cudaStream_t        stream    = nullptr;
 };
 
 template <typename T> std::string getNumpyType() {
@@ -60,9 +70,13 @@ PyArray* makePyArray(AsyncDeviceVector<T>& deviceVector, const std::string& dTyp
   thisPyArray->__cuda_array_interface__ = boost::python::dict();
   auto& dict                            = thisPyArray->__cuda_array_interface__;
 
+  thisPyArray->stream    = deviceVector.stream();
+  T* releasedPtr         = deviceVector.release();
+  thisPyArray->devicePtr = releasedPtr;
+
   dict["shape"]   = shape;
   dict["typestr"] = boost::python::str("|" + dTypeStr);
-  dict["data"] = boost::python::make_tuple(reinterpret_cast<std::size_t>(deviceVector.release()), /*readOnly=*/false);
+  dict["data"]    = boost::python::make_tuple(reinterpret_cast<std::size_t>(releasedPtr), /*readOnly=*/false);
   dict["version"] = 2;
 
   return thisPyArray;
