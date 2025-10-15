@@ -1,11 +1,28 @@
+// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #include <cub/cub.cuh>
 
 #include "butina.h"
 #include "host_vector.h"
 namespace nvMolKit {
 
+namespace {
 constexpr int blockSizeCount = 256;
 
+// TODO can we do some dynamic assignment as lower numbers of rows execute due to being done.
 __global__ void butinaKernelCountClusterSize(const cuda::std::span<const double> distanceMatrix,
                                              const cuda::std::span<int>          clusters,
                                              const cuda::std::span<int>          clusterSizes,
@@ -14,18 +31,24 @@ __global__ void butinaKernelCountClusterSize(const cuda::std::span<const double>
   const auto pointIdx  = static_cast<int>(blockIdx.x);
   const auto numPoints = static_cast<int>(clusters.size());
 
+  if (clusters[pointIdx] >= 0) {
+    clusterSizes[pointIdx] = 0;
+    return;
+  }
+
   const cuda::std::span<const double> distances  = distanceMatrix.subspan(pointIdx * numPoints, numPoints);
   int                                 localCount = 0;
   for (int i = tid; i < numPoints; i += blockSizeCount) {
     const double dist = distances[i];
-    if (const int cluster = clusters[i]; dist < cutoff && cluster == 0) {
+    if (const int cluster = clusters[i]; dist < cutoff && cluster < 0) {
       localCount++;
     }
   }
 
-  __shared__ cub::BlockReduce<double, blockSizeCount>::TempStorage tempStorage;
-  const int totalCount = cub::BlockReduce<double, blockSizeCount>(tempStorage).Sum(localCount);
+  __shared__ cub::BlockReduce<int, blockSizeCount>::TempStorage tempStorage;
+  const int totalCount = cub::BlockReduce<int, blockSizeCount>(tempStorage).Sum(localCount);
   if (tid == 0) {
+    //printf("Count %d for pt %d\n", totalCount, pointIdx);
     clusterSizes[pointIdx] = totalCount;
   }
 }
@@ -36,14 +59,18 @@ __global__ void butinaWriteClusterValue(const cuda::std::span<const double> dist
                                         const int*                          centralIdx,
                                         const int*                          clusterIdx) {
   const auto numPoints  = static_cast<int>(clusters.size());
-  const auto tid        = static_cast<int>(threadIdx.x + blockIdx.x * blockDim.x);
+  const auto tid        = static_cast<int>(threadIdx.x + (blockIdx.x * blockDim.x));
   const int  pointIdx   = *centralIdx;
   const int  clusterVal = *clusterIdx;
+  if (tid == 0) {
+    //printf("Cluster %d centroid is element %d\n", clusterVal, pointIdx);
+  }
 
   const cuda::std::span<const double> distances = distanceMatrix.subspan(pointIdx * numPoints, numPoints);
   if (tid < numPoints) {
     if (const double dist = distances[tid]; dist < cutoff) {
-      if (const int cluster = clusters[tid]; cluster == 0) {
+      if (const int cluster = clusters[tid]; cluster < 0) {
+        //printf("Assigning cluster %d to item %d\n", clusterVal, tid);
         clusters[tid] = clusterVal;
       }
     }
@@ -58,34 +85,80 @@ __global__ void bumpClusterIdxKernel(int* clusterIdx) {
 
 __global__ void assignSingletonIdsKernel(const cuda::std::span<int> clusters, const int* nextClusterIdx) {
   int clusterIdx = *nextClusterIdx;
-  for (int i = 0; i < clusters.size(); i++) {
-    if (clusters[i] == 0) {
+  for (int i = static_cast<int>(clusters.size()) - 1; i >= 0; i--) {
+    if (clusters[i] < 0) {
       clusters[i] = clusterIdx;
       clusterIdx++;
     }
   }
 }
 
-void butinaGpu(const AsyncDeviceVector<double>& distanceMatrix,
-               AsyncDeviceVector<int>&          clusters,
+constexpr int argMaxBlockSize = 512;
+__global__ void lastArgMax(const cuda::std::span<const int> values, int* outVal, int* outIdx) {
+  int maxVal = cuda::std::numeric_limits<int>::min();
+  int maxID = -1;
+  __shared__ int foundMaxVal[argMaxBlockSize];
+  __shared__ int foundMaxIds[argMaxBlockSize];
+  const auto tid = static_cast<int>(threadIdx.x);
+  for (int i = tid; i < values.size(); i += argMaxBlockSize) {
+    if (const int val = values[i]; val >= maxVal) {
+      maxID = i;
+      maxVal = val;
+    }
+  }
+  foundMaxVal[tid] = maxVal;
+  foundMaxIds[tid] = maxID;
+
+  __shared__ cub::BlockReduce<int, argMaxBlockSize>::TempStorage storage;
+  const int actualMaxVal = cub::BlockReduce<int, argMaxBlockSize>(storage).Reduce(maxVal, cub::Max());
+  __syncthreads(); // For shared memory write of maxVal and maxID
+  if (tid == 0) {\
+    *outVal = actualMaxVal;
+    for (int i = argMaxBlockSize - 1; i >= 0; i--) {
+      if (foundMaxVal[i] == actualMaxVal) {
+        *outIdx = foundMaxIds[i];
+        //printf("Found max of %d at %d\n", actualMaxVal, *outIdx);
+        break;
+      }
+    }
+  }
+}
+
+// TODO - consolidate this to device vector code.
+template <typename T> __global__ void setAllKernel(const size_t numElements, T value, T* dst) {
+  const size_t idx = (blockIdx.x * blockDim.x) + threadIdx.x;
+  if (idx < numElements) {
+    dst[idx] = value;
+  }
+}
+template <typename T> void setAll(const cuda::std::span<T>& vec, const T& value, cudaStream_t stream) {
+  const size_t          numElements = vec.size();
+  if (numElements == 0) {
+    return;
+  }
+  constexpr int blockSize = 128;
+  const size_t numBlocks = (numElements + blockSize - 1) / blockSize;
+  setAllKernel<<<numBlocks, blockSize, 0, stream>>>(numElements, value, vec.data());
+  cudaCheckError(cudaGetLastError());
+}
+
+} // namespace
+void butinaGpu(const cuda::std::span<const double> distanceMatrix,
+               const cuda::std::span<int>          clusters,
                const double                     cutoff,
                cudaStream_t                     stream) {
   const size_t numPoints = clusters.size();
-  clusters.zero();
+  setAll(clusters, -1, stream);
   if (const size_t matSize = distanceMatrix.size(); numPoints * numPoints != matSize) {
     throw std::runtime_error("Butina size mismatch" + std::to_string(numPoints) +
                              " points^2 != " + std::to_string(matSize) + " distance matrix size");
   }
-  if (clusters.stream() != stream) {
-    throw std::runtime_error("Butina stream mismatch");
-  }
-
   AsyncDeviceVector<int> clusterSizes(clusters.size(), stream);
   clusterSizes.zero();
 
   const AsyncDevicePtr<int> maxIndex(-1, stream);
   const AsyncDevicePtr<int> maxValue(std::numeric_limits<int>::max(), stream);
-  const AsyncDevicePtr<int> clusterIdx(1, stream);
+  const AsyncDevicePtr<int> clusterIdx(0, stream);
   PinnedHostVector<int>     maxCluster(1);
   maxCluster[0]           = std::numeric_limits<int>::max();
   size_t tempStorageBytes = 0;
@@ -94,13 +167,13 @@ void butinaGpu(const AsyncDeviceVector<double>& distanceMatrix,
                             clusterSizes.data(),
                             maxValue.data(),
                             maxIndex.data(),
-                            numPoints,
+                            static_cast<int64_t>(numPoints),
                             stream);
-  AsyncDeviceVector<uint8_t> tempStorage(tempStorageBytes, stream);
-  const int                  numBlocksFlat = (clusterSizes.size() - 1) / blockSizeCount + 1;
+  AsyncDeviceVector<uint8_t> const tempStorage(tempStorageBytes, stream);
+  const int                  numBlocksFlat = ((static_cast<int>(clusterSizes.size()) - 1) / blockSizeCount) + 1;
   while (maxCluster[0] > 1) {
-    butinaKernelCountClusterSize<<<numPoints, blockSizeCount, 0, stream>>>(toSpan(distanceMatrix),
-                                                                           toSpan(clusters),
+    butinaKernelCountClusterSize<<<numPoints, blockSizeCount, 0, stream>>>(distanceMatrix,
+                                                                           clusters,
                                                                            toSpan(clusterSizes),
                                                                            cutoff);
     cudaCheckError(cudaGetLastError());
@@ -111,8 +184,9 @@ void butinaGpu(const AsyncDeviceVector<double>& distanceMatrix,
                                              maxIndex.data(),
                                              numPoints,
                                              stream));
-    butinaWriteClusterValue<<<numBlocksFlat, blockSizeCount, 0, stream>>>(toSpan(distanceMatrix),
-                                                                          toSpan(clusters),
+    // lastArgMax<<<1, argMaxBlockSize, 0, stream>>>(toSpan(clusterSizes), maxValue.data(), maxIndex.data());
+    butinaWriteClusterValue<<<numBlocksFlat, blockSizeCount, 0, stream>>>(distanceMatrix,
+                                                                          clusters,
                                                                           cutoff,
                                                                           maxIndex.data(),
                                                                           clusterIdx.data());
@@ -121,8 +195,9 @@ void butinaGpu(const AsyncDeviceVector<double>& distanceMatrix,
     cudaCheckError(cudaGetLastError());
     cudaCheckError(cudaMemcpyAsync(maxCluster.data(), maxValue.data(), sizeof(int), cudaMemcpyDefault, stream));
     cudaStreamSynchronize(stream);
+    int maxV = maxCluster[0];
   }
-  assignSingletonIdsKernel<<<1, 1, 0, stream>>>(toSpan(clusters), clusterIdx.data());
+  assignSingletonIdsKernel<<<1, 1, 0, stream>>>(clusters, clusterIdx.data());
   cudaStreamSynchronize(stream);
 }
 
