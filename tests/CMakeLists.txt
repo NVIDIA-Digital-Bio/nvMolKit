@@ -173,7 +173,11 @@ target_link_libraries(test_host_vector PRIVATE host_vector device_vector)
 add_executable(test_etkdg_result_tracker test_etkdg_result_tracker.cpp)
 target_link_libraries(test_etkdg_result_tracker PRIVATE etkdg_impl)
 
+add_executable(test_butina test_butina.cpp)
+target_link_libraries(test_butina PRIVATE butina device)
+
 set(TEST_LIST
+    test_butina
     test_bfgs_hessian
     test_openmp_helpers
     test_conformer_checkers

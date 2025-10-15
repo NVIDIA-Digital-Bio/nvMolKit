@@ -111,3 +111,7 @@ target_link_libraries(
           openmp_helpers
           OpenMP::OpenMP_CXX)
 target_include_directories(etkdg PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_library(butina butina.cu)
+target_link_libraries(butina PUBLIC device_vector)
+target_include_directories(butina PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
