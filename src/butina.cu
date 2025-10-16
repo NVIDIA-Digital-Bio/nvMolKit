@@ -161,15 +161,15 @@ void butinaGpu(const cuda::std::span<const double> distanceMatrix,
   const AsyncDevicePtr<int> clusterIdx(0, stream);
   PinnedHostVector<int>     maxCluster(1);
   maxCluster[0]           = std::numeric_limits<int>::max();
-  size_t tempStorageBytes = 0;
-  cub::DeviceReduce::ArgMax(nullptr,
-                            tempStorageBytes,
-                            clusterSizes.data(),
-                            maxValue.data(),
-                            maxIndex.data(),
-                            static_cast<int64_t>(numPoints),
-                            stream);
-  AsyncDeviceVector<uint8_t> const tempStorage(tempStorageBytes, stream);
+  // size_t tempStorageBytes = 0;
+  // cub::DeviceReduce::ArgMax(nullptr,
+  //                           tempStorageBytes,
+  //                           clusterSizes.data(),
+  //                           maxValue.data(),
+  //                           maxIndex.data(),
+  //                           static_cast<int64_t>(numPoints),
+  //                           stream);
+  // AsyncDeviceVector<uint8_t> const tempStorage(tempStorageBytes, stream);
   const int                  numBlocksFlat = ((static_cast<int>(clusterSizes.size()) - 1) / blockSizeCount) + 1;
   while (maxCluster[0] > 1) {
     butinaKernelCountClusterSize<<<numPoints, blockSizeCount, 0, stream>>>(distanceMatrix,
@@ -177,14 +177,15 @@ void butinaGpu(const cuda::std::span<const double> distanceMatrix,
                                                                            toSpan(clusterSizes),
                                                                            cutoff);
     cudaCheckError(cudaGetLastError());
-    cudaCheckError(cub::DeviceReduce::ArgMax(tempStorage.data(),
-                                             tempStorageBytes,
-                                             clusterSizes.data(),
-                                             maxValue.data(),
-                                             maxIndex.data(),
-                                             numPoints,
-                                             stream));
-    // lastArgMax<<<1, argMaxBlockSize, 0, stream>>>(toSpan(clusterSizes), maxValue.data(), maxIndex.data());
+    // cudaCheckError(cub::DeviceReduce::ArgMax(tempStorage.data(),
+    //                                          tempStorageBytes,
+    //                                          clusterSizes.data(),
+    //                                          maxValue.data(),
+    //                                          maxIndex.data(),
+    //                                          numPoints,
+    //                                          stream));
+    lastArgMax<<<1, argMaxBlockSize, 0, stream>>>(toSpan(clusterSizes), maxValue.data(), maxIndex.data());
+    cudaCheckError(cudaGetLastError());
     butinaWriteClusterValue<<<numBlocksFlat, blockSizeCount, 0, stream>>>(distanceMatrix,
                                                                           clusters,
                                                                           cutoff,
