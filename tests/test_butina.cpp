@@ -12,6 +12,13 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdint>
+#include <numeric>
+#include <random>
+#include <vector>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
@@ -20,166 +27,171 @@
 #include "host_vector.h"
 
 using nvMolKit::AsyncDeviceVector;
-namespace {
-const std::vector<double> tenX10Distances = {
-    0.        , 0.15687623, 0.09595425, 0.72546897, 0.33924049,
-    0.78225097, 0.16806415, 0.26631666, 0.39562062, 0.50155629,
-    0.15687623, 0.        , 0.41414406, 0.05131665, 0.04809979,
-    0.40914488, 0.23585818, 0.25649259, 0.85540637, 0.22509407,
-    0.09595425, 0.41414406, 0.        , 0.19392538, 0.26997909,
-    0.51325713, 0.76052488, 0.03183953, 0.23982451, 0.17851484,
-    0.72546897, 0.05131665, 0.19392538, 0.        , 0.52667272,
-    0.06120078, 0.54546094, 0.29008846, 0.49764631, 0.04829942,
-    0.33924049, 0.04809979, 0.26997909, 0.52667272, 0.        ,
-    0.46292525, 0.06468587, 0.58566521, 0.26804082, 0.26455253,
-    0.78225097, 0.40914488, 0.51325713, 0.06120078, 0.46292525,
-    0.        , 0.03692489, 0.49409977, 0.12122929, 0.17019359,
-    0.16806415, 0.23585818, 0.76052488, 0.54546094, 0.06468587,
-    0.03692489, 0.        , 0.50806817, 0.23168576, 0.12921447,
-    0.26631666, 0.25649259, 0.03183953, 0.29008846, 0.58566521,
-    0.49409977, 0.50806817, 0.        , 0.79231095, 0.60798572,
-    0.39562062, 0.85540637, 0.23982451, 0.49764631, 0.26804082,
-    0.12122929, 0.23168576, 0.79231095, 0.        , 0.2796813 ,
-    0.50155629, 0.22509407, 0.17851484, 0.04829942, 0.26455253,
-    0.17019359, 0.12921447, 0.60798572, 0.2796813 , 0.        };
 
-const std::vector<double> twentyXdistances = {
-  0.00000000e+00, 4.28334233e-01, 3.92355916e-02, 3.53237014e-01,
-       8.26688704e-01, 8.20554716e-02, 6.69723399e-01, 2.62328608e-01,
-       1.29832308e-01, 4.91166772e-01, 5.91578436e-01, 6.80822430e-01,
-       2.32601389e-01, 3.20557456e-01, 9.52252182e-02, 5.81055765e-01,
-       2.99062475e-01, 3.16210590e-01, 5.03770007e-02, 8.14921739e-01,
-       4.28334233e-01, 0.00000000e+00, 7.43119054e-01, 2.85390222e-01,
-       7.06118446e-01, 2.75754765e-03, 4.10717950e-01, 1.33175197e-01,
-       6.65216758e-02, 2.14358232e-01, 9.41459844e-01, 3.95954996e-01,
-       7.70372445e-01, 5.36444372e-02, 1.51510226e-01, 5.24067658e-01,
-       4.57416687e-01, 3.18751219e-01, 3.32886703e-01, 8.50407248e-03,
-       3.92355916e-02, 7.43119054e-01, 0.00000000e+00, 3.50990589e-02,
-       3.71857986e-01, 5.19327669e-01, 4.50899698e-01, 2.12239546e-02,
-       1.23371425e-01, 7.74965404e-02, 5.94356372e-01, 9.83823535e-02,
-       7.05892552e-03, 2.33988605e-01, 2.31620426e-01, 3.13071989e-02,
-       7.75254169e-01, 4.76810391e-01, 4.20611050e-04, 2.06978782e-01,
-       3.53237014e-01, 2.85390222e-01, 3.50990589e-02, 0.00000000e+00,
-       3.52204246e-01, 4.44318637e-01, 2.35189520e-01, 4.52606522e-02,
-       3.33678580e-01, 5.53707893e-01, 5.92306227e-02, 6.22666945e-02,
-       2.78454801e-01, 1.02111130e-01, 6.96430300e-01, 3.63831763e-01,
-       6.82188928e-01, 2.05471402e-01, 4.60918701e-01, 4.93633871e-01,
-       8.26688704e-01, 7.06118446e-01, 3.71857986e-01, 3.52204246e-01,
-       0.00000000e+00, 6.17364720e-01, 2.89029576e-01, 1.17250765e-01,
-       8.40571025e-01, 1.25370216e-01, 6.20399770e-01, 4.04896966e-01,
-       6.59213516e-01, 4.43452066e-01, 3.68303848e-01, 8.25229830e-02,
-       5.98858722e-01, 8.95751382e-03, 7.87783604e-02, 1.96044042e-01,
-       8.20554716e-02, 2.75754765e-03, 5.19327669e-01, 4.44318637e-01,
-       6.17364720e-01, 0.00000000e+00, 4.51210746e-01, 1.13530765e-01,
-       1.08139165e-01, 1.75229975e-01, 3.90527032e-03, 7.29148400e-02,
-       8.52271109e-01, 1.58622433e-01, 4.20780410e-01, 1.29486959e-01,
-       8.77639802e-02, 9.59418053e-01, 1.50618954e-01, 1.72797154e-01,
-       6.69723399e-01, 4.10717950e-01, 4.50899698e-01, 2.35189520e-01,
-       2.89029576e-01, 4.51210746e-01, 0.00000000e+00, 5.80999933e-01,
-       2.41096724e-01, 1.35017885e-01, 2.11745728e-01, 1.40819190e-02,
-       8.03005685e-01, 9.36726686e-02, 5.15301783e-01, 2.10827094e-01,
-       1.81163695e-01, 7.92374568e-01, 4.16406822e-01, 1.73051631e-01,
-       2.62328608e-01, 1.33175197e-01, 2.12239546e-02, 4.52606522e-02,
-       1.17250765e-01, 1.13530765e-01, 5.80999933e-01, 0.00000000e+00,
-       1.88429868e-01, 2.07485491e-01, 2.35277196e-01, 5.12522147e-01,
-       3.23604481e-02, 5.28560394e-01, 1.30746685e-01, 5.25876579e-01,
-       1.65333764e-01, 6.98585741e-02, 2.77788806e-01, 3.29801542e-01,
-       1.29832308e-01, 6.65216758e-02, 1.23371425e-01, 3.33678580e-01,
-       8.40571025e-01, 1.08139165e-01, 2.41096724e-01, 1.88429868e-01,
-       0.00000000e+00, 7.06422640e-01, 3.29732215e-01, 1.67861137e-01,
-       4.38372063e-01, 1.11624009e-01, 1.38666577e-01, 2.38231023e-01,
-       5.83872294e-01, 3.30809578e-01, 3.36345177e-01, 3.52254777e-01,
-       4.91166772e-01, 2.14358232e-01, 7.74965404e-02, 5.53707893e-01,
-       1.25370216e-01, 1.75229975e-01, 1.35017885e-01, 2.07485491e-01,
-       7.06422640e-01, 0.00000000e+00, 6.63347167e-02, 3.06296705e-02,
-       1.43749230e-01, 9.08793718e-01, 3.00049213e-01, 1.07449023e-01,
-       1.46324426e-01, 3.28533356e-01, 6.87267935e-02, 4.88401138e-01,
-       5.91578436e-01, 9.41459844e-01, 5.94356372e-01, 5.92306227e-02,
-       6.20399770e-01, 3.90527032e-03, 2.11745728e-01, 2.35277196e-01,
-       3.29732215e-01, 6.63347167e-02, 0.00000000e+00, 7.86537319e-02,
-       1.97039294e-01, 2.89293449e-02, 1.49738182e-02, 2.70539555e-01,
-       5.50391451e-01, 4.07711037e-01, 3.97503552e-01, 7.92234278e-01,
-       6.80822430e-01, 3.95954996e-01, 9.83823535e-02, 6.22666945e-02,
-       4.04896966e-01, 7.29148400e-02, 1.40819190e-02, 5.12522147e-01,
-       1.67861137e-01, 3.06296705e-02, 7.86537319e-02, 0.00000000e+00,
-       4.70599506e-01, 2.21314350e-01, 4.89859402e-01, 3.27185149e-01,
-       3.12837114e-01, 2.06748946e-01, 5.54516508e-01, 5.98646770e-01,
-       2.32601389e-01, 7.70372445e-01, 7.05892552e-03, 2.78454801e-01,
-       6.59213516e-01, 8.52271109e-01, 8.03005685e-01, 3.23604481e-02,
-       4.38372063e-01, 1.43749230e-01, 1.97039294e-01, 4.70599506e-01,
-       0.00000000e+00, 4.91182429e-01, 6.53238963e-01, 4.57624369e-01,
-       4.41574003e-01, 2.35741796e-01, 3.03863027e-02, 2.74462358e-01,
-       3.20557456e-01, 5.36444372e-02, 2.33988605e-01, 1.02111130e-01,
-       4.43452066e-01, 1.58622433e-01, 9.36726686e-02, 5.28560394e-01,
-       1.11624009e-01, 9.08793718e-01, 2.89293449e-02, 2.21314350e-01,
-       4.91182429e-01, 0.00000000e+00, 1.67680280e-01, 3.40771026e-01,
-       4.78454502e-01, 4.08718593e-01, 4.90917848e-01, 7.51463090e-01,
-       9.52252182e-02, 1.51510226e-01, 2.31620426e-01, 6.96430300e-01,
-       3.68303848e-01, 4.20780410e-01, 5.15301783e-01, 1.30746685e-01,
-       1.38666577e-01, 3.00049213e-01, 1.49738182e-02, 4.89859402e-01,
-       6.53238963e-01, 1.67680280e-01, 0.00000000e+00, 8.85634551e-01,
-       2.57493252e-01, 5.10754506e-01, 7.69306985e-01, 3.57848823e-01,
-       5.81055765e-01, 5.24067658e-01, 3.13071989e-02, 3.63831763e-01,
-       8.25229830e-02, 1.29486959e-01, 2.10827094e-01, 5.25876579e-01,
-       2.38231023e-01, 1.07449023e-01, 2.70539555e-01, 3.27185149e-01,
-       4.57624369e-01, 3.40771026e-01, 8.85634551e-01, 0.00000000e+00,
-       1.39909419e-01, 2.50618977e-01, 4.36206223e-01, 8.24095131e-01,
-       2.99062475e-01, 4.57416687e-01, 7.75254169e-01, 6.82188928e-01,
-       5.98858722e-01, 8.77639802e-02, 1.81163695e-01, 1.65333764e-01,
-       5.83872294e-01, 1.46324426e-01, 5.50391451e-01, 3.12837114e-01,
-       4.41574003e-01, 4.78454502e-01, 2.57493252e-01, 1.39909419e-01,
-       0.00000000e+00, 4.64835132e-01, 7.30595916e-01, 5.49766675e-01,
-       3.16210590e-01, 3.18751219e-01, 4.76810391e-01, 2.05471402e-01,
-       8.95751382e-03, 9.59418053e-01, 7.92374568e-01, 6.98585741e-02,
-       3.30809578e-01, 3.28533356e-01, 4.07711037e-01, 2.06748946e-01,
-       2.35741796e-01, 4.08718593e-01, 5.10754506e-01, 2.50618977e-01,
-       4.64835132e-01, 0.00000000e+00, 2.66638665e-01, 5.25852768e-02,
-       5.03770007e-02, 3.32886703e-01, 4.20611050e-04, 4.60918701e-01,
-       7.87783604e-02, 1.50618954e-01, 4.16406822e-01, 2.77788806e-01,
-       3.36345177e-01, 6.87267935e-02, 3.97503552e-01, 5.54516508e-01,
-       3.03863027e-02, 4.90917848e-01, 7.69306985e-01, 4.36206223e-01,
-       7.30595916e-01, 2.66638665e-01, 0.00000000e+00, 4.76289340e-02,
-       8.14921739e-01, 8.50407248e-03, 2.06978782e-01, 4.93633871e-01,
-       1.96044042e-01, 1.72797154e-01, 1.73051631e-01, 3.29801542e-01,
-       3.52254777e-01, 4.88401138e-01, 7.92234278e-01, 5.98646770e-01,
-       2.74462358e-01, 7.51463090e-01, 3.57848823e-01, 8.24095131e-01,
-       5.49766675e-01, 5.25852768e-02, 4.76289340e-02, 0.00000000e+00
-};
+namespace {
+
+std::vector<double> makeSymmetricDifferenceMatrix(const int nPts, std::mt19937 &rng) {
+  std::uniform_real_distribution<double> dist(0.0, 1.0);
+  std::vector<double> distances(nPts * nPts, 0.0);
+  for (int row = 0; row < nPts; ++row) {
+    // row + 1 to ignore diagonal.
+    for (int col = row + 1; col < nPts; ++col) {
+      const double value = dist(rng);
+      distances[(row * nPts) + col] = value;
+      distances[(col * nPts) + row] = value;
+    }
+  }
+  return distances;
+}
+
+std::vector<uint8_t> makeAdjacency(const std::vector<double> &distances, int nPts, double cutoff) {
+  std::vector<uint8_t> adjacency(distances.size(), 0);
+  for (size_t idx = 0; idx < distances.size(); ++idx) {
+    adjacency[idx] = distances[idx] < cutoff ? 1U : 0U;
+  }
+  return adjacency;
+}
+
+std::vector<int> runButina(const std::vector<double> &distances, const int nPts, const double cutoff, cudaStream_t stream) {
+  AsyncDeviceVector<double> distancesDev(distances.size(), stream);
+  AsyncDeviceVector<int>    resultDev(nPts, stream);
+  distancesDev.copyFromHost(distances);
+  nvMolKit::butinaGpu(toSpan(distancesDev), toSpan(resultDev), cutoff, stream);
+  std::vector<int> got(nPts);
+  resultDev.copyToHost(got);
+  cudaStreamSynchronize(stream);
+  return got;
+}
+
+void checkButinaCorrectness(const std::vector<uint8_t> &adjacency, const std::vector<int> &labels) {
+  const int nPts = static_cast<int>(labels.size());
+  ASSERT_EQ(adjacency.size(), static_cast<size_t>(nPts) * static_cast<size_t>(nPts));
+
+  std::vector<uint8_t> working = adjacency;
+  std::vector<int>     counts(nPts, 0);
+  for (int row = 0; row < nPts; ++row) {
+    const size_t base = static_cast<size_t>(row) * nPts;
+    for (int col = 0; col < nPts; ++col) {
+      if (working[base + col] != 0U) {
+        ++counts[row];
+      }
+    }
+  }
+
+  std::vector<bool> seen(nPts, false);
+  int               seenCount = 0;
+
+  const int maxLabelId = *std::ranges::max_element(labels.begin(), labels.end());
+  for (int label = 0; label <= maxLabelId; ++label) {
+    std::vector<int> cluster;
+    cluster.reserve(nPts);
+    for (int idx = 0; idx < nPts; ++idx) {
+      if (labels[idx] == label) {
+        cluster.push_back(idx);
+      }
+    }
+    const auto clusterSize = static_cast<int>(cluster.size());
+    ASSERT_GT(clusterSize, 0) << "Cluster ID " << label << " has no members";
+
+    const int maxCount = *std::ranges::max_element(counts.begin(), counts.end());
+    ASSERT_EQ(clusterSize, maxCount);
+
+    for (const int member : cluster) {
+      ASSERT_FALSE(seen[member]);
+    }
+
+    for (const int member : cluster) {
+      seen[member] = true;
+      const size_t rowBase = static_cast<size_t>(member) * nPts;
+      for (int col = 0; col < nPts; ++col) {
+        const size_t idx       = rowBase + col;
+        const size_t mirrorIdx = static_cast<size_t>(col) * nPts + member;
+        if (working[idx] != 0U) {
+          working[idx] = 0U;
+          --counts[member];
+        }
+        if (working[mirrorIdx] != 0U) {
+          working[mirrorIdx] = 0U;
+          --counts[col];
+        }
+      }
+      counts[member] = 0;
+    }
+    seenCount += clusterSize;
+  }
+
+  ASSERT_EQ(seenCount, nPts);
+}
+
 } // namespace
 
-TEST(ButinaClusterTest, KnownResultReorder) {
-  constexpr int          nPts   = 10;
+
+TEST(ButinaClusterTest, HandlesSinglePoint) {
+  constexpr int          nPts   = 1;
   constexpr double       cutoff = 0.2;
   nvMolKit::ScopedStream const scopedStream;
   cudaStream_t           stream = scopedStream.stream();
 
-  AsyncDeviceVector<double> distancesDev(tenX10Distances.size(), stream);
+  AsyncDeviceVector<double> distancesDev(nPts * nPts, stream);
   AsyncDeviceVector<int>    resultDev(nPts, stream);
-  distancesDev.copyFromHost(tenX10Distances);
+  distancesDev.copyFromHost(std::vector<double>{0.0});
 
   nvMolKit::butinaGpu(toSpan(distancesDev), toSpan(resultDev), cutoff, stream);
   std::vector<int> got(nPts);
   resultDev.copyToHost(got);
   cudaStreamSynchronize(stream);
-  const std::vector<int> want = {1, 1, 0, 0, 1, 0, 0, 3, 2, 0};
-  EXPECT_THAT(got, ::testing::ElementsAreArray(want));
+  EXPECT_THAT(got, ::testing::ElementsAre(0));
 }
 
+class ButinaClusterTestFixture : public ::testing::TestWithParam<int> {};
+TEST_P(ButinaClusterTestFixture, ClusteringMatchesReference) {
+  nvMolKit::ScopedStream const scopedStream;
+  cudaStream_t                 stream = scopedStream.stream();
+  std::mt19937                 rng(42);
 
-TEST(ButinaClusterTest, KnownResult20X) {
-  constexpr int          nPts   = 20;
-  constexpr double       cutoff = 0.1;
+  const int nPts = GetParam();
+  constexpr double cutoff = 0.1;
+  const auto                distances = makeSymmetricDifferenceMatrix(nPts, rng);
+  const auto                adjacency = makeAdjacency(distances, nPts, cutoff);
+  const std::vector<int>    labels    = runButina(distances, nPts, cutoff, stream);
+  SCOPED_TRACE(::testing::Message() << "nPts=" << nPts);
+  checkButinaCorrectness(adjacency, labels);
+}
+
+INSTANTIATE_TEST_SUITE_P(ButinaClusterTest, ButinaClusterTestFixture, ::testing::Values(1, 10, 100, 1000));
+
+
+TEST(ButinaClusterEdgeTest, EdgeOneCluster) {
+  constexpr int          nPts   = 10;
+  constexpr double       cutoff = 100.0;
   nvMolKit::ScopedStream const scopedStream;
   cudaStream_t           stream = scopedStream.stream();
 
-  AsyncDeviceVector<double> distancesDev(twentyXdistances.size(), stream);
-  AsyncDeviceVector<int>    resultDev(nPts, stream);
-  distancesDev.copyFromHost(twentyXdistances);
+  std::vector<double> distances(static_cast<size_t>(nPts) * nPts, 0.5);
+  for (int i = 0; i < nPts; ++i) {
+    distances[static_cast<size_t>(i) * nPts + i] = 0.0;
+  }
 
-  nvMolKit::butinaGpu(toSpan(distancesDev), toSpan(resultDev), cutoff, stream);
-  std::vector<int> got(nPts);
-  resultDev.copyToHost(got);
-  cudaStreamSynchronize(stream);
-  const std::vector<int> want = {1, 1, 0, 0, 1, 0, 0, 3, 2, 0};
-  EXPECT_THAT(got, ::testing::ElementsAreArray(want));
+  const std::vector<int> labels = runButina(distances, nPts, cutoff, stream);
+  EXPECT_THAT(labels, ::testing::Each(0));
 }
+
+TEST(ButinaClusterEdgeTest, EdgeNClusters) {
+  constexpr int          nPts   = 10;
+  constexpr double       cutoff = 1e-8;
+  nvMolKit::ScopedStream const scopedStream;
+  cudaStream_t           stream = scopedStream.stream();
+
+  std::vector<double> distances(static_cast<size_t>(nPts) * nPts, 1.0);
+  for (int i = 0; i < nPts; ++i) {
+    distances[static_cast<size_t>(i) * nPts + i] = 0.0;
+  }
+
+  const std::vector<int> labels = runButina(distances, nPts, cutoff, stream);
+  std::vector<int>       sorted = labels;
+  std::ranges::sort(sorted);
+  std::vector<int> want(nPts);
+  std::iota(want.begin(), want.end(), 0);
+  EXPECT_THAT(sorted, ::testing::ElementsAreArray(want));
+}
+

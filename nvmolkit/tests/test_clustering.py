@@ -7,6 +7,7 @@ def check_butina_correctness(hit_mat, clusts):
     seen = set()
 
     for clust in clusts:
+        assert len(clust) > 0
         clust_size = len(clust)
         counts = hit_mat.sum(-1)
         assert clust_size == counts.max()
