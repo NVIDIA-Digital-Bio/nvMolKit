@@ -34,7 +34,9 @@ template <typename T> class AsyncDeviceVector {
  public:
   explicit AsyncDeviceVector() = default;
   explicit AsyncDeviceVector(size_t size, cudaStream_t stream = 0) : size_(size), stream_(stream) {
-    cudaCheckError(cudaMallocAsync(&data_, size * sizeof(T), stream_));
+    if (size > 0) {
+      cudaCheckError(cudaMallocAsync(&data_, size * sizeof(T), stream_));
+    }
   }
   AsyncDeviceVector(const AsyncDeviceVector& other) = delete;
   AsyncDeviceVector(AsyncDeviceVector&& other) noexcept

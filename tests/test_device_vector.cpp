@@ -309,3 +309,5 @@ TEST(AsyncDeviceVector, setFromArray) {
   vec.copyToHost(result);
   EXPECT_THAT(result, ::testing::ElementsAre(1, 2, 3));
 }
+
+// TODO: Tests for nonzero stream, and zero size allocation / deallocation.

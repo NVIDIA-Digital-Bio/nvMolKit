@@ -25,6 +25,10 @@ void butinaGpu(cuda::std::span<const double> distanceMatrix,
                cudaStream_t                  stream   = nullptr,
                bool                          useGraph = false);
 
+void butinaGpu(cuda::std::span<const uint8_t> hitMatrix,
+               cuda::std::span<int>           clusters,
+               cudaStream_t                   stream   = nullptr,
+               bool                           useGraph = false);
 }  // namespace nvMolKit
 
 #endif  // NVMOLKIT_BUTINA_H
