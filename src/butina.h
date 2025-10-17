@@ -21,8 +21,9 @@ namespace nvMolKit {
 
 void butinaGpu(cuda::std::span<const double> distanceMatrix,
                cuda::std::span<int>          clusters,
-               double                           cutoff,
-               cudaStream_t                     stream = nullptr);
+               double                        cutoff,
+               cudaStream_t                  stream   = nullptr,
+               bool                          useGraph = false);
 
 }  // namespace nvMolKit
 

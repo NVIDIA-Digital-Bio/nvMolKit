@@ -12,6 +12,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -19,8 +22,6 @@
 #include <numeric>
 #include <random>
 #include <vector>
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
 
 #include "butina.h"
 #include "device.h"
@@ -30,13 +31,13 @@ using nvMolKit::AsyncDeviceVector;
 
 namespace {
 
-std::vector<double> makeSymmetricDifferenceMatrix(const int nPts, std::mt19937 &rng) {
+std::vector<double> makeSymmetricDifferenceMatrix(const int nPts, std::mt19937& rng) {
   std::uniform_real_distribution<double> dist(0.0, 1.0);
-  std::vector<double> distances(nPts * nPts, 0.0);
+  std::vector<double>                    distances(nPts * nPts, 0.0);
   for (int row = 0; row < nPts; ++row) {
     // row + 1 to ignore diagonal.
     for (int col = row + 1; col < nPts; ++col) {
-      const double value = dist(rng);
+      const double value            = dist(rng);
       distances[(row * nPts) + col] = value;
       distances[(col * nPts) + row] = value;
     }
@@ -44,7 +45,7 @@ std::vector<double> makeSymmetricDifferenceMatrix(const int nPts, std::mt19937 &
   return distances;
 }
 
-std::vector<uint8_t> makeAdjacency(const std::vector<double> &distances, int nPts, double cutoff) {
+std::vector<uint8_t> makeAdjacency(const std::vector<double>& distances, int nPts, double cutoff) {
   std::vector<uint8_t> adjacency(distances.size(), 0);
   for (size_t idx = 0; idx < distances.size(); ++idx) {
     adjacency[idx] = distances[idx] < cutoff ? 1U : 0U;
@@ -52,7 +53,10 @@ std::vector<uint8_t> makeAdjacency(const std::vector<double> &distances, int nPt
   return adjacency;
 }
 
-std::vector<int> runButina(const std::vector<double> &distances, const int nPts, const double cutoff, cudaStream_t stream) {
+std::vector<int> runButina(const std::vector<double>& distances,
+                           const int                  nPts,
+                           const double               cutoff,
+                           cudaStream_t               stream) {
   AsyncDeviceVector<double> distancesDev(distances.size(), stream);
   AsyncDeviceVector<int>    resultDev(nPts, stream);
   distancesDev.copyFromHost(distances);
@@ -63,7 +67,7 @@ std::vector<int> runButina(const std::vector<double> &distances, const int nPts,
   return got;
 }
 
-void checkButinaCorrectness(const std::vector<uint8_t> &adjacency, const std::vector<int> &labels) {
+void checkButinaCorrectness(const std::vector<uint8_t>& adjacency, const std::vector<int>& labels) {
   const int nPts = static_cast<int>(labels.size());
   ASSERT_EQ(adjacency.size(), static_cast<size_t>(nPts) * static_cast<size_t>(nPts));
 
@@ -101,7 +105,7 @@ void checkButinaCorrectness(const std::vector<uint8_t> &adjacency, const std::ve
     }
 
     for (const int member : cluster) {
-      seen[member] = true;
+      seen[member]         = true;
       const size_t rowBase = static_cast<size_t>(member) * nPts;
       for (int col = 0; col < nPts; ++col) {
         const size_t idx       = rowBase + col;
@@ -123,14 +127,13 @@ void checkButinaCorrectness(const std::vector<uint8_t> &adjacency, const std::ve
   ASSERT_EQ(seenCount, nPts);
 }
 
-} // namespace
-
+}  // namespace
 
 TEST(ButinaClusterTest, HandlesSinglePoint) {
-  constexpr int          nPts   = 1;
-  constexpr double       cutoff = 0.2;
+  constexpr int                nPts   = 1;
+  constexpr double             cutoff = 0.2;
   nvMolKit::ScopedStream const scopedStream;
-  cudaStream_t           stream = scopedStream.stream();
+  cudaStream_t                 stream = scopedStream.stream();
 
   AsyncDeviceVector<double> distancesDev(nPts * nPts, stream);
   AsyncDeviceVector<int>    resultDev(nPts, stream);
@@ -149,23 +152,22 @@ TEST_P(ButinaClusterTestFixture, ClusteringMatchesReference) {
   cudaStream_t                 stream = scopedStream.stream();
   std::mt19937                 rng(42);
 
-  const int nPts = GetParam();
-  constexpr double cutoff = 0.1;
-  const auto                distances = makeSymmetricDifferenceMatrix(nPts, rng);
-  const auto                adjacency = makeAdjacency(distances, nPts, cutoff);
-  const std::vector<int>    labels    = runButina(distances, nPts, cutoff, stream);
+  const int              nPts      = GetParam();
+  constexpr double       cutoff    = 0.1;
+  const auto             distances = makeSymmetricDifferenceMatrix(nPts, rng);
+  const auto             adjacency = makeAdjacency(distances, nPts, cutoff);
+  const std::vector<int> labels    = runButina(distances, nPts, cutoff, stream);
   SCOPED_TRACE(::testing::Message() << "nPts=" << nPts);
   checkButinaCorrectness(adjacency, labels);
 }
 
 INSTANTIATE_TEST_SUITE_P(ButinaClusterTest, ButinaClusterTestFixture, ::testing::Values(1, 10, 100, 1000));
 
-
 TEST(ButinaClusterEdgeTest, EdgeOneCluster) {
-  constexpr int          nPts   = 10;
-  constexpr double       cutoff = 100.0;
+  constexpr int                nPts   = 10;
+  constexpr double             cutoff = 100.0;
   nvMolKit::ScopedStream const scopedStream;
-  cudaStream_t           stream = scopedStream.stream();
+  cudaStream_t                 stream = scopedStream.stream();
 
   std::vector<double> distances(static_cast<size_t>(nPts) * nPts, 0.5);
   for (int i = 0; i < nPts; ++i) {
@@ -177,10 +179,10 @@ TEST(ButinaClusterEdgeTest, EdgeOneCluster) {
 }
 
 TEST(ButinaClusterEdgeTest, EdgeNClusters) {
-  constexpr int          nPts   = 10;
-  constexpr double       cutoff = 1e-8;
+  constexpr int                nPts   = 10;
+  constexpr double             cutoff = 1e-8;
   nvMolKit::ScopedStream const scopedStream;
-  cudaStream_t           stream = scopedStream.stream();
+  cudaStream_t                 stream = scopedStream.stream();
 
   std::vector<double> distances(static_cast<size_t>(nPts) * nPts, 1.0);
   for (int i = 0; i < nPts; ++i) {
@@ -194,4 +196,3 @@ TEST(ButinaClusterEdgeTest, EdgeNClusters) {
   std::iota(want.begin(), want.end(), 0);
   EXPECT_THAT(sorted, ::testing::ElementsAreArray(want));
 }
-

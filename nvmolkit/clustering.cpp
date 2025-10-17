@@ -24,12 +24,12 @@ BOOST_PYTHON_MODULE(_clustering) {
     "butina",
     +[](const boost::python::dict& distanceMatrix, const double cutoff) {
       // Extract boost::python::tuple from dict['shape']
-      boost::python::tuple shape = boost::python::extract<boost::python::tuple>(distanceMatrix["shape"]);
-      const size_t matDim1    = boost::python::extract<size_t>(shape[0]);
+      boost::python::tuple             shape   = boost::python::extract<boost::python::tuple>(distanceMatrix["shape"]);
+      const size_t                     matDim1 = boost::python::extract<size_t>(shape[0]);
       nvMolKit::AsyncDeviceVector<int> clusterIds(matDim1);
 
       boost::python::tuple data        = boost::python::extract<boost::python::tuple>(distanceMatrix["data"]);
-      const size_t    dataPointer = boost::python::extract<std::size_t>(data[0]);
+      const size_t         dataPointer = boost::python::extract<std::size_t>(data[0]);
       const auto matSpan = nvMolKit::getSpanFromDictElems<double>(reinterpret_cast<void*>(dataPointer), shape);
       nvMolKit::butinaGpu(matSpan, toSpan(clusterIds), cutoff);
 
