@@ -22,6 +22,7 @@ namespace nvMolKit {
 namespace {
 constexpr int blockSizeCount = 256;
 constexpr int kAssignedAsSingletonSentinel = std::numeric_limits<int>::max() - 1;
+constexpr int kMinLoopSizeForAssignment = 3;
 
 // TODO can we do some dynamic assignment as lower numbers of rows execute due to being done.
 __global__ void butinaKernelCountClusterSize(const cuda::std::span<const double> distanceMatrix,
@@ -71,7 +72,7 @@ __global__ void butinaWriteClusterValue(const cuda::std::span<const double> dist
   const auto numPoints = static_cast<int>(clusters.size());
   const auto tid       = static_cast<int>(threadIdx.x + (blockIdx.x * blockDim.x));
   const int  clusterSz = *maxClusterSize;
-  if (clusterSz <= 1) {
+  if (clusterSz < kMinLoopSizeForAssignment) {
     return;
   }
   const int pointIdx   = *centralIdx;
@@ -80,14 +81,14 @@ __global__ void butinaWriteClusterValue(const cuda::std::span<const double> dist
   }
   const int clusterVal = *clusterIdx;
   if (tid == 0) {
-    // printf("Cluster %d centroid is element %d\n", clusterVal, pointIdx);
+    //printf("Cluster %d centroid is element %d\n", clusterVal, pointIdx);
   }
 
   const cuda::std::span<const double> distances = distanceMatrix.subspan(pointIdx * numPoints, numPoints);
   if (tid < numPoints) {
     if (const double dist = distances[tid]; dist < cutoff) {
-      if (const int cluster = clusters[tid]; cluster < 0 || cluster == kAssignedAsSingletonSentinel) {
-        // printf("Assigning cluster %d to item %d\n", clusterVal, tid);
+      if (const int cluster = clusters[tid]; cluster < 0) {
+        //printf("CLUSTER: %d to item %d total size %d\n", clusterVal, tid, clusterSz);
         clusters[tid] = clusterVal;
       }
     }
@@ -96,17 +97,60 @@ __global__ void butinaWriteClusterValue(const cuda::std::span<const double> dist
 
 __global__ void bumpClusterIdxKernel(int* clusterIdx, const int* lastClusterSize) {
   if (const auto tid = static_cast<int>(threadIdx.x); tid == 0) {
-    if (*lastClusterSize > 1) {
+    if (*lastClusterSize >= kMinLoopSizeForAssignment) {
       clusterIdx[tid] += 1;
     }
   }
 }
 
+
+
+__global__ void pairDoubletKernels(const cuda::std::span<const double> distanceMatrix, const cuda::std::span<int> clusters, const cuda::std::span<const int> clusterSizes, const double cutoff) {
+  const auto tid       = static_cast<int>(threadIdx.x);
+  const auto pointIdx  = static_cast<int>(blockIdx.x);
+  const auto numPoints = static_cast<int>(clusters.size());
+
+  if (clusterSizes[pointIdx] != 2) {
+    return;
+  }
+
+  const cuda::std::span<const double> distances  = distanceMatrix.subspan(pointIdx * numPoints, numPoints);
+  // Loop up to point IDX so that only one of the pairs does the write. The followup kernel will set both values
+  for (int i = tid; i < pointIdx; i += blockSizeCount) {
+    const double dist = distances[i];
+    if (i != pointIdx && dist < cutoff && clusterSizes[i] == 2) {
+      clusters[pointIdx] = kAssignedAsSingletonSentinel - 1 - i; // Mark as paired with i
+      //printf("Pairing point %d with %d\n", pointIdx, i);
+      break;
+    }
+  }
+}
+
+// TODO This could be parallelized with a shared clustderIdx++ to atomicAdd.
+__global__ void assignDoubletIdsKernel(const cuda::std::span<int> clusters, int* nextClusterIdx) {
+  int clusterIdx = *nextClusterIdx;
+  const int expectedDoubletRange = kAssignedAsSingletonSentinel - clusters.size();
+  for (int i = static_cast<int>(clusters.size()) - 1; i >= 0; i--) {
+    const int clustId = clusters[i];
+    if (clustId >=  expectedDoubletRange && clustId < kAssignedAsSingletonSentinel) {
+      int otherIdx = kAssignedAsSingletonSentinel - 1 - clustId;
+      clusters[i] = clusterIdx;
+      clusters[otherIdx] = clusterIdx;
+      //printf("CLUSTER: Assigning doublet cluster %d to items %d and %d\n", clusterIdx, i, otherIdx);
+      clusterIdx++;
+    }
+  }
+  *nextClusterIdx = clusterIdx;
+}
+
+
+// TODO This could be parallelized with a shared clustderIdx++ to atomicAdd.
 __global__ void assignSingletonIdsKernel(const cuda::std::span<int> clusters, const int* nextClusterIdx) {
   int clusterIdx = *nextClusterIdx;
   for (int i = static_cast<int>(clusters.size()) - 1; i >= 0; i--) {
     const int clustId = clusters[i];
     if (clustId < 0 || clustId == kAssignedAsSingletonSentinel) {
+      //printf("CLUSTER: Assigning singleton %d to item %d\n", clusterIdx, i);
       clusters[i] = clusterIdx;
       clusterIdx++;
     }
@@ -137,7 +181,7 @@ __global__ void lastArgMax(const cuda::std::span<const int> values, int* outVal,
     for (int i = argMaxBlockSize - 1; i >= 0; i--) {
       if (foundMaxVal[i] == actualMaxVal) {
         *outIdx = foundMaxIds[i];
-        // printf("Found max of %d at %d\n", actualMaxVal, *outIdx);
+        //printf("Found max of %d at %d\n", actualMaxVal, *outIdx);
         break;
       }
     }
@@ -191,7 +235,7 @@ void butinaGpu(const cuda::std::span<const double> distanceMatrix,
   //                           stream);
   // AsyncDeviceVector<uint8_t> const tempStorage(tempStorageBytes, stream);
   const int                  numBlocksFlat = ((static_cast<int>(clusterSizes.size()) - 1) / blockSizeCount) + 1;
-  while (maxCluster[0] > 1) {
+  while (maxCluster[0] >= kMinLoopSizeForAssignment) {
     butinaKernelCountClusterSize<<<numPoints, blockSizeCount, 0, stream>>>(distanceMatrix,
                                                                            clusters,
                                                                            toSpan(clusterSizes),
@@ -218,7 +262,14 @@ void butinaGpu(const cuda::std::span<const double> distanceMatrix,
     cudaCheckError(cudaMemcpyAsync(maxCluster.data(), maxValue.data(), sizeof(int), cudaMemcpyDefault, stream));
     cudaStreamSynchronize(stream);
     int maxV = maxCluster[0];
+    //printf("End of loop max cluster size: %d\n", maxV);
   }
+  //printf("Exiting loop\n");
+  pairDoubletKernels<<<numPoints, blockSizeCount, 0, stream>>>(distanceMatrix,
+                                                               clusters,
+                                                               toSpan(clusterSizes),
+                                                               cutoff);
+  assignDoubletIdsKernel<<<1, 1, 0, stream>>>(clusters, clusterIdx.data());
   assignSingletonIdsKernel<<<1, 1, 0, stream>>>(clusters, clusterIdx.data());
   cudaStreamSynchronize(stream);
 }
