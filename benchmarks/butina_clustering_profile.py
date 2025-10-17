@@ -24,6 +24,10 @@ if __name__ == "__main__":
     with nvtx.annotate("Setup", color="blue"):
         size = int(sys.argv[1])
         cutoff = float(sys.argv[2])
+        warmup = False
+        if len(sys.argv)  > 3:
+            warmup = int(sys.argv[3])
+
         input_data = "/data/chembl_size_splits/chembl_40-60.smi"
         with open(input_data, "r") as f:
             smis = [line.strip() for line in f.readlines()]
@@ -32,7 +36,8 @@ if __name__ == "__main__":
 
         dists = get_distance_matrix(mols)
         dist_mat = resize_and_fill(dists, size)
-    with nvtx.annotate("Warmup", color="red"):
-        warmup = butina_nvmol(dist_mat[:10, :10].contiguous(), 0.2)
+    if warmup:
+        with nvtx.annotate("Warmup", color="red"):
+            warmup = butina_nvmol(dist_mat[:10, :10].contiguous(), 0.2)
     with nvtx.annotate("Clustering", color="green"):
         res = butina_nvmol(dist_mat, cutoff)
