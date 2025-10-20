@@ -5,13 +5,29 @@ Please see the official [NVIDIA nvMolKit Documentation](https://nvidia-digital-b
 
 ## Installation Guide
 
-### Prerequisites
+**IMPORTANT**: nvMolKit requires an NVIDIA GPU with compute capability 7.0 (V100) or higher to run. Check your GPU's compute capability [here](https://developer.nvidia.com/cuda-gpus).
+It also requires a CUDA Driver sufficient for CUDA 12.6 or later (driver version >=560.28, though some backwards compatibility may be supported, see the [CUDA compatibility guide](https://docs.nvidia.com/deploy/cuda-compatibility/index.html). 
 
-#### An NVIDIA GPU
-nvMolKit requires an NVIDIA GPU with compute capability 7.0 (V100) or higher. Check your GPU's compute capability [here](https://developer.nvidia.com/cuda-gpus).
-Multiple GPUs are supported for some APIs.
+### Conda-forge Installation (Recommended)
 
-#### System Dependencies
+Conda is the recommended way to install nvMolKit, matching the recommended distribution mechanism of the RDKit. First, ensure 
+you have a variant of conda installed and activated, such as [Miniconda](https://docs.conda.io/en/latest/miniconda.html) 
+or [Miniforge](https://conda-forge.org/download/).
+
+nvMolKit v0.2.0 supports RDKit 2024.09.6 and 2025.03.1. To install:
+
+```bash
+conda install -c conda-forge nvmolkit
+````
+
+
+### Installation from Source
+#### Prerequisites
+
+##### An NVIDIA GPU
+See the note above about GPU requirements.
+
+##### System Dependencies
 
 First, install essential build dependencies. This includes a C++ compiler and OpenMP. Eigen headers may be necesary,
 sometimes RDKit includes them in some headers but the RDKit install does not always properly declare this dependency.
@@ -36,11 +52,11 @@ sudo apt-get install clang-15 clang-format-15 clang-tidy-15
 #   conda install -c conda-forge cxx-compiler
 ```
 
-#### CUDA Installation
+##### CUDA Installation
 
 Install NVIDIA CUDA Toolkit (version 12.5 or later) following [NVIDIA's official installation guide](https://developer.nvidia.com/cuda-downloads?target_os=Linux&target_arch=x86_64&Distribution=Ubuntu&target_version=22.04&target_type=deb_network).
 
-#### CMake
+##### CMake
 
 nvMolKit requires CMake >= 3.26. Update if needed, for example on Ubuntu:
 
@@ -60,7 +76,7 @@ cmake --version
 A conda cmake should also work.
 
 
-#### Python Environment Setup
+##### Python Environment Setup
 
 Create a conda environment with all required dependencies (install [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/main) or [Anaconda](https://www.anaconda.com/download) if you don't have conda):
 
@@ -81,7 +97,7 @@ pip install torch torchvision torchaudio
 python -c "import torch; print(torch.__version__); print(f'Is a CUDA build? {torch.cuda.is_available()}')"
 ```
 
-### Installation
+#### Installation
 
 ```bash
 # Activate your environment
@@ -102,7 +118,7 @@ pip install pytest
 (cd nvmolkit/tests && pytest -v .)
 ```
 
-### Docker containers
+#### Docker containers
 
 Materials for building docker containers are in [`admin/container`](admin/container). [HPCCM](https://github.com/NVIDIA/hpc-container-maker)
 builds docker files from yaml configs. See the [README](admin/container/hpccm_build.py) for config definitions.

@@ -45,8 +45,7 @@ def MMFFOptimizeMoleculesConfs(
                   conformers already generated.
         maxIters: Maximum number of BFGS optimization iterations (default: 200)
         nonBondedThreshold: Radius threshold for non-bonded interactions in Ångströms (default: 100.0)
-        numThreads: Number of OpenMP threads for parallel processing (default: 1)
-        batchSize: Batch size for processing conformers, 0 for no batching (default: 0)
+        hardwareOptions: Configures CPU and GPU batching, threading, and device selection. Will attempt to use reasonable defaults if not set.
 
     Returns:
         List of lists of energies, where each inner list contains the optimized energies

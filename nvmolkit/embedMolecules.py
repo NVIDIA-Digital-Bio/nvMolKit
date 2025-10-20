@@ -43,6 +43,14 @@ def EmbedMolecules(
     It uses CUDA for GPU acceleration and OpenMP for CPU parallelization to achieve high
     performance embedding of large molecule sets.
 
+    nvMolKit implements a subset of features specified in the EmbedParameters class. The following features are restricted:
+
+        - useRandomCoords must be True
+        - Bounds matrices are not supported (setBoundsMat)
+        - Custom Coulomb potentials are not supported (SetCPCI)
+        - Coordinate constraints are not supported (SetCoordMap)
+        - embedFragmentsSeparately is not supported. All fragments will be embedded together.
+
     Args:
         molecules: List of RDKit molecules to embed. Molecules should be prepared
                   (sanitized, explicit hydrogens added if needed).

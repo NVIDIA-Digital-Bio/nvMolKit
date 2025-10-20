@@ -67,7 +67,29 @@ nvMolKit is open source under the Apache License, and is available on `GitHub <h
 Installation
 ------------
 
-See installation instructions in the `GitHub README <https://github.com/NVIDIA-Digital-Bio/nvMolKit>`_.
+.. important::
+
+   nvMolKit requires an NVIDIA GPU with compute capability 7.0 (V100) or higher. You can check your GPU's compute capability at the `NVIDIA CUDA GPUs page <https://developer.nvidia.com/cuda-gpus>`_.
+   A CUDA Driver compatible with CUDA 12.6 or later is also required (driver version >=560.28). Some degree of backward compatibility may be available; for details, see the `CUDA compatibility guide <https://docs.nvidia.com/deploy/cuda-compatibility/index.html>`_.
+
+Conda Forge
+^^^^^^^^^^^
+
+Conda is the recommended way to install nvMolKit, in line with RDKit's recommended installation practice. First, ensure
+you have a conda-based environment manager installed and activated, such as `Miniconda <https://docs.conda.io/en/latest/miniconda.html>`_ or `Miniforge <https://conda-forge.org/download/>`_.
+
+nvMolKit v0.2.0 supports RDKit 2024.09.6 and 2025.03.1.
+
+To install with conda, run::
+
+    conda install -c conda-forge nvmolkit
+
+
+
+From Source
+^^^^^^^^^^^
+
+nvMolKit can be installed from source using a C++ and CUDA compiler. See installation instructions in the `GitHub README <https://github.com/NVIDIA-Digital-Bio/nvMolKit>`_.
 
 
 Features
@@ -82,21 +104,17 @@ nvMolKit currently supports the following features:
 * **Molecular Similarity**: Fast GPU-accelerated similarity calculations (see :doc:`similarity`)
     * Tanimoto and cosine Similarity
     * Supports all-to-all comparisons between fingerprints in a batch or between two batches of fingerprints
+    * Supports compute in chunks to limit GPU memory usage
 
 * **ETKDG Conformer Generation**: GPU-accelerated 3D conformer generation using Experimental-Torsion Knowledge-based Distance Geometry
     * Batch processing of multiple molecules with multiple conformers per molecule
     * Supports multiple GPUs
-    * Does not support all ETKDG options. Defaults in ETKDGv3() are supported with 1 exception.
-        * Requires ``useRandomCoords=True``
-        * Does not yet support coordMap or fixed atoms
-        * Does not yet support conformer deduplication
-    * Maximum of 256 atoms per molecule
+    * Does not support all RDKit `EmbedParameters` options. Defaults in ETKDGv3() are supported with a few exceptions (see API documentation)
 
 * **MMFF Geometry Relaxation**: GPU-accelerated molecular mechanics force field optimization
     * MMFF94 force field implementation for conformer optimization
     * Batch optimization of multiple molecules and conformers
     * Supports multiple GPUs
-    * Maximum of 256 atoms per molecule
 
 
 .. _async-results:

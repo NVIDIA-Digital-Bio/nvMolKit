@@ -26,8 +26,9 @@ Similarity Calculations
    :template: function_template.rst
 
    similarity.crossTanimotoSimilarity
+   similarity.crossTanimotoSimilarityMemoryConstrained
    similarity.crossCosineSimilarity
-
+   similarity.crossCosineSimilarityMemoryConstrained
 
 
 ETKDG Conformer Generation
