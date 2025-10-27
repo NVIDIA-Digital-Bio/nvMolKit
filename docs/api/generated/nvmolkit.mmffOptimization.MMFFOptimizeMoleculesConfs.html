@@ -42,7 +42,7 @@
   <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
 <link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
 
-    <script src="../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../_static/documentation_options.js?v=938c9ccc"></script>
     <script src="../../_static/doctools.js?v=9bcbadda"></script>
     <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../../_static/thebelab-helper.js"></script>
@@ -57,7 +57,7 @@
 
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
-  <meta name="docsearch:version" content="0.1.0" />
+  <meta name="docsearch:version" content="0.2.0" />
 
 
   </head>
@@ -247,15 +247,21 @@
 <nav class="bd-docs-nav bd-links"
      aria-label="Table of Contents">
   <p class="bd-links__title" role="heading" aria-level="1">Table of Contents</p>
-  <div class="bd-toc-item navbar-nav"><ul class="current nav bd-sidenav">
+  <div class="bd-toc-item navbar-nav"><ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../index.html">Overview</a></li>
+</ul>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../similarity.html">Molecular similarity on GPU</a></li>
+</ul>
+<ul class="current nav bd-sidenav">
 <li class="toctree-l1 current active has-children"><a class="reference internal" href="../nvmolkit.html">nvMolKit APIs</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.fingerprints.MorganFingerprintGenerator.html">MorganFingerprintGenerator</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.fingerprints.pack_fingerprint.html">pack_fingerprint</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.fingerprints.unpack_fingerprint.html">unpack_fingerprint</a></li>
-<li class="toctree-l2"><a class="reference internal" href="nvmolkit.similarity.bulkTanimotoSimilarity.html">bulkTanimotoSimilarity</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.similarity.crossTanimotoSimilarity.html">crossTanimotoSimilarity</a></li>
-<li class="toctree-l2"><a class="reference internal" href="nvmolkit.similarity.bulkCosineSimilarity.html">bulkCosineSimilarity</a></li>
+<li class="toctree-l2"><a class="reference internal" href="nvmolkit.similarity.crossTanimotoSimilarityMemoryConstrained.html">crossTanimotoSimilarityMemoryConstrained</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.similarity.crossCosineSimilarity.html">crossCosineSimilarity</a></li>
+<li class="toctree-l2"><a class="reference internal" href="nvmolkit.similarity.crossCosineSimilarityMemoryConstrained.html">crossCosineSimilarityMemoryConstrained</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.embedMolecules.EmbedMolecules.html">EmbedMolecules</a></li>
 <li class="toctree-l2 current active"><a class="current reference internal" href="#">MMFFOptimizeMoleculesConfs</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.types.AsyncGpuResult.html">AsyncGpuResult</a></li>
@@ -326,13 +332,13 @@
 <span class="sig-prename descclassname"><span class="pre">nvmolkit.mmffOptimization.</span></span><span class="sig-name descname"><span class="pre">MMFFOptimizeMoleculesConfs</span></span><span class="sig-paren">(</span>
 
 <dl>
-<dd><em class="sig-param"><span class="n"><span class="pre">molecules</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.13)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><span class="pre">Mol</span><span class="p"><span class="pre">]</span></span></span></em>,</dd>
-<dd><em class="sig-param"><span class="n"><span class="pre">maxIters</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.13)"><span class="pre">int</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">200</span></span></em>,</dd>
-<dd><em class="sig-param"><span class="n"><span class="pre">nonBondedThreshold</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><span class="pre">float</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">100.0</span></span></em>,</dd>
-<dd><em class="sig-param"><span class="n"><span class="pre">hardwareOptions</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="nvmolkit.types.HardwareOptions.html#nvmolkit.types.HardwareOptions" title="nvmolkit.types.HardwareOptions"><span class="pre">HardwareOptions</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.13)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>,</dd>
+<dd><em class="sig-param"><span class="n"><span class="pre">molecules</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><span class="pre">Mol</span><span class="p"><span class="pre">]</span></span></span></em>,</dd>
+<dd><em class="sig-param"><span class="n"><span class="pre">maxIters</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">200</span></span></em>,</dd>
+<dd><em class="sig-param"><span class="n"><span class="pre">nonBondedThreshold</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><span class="pre">float</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">100.0</span></span></em>,</dd>
+<dd><em class="sig-param"><span class="n"><span class="pre">hardwareOptions</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="nvmolkit.types.HardwareOptions.html#nvmolkit.types.HardwareOptions" title="nvmolkit.types.HardwareOptions"><span class="pre">HardwareOptions</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>,</dd>
 </dl>
 
-<span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.13)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.13)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><span class="pre">float</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvmolkit.mmffOptimization.MMFFOptimizeMoleculesConfs" title="Link to this definition">#</a></dt>
+<span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><span class="pre">float</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvmolkit.mmffOptimization.MMFFOptimizeMoleculesConfs" title="Link to this definition">#</a></dt>
 <dd><p>Optimize conformers for multiple molecules using MMFF force field with BFGS minimization.</p>
 <p>This function performs GPU-accelerated MMFF optimization on multiple molecules with
 multiple conformers each. It uses CUDA for GPU acceleration and OpenMP for CPU
@@ -344,8 +350,7 @@ parallelization to achieve high performance.</p>
 conformers already generated.</p></li>
 <li><p><strong>maxIters</strong> – Maximum number of BFGS optimization iterations (default: 200)</p></li>
 <li><p><strong>nonBondedThreshold</strong> – Radius threshold for non-bonded interactions in Ångströms (default: 100.0)</p></li>
-<li><p><strong>numThreads</strong> – Number of OpenMP threads for parallel processing (default: 1)</p></li>
-<li><p><strong>batchSize</strong> – Batch size for processing conformers, 0 for no batching (default: 0)</p></li>
+<li><p><strong>hardwareOptions</strong> – Configures CPU and GPU batching, threading, and device selection. Will attempt to use reasonable defaults if not set.</p></li>
 </ul>
 </dd>
 <dt class="field-even">Returns<span class="colon">:</span></dt>
@@ -355,28 +360,29 @@ molecule order and conformer iteration order.</p>
 </dd>
 <dt class="field-odd">Raises<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><a class="reference external" href="https://docs.python.org/3/library/exceptions.html#ValueError" title="(in Python v3.13)"><strong>ValueError</strong></a> – If any molecule in the input list is invalid</p></li>
-<li><p><a class="reference external" href="https://docs.python.org/3/library/exceptions.html#RuntimeError" title="(in Python v3.13)"><strong>RuntimeError</strong></a> – If CUDA operations fail or optimization encounters errors</p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/exceptions.html#ValueError" title="(in Python v3.14)"><strong>ValueError</strong></a> – If any molecule in the input list is invalid</p></li>
+<li><p><a class="reference external" href="https://docs.python.org/3/library/exceptions.html#RuntimeError" title="(in Python v3.14)"><strong>RuntimeError</strong></a> – If CUDA operations fail or optimization encounters errors</p></li>
 </ul>
 </dd>
 </dl>
 <p class="rubric">Example</p>
 <div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">rdkit</span><span class="w"> </span><span class="kn">import</span> <span class="n">Chem</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">rdkit.Chem</span><span class="w"> </span><span class="kn">import</span> <span class="n">rdDistGeom</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">nvmolkit.mmff</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">mmff</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">nvmolkit.mmffOptimization</span><span class="w"> </span><span class="kn">import</span> <span class="n">MMFFOptimizeMoleculesConfs</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">nvmolkit.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">HardwareOptions</span>
 <span class="gp">&gt;&gt;&gt;</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="c1"># Load molecules and generate conformers</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="n">mol1</span> <span class="o">=</span> <span class="n">Chem</span><span class="o">.</span><span class="n">MolFromSmiles</span><span class="p">(</span><span class="s1">&#39;CCO&#39;</span><span class="p">)</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="n">mol2</span> <span class="o">=</span> <span class="n">Chem</span><span class="o">.</span><span class="n">MolFromSmiles</span><span class="p">(</span><span class="s1">&#39;CCC&#39;</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">mol1</span> <span class="o">=</span> <span class="n">Chem</span><span class="o">.</span><span class="n">AddHs</span><span class="p">(</span><span class="n">Chem</span><span class="o">.</span><span class="n">MolFromSmiles</span><span class="p">(</span><span class="s1">&#39;CCO&#39;</span><span class="p">))</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">mol2</span> <span class="o">=</span> <span class="n">Chem</span><span class="o">.</span><span class="n">AddHs</span><span class="p">(</span><span class="n">Chem</span><span class="o">.</span><span class="n">MolFromSmiles</span><span class="p">(</span><span class="s1">&#39;CCC&#39;</span><span class="p">))</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="n">rdDistGeom</span><span class="o">.</span><span class="n">EmbedMultipleConfs</span><span class="p">(</span><span class="n">mol1</span><span class="p">,</span> <span class="n">numConfs</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="n">rdDistGeom</span><span class="o">.</span><span class="n">EmbedMultipleConfs</span><span class="p">(</span><span class="n">mol2</span><span class="p">,</span> <span class="n">numConfs</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
 <span class="gp">&gt;&gt;&gt;</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="c1"># Optimize with custom settings</span>
-<span class="gp">&gt;&gt;&gt; </span><span class="n">energies</span> <span class="o">=</span> <span class="n">mmff</span><span class="o">.</span><span class="n">MMFFOptimizeMoleculesConfs</span><span class="p">(</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># Set custom runtime performance options (optional)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">hardware_options</span> <span class="o">=</span> <span class="n">HardwareOptions</span><span class="p">(</span><span class="n">batchSize</span><span class="o">=</span><span class="mi">200</span><span class="p">,</span> <span class="n">batchesPerGpu</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">energies</span> <span class="o">=</span> <span class="n">MMFFOptimizeMoleculesConfs</span><span class="p">(</span>
 <span class="gp">... </span>    <span class="p">[</span><span class="n">mol1</span><span class="p">,</span> <span class="n">mol2</span><span class="p">],</span>
 <span class="gp">... </span>    <span class="n">maxIters</span><span class="o">=</span><span class="mi">500</span><span class="p">,</span>
-<span class="gp">... </span>    <span class="n">numThreads</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span>
-<span class="gp">... </span>    <span class="n">batchSize</span><span class="o">=</span><span class="mi">32</span>
+<span class="gp">... </span>    <span class="n">hardwareOptions</span><span class="o">=</span><span class="n">hardware_options</span>
 <span class="gp">... </span><span class="p">)</span>
 <span class="gp">&gt;&gt;&gt;</span>
 <span class="gp">&gt;&gt;&gt; </span><span class="c1"># energies[0] contains 5 energies for mol1&#39;s conformers</span>

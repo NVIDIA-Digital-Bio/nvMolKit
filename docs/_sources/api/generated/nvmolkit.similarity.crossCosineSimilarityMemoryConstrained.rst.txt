@@ -1,8 +1,8 @@
 ﻿.. SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
-bulkTanimotoSimilarity
-======================
+crossCosineSimilarityMemoryConstrained
+======================================
 
 .. currentmodule:: nvmolkit.similarity
 
-.. autofunction:: bulkTanimotoSimilarity
+.. autofunction:: crossCosineSimilarityMemoryConstrained

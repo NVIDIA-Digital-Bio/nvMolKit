@@ -42,7 +42,7 @@
   <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
 <link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
 
-    <script src="_static/documentation_options.js?v=01f34227"></script>
+    <script src="_static/documentation_options.js?v=938c9ccc"></script>
     <script src="_static/doctools.js?v=9bcbadda"></script>
     <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="_static/thebelab-helper.js"></script>
@@ -56,7 +56,7 @@
 
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
-  <meta name="docsearch:version" content="0.1.0" />
+  <meta name="docsearch:version" content="0.2.0" />
 
 
   </head>
@@ -247,14 +247,20 @@
      aria-label="Table of Contents">
   <p class="bd-links__title" role="heading" aria-level="1">Table of Contents</p>
   <div class="bd-toc-item navbar-nav"><ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="index.html">Overview</a></li>
+</ul>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="similarity.html">Molecular similarity on GPU</a></li>
+</ul>
+<ul class="nav bd-sidenav">
 <li class="toctree-l1 has-children"><a class="reference internal" href="api/nvmolkit.html">nvMolKit APIs</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.fingerprints.MorganFingerprintGenerator.html">MorganFingerprintGenerator</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.fingerprints.pack_fingerprint.html">pack_fingerprint</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.fingerprints.unpack_fingerprint.html">unpack_fingerprint</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.similarity.bulkTanimotoSimilarity.html">bulkTanimotoSimilarity</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.similarity.crossTanimotoSimilarity.html">crossTanimotoSimilarity</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.similarity.bulkCosineSimilarity.html">bulkCosineSimilarity</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.similarity.crossTanimotoSimilarityMemoryConstrained.html">crossTanimotoSimilarityMemoryConstrained</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.similarity.crossCosineSimilarity.html">crossCosineSimilarity</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.similarity.crossCosineSimilarityMemoryConstrained.html">crossCosineSimilarityMemoryConstrained</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.embedMolecules.EmbedMolecules.html">EmbedMolecules</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.mmffOptimization.MMFFOptimizeMoleculesConfs.html">MMFFOptimizeMoleculesConfs</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.types.AsyncGpuResult.html">AsyncGpuResult</a></li>
@@ -317,8 +323,10 @@
                   
   <section id="changelog">
 <h1>Changelog<a class="headerlink" href="#changelog" title="Link to this heading">#</a></h1>
-<section id="release-0-0-1-2025-09-09">
-<h2>Release 0.0.1  2025-09-09<a class="headerlink" href="#release-0-0-1-2025-09-09" title="Link to this heading">#</a></h2>
+<section id="id1">
+<h2>0.0.1  2025-09-09<a class="headerlink" href="#id1" title="Link to this heading">#</a></h2>
+<section id="summary">
+<h3>Summary<a class="headerlink" href="#summary" title="Link to this heading">#</a></h3>
 <p>Initial release of nvMolKit. Features include:</p>
 <ul class="simple">
 <li><p>Morgan Fingerprints</p></li>
@@ -326,6 +334,48 @@
 <li><p>ETKDG conformer generation</p></li>
 <li><p>MMFF optimization</p></li>
 </ul>
+</section>
+</section>
+<section id="id2">
+<h2>0.2.0 - 2025-10-24<a class="headerlink" href="#id2" title="Link to this heading">#</a></h2>
+<section id="id3">
+<h3>Summary<a class="headerlink" href="#id3" title="Link to this heading">#</a></h3>
+<p>nvMolKit 0.2.0 comes with significant usability and feature-completeness improvements to existing functionality. It is also
+the first release to have a <a class="reference external" href="https://anaconda.org/conda-forge/nvmolkit">conda-forge release</a>.</p>
+</section>
+<section id="contributors">
+<h3>Contributors<a class="headerlink" href="#contributors" title="Link to this heading">#</a></h3>
+<ul class="simple">
+<li><p>Kevin Boyd (&#64;scal444)</p></li>
+<li><p>Eva Xue (&#64;evasnow1992)</p></li>
+<li><p>Ignacio Pickering (&#64;ignaciojpickering)</p></li>
+</ul>
+</section>
+<section id="features">
+<h3>Features<a class="headerlink" href="#features" title="Link to this heading">#</a></h3>
+<ul class="simple">
+<li><p>Add memory-segmented cross-similarity code, enabling larger datasets on systems with limited GPU memory (<a class="reference external" href="https://github.com/NVIDIA-Digital-Bio/nvMolKit/pull/13">#13</a>)</p></li>
+<li><p>Support conformer deduplication in ETKDG conformer generation (<a class="reference external" href="https://github.com/NVIDIA-Digital-Bio/nvMolKit/pull/14">#14</a>)</p></li>
+<li><p>Allow molecules &gt; 256 atoms in conformer generation and MMFF optimization (<a class="reference external" href="https://github.com/NVIDIA-Digital-Bio/nvMolKit/pull/16">#16</a>)</p></li>
+<li><p>Enable all combinations of (ET)(K)(DG) in conformer generator (<a class="reference external" href="https://github.com/NVIDIA-Digital-Bio/nvMolKit/pull/17">#17</a>)</p></li>
+</ul>
+</section>
+<section id="bug-fixes">
+<h3>Bug Fixes<a class="headerlink" href="#bug-fixes" title="Link to this heading">#</a></h3>
+<ul class="simple">
+<li><p>Fix compilation error on C++ build with target=native on Hopper architecture GPUs. (<a class="reference external" href="https://github.com/NVIDIA-Digital-Bio/nvMolKit/pull/6">#6</a>)</p></li>
+<li><p>Fix lack of device-set cleanup in multi-GPU code (<a class="reference external" href="https://github.com/NVIDIA-Digital-Bio/nvMolKit/pull/8">#8</a>)</p></li>
+<li><p>Fix bug in fingerprint bool-&gt;bitfield packing/unpacking code (<a class="reference external" href="https://github.com/NVIDIA-Digital-Bio/nvMolKit/pull/11">#11</a>)</p></li>
+<li><p>Fix integer overflow leading to incorrect allocations in similarity calculation code. (<a class="reference external" href="https://github.com/NVIDIA-Digital-Bio/nvMolKit/pull/20">#20</a>)</p></li>
+<li><p>Fix crash in most multithreaded APIs whenever exceptions are thrown inside of OpenMP loop. Exceptions now properly propagated to python (<a class="reference external" href="https://github.com/NVIDIA-Digital-Bio/nvMolKit/pull/18">#18</a>)</p></li>
+</ul>
+</section>
+<section id="miscellaneous">
+<h3>Miscellaneous<a class="headerlink" href="#miscellaneous" title="Link to this heading">#</a></h3>
+<ul class="simple">
+<li><p>Removed unsupported Bulk Similarity APIs (<a class="reference external" href="https://github.com/NVIDIA-Digital-Bio/nvMolKit/pull/12">#12</a>)</p></li>
+</ul>
+</section>
 </section>
 </section>
 
@@ -369,7 +419,18 @@
   </div>
   <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="visible nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#release-0-0-1-2025-09-09">Release 0.0.1  2025-09-09</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#id1">0.0.1  2025-09-09</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#summary">Summary</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#id2">0.2.0 - 2025-10-24</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id3">Summary</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#contributors">Contributors</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#features">Features</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#bug-fixes">Bug Fixes</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#miscellaneous">Miscellaneous</a></li>
+</ul>
+</li>
 </ul>
   </nav></div>
 

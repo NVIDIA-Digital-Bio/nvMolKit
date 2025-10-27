@@ -9,7 +9,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>bulkCosineSimilarity &#8212; nvMolKit</title>
+    <title>crossCosineSimilarityMemoryConstrained &#8212; nvMolKit</title>
   
   
   
@@ -42,22 +42,22 @@
   <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
 <link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
 
-    <script src="../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../_static/documentation_options.js?v=938c9ccc"></script>
     <script src="../../_static/doctools.js?v=9bcbadda"></script>
     <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../../_static/thebelab-helper.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@jupyter-widgets/html-manager@^1.0.1/dist/embed-amd.js"></script>
-    <script>DOCUMENTATION_OPTIONS.pagename = 'api/generated/nvmolkit.similarity.bulkCosineSimilarity';</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'api/generated/nvmolkit.similarity.crossCosineSimilarityMemoryConstrained';</script>
     <link rel="icon" href="../../_static/favicon.png"/>
     <link rel="index" title="Index" href="../../genindex.html" />
     <link rel="search" title="Search" href="../../search.html" />
-    <link rel="next" title="crossCosineSimilarity" href="nvmolkit.similarity.crossCosineSimilarity.html" />
-    <link rel="prev" title="crossTanimotoSimilarity" href="nvmolkit.similarity.crossTanimotoSimilarity.html" />
+    <link rel="next" title="EmbedMolecules" href="nvmolkit.embedMolecules.EmbedMolecules.html" />
+    <link rel="prev" title="crossCosineSimilarity" href="nvmolkit.similarity.crossCosineSimilarity.html" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
-  <meta name="docsearch:version" content="0.1.0" />
+  <meta name="docsearch:version" content="0.2.0" />
 
 
   </head>
@@ -247,15 +247,21 @@
 <nav class="bd-docs-nav bd-links"
      aria-label="Table of Contents">
   <p class="bd-links__title" role="heading" aria-level="1">Table of Contents</p>
-  <div class="bd-toc-item navbar-nav"><ul class="current nav bd-sidenav">
+  <div class="bd-toc-item navbar-nav"><ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../index.html">Overview</a></li>
+</ul>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../similarity.html">Molecular similarity on GPU</a></li>
+</ul>
+<ul class="current nav bd-sidenav">
 <li class="toctree-l1 current active has-children"><a class="reference internal" href="../nvmolkit.html">nvMolKit APIs</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.fingerprints.MorganFingerprintGenerator.html">MorganFingerprintGenerator</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.fingerprints.pack_fingerprint.html">pack_fingerprint</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.fingerprints.unpack_fingerprint.html">unpack_fingerprint</a></li>
-<li class="toctree-l2"><a class="reference internal" href="nvmolkit.similarity.bulkTanimotoSimilarity.html">bulkTanimotoSimilarity</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.similarity.crossTanimotoSimilarity.html">crossTanimotoSimilarity</a></li>
-<li class="toctree-l2 current active"><a class="current reference internal" href="#">bulkCosineSimilarity</a></li>
+<li class="toctree-l2"><a class="reference internal" href="nvmolkit.similarity.crossTanimotoSimilarityMemoryConstrained.html">crossTanimotoSimilarityMemoryConstrained</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.similarity.crossCosineSimilarity.html">crossCosineSimilarity</a></li>
+<li class="toctree-l2 current active"><a class="current reference internal" href="#">crossCosineSimilarityMemoryConstrained</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.embedMolecules.EmbedMolecules.html">EmbedMolecules</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.mmffOptimization.MMFFOptimizeMoleculesConfs.html">MMFFOptimizeMoleculesConfs</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.types.AsyncGpuResult.html">AsyncGpuResult</a></li>
@@ -302,7 +308,7 @@
     
     <li class="breadcrumb-item"><a href="../nvmolkit.html" class="nav-link">nvMolKit APIs</a></li>
     
-    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">bulkCosineSimilarity</span></li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">crossCosineSimilarityMemoryConstrained</span></li>
   </ul>
 </nav>
 </div>
@@ -319,32 +325,35 @@
 <div id="searchbox"></div>
                 <article class="bd-article">
                   
-  <section id="bulkcosinesimilarity">
-<h1>bulkCosineSimilarity<a class="headerlink" href="#bulkcosinesimilarity" title="Link to this heading">#</a></h1>
+  <section id="crosscosinesimilaritymemoryconstrained">
+<h1>crossCosineSimilarityMemoryConstrained<a class="headerlink" href="#crosscosinesimilaritymemoryconstrained" title="Link to this heading">#</a></h1>
 <dl class="py function">
-<dt class="sig sig-object py" id="nvmolkit.similarity.bulkCosineSimilarity">
-<span class="sig-prename descclassname"><span class="pre">nvmolkit.similarity.</span></span><span class="sig-name descname"><span class="pre">bulkCosineSimilarity</span></span><span class="sig-paren">(</span>
+<dt class="sig sig-object py" id="nvmolkit.similarity.crossCosineSimilarityMemoryConstrained">
+<span class="sig-prename descclassname"><span class="pre">nvmolkit.similarity.</span></span><span class="sig-name descname"><span class="pre">crossCosineSimilarityMemoryConstrained</span></span><span class="sig-paren">(</span>
 
 <dl>
-<dd><em class="sig-param"><span class="n"><span class="pre">fingerprint_one</span></span></em>,</dd>
-<dd><em class="sig-param"><span class="n"><span class="pre">fingerprint_group_two</span></span></em>,</dd>
+<dd><em class="sig-param"><span class="n"><span class="pre">fingerprint_group_one</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>,</dd>
+<dd><em class="sig-param"><span class="n"><span class="pre">fingerprint_group_two</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>,</dd>
 </dl>
 
-<span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="nvmolkit.types.AsyncGpuResult.html#nvmolkit.types.AsyncGpuResult" title="nvmolkit.types.AsyncGpuResult"><span class="pre">AsyncGpuResult</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.13)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><span class="pre">float</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvmolkit.similarity.bulkCosineSimilarity" title="Link to this definition">#</a></dt>
-<dd><p>Returns the Cosine similarity between a fingerprint and a set of fingerprints.</p>
-<p>For optimal performance, the input fingerprints should be generated by nvMolKit, as there is significant overhead
-in data type conversion and copying to device when using RDKit fingerprints.</p>
+<span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="(in NumPy v2.3)"><span class="pre">ndarray</span></a></span></span><a class="headerlink" href="#nvmolkit.similarity.crossCosineSimilarityMemoryConstrained" title="Link to this definition">#</a></dt>
+<dd><p>Returns the Cosine similarity between two sets of fingerprints.</p>
+<p>Computes results on the GPU, but returns a numpy array on the CPU. Will perform computation in chunks if necessary to avoid running out of memory on the GPU. Will still
+fail if the resulting matrix is too large to fit on the CPU.</p>
+<p>Expects fingerprints generated by nvMolKit or as a torch tensor located on device 0, with the leading dimension corresponding to
+the number of fingerprints, and the second dimension representing the packed fingerprint
+bitfield.</p>
+<p>The special case of fingerprint_group_1 as a 1 x n_bits tensor is equivalent to RDKit’s BulkCosineSimilarity.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>fingerprint_one</strong> – An RDKit ExplicitBitVect or a torch Tensor computed from nvMolKit fingerprints</p></li>
-<li><p><strong>fingerprint_group_two</strong> – A list of RDKit ExplicitBitVects or a torch tensor computed from nvMolKit fingerprints</p></li>
+<li><p><strong>fingerprint_group_one</strong> – A torch Tensor computed from nvMolKit fingerprints</p></li>
+<li><p><strong>fingerprint_group_two</strong> – A torch Tensor computed from nvMolKit fingerprints,
+or None for all-to-all similarity within fingerprint_group_one.</p></li>
 </ul>
 </dd>
 <dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>An AsyncGpuResult object containing the Cosine similarities, with length equal to the number of
-fingerprints in fingerprint_group_two. If fingerprint_one is an RDKit ExplicitBitVect, the return
-type will be a list of floats.</p>
+<dd class="field-even"><p>A numpy array of Cosine similarities, with index [i, j] corresponding to the similarity between</p>
 </dd>
 </dl>
 </dd></dl>
@@ -362,20 +371,20 @@ type will be a list of floats.</p>
                   
 <div class="prev-next-area">
     <a class="left-prev"
-       href="nvmolkit.similarity.crossTanimotoSimilarity.html"
+       href="nvmolkit.similarity.crossCosineSimilarity.html"
        title="previous page">
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
         <p class="prev-next-subtitle">previous</p>
-        <p class="prev-next-title">crossTanimotoSimilarity</p>
+        <p class="prev-next-title">crossCosineSimilarity</p>
       </div>
     </a>
     <a class="right-next"
-       href="nvmolkit.similarity.crossCosineSimilarity.html"
+       href="nvmolkit.embedMolecules.EmbedMolecules.html"
        title="next page">
       <div class="prev-next-info">
         <p class="prev-next-subtitle">next</p>
-        <p class="prev-next-title">crossCosineSimilarity</p>
+        <p class="prev-next-title">EmbedMolecules</p>
       </div>
       <i class="fa-solid fa-angle-right"></i>
     </a>
@@ -400,7 +409,7 @@ type will be a list of floats.</p>
   </div>
   <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="visible nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#nvmolkit.similarity.bulkCosineSimilarity"><code class="docutils literal notranslate"><span class="pre">bulkCosineSimilarity()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#nvmolkit.similarity.crossCosineSimilarityMemoryConstrained"><code class="docutils literal notranslate"><span class="pre">crossCosineSimilarityMemoryConstrained()</span></code></a></li>
 </ul>
   </nav></div>
 

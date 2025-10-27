@@ -3,13 +3,13 @@
 <!DOCTYPE html>
 
 
-<html lang="en" data-content_root="../" >
+<html lang="en" data-content_root="../../" >
 
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Getting Started Tutorial &#8212; nvMolKit</title>
+    <title>crossTanimotoSimilarityMemoryConstrained &#8212; nvMolKit</title>
   
   
   
@@ -28,34 +28,36 @@
   </noscript>
   
   <!-- Loaded before other Sphinx assets -->
-  <link href="../_static/styles/theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
-<link href="../_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+  <link href="../../_static/styles/theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+<link href="../../_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
 
-    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=03e43079" />
-    <link rel="stylesheet" type="text/css" href="../_static/styles/nvidia-sphinx-theme.css?v=df3ac72c" />
-    <link rel="stylesheet" type="text/css" href="../_static/jupyter-sphinx.css?v=572af1d6" />
-    <link rel="stylesheet" type="text/css" href="../_static/thebelab.css" />
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/nvidia-sphinx-theme.css?v=df3ac72c" />
+    <link rel="stylesheet" type="text/css" href="../../_static/jupyter-sphinx.css?v=572af1d6" />
+    <link rel="stylesheet" type="text/css" href="../../_static/thebelab.css" />
   
   <!-- So that users can add custom icons -->
-  <script src="../_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
+  <script src="../../_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
   <!-- Pre-loaded scripts that we'll load fully later -->
-  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
-<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
+  <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
+<link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
 
-    <script src="../_static/documentation_options.js?v=01f34227"></script>
-    <script src="../_static/doctools.js?v=9bcbadda"></script>
-    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
-    <script src="../_static/thebelab-helper.js"></script>
+    <script src="../../_static/documentation_options.js?v=938c9ccc"></script>
+    <script src="../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/thebelab-helper.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@jupyter-widgets/html-manager@^1.0.1/dist/embed-amd.js"></script>
-    <script>DOCUMENTATION_OPTIONS.pagename = 'tutorials/getting_started';</script>
-    <link rel="icon" href="../_static/favicon.png"/>
-    <link rel="index" title="Index" href="../genindex.html" />
-    <link rel="search" title="Search" href="../search.html" />
+    <script>DOCUMENTATION_OPTIONS.pagename = 'api/generated/nvmolkit.similarity.crossTanimotoSimilarityMemoryConstrained';</script>
+    <link rel="icon" href="../../_static/favicon.png"/>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="crossCosineSimilarity" href="nvmolkit.similarity.crossCosineSimilarity.html" />
+    <link rel="prev" title="crossTanimotoSimilarity" href="nvmolkit.similarity.crossTanimotoSimilarity.html" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
-  <meta name="docsearch:version" content="0.1.0" />
+  <meta name="docsearch:version" content="0.2.0" />
 
 
   </head>
@@ -76,7 +78,7 @@
   <dialog id="pst-search-dialog">
     
 <form class="bd-search d-flex align-items-center"
-      action="../search.html"
+      action="../../search.html"
       method="get">
   <i class="fa-solid fa-magnifying-glass"></i>
   <input type="search"
@@ -112,7 +114,7 @@
     
   
 
-<a class="navbar-brand logo" href="../index.html">
+<a class="navbar-brand logo" href="../../index.html">
   
   
   
@@ -123,8 +125,8 @@
       
     
     
-    <img src="../_static/nvidia-logo-horiz-rgb-blk-for-screen.svg" class="logo__image only-light" alt="nvMolKit - Home"/>
-    <img src="../_static/nvidia-logo-horiz-rgb-wht-for-screen.svg" class="logo__image only-dark pst-js-only" alt="nvMolKit - Home"/>
+    <img src="../../_static/nvidia-logo-horiz-rgb-blk-for-screen.svg" class="logo__image only-light" alt="nvMolKit - Home"/>
+    <img src="../../_static/nvidia-logo-horiz-rgb-wht-for-screen.svg" class="logo__image only-dark pst-js-only" alt="nvMolKit - Home"/>
   
   
     <p class="title logo__title">nvMolKit</p>
@@ -197,7 +199,7 @@
     
   
 
-<a class="navbar-brand logo" href="../index.html">
+<a class="navbar-brand logo" href="../../index.html">
   
   
   
@@ -208,8 +210,8 @@
       
     
     
-    <img src="../_static/nvidia-logo-horiz-rgb-blk-for-screen.svg" class="logo__image only-light" alt="nvMolKit - Home"/>
-    <img src="../_static/nvidia-logo-horiz-rgb-wht-for-screen.svg" class="logo__image only-dark pst-js-only" alt="nvMolKit - Home"/>
+    <img src="../../_static/nvidia-logo-horiz-rgb-blk-for-screen.svg" class="logo__image only-light" alt="nvMolKit - Home"/>
+    <img src="../../_static/nvidia-logo-horiz-rgb-wht-for-screen.svg" class="logo__image only-dark pst-js-only" alt="nvMolKit - Home"/>
   
   
     <p class="title logo__title">nvMolKit</p>
@@ -246,22 +248,29 @@
      aria-label="Table of Contents">
   <p class="bd-links__title" role="heading" aria-level="1">Table of Contents</p>
   <div class="bd-toc-item navbar-nav"><ul class="nav bd-sidenav">
-<li class="toctree-l1 has-children"><a class="reference internal" href="../api/nvmolkit.html">nvMolKit APIs</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
-<li class="toctree-l2"><a class="reference internal" href="../api/generated/nvmolkit.fingerprints.MorganFingerprintGenerator.html">MorganFingerprintGenerator</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../api/generated/nvmolkit.fingerprints.pack_fingerprint.html">pack_fingerprint</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../api/generated/nvmolkit.fingerprints.unpack_fingerprint.html">unpack_fingerprint</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../api/generated/nvmolkit.similarity.bulkTanimotoSimilarity.html">bulkTanimotoSimilarity</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../api/generated/nvmolkit.similarity.crossTanimotoSimilarity.html">crossTanimotoSimilarity</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../api/generated/nvmolkit.similarity.bulkCosineSimilarity.html">bulkCosineSimilarity</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../api/generated/nvmolkit.similarity.crossCosineSimilarity.html">crossCosineSimilarity</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../api/generated/nvmolkit.embedMolecules.EmbedMolecules.html">EmbedMolecules</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../api/generated/nvmolkit.embedMolecules.BatchHardwareOptions.html">BatchHardwareOptions</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../api/generated/nvmolkit.mmffOptimization.MMFFOptimizeMoleculesConfs.html">MMFFOptimizeMoleculesConfs</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../index.html">Overview</a></li>
+</ul>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../similarity.html">Molecular similarity on GPU</a></li>
+</ul>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1 current active has-children"><a class="reference internal" href="../nvmolkit.html">nvMolKit APIs</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="nvmolkit.fingerprints.MorganFingerprintGenerator.html">MorganFingerprintGenerator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="nvmolkit.fingerprints.pack_fingerprint.html">pack_fingerprint</a></li>
+<li class="toctree-l2"><a class="reference internal" href="nvmolkit.fingerprints.unpack_fingerprint.html">unpack_fingerprint</a></li>
+<li class="toctree-l2"><a class="reference internal" href="nvmolkit.similarity.crossTanimotoSimilarity.html">crossTanimotoSimilarity</a></li>
+<li class="toctree-l2 current active"><a class="current reference internal" href="#">crossTanimotoSimilarityMemoryConstrained</a></li>
+<li class="toctree-l2"><a class="reference internal" href="nvmolkit.similarity.crossCosineSimilarity.html">crossCosineSimilarity</a></li>
+<li class="toctree-l2"><a class="reference internal" href="nvmolkit.similarity.crossCosineSimilarityMemoryConstrained.html">crossCosineSimilarityMemoryConstrained</a></li>
+<li class="toctree-l2"><a class="reference internal" href="nvmolkit.embedMolecules.EmbedMolecules.html">EmbedMolecules</a></li>
+<li class="toctree-l2"><a class="reference internal" href="nvmolkit.mmffOptimization.MMFFOptimizeMoleculesConfs.html">MMFFOptimizeMoleculesConfs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="nvmolkit.types.AsyncGpuResult.html">AsyncGpuResult</a></li>
+<li class="toctree-l2"><a class="reference internal" href="nvmolkit.types.HardwareOptions.html">HardwareOptions</a></li>
 </ul>
 </details></li>
 </ul>
 <ul class="nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="../changelog.html">Changelog</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../changelog.html">Changelog</a></li>
 </ul>
 </div>
 </nav></div>
@@ -292,11 +301,14 @@
   <ul class="bd-breadcrumbs">
     
     <li class="breadcrumb-item breadcrumb-home">
-      <a href="../index.html" class="nav-link" aria-label="Home">
+      <a href="../../index.html" class="nav-link" aria-label="Home">
         <i class="fa-solid fa-home"></i>
       </a>
     </li>
-    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">Getting Started Tutorial</span></li>
+    
+    <li class="breadcrumb-item"><a href="../nvmolkit.html" class="nav-link">nvMolKit APIs</a></li>
+    
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">crossTanimotoSimilarityMemoryConstrained</span></li>
   </ul>
 </nav>
 </div>
@@ -313,24 +325,39 @@
 <div id="searchbox"></div>
                 <article class="bd-article">
                   
-  <section id="getting-started-tutorial">
-<h1>Getting Started Tutorial<a class="headerlink" href="#getting-started-tutorial" title="Link to this heading">#</a></h1>
-<p>Welcome to the NVIDIA nvMolKit getting started tutorial!</p>
-<section id="introduction">
-<h2>Introduction<a class="headerlink" href="#introduction" title="Link to this heading">#</a></h2>
-<p>This tutorial will introduce you to the basics of using nvMolKit.</p>
-</section>
-<section id="installation">
-<h2>Installation<a class="headerlink" href="#installation" title="Link to this heading">#</a></h2>
-<p>Make sure you’ve installed nvMolKit using pip:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span>nvmolkit
-</pre></div>
-</div>
-</section>
-<section id="next-steps">
-<h2>Next Steps<a class="headerlink" href="#next-steps" title="Link to this heading">#</a></h2>
-<p>Stay tuned for more tutorials!</p>
-</section>
+  <section id="crosstanimotosimilaritymemoryconstrained">
+<h1>crossTanimotoSimilarityMemoryConstrained<a class="headerlink" href="#crosstanimotosimilaritymemoryconstrained" title="Link to this heading">#</a></h1>
+<dl class="py function">
+<dt class="sig sig-object py" id="nvmolkit.similarity.crossTanimotoSimilarityMemoryConstrained">
+<span class="sig-prename descclassname"><span class="pre">nvmolkit.similarity.</span></span><span class="sig-name descname"><span class="pre">crossTanimotoSimilarityMemoryConstrained</span></span><span class="sig-paren">(</span>
+
+<dl>
+<dd><em class="sig-param"><span class="n"><span class="pre">fingerprint_group_one</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>,</dd>
+<dd><em class="sig-param"><span class="n"><span class="pre">fingerprint_group_two</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>,</dd>
+</dl>
+
+<span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="(in NumPy v2.3)"><span class="pre">ndarray</span></a></span></span><a class="headerlink" href="#nvmolkit.similarity.crossTanimotoSimilarityMemoryConstrained" title="Link to this definition">#</a></dt>
+<dd><p>Returns the Tanimoto similarity within a set of fingerprints or between two sets of fingerprints.</p>
+<p>Computes results on the GPU, but returns a numpy array on the CPU. Will perform computation in chunks if necessary to avoid running out of memory on the GPU. Will still
+fail if the resulting matrix is too large to fit on the CPU.</p>
+<p>Expects fingerprints generated by nvMolKit or as a torch tensor located on device 0, with the leading dimension corresponding to
+the number of fingerprints, and the second dimension representing the packed fingerprint
+bitfield.</p>
+<p>The special case of fingerprint_group_1 as a 1 x n_bits tensor is equivalent to RDKit’s BulkTanimotoSimilarity.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>fingerprint_group_one</strong> – A torch Tensor or AsyncGpuResult computed from nvMolKit fingerprints</p></li>
+<li><p><strong>fingerprint_group_two</strong> – A torch Tensor or AsyncGpuResult computed from nvMolKit fingerprints,
+or None for all-to-all similarity within fingerprint_group_one.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>A numpy array of Tanimoto similarities, with index [i, j] corresponding to the similarity between</p>
+</dd>
+</dl>
+</dd></dl>
+
 </section>
 
 
@@ -343,6 +370,24 @@
                 <footer class="prev-next-footer d-print-none">
                   
 <div class="prev-next-area">
+    <a class="left-prev"
+       href="nvmolkit.similarity.crossTanimotoSimilarity.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">crossTanimotoSimilarity</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="nvmolkit.similarity.crossCosineSimilarity.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">crossCosineSimilarity</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
 </div>
                 </footer>
               
@@ -364,9 +409,7 @@
   </div>
   <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="visible nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#introduction">Introduction</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#installation">Installation</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#next-steps">Next Steps</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#nvmolkit.similarity.crossTanimotoSimilarityMemoryConstrained"><code class="docutils literal notranslate"><span class="pre">crossTanimotoSimilarityMemoryConstrained()</span></code></a></li>
 </ul>
   </nav></div>
 
@@ -384,8 +427,8 @@
   </div>
   
   <!-- Scripts loaded after <body> so the DOM is not blocked -->
-  <script defer src="../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf"></script>
-<script defer src="../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf"></script>
+  <script defer src="../../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf"></script>
+<script defer src="../../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf"></script>
 
   <footer class="bd-footer">
 <div class="bd-footer__inner bd-page-width">
@@ -394,8 +437,8 @@
       
         <div class="footer-item">
 <a class="footer-brand logo" href="https://www.nvidia.com">
-  <img src="../_static/nvidia-logo-horiz-rgb-1c-blk-for-screen.svg" class="logo__image only-light" alt="NVIDIA"/>
-  <img src="../_static/nvidia-logo-horiz-rgb-1c-wht-for-screen.svg" class="logo__image only-dark" alt="NVIDIA"/>
+  <img src="../../_static/nvidia-logo-horiz-rgb-1c-blk-for-screen.svg" class="logo__image only-light" alt="NVIDIA"/>
+  <img src="../../_static/nvidia-logo-horiz-rgb-1c-wht-for-screen.svg" class="logo__image only-dark" alt="NVIDIA"/>
 </a></div>
       
         <div class="footer-item">
