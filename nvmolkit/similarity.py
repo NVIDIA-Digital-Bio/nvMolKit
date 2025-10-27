@@ -93,7 +93,7 @@ def crossCosineSimilarity(fingerprint_group_one: AsyncGpuResult | torch.Tensor, 
     the number of fingerprints, and the second dimension representing the packed fingerprint
     bitfield.
 
-    The special case of fingerprint_group_1 as a 1 x n_bits tensor is equivalent to RDKit's BulkTanimotoSimilarity.
+    The special case of fingerprint_group_1 as a 1 x n_bits tensor is equivalent to RDKit's BulkCosineSimilarity.
 
     Args:
         fingerprint_group_one: A torch Tensor computed from nvMolKit fingerprints
@@ -122,7 +122,7 @@ def crossCosineSimilarityMemoryConstrained(fingerprint_group_one: torch.Tensor,
     the number of fingerprints, and the second dimension representing the packed fingerprint
     bitfield.
 
-    The special case of fingerprint_group_1 as a 1 x n_bits tensor is equivalent to RDKit's BulkTanimotoSimilarity.
+    The special case of fingerprint_group_1 as a 1 x n_bits tensor is equivalent to RDKit's BulkCosineSimilarity.
 
     Args:
         fingerprint_group_one: A torch Tensor computed from nvMolKit fingerprints
