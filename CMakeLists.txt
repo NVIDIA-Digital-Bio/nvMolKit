@@ -10,14 +10,14 @@
 # "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
 # specific language governing permissions and limitations under the License.
 
-cmake_minimum_required(VERSION 3.26)
+cmake_minimum_required(VERSION 3.30)
 
 project(
   nvmolkit
-  VERSION 0.0.1
+  VERSION 0.3.0
   LANGUAGES CXX CUDA)
-set(CMAKE_CUDA_STANDARD 17)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CUDA_STANDARD 20)
+set(CMAKE_CXX_STANDARD 20)
 find_package(CUDAToolkit REQUIRED)
 
 set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH};${CMAKE_CURRENT_SOURCE_DIR}/cmake")
