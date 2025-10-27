@@ -81,11 +81,6 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
     hardwareOptions.preprocessingThreads == -1 ? omp_get_max_threads() : hardwareOptions.preprocessingThreads;
   const int batchSize = hardwareOptions.batchSize == -1 ? 500 : hardwareOptions.batchSize;
 
-  // Validate batchesPerGpu
-  if (batchesPerGpu > numThreads) {
-    throw std::invalid_argument("batchesPerGpu (" + std::to_string(batchesPerGpu) + ") cannot exceed numThreads (" +
-                                std::to_string(numThreads) + ")");
-  }
   if (batchesPerGpu <= 0) {
     throw std::invalid_argument("batchesPerGpu must be greater than 0");
   }
