@@ -59,20 +59,21 @@ def MMFFOptimizeMoleculesConfs(
     Example:
         >>> from rdkit import Chem
         >>> from rdkit.Chem import rdDistGeom
-        >>> import nvmolkit.mmff as mmff
+        >>> from nvmolkit.mmffOptimization import MMFFOptimizeMoleculesConfs
+        >>> from nvmolkit.types import HardwareOptions
         >>>
         >>> # Load molecules and generate conformers
-        >>> mol1 = Chem.MolFromSmiles('CCO')
-        >>> mol2 = Chem.MolFromSmiles('CCC')
+        >>> mol1 = Chem.AddHs(Chem.MolFromSmiles('CCO'))
+        >>> mol2 = Chem.AddHs(Chem.MolFromSmiles('CCC'))
         >>> rdDistGeom.EmbedMultipleConfs(mol1, numConfs=5)
         >>> rdDistGeom.EmbedMultipleConfs(mol2, numConfs=3)
         >>>
-        >>> # Optimize with custom settings
-        >>> energies = mmff.MMFFOptimizeMoleculesConfs(
+        >>> # Set custom runtime performance options (optional)
+        >>> hardware_options = HardwareOptions(batchSize=200, batchesPerGpu=4)
+        >>> energies = MMFFOptimizeMoleculesConfs(
         ...     [mol1, mol2],
         ...     maxIters=500,
-        ...     numThreads=4,
-        ...     batchSize=32
+        ...     hardwareOptions=hardware_options
         ... )
         >>>
         >>> # energies[0] contains 5 energies for mol1's conformers

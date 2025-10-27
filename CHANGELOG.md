@@ -4,7 +4,7 @@
 
 ### Summary
 
-nvMolKit 0.2.0 comes with significant usability and feature-completness improvements to existing functionality. It is also
+nvMolKit 0.2.0 comes with significant usability and feature-completeness improvements to existing functionality. It is also
 the first release to have a [conda-forge release](https://anaconda.org/conda-forge/nvmolkit).
 
 ### Contributors

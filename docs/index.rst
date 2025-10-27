@@ -15,7 +15,7 @@ For operations that don't modify RDKit structures, nvMolKit returns asynchronous
 An example using nvMolKit to compute Morgan fingerprints in parallel on the GPU is shown below:
 
 .. code-block:: python
-
+    import torch
     # RDKit API as common base
     from rdkit import Chem
     mols = [Chem.MolFromSmiles(smi) for smi in ['C1CCCCC1', 'C1CCCCC2CCCCC12', "COO"]]

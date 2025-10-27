@@ -6,7 +6,7 @@ Please see the official [NVIDIA nvMolKit Documentation](https://nvidia-digital-b
 ## Installation Guide
 
 **IMPORTANT**: nvMolKit requires an NVIDIA GPU with compute capability 7.0 (V100) or higher to run. Check your GPU's compute capability [here](https://developer.nvidia.com/cuda-gpus).
-It also requires a CUDA Driver sufficient for CUDA 12.6 or later (driver version >=560.28, though some backwards compatibility may be supported, see the [CUDA compatibility guide](https://docs.nvidia.com/deploy/cuda-compatibility/index.html). 
+It also requires a CUDA Driver sufficient for CUDA 12.6 or later (driver version >=560.28), though some backwards compatibility may be supported, see the [CUDA compatibility guide](https://docs.nvidia.com/deploy/cuda-compatibility/index.html).
 
 ### Conda-forge Installation (Recommended)
 
@@ -18,7 +18,7 @@ nvMolKit v0.2.0 supports RDKit 2024.09.6 and 2025.03.1. To install:
 
 ```bash
 conda install -c conda-forge nvmolkit
-````
+```
 
 
 ### Installation from Source
@@ -86,7 +86,7 @@ conda create --name nvmolkit_dev_py312 python=3.12.1
 conda activate nvmolkit_dev_py312
 
 # Install RDKit with development headers
-conda install -c conda-forge rdkit=2024.09.3 rdkit-dev=2024.09.3
+conda install -c conda-forge rdkit=2024.09.6 rdkit-dev=2024.09.6
 
 # Install Boost subpackages in case RDKit install did not include them transitively
 conda install -c conda-forge libboost libboost-python libboost-devel libboost-headers libboost-python-devel
