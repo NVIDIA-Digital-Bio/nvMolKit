@@ -37,8 +37,6 @@ elseif(NVMOLKIT_CUDA_TARGET_MODE STREQUAL "full")
         STATUS "CUDA < 12.8 detected, Blackwell (100-real) arch not enabled")
     endif()
   endif()
-  # Suppress possible warnings about deprecated GPU targets 70 and onward.
-  string(APPEND CMAKE_CUDA_FLAGS " -Wno-deprecated-gpu-targets")
 
   set(CMAKE_CUDA_ARCHITECTURES "${_nvmolkit_cuda_arch_list}")
   message(

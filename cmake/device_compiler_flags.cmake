@@ -14,19 +14,22 @@
 # the License.
 
 # General flags for CUDA compilation
-string(APPEND CMAKE_CUDA_FLAGS " -Wno-deprecated-gpu-targets")
+# Build up all flags in a temporary variable to avoid duplication on reconfigure
+set(NVMOLKIT_NVCC_ALL_FLAGS "-Wno-deprecated-gpu-targets --default-stream per-thread")
 if(NVMOLKIT_EXTRA_DEV_FLAGS)
-  string(APPEND CMAKE_CUDA_FLAGS " --Werror all-warnings")
+  string(APPEND NVMOLKIT_NVCC_ALL_FLAGS " --Werror all-warnings")
 endif()
 
-set(NVMOLKIT_NVCC_ALL_FLAGS "--default-stream per-thread")
+# Combine host flags (from host_compiler_flags.cmake) and device flags
 set(CMAKE_CUDA_FLAGS
-    "${CMAKE_CUDA_FLAGS} ${NVMOLKIT_NVCC_ALL_FLAGS}"
+    "${NVMOLKIT_HOST_CUDA_FLAGS} ${NVMOLKIT_NVCC_ALL_FLAGS}"
     CACHE STRING "All CUDA flags" FORCE)
 
 set(NVMOLKIT_DEBUG_FLAGS "-g -G")
 
-set(NVMOLKIT_RELWITHDEBINFO_FLAGS "-lineinfo")
+set(NVMOLKIT_RELWITHDEBINFO_FLAGS "-lineinfo --use_fast_math")
+
+set(NVMOLKIT_RELEASE_FLAGS "--use_fast_math")
 
 set(CMAKE_CUDA_FLAGS_DEBUG
     ${NVMOLKIT_DEBUG_FLAGS}
@@ -36,3 +39,7 @@ set(CMAKE_CUDA_FLAGS_RELWITHDEBINFO
     ${NVMOLKIT_RELWITHDEBINFO_FLAGS}
     CACHE STRING "Flags to CUDA compiler used during RelWithDebInfo builds"
           FORCE)
+
+set(CMAKE_CUDA_FLAGS_RELEASE
+    ${NVMOLKIT_RELEASE_FLAGS}
+    CACHE STRING "Flags to CUDA compiler used during Release builds" FORCE)

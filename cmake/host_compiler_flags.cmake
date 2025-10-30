@@ -16,8 +16,9 @@
 if(NVMOLKIT_EXTRA_DEV_FLAGS)
   message(STATUS "Enabling extra development flags")
   string(APPEND CMAKE_CXX_FLAGS " -Werror -Wall  -Wextra -Wno-sign-compare")
-  string(APPEND CMAKE_CUDA_FLAGS
-         " --compiler-options \"-Werror -Wall  -Wextra\"")
+  set(NVMOLKIT_HOST_CUDA_FLAGS " --compiler-options \"-Werror -Wall  -Wextra\"")
+else()
+  set(NVMOLKIT_HOST_CUDA_FLAGS "")
 endif()
 if(NVMOLKIT_BUILD_AGAINST_PIP_RDKIT)
   message(STATUS "Using pre-cxx11 ABI")
