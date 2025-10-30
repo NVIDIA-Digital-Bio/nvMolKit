@@ -27,9 +27,9 @@ set(CMAKE_CUDA_FLAGS
 
 set(NVMOLKIT_DEBUG_FLAGS "-g -G")
 
-set(NVMOLKIT_RELWITHDEBINFO_FLAGS "-lineinfo --ftz=true")
+set(NVMOLKIT_RELWITHDEBINFO_FLAGS "-lineinfo --use_fast_math")
 
-set(NVMOLKIT_RELEASE_FLAGS "--ftz=true")
+set(NVMOLKIT_RELEASE_FLAGS "--use_fast_math")
 
 set(CMAKE_CUDA_FLAGS_DEBUG
     ${NVMOLKIT_DEBUG_FLAGS}
