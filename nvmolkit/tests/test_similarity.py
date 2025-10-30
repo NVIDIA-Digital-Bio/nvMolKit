@@ -212,6 +212,7 @@ def test_memory_constrained_tanimoto_self(size_limited_mols):
     # GPU-packed fingerprints (torch CUDA tensor)
     nvmolkit_fps_cu = nvmolkit_fpgen.GetFingerprints(size_limited_mols, num_threads=1)
     nvmolkit_fps_torch = nvmolkit_fps_cu.torch()
+    torch.cuda.synchronize()
 
     got = crossTanimotoSimilarityMemoryConstrained(nvmolkit_fps_torch)
     # Compare as numpy
@@ -226,6 +227,7 @@ def test_memory_constrained_tanimoto_cross(size_limited_mols, nxmdims):
     ref = torch.empty(d1, d2, dtype=torch.float64)
     for i in range(d1):
         ref[i] = torch.tensor(BulkTanimotoSimilarity(fps1[i], fps2))
+    torch.cuda.synchronize()
 
     got = crossTanimotoSimilarityMemoryConstrained(t1, t2)
     np.testing.assert_allclose(got, ref.cpu().numpy(), rtol=1e-5, atol=1e-5)
@@ -242,6 +244,7 @@ def test_memory_constrained_cosine_self(size_limited_mols):
 
     nvmolkit_fps_cu = nvmolkit_fpgen.GetFingerprints(size_limited_mols, num_threads=1)
     nvmolkit_fps_torch = nvmolkit_fps_cu.torch()
+    torch.cuda.synchronize()
 
     got = crossCosineSimilarityMemoryConstrained(nvmolkit_fps_torch)
     np.testing.assert_allclose(got, ref.cpu().numpy(), rtol=1e-5, atol=1e-5)
@@ -255,6 +258,7 @@ def test_memory_constrained_cosine_cross(size_limited_mols, nxmdims):
     ref = torch.empty(d1, d2, dtype=torch.float64)
     for i in range(d1):
         ref[i] = torch.tensor(BulkCosineSimilarity(fps1[i], fps2))
+    torch.cuda.synchronize()
 
     got = crossCosineSimilarityMemoryConstrained(t1, t2)
     np.testing.assert_allclose(got, ref.cpu().numpy(), rtol=1e-5, atol=1e-5)
