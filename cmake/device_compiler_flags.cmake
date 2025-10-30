@@ -26,7 +26,9 @@ set(CMAKE_CUDA_FLAGS
 
 set(NVMOLKIT_DEBUG_FLAGS "-g -G")
 
-set(NVMOLKIT_RELWITHDEBINFO_FLAGS "-lineinfo")
+set(NVMOLKIT_RELWITHDEBINFO_FLAGS "-lineinfo --ftz=true")
+
+set(NVMOLKIT_RELEASE_FLAGS "--ftz=true")
 
 set(CMAKE_CUDA_FLAGS_DEBUG
     ${NVMOLKIT_DEBUG_FLAGS}
@@ -36,3 +38,7 @@ set(CMAKE_CUDA_FLAGS_RELWITHDEBINFO
     ${NVMOLKIT_RELWITHDEBINFO_FLAGS}
     CACHE STRING "Flags to CUDA compiler used during RelWithDebInfo builds"
           FORCE)
+
+set(CMAKE_CUDA_FLAGS_RELEASE
+    ${NVMOLKIT_RELEASE_FLAGS}
+    CACHE STRING "Flags to CUDA compiler used during Release builds" FORCE)
