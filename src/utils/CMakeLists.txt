@@ -50,5 +50,5 @@ target_link_libraries(openmp_helpers PRIVATE OpenMP::OpenMP_CXX)
 target_include_directories(openmp_helpers INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(cub_helpers INTERFACE)
-target_link_libraries(host_vector INTERFACE CUDA::cudart)
+target_link_libraries(cub_helpers INTERFACE CUDA::cudart)
 target_include_directories(cub_helpers INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
