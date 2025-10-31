@@ -70,7 +70,7 @@ if __name__ == "__main__":
         print("Usage: python butina_clustering_bench.py <input_smiles_file> <do_rdkit (0 or 1)>")
         sys.exit(1)
     input_data = sys.argv[1]
-    do_rdkit = bool(sys.argv[2])
+    do_rdkit = sys.argv[2] != "0"
 
     with open(input_data, "r") as f:
         smis = [line.strip() for line in f.readlines()]
