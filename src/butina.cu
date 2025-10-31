@@ -243,6 +243,7 @@ void innerButinaLoop(const int                            numPoints,
 }
 
 }  // namespace
+
 void butinaGpu(const cuda::std::span<const uint8_t> hitMatrix,
                const cuda::std::span<int>           clusters,
                cudaStream_t                         stream) {
