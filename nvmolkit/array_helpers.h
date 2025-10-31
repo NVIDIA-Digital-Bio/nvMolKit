@@ -23,6 +23,16 @@
 
 namespace nvMolKit {
 
+template <typename blockT> cuda::std::span<const blockT> getSpanFromDictElems(void* data, boost::python::tuple& shape) {
+  size_t size = boost::python::extract<size_t>(shape[0]);
+  // multiply by any other dimensions
+  for (int i = 1; i < len(shape); i++) {
+    size *= boost::python::extract<size_t>(shape[i]);
+  }
+
+  return cuda::std::span<blockT>(reinterpret_cast<blockT*>(data), size);
+}
+
 struct PyArray {
   PyArray() = default;
   ~PyArray() {
