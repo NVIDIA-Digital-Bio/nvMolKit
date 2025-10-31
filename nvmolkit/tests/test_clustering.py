@@ -17,7 +17,7 @@ def check_butina_correctness(hit_mat, clusts):
             hit_mat[item, :] = False
             hit_mat[:, item] = False
     assert len(seen) == hit_mat.shape[0]
-#@pytest.mark.parametrize("size", (1, 10, 100, 1000))
+
 @pytest.mark.parametrize("size", (1, 10, 100, 1000))
 def test_butina_clustering(size):
     n = size

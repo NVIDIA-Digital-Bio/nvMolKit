@@ -229,6 +229,13 @@ TEST(AsyncDeviceVector, resizeEmpty) {
   EXPECT_EQ(vec.size(), 0);
 }
 
+TEST(AsyncDeviceVector, StartEmptyWithExplicitConstructor) {
+  AsyncDeviceVector<int> vec(0);
+  EXPECT_EQ(vec.size(), 0);
+  vec.resize(5);
+  EXPECT_EQ(vec.size(), 5);
+}
+
 class AsyncDeviceVectorResizeTests : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -309,5 +316,3 @@ TEST(AsyncDeviceVector, setFromArray) {
   vec.copyToHost(result);
   EXPECT_THAT(result, ::testing::ElementsAre(1, 2, 3));
 }
-
-// TODO: Tests for nonzero stream, and zero size allocation / deallocation.

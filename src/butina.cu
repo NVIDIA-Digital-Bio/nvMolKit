@@ -18,6 +18,16 @@
 #include "butina.h"
 #include "host_vector.h"
 #include "nvtx.h"
+
+/**
+ * TODO: Future optimizations
+ * - Keep a live list of active indices and only dispatch counts for those.
+ * - Parallelize singlet/doublet assignment (low priority since these only run once)
+ * - Use neighborlists instead of hit matrix. This could be implemented in similarity code too.
+ * - Use ArgMax from CUB instead of custom kernel. CUB API changed somewhere between 12.5 and 12.9, so we'd need a
+ * compatibility layer.
+ * - Use CUDA Graphs for inner loop and exit criteria.
+ */
 namespace nvMolKit {
 
 namespace {
@@ -25,7 +35,9 @@ constexpr int blockSizeCount               = 256;
 constexpr int kAssignedAsSingletonSentinel = std::numeric_limits<int>::max() - 1;
 constexpr int kMinLoopSizeForAssignment    = 3;
 
-// TODO can we do some dynamic assignment as lower numbers of rows execute due to being done.
+//! Kernel to count the size of each cluster around each point
+//! Assigns singleton clusters to a sentinel value for later processing.
+//! Looks up and skips finished clusters.
 __global__ void butinaKernelCountClusterSize(const cuda::std::span<const uint8_t> hitMatrix,
                                              const cuda::std::span<int>           clusters,
                                              const cuda::std::span<int>           clusterSizes) {
@@ -53,7 +65,6 @@ __global__ void butinaKernelCountClusterSize(const cuda::std::span<const uint8_t
   __shared__ cub::BlockReduce<int, blockSizeCount>::TempStorage tempStorage;
   const int totalCount = cub::BlockReduce<int, blockSizeCount>(tempStorage).Sum(localCount);
   if (tid == 0) {
-    // printf("Count %d for pt %d\n", totalCount, pointIdx);
     clusterSizes[pointIdx] = totalCount;
     if (totalCount < 2) {
       // Note that this would be a data race between writing this cluster[] and another thread reading it[]. However,
@@ -64,6 +75,7 @@ __global__ void butinaKernelCountClusterSize(const cuda::std::span<const uint8_t
   }
 }
 
+//! Kernel to write the cluster assignment for the largest cluster found
 __global__ void butinaWriteClusterValue(const cuda::std::span<const uint8_t> hitMatrix,
                                         const cuda::std::span<int>           clusters,
                                         const int*                           centralIdx,
@@ -80,21 +92,19 @@ __global__ void butinaWriteClusterValue(const cuda::std::span<const uint8_t> hit
     return;
   }
   const int clusterVal = *clusterIdx;
-  if (tid == 0) {
-    // printf("Cluster %d centroid is element %d\n", clusterVal, pointIdx);
-  }
 
   const cuda::std::span<const uint8_t> hits = hitMatrix.subspan(pointIdx * numPoints, numPoints);
   if (tid < numPoints) {
-    if (const bool isNeighbor = hits[tid]; isNeighbor > 0) {
-      if (const int cluster = clusters[tid]; cluster < 0) {
-        // printf("CLUSTER: %d to item %d total size %d\n", clusterVal, tid, clusterSz);
+    if (hits[tid]) {
+      if (clusters[tid] < 0) {
         clusters[tid] = clusterVal;
       }
     }
   }
 }
 
+//! Kernel to bump the cluster index if the last cluster assigned was large enough. The edge case is for if we hit the <
+//! 3 criteria.
 __global__ void bumpClusterIdxKernel(int* clusterIdx, const int* lastClusterSize) {
   if (const auto tid = static_cast<int>(threadIdx.x); tid == 0) {
     if (*lastClusterSize >= kMinLoopSizeForAssignment) {
@@ -103,6 +113,8 @@ __global__ void bumpClusterIdxKernel(int* clusterIdx, const int* lastClusterSize
   }
 }
 
+//! Identify all pairs that must be in a cluster together at the end of the Butina Loop.
+//! Mark them with a sentinel value to be assigned in a secondary pass.
 __global__ void pairDoubletKernels(const cuda::std::span<const uint8_t> hitMatrix,
                                    const cuda::std::span<int>           clusters,
                                    const cuda::std::span<const int>     clusterSizes) {
@@ -120,13 +132,12 @@ __global__ void pairDoubletKernels(const cuda::std::span<const uint8_t> hitMatri
     const bool isNeighbor = hits[i];
     if (i != pointIdx && isNeighbor && clusterSizes[i] == 2) {
       clusters[pointIdx] = kAssignedAsSingletonSentinel - 1 - i;  // Mark as paired with i
-      // printf("Pairing point %d with %d\n", pointIdx, i);
       break;
     }
   }
 }
 
-// TODO This could be parallelized with a shared clustderIdx++ to atomicAdd.
+//! Assign cluster IDs to doublets marked in the previous kernel
 __global__ void assignDoubletIdsKernel(const cuda::std::span<int> clusters, int* nextClusterIdx) {
   int       clusterIdx           = *nextClusterIdx;
   const int expectedDoubletRange = kAssignedAsSingletonSentinel - clusters.size();
@@ -136,27 +147,27 @@ __global__ void assignDoubletIdsKernel(const cuda::std::span<int> clusters, int*
       int otherIdx       = kAssignedAsSingletonSentinel - 1 - clustId;
       clusters[i]        = clusterIdx;
       clusters[otherIdx] = clusterIdx;
-      // printf("CLUSTER: Assigning doublet cluster %d to items %d and %d\n", clusterIdx, i, otherIdx);
       clusterIdx++;
     }
   }
   *nextClusterIdx = clusterIdx;
 }
 
-// TODO This could be parallelized with a shared clustderIdx++ to atomicAdd.
+//! Assign all remaining singleton clusters their own cluster IDs. These were identified in the counts kernel.
 __global__ void assignSingletonIdsKernel(const cuda::std::span<int> clusters, const int* nextClusterIdx) {
   int clusterIdx = *nextClusterIdx;
   for (int i = static_cast<int>(clusters.size()) - 1; i >= 0; i--) {
     const int clustId = clusters[i];
     if (clustId < 0 || clustId == kAssignedAsSingletonSentinel) {
-      // printf("CLUSTER: Assigning singleton %d to item %d\n", clusterIdx, i);
       clusters[i] = clusterIdx;
       clusterIdx++;
     }
   }
 }
 
-constexpr int   argMaxBlockSize = 512;
+constexpr int argMaxBlockSize = 512;
+
+//! Custom ArgMax kernel that returns the largest value and index.
 __global__ void lastArgMax(const cuda::std::span<const int> values, int* outVal, int* outIdx) {
   int            maxVal = cuda::std::numeric_limits<int>::min();
   int            maxID  = -1;
@@ -180,7 +191,6 @@ __global__ void lastArgMax(const cuda::std::span<const int> values, int* outVal,
     for (int i = argMaxBlockSize - 1; i >= 0; i--) {
       if (foundMaxVal[i] == actualMaxVal) {
         *outIdx = foundMaxIds[i];
-        // printf("Found max of %d at %d\n", actualMaxVal, *outIdx);
         break;
       }
     }
@@ -218,14 +228,6 @@ void innerButinaLoop(const int                            numPoints,
 
   butinaKernelCountClusterSize<<<numPoints, blockSizeCount, 0, stream>>>(hitMatrix, clusters, clusterSizesSpan);
   cudaCheckError(cudaGetLastError());
-  // cudaCheckError(cub::DeviceReduce::ArgMax(tempStorage.data(),
-  //                                          tempStorageBytes,
-  //                                          clusterSizes.data(),
-  //                                          maxValue.data(),
-  //                                          maxIndex.data(),
-  //                                          numPoints,
-  //                                          stream));
-
   lastArgMax<<<1, argMaxBlockSize, 0, stream>>>(clusterSizesSpan, maxValue.data(), maxIndex.data());
   cudaCheckError(cudaGetLastError());
   butinaWriteClusterValue<<<numBlocksFlat, blockSizeCount, 0, stream>>>(hitMatrix,
@@ -238,15 +240,12 @@ void innerButinaLoop(const int                            numPoints,
   cudaCheckError(cudaGetLastError());
   cudaCheckError(cudaMemcpyAsync(maxCluster.data(), maxValue.data(), sizeof(int), cudaMemcpyDefault, stream));
   cudaStreamSynchronize(stream);
-  int maxV = maxCluster[0];
-  // printf("End of loop max cluster size: %d\n", maxV);
 }
 
 }  // namespace
 void butinaGpu(const cuda::std::span<const uint8_t> hitMatrix,
                const cuda::std::span<int>           clusters,
-               cudaStream_t                         stream,
-               const bool                           useGraph) {
+               cudaStream_t                         stream) {
   ScopedNvtxRange setupRange("Butina Setup");
   const size_t    numPoints = clusters.size();
   setAll(clusters, -1, stream);
@@ -262,15 +261,6 @@ void butinaGpu(const cuda::std::span<const uint8_t> hitMatrix,
   const AsyncDevicePtr<int> clusterIdx(0, stream);
   PinnedHostVector<int>     maxCluster(1);
   maxCluster[0] = std::numeric_limits<int>::max();
-  // size_t tempStorageBytes = 0;
-  // cub::DeviceReduce::ArgMax(nullptr,
-  //                           tempStorageBytes,
-  //                           clusterSizes.data(),
-  //                           maxValue.data(),
-  //                           maxIndex.data(),
-  //                           static_cast<int64_t>(numPoints),
-  //                           stream);
-  // AsyncDeviceVector<uint8_t> const tempStorage(tempStorageBytes, stream);
   setupRange.pop();
   const auto clusterSizesSpan = toSpan(clusterSizes);
 
@@ -286,7 +276,6 @@ void butinaGpu(const cuda::std::span<const uint8_t> hitMatrix,
                     maxCluster,
                     stream);
   }
-  // printf("Exiting loop\n");
   pairDoubletKernels<<<numPoints, blockSizeCount, 0, stream>>>(hitMatrix, clusters, clusterSizesSpan);
   assignDoubletIdsKernel<<<1, 1, 0, stream>>>(clusters, clusterIdx.data());
   assignSingletonIdsKernel<<<1, 1, 0, stream>>>(clusters, clusterIdx.data());
@@ -295,6 +284,7 @@ void butinaGpu(const cuda::std::span<const uint8_t> hitMatrix,
 
 namespace {
 
+//! CUB Op to threshold a distance matrix into a hit matrix
 struct ThresholdOp {
   const double* matrix;
   uint8_t*      hits;
@@ -309,8 +299,7 @@ struct ThresholdOp {
 void butinaGpu(const cuda::std::span<const double> distanceMatrix,
                const cuda::std::span<int>          clusters,
                const double                        cutoff,
-               cudaStream_t                        stream,
-               const bool                          useGraph) {
+               cudaStream_t                        stream) {
   AsyncDeviceVector<uint8_t> hitMatrix(distanceMatrix.size(), stream);
   std::size_t                tempStorageBytes = 0;
   AsyncDeviceVector<uint8_t> tempStorage(0, stream);
@@ -329,7 +318,7 @@ void butinaGpu(const cuda::std::span<const double> distanceMatrix,
                        distanceMatrix.size(),
                        op,
                        stream);
-  butinaGpu(toSpan(hitMatrix), clusters, stream, useGraph);
+  butinaGpu(toSpan(hitMatrix), clusters, stream);
 }
 
 }  // namespace nvMolKit
