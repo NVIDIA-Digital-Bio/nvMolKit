@@ -13,15 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <math.h>
-
 #include <cub/cub.cuh>
 #include <numeric>
 
 #include "bfgs_hessian.h"
 #include "bfgs_minimize.h"
+#include "cub_helpers.cuh"
 #include "device_vector.h"
 #include "nvtx.h"
+
 namespace nvMolKit {
 constexpr double FUNCTOL = 1e-4;  //!< Default tolerance for function convergence in the minimizer
 constexpr double MOVETOL = 1e-7;  //!< Default tolerance for x changes in the minimizer
@@ -80,8 +80,8 @@ __global__ void initializeLineSearchKernel(const int16_t* statuses,
   double*       dirStart  = &dirs[atomStarts[sysIdx] * DIM];
 
   using BlockReduce = cub::BlockReduce<double, 128>;
-  __shared__ typename BlockReduce::TempStorage tempStorage;
-  __shared__ double                            dirSum[1];
+  __shared__ BlockReduce::TempStorage tempStorage;
+  __shared__ double                   dirSum[1];
 
   // ---------------------------------
   //  Scale direction vector if needed
@@ -132,7 +132,7 @@ __global__ void initializeLineSearchKernel(const int16_t* statuses,
     }
   }
   // Perform block-wide reduction to find the maximum
-  double blockMax = BlockReduce(tempStorage).Reduce(localMax, cub::Max());
+  double blockMax = BlockReduce(tempStorage).Reduce(localMax, cubMax());
 
   // The first thread in the block writes the result
   if (isFirstThread) {
@@ -467,13 +467,13 @@ void BfgsBatchMinimizer::initialize(const std::vector<int>& atomStartsHost,
   lineSearchEnergyScratch_.resize(numSystems);
 
   // Compute needed reduction storage.
-  size_t temp_storage_bytes;
+  size_t temp_storage_bytes = 0;
   cub::DeviceReduce::TransformReduce(nullptr,
                                      temp_storage_bytes,
                                      lineSearchStatus_.data(),
                                      countFinished_.data(),
                                      lineSearchStatus_.size(),
-                                     cub::Sum(),
+                                     cubSum(),
                                      NotEqualToMinusTwoFunctor(),
                                      0,
                                      stream_);
@@ -537,7 +537,7 @@ __global__ void setMaxStepKernel(const int* atomStarts, const double* positions,
   }
 
   using BlockReduce = cub::BlockReduce<double, 128>;
-  __shared__ typename BlockReduce::TempStorage tempStorage;
+  __shared__ BlockReduce::TempStorage tempStorage;
 
   const double squaredSum = BlockReduce(tempStorage).Sum(sumSquaredPos);
   if (isFirstThread) {
@@ -572,7 +572,7 @@ int BfgsBatchMinimizer::lineSearchCountFinished() const {
                                      lineSearchStatus_.data(),
                                      countFinished_.data(),
                                      lineSearchStatus_.size(),
-                                     cub::Sum(),
+                                     cubSum(),
                                      NotEqualToMinusTwoFunctor(),
                                      0,
                                      stream_);
@@ -644,8 +644,8 @@ __global__ void setDirectionKernel(const int*    atomStarts,
     }
   }
 
-  __shared__ typename cub::BlockReduce<double, 128>::TempStorage tempStorage;
-  double           blockMax = cub::BlockReduce<double, 128>(tempStorage).Reduce(localMax, cub::Max());
+  __shared__ cub::BlockReduce<double, 128>::TempStorage tempStorage;
+  double           blockMax = cub::BlockReduce<double, 128>(tempStorage).Reduce(localMax, cubMax());
   constexpr double TOLX     = 4. * 3e-8;
   if (idxWithinSystem == 0 && blockMax < TOLX) {
     // Converged
@@ -699,8 +699,8 @@ __global__ void scaleGradKernel(const int16_t* statuses,
     }
   }
 
-  __shared__ typename cub::BlockReduce<double, 128>::TempStorage tempStorage;
-  double blockMax = cub::BlockReduce<double, 128>(tempStorage).Reduce(maxGrad, cub::Max());
+  __shared__ cub::BlockReduce<double, 128>::TempStorage tempStorage;
+  double blockMax = cub::BlockReduce<double, 128>(tempStorage).Reduce(maxGrad, cubMax());
 
   if (idxWithinSystem == 0) {
     distributedMax[0] = blockMax;
@@ -775,8 +775,8 @@ __global__ void updateDGradKernel(const double  gradTol,
       localMax = temp;
     }
   }
-  __shared__ typename cub::BlockReduce<double, 128>::TempStorage tempStorage;
-  double blockMax = cub::BlockReduce<double, 128>(tempStorage).Reduce(localMax, cub::Max());
+  __shared__ cub::BlockReduce<double, 128>::TempStorage tempStorage;
+  double blockMax = cub::BlockReduce<double, 128>(tempStorage).Reduce(localMax, cubMax());
 
   if (idxWithinSystem == 0) {
     const double term = max(energies[sysIdx] * gradScales[sysIdx], 1.0);
