@@ -13,4 +13,4 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-find_package(OpenMP REQUIRED)
+find_package(OpenMP REQUIRED COMPONENTS CXX)
