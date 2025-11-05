@@ -48,7 +48,7 @@ std::vector<double> makeSymmetricDifferenceMatrix(const int nPts, std::mt19937& 
 std::vector<uint8_t> makeAdjacency(const std::vector<double>& distances, int nPts, double cutoff) {
   std::vector<uint8_t> adjacency(distances.size(), 0);
   for (size_t idx = 0; idx < distances.size(); ++idx) {
-    adjacency[idx] = distances[idx] < cutoff ? 1U : 0U;
+    adjacency[idx] = distances[idx] <= cutoff ? 1U : 0U;
   }
   return adjacency;
 }

@@ -108,7 +108,8 @@ __global__ void butinaWriteClusterValue(const cuda::std::span<const uint8_t> hit
 __global__ void bumpClusterIdxKernel(int* clusterIdx, const int* lastClusterSize) {
   if (const auto tid = static_cast<int>(threadIdx.x); tid == 0) {
     if (*lastClusterSize >= kMinLoopSizeForAssignment) {
-      clusterIdx[tid] += 1;
+      // ClusterIdx is size 1.
+      clusterIdx[0] += 1;
     }
   }
 }
@@ -292,7 +293,7 @@ struct ThresholdOp {
   double        cutoff;
   ThresholdOp(const double* m, uint8_t* h, double c) : matrix(m), hits(h), cutoff(c) {}
 
-  __device__ void operator()(const std::size_t idx) const { hits[idx] = (matrix[idx] < cutoff); }
+  __device__ void operator()(const std::size_t idx) const { hits[idx] = (matrix[idx] <= cutoff); }
 };
 
 }  // namespace

@@ -44,7 +44,7 @@ def test_butina_clustering(size):
     nvmol_res = butina(torch_dists,  cutoff).torch()
     nvmol_clusts = [tuple(torch.argwhere(nvmol_res == i).flatten().tolist()) for i in range(nvmol_res.max() + 1)]
 
-    check_butina_correctness(torch_dists < cutoff, nvmol_clusts)
+    check_butina_correctness(torch_dists <= cutoff, nvmol_clusts)
 
 def test_butina_edge_one_cluster():
     n = 10
