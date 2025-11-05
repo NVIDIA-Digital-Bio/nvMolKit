@@ -29,6 +29,8 @@ if(CCCL_FOUND AND CCCL_VERSION VERSION_GREATER_EQUAL "3.0.0")
   # Create alias to use the real CCCL target
   add_library(cccl_interface INTERFACE)
   target_link_libraries(cccl_interface INTERFACE CCCL::CCCL)
+  # Define preprocessor macro to indicate CCCL >= 3.0.0 is available
+  target_compile_definitions(cccl_interface INTERFACE NVMOLKIT_HAS_CCCL_GE_3=1)
 else()
   if(CCCL_FOUND)
     message(
