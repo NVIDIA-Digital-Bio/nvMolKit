@@ -16,6 +16,7 @@
 #include <cub/cub.cuh>
 
 #include "butina.h"
+#include "cub_helpers.cuh"
 #include "host_vector.h"
 #include "nvtx.h"
 
@@ -185,7 +186,7 @@ __global__ void lastArgMax(const cuda::std::span<const int> values, int* outVal,
   foundMaxIds[tid] = maxID;
 
   __shared__ cub::BlockReduce<int, argMaxBlockSize>::TempStorage storage;
-  const int actualMaxVal = cub::BlockReduce<int, argMaxBlockSize>(storage).Reduce(maxVal, cub::Max());
+  const int actualMaxVal = cub::BlockReduce<int, argMaxBlockSize>(storage).Reduce(maxVal, cubMax());
   __syncthreads();  // For shared memory write of maxVal and maxID
   if (tid == 0) {
     *outVal = actualMaxVal;
