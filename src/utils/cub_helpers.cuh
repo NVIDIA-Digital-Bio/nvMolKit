@@ -18,11 +18,17 @@
 
 #include <cub/cub.cuh>
 
-#if CUDART_VERSION >= 12090
+#ifdef NVMOLKIT_HAS_CCCL_GE_3
+// CCCL >= 3.0.0 provides modern C++ functional operators
 using cubMax = cuda::maximum<>;
 using cubSum = cuda::std::plus<>;
 #else
+// Fall back to CUB operators for older CCCL or bundled CUDA headers
+// Suppress deprecation warnings for cub::Max and cub::Sum in CCCL 2.x
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 using cubMax = cub::Max;
 using cubSum = cub::Sum;
+#pragma GCC diagnostic pop
 #endif
 #endif  // NVMOLKIT_CUB_HELPERS_H

@@ -23,24 +23,31 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/versions.h.in
                ${CMAKE_CURRENT_BINARY_DIR}/versions.h @ONLY)
 
 add_library(similarity_kernels similarity_kernels.cu)
-target_link_libraries(similarity_kernels PRIVATE cuda_error_check device)
+target_link_libraries(similarity_kernels PRIVATE cuda_error_check device
+                                                 cccl_interface)
 
 target_include_directories(similarity_kernels
                            PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_include_directories(similarity_kernels PUBLIC ${Boost_INCLUDE_DIRS})
+target_include_directories(similarity_kernels SYSTEM
+                           PRIVATE ${Boost_INCLUDE_DIRS})
 add_library(Similarity similarity.cpp)
 
 target_link_libraries(
   Similarity
   PUBLIC CUDA::cudart device_vector
-  PRIVATE similarity_kernels ${RDKit_LIBS} device_vector device openmp_helpers
-          OpenMP::OpenMP_CXX)
+  PRIVATE similarity_kernels
+          ${RDKit_LIBS}
+          device_vector
+          device
+          openmp_helpers
+          OpenMP::OpenMP_CXX
+          cccl_interface)
 target_include_directories(Similarity PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(Similarity SYSTEM PRIVATE ${Boost_INCLUDE_DIRS})
 add_library(morganFingerprintKernels morgan_fingerprint_kernels.cu)
 target_link_libraries(
   morganFingerprintKernels
-  PRIVATE cuda_error_check flatBitVect ${RDKit_LIBS}
+  PRIVATE cuda_error_check flatBitVect ${RDKit_LIBS} cccl_interface
   PUBLIC device_vector flatBitVect cuda_error_check)
 target_include_directories(morganFingerprintKernels
                            PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

@@ -14,5 +14,5 @@
 # the License.
 
 if(NVMOLKIT_BUILD_PYTHON_BINDINGS)
-  find_package(Python REQUIRED COMPONENTS Development)
+  find_package(Python REQUIRED COMPONENTS Development.Module)
 endif()
