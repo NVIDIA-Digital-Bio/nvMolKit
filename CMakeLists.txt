@@ -33,10 +33,15 @@ if(CCCL_FOUND AND CCCL_VERSION VERSION_GREATER_EQUAL "3.0.0")
   target_compile_definitions(cccl_interface INTERFACE NVMOLKIT_HAS_CCCL_GE_3=1)
 else()
   if(CCCL_FOUND)
-    message(
-      STATUS
-        "CCCL ${CCCL_VERSION} found but version < 3.0.0, using bundled CUDA headers"
-    )
+    message(STATUS "CCCL ${CCCL_VERSION} found but version < 3.0.0")
+    if(CMAKE_PREFIX_PATH)
+      message(
+        STATUS
+          "CMAKE_PREFIX_PATH is set - CCCL ${CCCL_VERSION} headers may be used from PREFIX path"
+      )
+    else()
+      message(STATUS "Using bundled CUDA headers")
+    endif()
   else()
     message(STATUS "CCCL not found, using bundled CUDA headers")
   endif()
