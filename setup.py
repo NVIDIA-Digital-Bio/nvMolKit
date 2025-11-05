@@ -54,7 +54,8 @@ if __name__ == "__main__":
             "-DNVMOLKIT_BUILD_PYTHON_BINDINGS=ON",
             "-DNVMOLKIT_BUILD_TESTS=OFF",
             "-DNVMOLKIT_BUILD_BENCHMARKS=OFF",
-            "-DNVMOLKIT_CUDA_TARGET_MODE=full"
+            f"-DNVMOLKIT_CUDA_TARGET_MODE={os.getenv("NVMOLKIT_CUDA_TARGET_MODE", 'full')}",
+            f"-DCMAKE_BUILD_TYPE={os.getenv("CMAKE_BUILD_TYPE", 'Release')}",
             #"-DBoost_NO_BOOST_CMAKE=TRUE"
         ] + cmake_extra_args,
         packages=["nvmolkit"],
