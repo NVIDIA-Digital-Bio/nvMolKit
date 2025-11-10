@@ -9,8 +9,7 @@ podTemplate(cloud:'blsm-prod-cloud', yaml : """
     nodeSelector:
       kubernetes.io/os: linux""",
   containers: [
-    containerTemplate(name: 'cuda12', image: 'nvcr.io/nvidia/cuda:12.6.3-devel-ubuntu22.04', ttyEnabled: true, command: 'cat'),
-    containerTemplate(name: 'cuda13', image: 'nvcr.io/nvidia/cuda:13.0.1-devel-ubuntu24.04', ttyEnabled: true, command: 'cat'),
+    containerTemplate(name: 'golang', image: 'golang:1.12.9', ttyEnabled: true, command: 'cat')
   ]) {
       node(POD_LABEL) {
           def githubHelper
@@ -47,59 +46,26 @@ podTemplate(cloud:'blsm-prod-cloud', yaml : """
                   }
               }
           
-             stageName = 'Parallel Testing'
-             stage(stageName) {
-                 parallel(
-                   'QA_pipeline': {
-                       container('cuda13') {
-                           try {
-                               githubHelper.updateCommitStatus("$BUILD_URL", "QA_pipeline Running", GitHubCommitState.PENDING)
-                               println "Setting up conda environment: Python 3.13, RDKit 2025.3.1"
-                               sh 'cd ${WORKSPACE} && bash admin/setup_conda_env.sh 3.13 2025.3.1'
-                               println "Running QA pipeline"
-                               sh 'cd ${WORKSPACE} && bash admin/run_qa.sh'
-                               
-                               githubHelper.updateCommitStatus("$BUILD_URL", "QA_pipeline Complete", GitHubCommitState.SUCCESS)
-                           } catch (Exception e) {
-                               githubHelper.updateCommitStatus("$BUILD_URL", "QA_pipeline Failed", GitHubCommitState.FAILURE)
-                               throw e
-                           }
-                       }
-                   },
-                   'build_test_oldest_supported': {
-                       container('cuda12') {
-                           try {
-                               githubHelper.updateCommitStatus("$BUILD_URL", "build_test_oldest_supported Running", GitHubCommitState.PENDING)
-                               println "Setting up conda environment: Python 3.10, RDKit 2024.9.6"
-                               sh 'cd ${WORKSPACE} && bash admin/setup_conda_env.sh 3.10 2024.9.6'
-                               println "Running build and test on oldest supported CUDA"
-                               // Build and test logic for CUDA 12.6 will be added here
-                               
-                               githubHelper.updateCommitStatus("$BUILD_URL", "build_test_oldest_supported Complete", GitHubCommitState.SUCCESS)
-                           } catch (Exception e) {
-                               githubHelper.updateCommitStatus("$BUILD_URL", "build_test_oldest_supported Failed", GitHubCommitState.FAILURE)
-                               throw e
-                           }
-                       }
-                   },
-                   'build_test_newest_supported': {
-                       container('cuda13') {
-                           try {
-                               githubHelper.updateCommitStatus("$BUILD_URL", "build_test_newest_supported Running", GitHubCommitState.PENDING)
-                               println "Setting up conda environment: Python 3.13, RDKit 2025.3.1"
-                               sh 'cd ${WORKSPACE} && bash admin/setup_conda_env.sh 3.13 2025.3.1'
-                               println "Running build and test on newest supported CUDA"
-                               // Build and test logic for CUDA 13.0 will be added here
-                               
-                               githubHelper.updateCommitStatus("$BUILD_URL", "build_test_newest_supported Complete", GitHubCommitState.SUCCESS)
-                           } catch (Exception e) {
-                               githubHelper.updateCommitStatus("$BUILD_URL", "build_test_newest_supported Failed", GitHubCommitState.FAILURE)
-                               throw e
-                           }
-                       }
-                   }
-                 )
-             }
+              stageName = 'Build'
+              stage(stageName) {
+                  container('golang') {
+                      githubHelper.updateCommitStatus("$BUILD_URL", "$stageName Running", GitHubCommitState.PENDING)
+                      //add build steps
+                      println "Building code"
+                      sh "sleep 10"
+                  
+                  }
+              }
+          
+              stageName = 'Test'
+              stage(stageName) {
+                  container('golang') {
+                      githubHelper.updateCommitStatus("$BUILD_URL", "$stageName Running", GitHubCommitState.PENDING)
+                      // add test cases here
+                      println "Running test"
+                  
+                  }
+              }
               // upload jenkins job logs to github for external users
               // this function remove sensitive data from logs before upload
               // user can provide list of plain guard words (sensitive words) or regular expression for guard words 
