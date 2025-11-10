@@ -1,4 +1,6 @@
 #!/bin/bash
+
+source ~/.bashrc
 set -ex
 bash admin/run_clang_format.sh -d
 bash admin/run_cmake_format_lint.sh -d
