@@ -682,7 +682,6 @@ __global__ void combinedGradKernel(const EnergyForceContribsDevicePtr* terms,
                                    double*                             grad) {
   const int molIdx = blockIdx.x;
   const int tid    = threadIdx.x;
-  const int stride = blockDim.x;
 
   const int atomStart = systemIndices->atomStarts[molIdx];
   const int atomEnd   = systemIndices->atomStarts[molIdx + 1];
@@ -694,18 +693,18 @@ __global__ void combinedGradKernel(const EnergyForceContribsDevicePtr* terms,
   const bool useSharedMem = numAtoms <= maxAtomSize;
   double*    molGradBase  = useSharedMem ? accumGrad : grad + atomStart * 3;
 
-  for (int i = tid; i < numAtoms * 3; i += stride) {
+  for (int i = tid; i < numAtoms * 3; i += blockSizePerMol) {
     molGradBase[i] = 0.0;
   }
   __syncthreads();
 
   const double* molCoords = coords + atomStart * 3;
-  molGrad(*terms, *systemIndices, molCoords, molGradBase, molIdx, tid, stride);
+  molGrad<blockSizePerMol>(*terms, *systemIndices, molCoords, molGradBase, molIdx, tid);
   __syncthreads();
 
   if (useSharedMem) {
     double* globalGrad = grad + (atomStart * 3);
-    for (int i = tid; i < numAtoms * 3; i += stride) {
+    for (int i = tid; i < numAtoms * 3; i += blockSizePerMol) {
       globalGrad[i] = molGradBase[i];
     }
   }

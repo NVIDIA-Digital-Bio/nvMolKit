@@ -545,20 +545,19 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
   __syncthreads();
 
   if constexpr (FFType == ForceFieldType::MMFF) {
-    MMFF::molGrad(*terms, *systemIndices, localPos, localGrad, molIdx, tid, stride);
+    MMFF::molGrad<BLOCK_SIZE>(*terms, *systemIndices, localPos, localGrad, molIdx, tid);
   } else if constexpr (FFType == ForceFieldType::ETK) {
-    DistGeom::molGradETK(*terms, *systemIndices, localPos, localGrad, molIdx, tid, stride);
+    DistGeom::molGradETK<BLOCK_SIZE>(*terms, *systemIndices, localPos, localGrad, molIdx, tid);
   } else {  // DG
-    DistGeom::molGradDG(*terms,
-                        *systemIndices,
-                        localPos,
-                        localGrad,
-                        molIdx,
-                        dataDim,
-                        chiralWeight,
-                        fourthDimWeight,
-                        tid,
-                        stride);
+    DistGeom::molGradDG<BLOCK_SIZE>(*terms,
+                                    *systemIndices,
+                                    localPos,
+                                    localGrad,
+                                    molIdx,
+                                    dataDim,
+                                    chiralWeight,
+                                    fourthDimWeight,
+                                    tid);
   }
   __syncthreads();
 
@@ -672,20 +671,19 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
     __syncthreads();
 
     if constexpr (FFType == ForceFieldType::MMFF) {
-      MMFF::molGrad(*terms, *systemIndices, localPos, localGrad, molIdx, tid, stride);
+      MMFF::molGrad<BLOCK_SIZE>(*terms, *systemIndices, localPos, localGrad, molIdx, tid);
     } else if constexpr (FFType == ForceFieldType::ETK) {
-      DistGeom::molGradETK(*terms, *systemIndices, localPos, localGrad, molIdx, tid, stride);
+      DistGeom::molGradETK<BLOCK_SIZE>(*terms, *systemIndices, localPos, localGrad, molIdx, tid);
     } else {  // DG
-      DistGeom::molGradDG(*terms,
-                          *systemIndices,
-                          localPos,
-                          localGrad,
-                          molIdx,
-                          dataDim,
-                          chiralWeight,
-                          fourthDimWeight,
-                          tid,
-                          stride);
+      DistGeom::molGradDG<BLOCK_SIZE>(*terms,
+                                      *systemIndices,
+                                      localPos,
+                                      localGrad,
+                                      molIdx,
+                                      dataDim,
+                                      chiralWeight,
+                                      fourthDimWeight,
+                                      tid);
     }
     __syncthreads();
 

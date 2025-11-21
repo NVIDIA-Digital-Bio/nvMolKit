@@ -991,7 +991,6 @@ __global__ void combinedEnergiesKernel(const EnergyForceContribsDevicePtr* terms
                                        const uint8_t*                      activeThisStage) {
   const int molIdx = blockIdx.x;
   const int tid    = threadIdx.x;
-  const int stride = blockSizePerMol;
 
   if (activeThisStage != nullptr && activeThisStage[molIdx] == 0) {
     if (tid == 0) {
@@ -1024,7 +1023,6 @@ __global__ void combinedGradKernel(const EnergyForceContribsDevicePtr* terms,
                                    const uint8_t*                      activeThisStage) {
   const int molIdx = blockIdx.x;
   const int tid    = threadIdx.x;
-  const int stride = blockDim.x;
 
   if (activeThisStage != nullptr && activeThisStage[molIdx] == 0) {
     return;
@@ -1040,27 +1038,26 @@ __global__ void combinedGradKernel(const EnergyForceContribsDevicePtr* terms,
   const bool useSharedMem = numAtoms * dimension <= maxAtomSize * 4;
   double*    molGradBase  = useSharedMem ? accumGrad : grad + atomStart * dimension;
 
-  for (int i = tid; i < numAtoms * dimension; i += stride) {
+  for (int i = tid; i < numAtoms * dimension; i += blockSizePerMol) {
     molGradBase[i] = 0.0;
   }
   __syncthreads();
 
   const double* molCoords = coords + atomStart * dimension;
-  molGradDG(*terms,
-            *systemIndices,
-            molCoords,
-            molGradBase,
-            molIdx,
-            dimension,
-            chiralWeight,
-            fourthDimWeight,
-            tid,
-            stride);
+  molGradDG<blockSizePerMol>(*terms,
+                             *systemIndices,
+                             molCoords,
+                             molGradBase,
+                             molIdx,
+                             dimension,
+                             chiralWeight,
+                             fourthDimWeight,
+                             tid);
   __syncthreads();
 
   if (useSharedMem) {
     double* globalGrad = grad + (atomStart * dimension);
-    for (int i = tid; i < numAtoms * dimension; i += stride) {
+    for (int i = tid; i < numAtoms * dimension; i += blockSizePerMol) {
       globalGrad[i] = molGradBase[i];
     }
   }
