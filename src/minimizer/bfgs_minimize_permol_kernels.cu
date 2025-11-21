@@ -294,7 +294,7 @@ __device__ void updateInverseHessian(const int                                  
   for (int row = threadIdx.x; row < numTerms; row += BLOCK_SIZE) {
     double dotProduct = 0.0;
     for (int col = 0; col < numTerms; col++) {
-      dotProduct += invHessian[row * numTerms + col] * dGrad[col];
+      dotProduct += invHessian[col * numTerms + row] * dGrad[col];
     }
     hessDGrad[row] = dotProduct;
   }
@@ -358,7 +358,7 @@ __device__ void updateInverseHessian(const int                                  
     }
     __syncthreads();
 
-    // Update inverse Hessian and compute new direction
+    // Update inverse Hessian
     for (int row = threadIdx.x; row < numTerms; row += BLOCK_SIZE) {
       double pxi  = fac * xi[row];
       double hdgi = fad * hessDGrad[row];
@@ -369,7 +369,7 @@ __device__ void updateInverseHessian(const int                                  
         double hdgj   = hessDGrad[col];
         double dgj    = dGrad[col];
         double update = pxi * pxj - hdgi * hdgj + dgi * dgj;
-        invHessian[row * numTerms + col] += update;
+        invHessian[col * numTerms + row] += update;
       }
     }
     __syncthreads();
@@ -379,7 +379,7 @@ __device__ void updateInverseHessian(const int                                  
   for (int row = threadIdx.x; row < numTerms; row += BLOCK_SIZE) {
     double dotProduct = 0.0;
     for (int col = 0; col < numTerms; col++) {
-      dotProduct += invHessian[row * numTerms + col] * grad[col];
+      dotProduct += invHessian[col * numTerms + row] * grad[col];
     }
     xi[row] = -dotProduct;
   }
