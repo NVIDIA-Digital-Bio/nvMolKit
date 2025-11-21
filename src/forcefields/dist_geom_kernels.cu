@@ -1160,12 +1160,12 @@ cudaError_t launchBlockPerMolEnergyKernel(int                                 nu
   return cudaGetLastError();
 }
 
-template <int dimension>
 cudaError_t launchBlockPerMolGradKernel(int                                 numMols,
                                         const EnergyForceContribsDevicePtr& terms,
                                         const BatchedIndicesDevicePtr&      systemIndices,
                                         const double*                       coords,
                                         double*                             grad,
+                                        const int                           dimension,
                                         const double                        chiralWeight,
                                         const double                        fourthDimWeight,
                                         const uint8_t*                      activeThisStage,
