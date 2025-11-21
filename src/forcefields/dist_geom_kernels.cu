@@ -1200,7 +1200,6 @@ __global__ void combinedEnergiesKernelETK(const Energy3DForceContribsDevicePtr* 
                                           const uint8_t*                        activeThisStage) {
   const int molIdx = blockIdx.x;
   const int tid    = threadIdx.x;
-  const int stride = blockSizePerMol;
 
   if (activeThisStage != nullptr && activeThisStage[molIdx] == 0) {
     if (tid == 0) {
