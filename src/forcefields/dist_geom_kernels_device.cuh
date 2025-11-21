@@ -1186,13 +1186,13 @@ static __device__ __inline__ double molEnergyETK(const Energy3DForceContribsDevi
   return energy;
 }
 
+template <int stride>
 static __device__ __inline__ void molGradETK(const Energy3DForceContribsDevicePtr& terms,
                                              const BatchedIndices3DDevicePtr&      systemIndices,
                                              const double*                         molCoords,
                                              double*                               grad,
                                              const int                             molIdx,
-                                             const int                             tid,
-                                             const int                             stride) {
+                                             const int                             tid) {
   const int atomStart = systemIndices.atomStarts[molIdx];
 
   namespace cg            = cooperative_groups;
