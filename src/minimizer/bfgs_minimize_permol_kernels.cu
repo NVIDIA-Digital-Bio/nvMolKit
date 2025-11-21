@@ -522,14 +522,13 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
   } else if constexpr (FFType == ForceFieldType::ETK) {
     threadEnergy = DistGeom::molEnergyETK<BLOCK_SIZE>(*terms, *systemIndices, localPos, molIdx, tid);
   } else {  // DG
-    threadEnergy = DistGeom::molEnergyDG<BLOCK_SIZE>(*terms,
-                                                     *systemIndices,
-                                                     localPos,
-                                                     molIdx,
-                                                     dataDim,
-                                                     chiralWeight,
-                                                     fourthDimWeight,
-                                                     tid);
+    threadEnergy = DistGeom::molEnergyDG<dataDim, BLOCK_SIZE>(*terms,
+                                                              *systemIndices,
+                                                              localPos,
+                                                              molIdx,
+                                                              chiralWeight,
+                                                              fourthDimWeight,
+                                                              tid);
   }
   const double blockEnergy = BlockReduce(tempStorage).Sum(threadEnergy);
 
@@ -549,15 +548,14 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
   } else if constexpr (FFType == ForceFieldType::ETK) {
     DistGeom::molGradETK<BLOCK_SIZE>(*terms, *systemIndices, localPos, localGrad, molIdx, tid);
   } else {  // DG
-    DistGeom::molGradDG<BLOCK_SIZE>(*terms,
-                                    *systemIndices,
-                                    localPos,
-                                    localGrad,
-                                    molIdx,
-                                    dataDim,
-                                    chiralWeight,
-                                    fourthDimWeight,
-                                    tid);
+    DistGeom::molGradDG<dataDim, BLOCK_SIZE>(*terms,
+                                             *systemIndices,
+                                             localPos,
+                                             localGrad,
+                                             molIdx,
+                                             chiralWeight,
+                                             fourthDimWeight,
+                                             tid);
   }
   __syncthreads();
 
@@ -619,14 +617,13 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
       } else if constexpr (FFType == ForceFieldType::ETK) {
         lsThreadEnergy = DistGeom::molEnergyETK<BLOCK_SIZE>(*terms, *systemIndices, scratchPos, molIdx, tid);
       } else {  // DG
-        lsThreadEnergy = DistGeom::molEnergyDG<BLOCK_SIZE>(*terms,
-                                                           *systemIndices,
-                                                           scratchPos,
-                                                           molIdx,
-                                                           dataDim,
-                                                           chiralWeight,
-                                                           fourthDimWeight,
-                                                           tid);
+        lsThreadEnergy = DistGeom::molEnergyDG<dataDim, BLOCK_SIZE>(*terms,
+                                                                    *systemIndices,
+                                                                    scratchPos,
+                                                                    molIdx,
+                                                                    chiralWeight,
+                                                                    fourthDimWeight,
+                                                                    tid);
       }
       const double lsBlockEnergy = BlockReduce(tempStorage).Sum(lsThreadEnergy);
 
@@ -675,15 +672,14 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
     } else if constexpr (FFType == ForceFieldType::ETK) {
       DistGeom::molGradETK<BLOCK_SIZE>(*terms, *systemIndices, localPos, localGrad, molIdx, tid);
     } else {  // DG
-      DistGeom::molGradDG<BLOCK_SIZE>(*terms,
-                                      *systemIndices,
-                                      localPos,
-                                      localGrad,
-                                      molIdx,
-                                      dataDim,
-                                      chiralWeight,
-                                      fourthDimWeight,
-                                      tid);
+      DistGeom::molGradDG<dataDim, BLOCK_SIZE>(*terms,
+                                               *systemIndices,
+                                               localPos,
+                                               localGrad,
+                                               molIdx,
+                                               chiralWeight,
+                                               fourthDimWeight,
+                                               tid);
     }
     __syncthreads();
 
