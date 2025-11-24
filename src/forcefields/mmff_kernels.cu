@@ -21,14 +21,6 @@
 
 using namespace nvMolKit::FFKernelUtils;
 
-// Implementations here are directly adapted from RDKit, as
-// the derivations are hard and no reference equations are provided anywhere.
-// TODO: implement from scratch.
-
-// rdkit_ports namespace functions are now in mmff_kernels_device.cuh
-
-// Device helper functions are now in mmff_kernels_device.cuh as inline functions
-
 __global__ void bondStretchEnergyKernel(const int     numBonds,
                                         const int*    idx1,
                                         const int*    idx2,

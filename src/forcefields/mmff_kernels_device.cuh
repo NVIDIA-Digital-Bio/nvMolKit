@@ -17,17 +17,12 @@
 #define NVMOLKIT_MMFF_KERNELS_DEVICE_CUH
 
 #include "kernel_utils.cuh"
-#include "mmff_kernels.h"
-
-// Constants used by MMFF energy/gradient functions
-namespace {
-constexpr double degreeToRadian = M_PI / 180.0;
-constexpr double radianToDegree = 180.0 / M_PI;
-}  // namespace
 
 using namespace nvMolKit::FFKernelUtils;
 
-// rdkit_ports namespace functions (header-only implementations)
+constexpr double degreeToRadian = M_PI / 180.0;
+constexpr double radianToDegree = 180.0 / M_PI;
+
 namespace rdkit_ports {
 
 static __device__ __forceinline__ void oopGrad(const double* pos,
@@ -243,7 +238,6 @@ static __device__ __forceinline__ void vDWGrad(const double* pos,
 
 }  // namespace rdkit_ports
 
-// Device helper functions (header-only implementations)
 static __device__ __forceinline__ double bondStretchEnergy(const double* pos,
                                                            const int     idx1,
                                                            const int     idx2,
