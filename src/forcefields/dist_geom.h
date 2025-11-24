@@ -479,8 +479,8 @@ void allocateDim4ConversionBuffers(const BatchedMolecularSystemHost& molSystemHo
 cudaError_t computeEnergy(BatchedMolecularDeviceBuffers&             molSystemDevice,
                           const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
                           const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
-                          double chiralWeight,
-                          double fourthDimWeight,
+                          double                                     chiralWeight,
+                          double                                     fourthDimWeight,
                           const uint8_t*                             activeThisStage = nullptr,
                           const double*                              positions       = nullptr,
                           cudaStream_t                               stream          = nullptr);
@@ -500,8 +500,8 @@ cudaError_t computeEnergyETK(BatchedMolecular3DDeviceBuffers&           molSyste
 cudaError_t computeGradients(BatchedMolecularDeviceBuffers&             molSystemDevice,
                              const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
                              const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
-                             double chiralWeight,
-double fourthDimWeight,
+                             double                                     chiralWeight,
+                             double                                     fourthDimWeight,
                              const uint8_t*                             activeThisStage = nullptr,
                              cudaStream_t                               stream          = nullptr);
 

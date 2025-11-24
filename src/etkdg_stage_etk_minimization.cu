@@ -84,12 +84,14 @@ __global__ void planarToleranceCheck(const int      numSystems,
 
 }  // namespace
 
-ETKMinimizationStage::ETKMinimizationStage(const std::vector<const RDKit::ROMol*>&     mols,
-                                           const std::vector<EmbedArgs>&               eargs,
-                                           const RDKit::DGeomHelpers::EmbedParameters& embedParam,
-                                           const ETKDGContext&                         ctx,
-                                           BfgsBatchMinimizer& minimizer,
-                                           cudaStream_t                                stream)
+ETKMinimizationStage::ETKMinimizationStage(
+  const std::vector<const RDKit::ROMol*>&                                                 mols,
+  const std::vector<EmbedArgs>&                                                           eargs,
+  const RDKit::DGeomHelpers::EmbedParameters&                                             embedParam,
+  const ETKDGContext&                                                                     ctx,
+  BfgsBatchMinimizer&                                                                     minimizer,
+  cudaStream_t                                                                            stream,
+  std::unordered_map<const RDKit::ROMol*, nvMolKit::DistGeom::Energy3DForceContribsHost>* cache)
     : embedParam_(embedParam),
       minimizer_(minimizer),
       stream_(stream) {
@@ -98,22 +100,48 @@ ETKMinimizationStage::ETKMinimizationStage(const std::vector<const RDKit::ROMol*
   const int totalNumAtoms = ctx.systemHost.atomStarts.back();
 
   std::vector<double> positions(totalNumAtoms * dim, 0.0);
+
+  bool preallocated = false;
   for (size_t i = 0; i < mols.size(); ++i) {
-    if (eargs[i].dim != 4) {
-      throw std::runtime_error("ETKDG minimization stage only supports 4D coordinates");
-    }
+    const auto& mol          = mols[i];
     const auto& etkdgDetails = eargs[i].etkdgDetails;
     const auto& mmat         = eargs[i].mmat;
-    // Set up GPU system. NOTE: Regardless of 3 or 4D system, the setup uses 3D.
-    // Note if we actually cared about the positions for this setup, the 3D/4D stride would be off, but
-    // we override the reference positions at execute time.
-    // TODO: Fix 3D/4D stride issue anyway for clarity.
-    auto        ffParams     = nvMolKit::DistGeom::construct3DForceFieldContribs(*mmat,
-                                                                      etkdgDetails,
-                                                                      positions,
-                                                                      /*dim=*/3,
-                                                                      embedParam.useBasicKnowledge);
-    addMoleculeToMolecularSystem3D(ffParams, ctx.systemHost.atomStarts, molSystemHost);
+
+    // Get or construct force field parameters
+    const nvMolKit::DistGeom::Energy3DForceContribsHost* ffParams = nullptr;
+    nvMolKit::DistGeom::Energy3DForceContribsHost        uncachedParams;
+
+    if (cache != nullptr) {
+      auto it = cache->find(mol);
+      if (it != cache->end()) {
+        ffParams = &it->second;
+      } else {
+        // Construct directly into cache
+        auto result = cache->emplace(mol,
+                                     nvMolKit::DistGeom::construct3DForceFieldContribs(*mmat,
+                                                                                       etkdgDetails,
+                                                                                       positions,
+                                                                                       /*dim=*/3,
+                                                                                       embedParam.useBasicKnowledge));
+        ffParams    = &result.first->second;
+      }
+    } else {
+      // No cache, construct locally
+      uncachedParams = nvMolKit::DistGeom::construct3DForceFieldContribs(*mmat,
+                                                                         etkdgDetails,
+                                                                         positions,
+                                                                         /*dim=*/3,
+                                                                         embedParam.useBasicKnowledge);
+      ffParams       = &uncachedParams;
+    }
+
+    // Preallocate once using the first molecule's parameters
+    if (!preallocated) {
+      nvMolKit::DistGeom::preallocateEstimatedBatch3D(*ffParams, molSystemHost, static_cast<int>(mols.size()));
+      preallocated = true;
+    }
+
+    addMoleculeToMolecularSystem3D(*ffParams, ctx.systemHost.atomStarts, molSystemHost);
   }
   setupDeviceBuffers3D(molSystemHost, molSystemDevice, positions, mols.size());
   DistGeom::sendContribsAndIndicesToDevice3D(molSystemHost, molSystemDevice);
@@ -179,16 +207,16 @@ void ETKMinimizationStage::execute(ETKDGContext& ctx) {
   // Run minimization
   constexpr int maxIters = 300;  // Taken from hard-coded RDKit value.
   minimizer_.minimize(maxIters,
-                         embedParam_.optimizerForceTol,
-                         ctx.systemHost.atomStarts,
-                         ctx.systemDevice.atomStarts,
-                         ctx.systemDevice.positions,
-                         molSystemDevice.grad,
-                         molSystemDevice.energyOuts,
-                         molSystemDevice.energyBuffer,
-                         eFunc,
-                         gFunc,
-                         ctx.activeThisStage.data());
+                      embedParam_.optimizerForceTol,
+                      ctx.systemHost.atomStarts,
+                      ctx.systemDevice.atomStarts,
+                      ctx.systemDevice.positions,
+                      molSystemDevice.grad,
+                      molSystemDevice.energyOuts,
+                      molSystemDevice.energyBuffer,
+                      eFunc,
+                      gFunc,
+                      ctx.activeThisStage.data());
 
   // 3. Check planar tolerance (only if useBasicKnowledge is true - ETKDG/KDG variants)
   if (embedParam_.useBasicKnowledge) {

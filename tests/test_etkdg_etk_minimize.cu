@@ -251,7 +251,8 @@ TEST_P(ETKStageSingleMolTestFixture, MinimizeCompare) {
   std::vector<const RDKit::ROMol*>         molsPtrs;
   molsPtrs.push_back(molPtr_.get());
   nvMolKit::BfgsBatchMinimizer minimizer(4, nvMolKit::DebugLevel::NONE, true, nullptr);
-  auto        stage = std::make_unique<nvMolKit::detail::ETKMinimizationStage>(molsPtrs, eargs_, embedParam_, context_, minimizer);
+  auto                         stage =
+    std::make_unique<nvMolKit::detail::ETKMinimizationStage>(molsPtrs, eargs_, embedParam_, context_, minimizer);
   const auto* stagePtr = stage.get();  // Store pointer before moving
   stages.push_back(std::move(stage));
 
@@ -343,9 +344,10 @@ TEST_P(ETKStageMultiMolTestFixture, MinimizeCompare) {
   for (auto& molPtr : mols_) {
     molsPtrs.push_back(molPtr);
   }
-  const int count = molsPtrs.size();
+  const int                    count = molsPtrs.size();
   nvMolKit::BfgsBatchMinimizer minimizer(4, nvMolKit::DebugLevel::NONE, true, nullptr);
-  auto        stage = std::make_unique<nvMolKit::detail::ETKMinimizationStage>(molsPtrs, eargs_, embedParam_, context_, minimizer);
+  auto                         stage =
+    std::make_unique<nvMolKit::detail::ETKMinimizationStage>(molsPtrs, eargs_, embedParam_, context_, minimizer);
   const auto* stagePtr = stage.get();  // Store pointer before moving
   stages.push_back(std::move(stage));
 

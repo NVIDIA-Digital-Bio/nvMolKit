@@ -51,18 +51,19 @@ __global__ void checkMinimizedEnergiesKernel(const int     molNum,
 
 namespace detail {
 
-DistGeomMinimizeStage::DistGeomMinimizeStage(const std::vector<const RDKit::ROMol*>&     mols,
-                                             const std::vector<EmbedArgs>&               eargs,
-                                             const RDKit::DGeomHelpers::EmbedParameters& embedParam,
-                                             ETKDGContext&                               ctx,
-                                             BfgsBatchMinimizer&                         minimizer,
-                                             double                                      chiralWeight,
-                                             double                                      fourthDimWeight,
-                                             int                                         maxIters,
-                                             bool                                        checkEnergy,
-                                             const std::string&                          stageName,
-                                             cudaStream_t                                stream,
-                                             std::unordered_map<const RDKit::ROMol*, nvMolKit::DistGeom::EnergyForceContribsHost>* cache)
+DistGeomMinimizeStage::DistGeomMinimizeStage(
+  const std::vector<const RDKit::ROMol*>&                                               mols,
+  const std::vector<EmbedArgs>&                                                         eargs,
+  const RDKit::DGeomHelpers::EmbedParameters&                                           embedParam,
+  ETKDGContext&                                                                         ctx,
+  BfgsBatchMinimizer&                                                                   minimizer,
+  double                                                                                chiralWeight,
+  double                                                                                fourthDimWeight,
+  int                                                                                   maxIters,
+  bool                                                                                  checkEnergy,
+  const std::string&                                                                    stageName,
+  cudaStream_t                                                                          stream,
+  std::unordered_map<const RDKit::ROMol*, nvMolKit::DistGeom::EnergyForceContribsHost>* cache)
     : embedParam_(embedParam),
       minimizer_(minimizer),
       chiralWeight_(chiralWeight),
@@ -78,41 +79,44 @@ DistGeomMinimizeStage::DistGeomMinimizeStage(const std::vector<const RDKit::ROMo
 
   // Preallocate memory based on first molecule (if available)
   bool preallocated = false;
-  
+
   // Process each molecule
   for (size_t i = 0; i < mols.size(); ++i) {
-    const auto&      mol      = mols[i];
-    const auto&      embedArg = eargs[i];
-    const auto&      numAtoms = mol->getNumAtoms();
-    
+    const auto& mol      = mols[i];
+    const auto& embedArg = eargs[i];
+    const auto& numAtoms = mol->getNumAtoms();
+
     // Get or construct force field parameters
     const nvMolKit::DistGeom::EnergyForceContribsHost* ffParams = nullptr;
-    nvMolKit::DistGeom::EnergyForceContribsHost uncachedParams;
-    
+    nvMolKit::DistGeom::EnergyForceContribsHost        uncachedParams;
+
     if (cache != nullptr) {
       auto it = cache->find(mol);
       if (it != cache->end()) {
         ffParams = &it->second;
       } else {
         // Construct directly into cache
-        auto [fst, snd] = cache->emplace(mol, DistGeom::constructForceFieldContribs(embedArg.dim,
-                                                                                 *embedArg.mmat,
-                                                                                 embedArg.chiralCenters,
-                                                                                 1.0,  // Default weight (actual weights passed to executeImpl)
-                                                                                 0.1,  // Default weight (actual weights passed to executeImpl)
-                                                                                 nullptr,
-                                                                                 embedParam.basinThresh));
+        auto [fst, snd] = cache->emplace(
+          mol,
+          DistGeom::constructForceFieldContribs(embedArg.dim,
+                                                *embedArg.mmat,
+                                                embedArg.chiralCenters,
+                                                1.0,  // Default weight (actual weights passed to executeImpl)
+                                                0.1,  // Default weight (actual weights passed to executeImpl)
+                                                nullptr,
+                                                embedParam.basinThresh));
         ffParams = &fst->second;
       }
     } else {
       // No cache, construct locally
-      uncachedParams = DistGeom::constructForceFieldContribs(embedArg.dim,
-                                                             *embedArg.mmat,
-                                                             embedArg.chiralCenters,
-                                                             1.0,  // Default weight (actual weights passed to executeImpl)
-                                                             0.1,  // Default weight (actual weights passed to executeImpl)
-                                                             nullptr,
-                                                             embedParam.basinThresh);
+      uncachedParams =
+        DistGeom::constructForceFieldContribs(embedArg.dim,
+                                              *embedArg.mmat,
+                                              embedArg.chiralCenters,
+                                              1.0,  // Default weight (actual weights passed to executeImpl)
+                                              0.1,  // Default weight (actual weights passed to executeImpl)
+                                              nullptr,
+                                              embedParam.basinThresh);
       ffParams = &uncachedParams;
     }
 
@@ -134,11 +138,11 @@ DistGeomMinimizeStage::DistGeomMinimizeStage(const std::vector<const RDKit::ROMo
   nvMolKit::DistGeom::sendContribsAndIndicesToDevice(molSystemHost, molSystemDevice);
 }
 
-void DistGeomMinimizeStage::executeImpl(ETKDGContext& ctx, 
-                                        double chiralWeight, 
-                                        double fourthDimWeight,
-                                        int maxIters,
-                                        bool checkEnergy) {
+void DistGeomMinimizeStage::executeImpl(ETKDGContext& ctx,
+                                        double        chiralWeight,
+                                        double        fourthDimWeight,
+                                        int           maxIters,
+                                        bool          checkEnergy) {
   // Setup device buffers for minimization
   DistGeom::setupDeviceBuffers(molSystemHost,
                                molSystemDevice,
@@ -150,7 +154,7 @@ void DistGeomMinimizeStage::executeImpl(ETKDGContext& ctx,
 
   // Use shared minimizer with repeat-until-converged
   auto eFunc = [&](const double* positions) {
-          DistGeom::computeEnergy(molSystemDevice,
+    DistGeom::computeEnergy(molSystemDevice,
                             ctx.systemDevice.atomStarts,
                             ctx.systemDevice.positions,
                             chiralWeight,
@@ -160,54 +164,53 @@ void DistGeomMinimizeStage::executeImpl(ETKDGContext& ctx,
                             stream_);
   };
 
-    auto gFunc = [&]() {
-            DistGeom::computeGradients(molSystemDevice,
-                                 ctx.systemDevice.atomStarts,
-                                 ctx.systemDevice.positions,
+  auto gFunc = [&]() {
+    DistGeom::computeGradients(molSystemDevice,
+                               ctx.systemDevice.atomStarts,
+                               ctx.systemDevice.positions,
 
-                                 chiralWeight,
-                                 fourthDimWeight,
-                                 ctx.activeThisStage.data(),
-stream_);
-    };
-            bool needsMore = minimizer_.minimize(maxIters,
-                                        embedParam_.optimizerForceTol,
-                                        ctx.systemHost.atomStarts,
-                                        ctx.systemDevice.atomStarts,
-                                        ctx.systemDevice.positions,
-                                        molSystemDevice.grad,
-                                        molSystemDevice.energyOuts,
-                                        molSystemDevice.energyBuffer,
-                                        eFunc,
-                                        gFunc,
-                                        ctx.activeThisStage.data());
+                               chiralWeight,
+                               fourthDimWeight,
+                               ctx.activeThisStage.data(),
+                               stream_);
+  };
+  bool needsMore = minimizer_.minimize(maxIters,
+                                       embedParam_.optimizerForceTol,
+                                       ctx.systemHost.atomStarts,
+                                       ctx.systemDevice.atomStarts,
+                                       ctx.systemDevice.positions,
+                                       molSystemDevice.grad,
+                                       molSystemDevice.energyOuts,
+                                       molSystemDevice.energyBuffer,
+                                       eFunc,
+                                       gFunc,
+                                       ctx.activeThisStage.data());
 
-            // Repeat until converged
-            while (needsMore) {
-              needsMore = minimizer_.minimize(maxIters,
-                                     embedParam_.optimizerForceTol,
-                                     ctx.systemHost.atomStarts,
-                                     ctx.systemDevice.atomStarts,
-                                     ctx.systemDevice.positions,
-                                     molSystemDevice.grad,
-                                     molSystemDevice.energyOuts,
-                                     molSystemDevice.energyBuffer,
-                                     eFunc,
-                                     gFunc,
-                                     ctx.activeThisStage.data());
-    }
+  // Repeat until converged
+  while (needsMore) {
+    needsMore = minimizer_.minimize(maxIters,
+                                    embedParam_.optimizerForceTol,
+                                    ctx.systemHost.atomStarts,
+                                    ctx.systemDevice.atomStarts,
+                                    ctx.systemDevice.positions,
+                                    molSystemDevice.grad,
+                                    molSystemDevice.energyOuts,
+                                    molSystemDevice.energyBuffer,
+                                    eFunc,
+                                    gFunc,
+                                    ctx.activeThisStage.data());
+  }
 
   // Check energy per atom if requested
   if (checkEnergy) {
-            nvMolKit::DistGeom::computeEnergy(molSystemDevice,
-                                              ctx.systemDevice.atomStarts,
-                                              ctx.systemDevice.positions,
-                                              chiralWeight,
-                                              fourthDimWeight,
-                                              nullptr,
-                                              nullptr,
-                                              stream_
-);
+    nvMolKit::DistGeom::computeEnergy(molSystemDevice,
+                                      ctx.systemDevice.atomStarts,
+                                      ctx.systemDevice.positions,
+                                      chiralWeight,
+                                      fourthDimWeight,
+                                      nullptr,
+                                      nullptr,
+                                      stream_);
     const int molNum   = molSystemDevice.energyOuts.size();
     const int gridSize = (molNum + kBlockSize - 1) / kBlockSize;
 
@@ -221,4 +224,3 @@ stream_);
 }  // namespace detail
 
 }  // namespace nvMolKit
-

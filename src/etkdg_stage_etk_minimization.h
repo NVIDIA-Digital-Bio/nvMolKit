@@ -31,12 +31,14 @@ namespace detail {
 
 class ETKMinimizationStage final : public ETKDGStage {
  public:
-  ETKMinimizationStage(const std::vector<const RDKit::ROMol*>&     mols,
-                       const std::vector<EmbedArgs>&               eargs,
-                       const RDKit::DGeomHelpers::EmbedParameters& embedParam,
-                       const ETKDGContext&                         ctx,
-                       BfgsBatchMinimizer& minimizer,
-                       cudaStream_t                                stream = nullptr);
+  ETKMinimizationStage(
+    const std::vector<const RDKit::ROMol*>&                                                 mols,
+    const std::vector<EmbedArgs>&                                                           eargs,
+    const RDKit::DGeomHelpers::EmbedParameters&                                             embedParam,
+    const ETKDGContext&                                                                     ctx,
+    BfgsBatchMinimizer&                                                                     minimizer,
+    cudaStream_t                                                                            stream = nullptr,
+    std::unordered_map<const RDKit::ROMol*, nvMolKit::DistGeom::Energy3DForceContribsHost>* cache  = nullptr);
 
   void        execute(ETKDGContext& ctx) override;
   std::string name() const override { return "ETK 3D Minimization"; }

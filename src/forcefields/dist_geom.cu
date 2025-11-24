@@ -641,8 +641,8 @@ void allocateDim4ConversionBuffers(const BatchedMolecularSystemHost& molSystemHo
 cudaError_t computeEnergy(BatchedMolecularDeviceBuffers&             molSystemDevice,
                           const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
                           const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
-                          const double                              chiralWeight,
-                          const double                              fourthDimWeight,
+                          const double                               chiralWeight,
+                          const double                               fourthDimWeight,
                           const uint8_t*                             activeThisStage,
                           const double*                              positions,
                           cudaStream_t                               stream) {
@@ -722,8 +722,8 @@ cudaError_t computeEnergy(BatchedMolecularDeviceBuffers&             molSystemDe
 cudaError_t computeGradients(BatchedMolecularDeviceBuffers&             molSystemDevice,
                              const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
                              const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
-                             const double chiralWeight,
-                             const double fourthDimWeight,
+                             const double                               chiralWeight,
+                             const double                               fourthDimWeight,
                              const uint8_t*                             activeThisStage,
                              cudaStream_t                               stream) {
   // Dispatch each term if there is a contrib for it.

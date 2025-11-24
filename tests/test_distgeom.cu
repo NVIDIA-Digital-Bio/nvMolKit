@@ -111,7 +111,7 @@ TEST_P(ETKDGFFGpuTestFixture, CombinedEnergies) {
   if (std::get<1>(GetParam()) == -1) {
     double wantEnergy = field_->calcEnergy();
     // Test without active stage parameters
-    CHECK_CUDA_RETURN(computeEnergy(systemDevice_, atomStartsDevice_, positionsDevice_,1.0, 0.1));
+    CHECK_CUDA_RETURN(computeEnergy(systemDevice_, atomStartsDevice_, positionsDevice_, 1.0, 0.1));
     CHECK_CUDA_RETURN(
       cudaMemcpy(&gotEnergy, systemDevice_.energyOuts.data() + 0, sizeof(double), cudaMemcpyDeviceToHost));
     EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
@@ -121,7 +121,8 @@ TEST_P(ETKDGFFGpuTestFixture, CombinedEnergies) {
     nvMolKit::AsyncDeviceVector<uint8_t> d_activeThisStage;
     d_activeThisStage.setFromVector(h_activeThisStage);
 
-    CHECK_CUDA_RETURN(computeEnergy(systemDevice_, atomStartsDevice_, positionsDevice_, 1.0, 0.1, d_activeThisStage.data()));
+    CHECK_CUDA_RETURN(
+      computeEnergy(systemDevice_, atomStartsDevice_, positionsDevice_, 1.0, 0.1, d_activeThisStage.data()));
     CHECK_CUDA_RETURN(
       cudaMemcpy(&gotEnergy, systemDevice_.energyOuts.data() + 0, sizeof(double), cudaMemcpyDeviceToHost));
 
@@ -151,7 +152,8 @@ TEST_P(ETKDGFFGpuTestFixture, CombinedGradients) {
     nvMolKit::AsyncDeviceVector<uint8_t> d_activeThisStage;
     d_activeThisStage.setFromVector(h_activeThisStage);
 
-    CHECK_CUDA_RETURN(computeGradients(systemDevice_, atomStartsDevice_, positionsDevice_, 1.0, 0.1,d_activeThisStage.data()));
+    CHECK_CUDA_RETURN(
+      computeGradients(systemDevice_, atomStartsDevice_, positionsDevice_, 1.0, 0.1, d_activeThisStage.data()));
     std::vector<double> gotGrad(positionsHost_.size(), 0.0);
     systemDevice_.grad.copyToHost(gotGrad);
     cudaDeviceSynchronize();
