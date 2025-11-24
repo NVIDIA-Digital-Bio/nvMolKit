@@ -84,15 +84,16 @@ __device__ __forceinline__ double clamp(double val, double minVal, double maxVal
   return fmax(minVal, fmin(maxVal, val));
 }
 
-__device__ __forceinline__ void crossProduct(const double& x1,
-                                             const double& y1,
-                                             const double& z1,
-                                             const double& x2,
-                                             const double& y2,
-                                             const double& z2,
-                                             double&       x,
-                                             double&       y,
-                                             double&       z) {
+template <typename TIn, typename TOut>
+__device__ __forceinline__ void crossProduct(const TIn& x1,
+                                             const TIn& y1,
+                                             const TIn& z1,
+                                             const TIn& x2,
+                                             const TIn& y2,
+                                             const TIn& z2,
+                                             TOut&      x,
+                                             TOut&      y,
+                                             TOut&      z) {
   x = y1 * z2 - z1 * y2;
   y = z1 * x2 - x1 * z2;
   z = x1 * y2 - y1 * x2;
