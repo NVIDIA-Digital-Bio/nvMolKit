@@ -170,7 +170,7 @@ __global__ void ChiralViolationEnergyKernel(const int      numChiral,
                                             const int*     idx4s,
                                             const double*  volLower,
                                             const double*  volUpper,
-                                            const double*  weights,
+                                            const double  weight,
                                             const double*  pos,
                                             double*        energyBuffer,
                                             const int*     energyBufferStarts,
@@ -191,7 +191,6 @@ __global__ void ChiralViolationEnergyKernel(const int      numChiral,
       const int    idx4    = idx4s[idx];
       const double lb      = volLower[idx];
       const double ub      = volUpper[idx];
-      const double weight  = weights[idx];
       const int    posIdx1 = idx1 * dimension;
       const int    posIdx2 = idx2 * dimension;
       const int    posIdx3 = idx3 * dimension;
@@ -218,7 +217,7 @@ __global__ void ChiralViolationGradientKernel(const int      numChiral,
                                               const int*     idx4s,
                                               const double*  volLower,
                                               const double*  volUpper,
-                                              const double*  weights,
+                                              const double  weight,
                                               const double*  pos,
                                               double*        grad,
                                               const int*     atomIdxToBatchIdx,
@@ -237,7 +236,6 @@ __global__ void ChiralViolationGradientKernel(const int      numChiral,
       const int    idx4    = idx4s[idx];
       const double lb      = volLower[idx];
       const double ub      = volUpper[idx];
-      const double weight  = weights[idx];
       const int    posIdx1 = idx1 * dimension;
       const int    posIdx2 = idx2 * dimension;
       const int    posIdx3 = idx3 * dimension;
@@ -286,7 +284,7 @@ __global__ void ChiralViolationGradientKernel(const int      numChiral,
 
 __global__ void fourthDimEnergyKernel(const int      numFD,
                                       const int*     idxs,
-                                      const double*  weights,
+                                      const double  weight,
                                       const double*  pos,
                                       double*        energyBuffer,
                                       const int*     energyBufferStarts,
@@ -302,7 +300,6 @@ __global__ void fourthDimEnergyKernel(const int      numFD,
 
     // Check if activeThisStage is nullptr or if this molecule/conformer is active in this stage
     if (activeThisStage == nullptr || activeThisStage[batchIdx] == 1) {
-      const double weight    = weights[idx];
       unsigned     pid       = idx1 * dimension + 3;
       const int    outputIdx = getEnergyAccumulatorIndex(idx, batchIdx, energyBufferStarts, fourthTermStarts);
       energyBuffer[outputIdx] += weight * pos[pid] * pos[pid];
@@ -312,7 +309,7 @@ __global__ void fourthDimEnergyKernel(const int      numFD,
 
 __global__ void fourthDimGradientKernel(const int      numFD,
                                         const int*     idxs,
-                                        const double*  weights,
+                                        const double  weight,
                                         const double*  pos,
                                         double*        grad,
                                         const int*     atomIdxToBatchIdx,
@@ -326,7 +323,6 @@ __global__ void fourthDimGradientKernel(const int      numFD,
 
     // Check if activeThisStage is nullptr or if this molecule/conformer is active in this stage
     if (activeThisStage == nullptr || activeThisStage[batchIdx] == 1) {
-      const double weight = weights[idx];
       int          pid    = idx1 * dimension + 3;
       grad[pid] += weight * pos[pid];
     }
@@ -1232,7 +1228,7 @@ cudaError_t launchChiralViolationEnergyKernel(const int      numChiral,
                                               const int*     idx4,
                                               const double*  volLower,
                                               const double*  volUpper,
-                                              const double*  weight,
+                                              double  weight,
                                               const double*  pos,
                                               double*        energyBuffer,
                                               const int*     energyBufferStarts,
@@ -1273,7 +1269,7 @@ cudaError_t launchChiralViolationGradientKernel(const int      numChiral,
                                                 const int*     idx4,
                                                 const double*  volLower,
                                                 const double*  volUpper,
-                                                const double*  weight,
+                                                double  weight,
                                                 const double*  pos,
                                                 double*        grad,
                                                 const int*     atomIdxToBatchIdx,
@@ -1305,7 +1301,7 @@ cudaError_t launchChiralViolationGradientKernel(const int      numChiral,
 
 cudaError_t launchFourthDimEnergyKernel(const int      numFD,
                                         const int*     idx,
-                                        const double*  weight,
+                                        double  weight,
                                         const double*  pos,
                                         double*        energyBuffer,
                                         const int*     energyBufferStarts,
@@ -1336,7 +1332,7 @@ cudaError_t launchFourthDimEnergyKernel(const int      numFD,
 
 cudaError_t launchFourthDimGradientKernel(const int      numFD,
                                           const int*     idx,
-                                          const double*  weight,
+                                          double  weight,
                                           const double*  pos,
                                           double*        grad,
                                           const int*     atomIdxToBatchIdx,
