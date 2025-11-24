@@ -42,30 +42,23 @@ FourthDimMinimizeStage::FourthDimMinimizeStage(const std::vector<const RDKit::RO
 
   // Process each molecule
   for (size_t i = 0; i < mols.size(); ++i) {
-    const auto&      mol      = mols[i];
-    const auto&      embedArg = eargs[i];
-    const auto&      numAtoms = mol->getNumAtoms();
-    auto             ffParams = nvMolKit::DistGeom::constructForceFieldContribs(embedArg.dim,
+    const auto& mol      = mols[i];
+    const auto& embedArg = eargs[i];
+    const auto& numAtoms = mol->getNumAtoms();
+    auto        ffParams = nvMolKit::DistGeom::constructForceFieldContribs(embedArg.dim,
                                                                     *embedArg.mmat,
                                                                     embedArg.chiralCenters,
                                                                     0.2,
                                                                     1.0,
                                                                     nullptr,
                                                                     embedParam_.basinThresh);
-    // Get atom numbers
-    std::vector<int> atomNumbers;
-    atomNumbers.reserve(numAtoms);
-    for (const auto& atom : mol->atoms()) {
-      atomNumbers.push_back(atom->getAtomicNum());
-    }
 
     // Add to molecular system
     nvMolKit::DistGeom::addMoleculeToMolecularSystem(ffParams,
                                                      numAtoms,
                                                      embedArg.dim,
                                                      ctx.systemHost.atomStarts,
-                                                     molSystemHost,
-                                                     &atomNumbers);
+                                                     molSystemHost);
   }
   nvMolKit::DistGeom::sendContribsAndIndicesToDevice(molSystemHost, molSystemDevice);
   nvMolKit::DistGeom::setupDeviceBuffers(molSystemHost,

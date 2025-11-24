@@ -62,30 +62,23 @@ FirstMinimizeStage::FirstMinimizeStage(const std::vector<const RDKit::ROMol*>&  
 
   // Process each molecule
   for (size_t i = 0; i < mols.size(); ++i) {
-    const auto&      mol      = mols[i];
-    const auto&      embedArg = eargs[i];
-    const auto&      numAtoms = mol->getNumAtoms();
-    auto             ffParams = nvMolKit::DistGeom::constructForceFieldContribs(embedArg.dim,
+    const auto& mol      = mols[i];
+    const auto& embedArg = eargs[i];
+    const auto& numAtoms = mol->getNumAtoms();
+    auto        ffParams = nvMolKit::DistGeom::constructForceFieldContribs(embedArg.dim,
                                                                     *embedArg.mmat,
                                                                     embedArg.chiralCenters,
                                                                     1.0,
                                                                     0.1,
                                                                     nullptr,
                                                                     embedParam.basinThresh);
-    // Get atom numbers
-    std::vector<int> atomNumbers;
-    atomNumbers.reserve(numAtoms);
-    for (const auto& atom : mol->atoms()) {
-      atomNumbers.push_back(atom->getAtomicNum());
-    }
 
     // Add to molecular system
     nvMolKit::DistGeom::addMoleculeToMolecularSystem(ffParams,
                                                      numAtoms,
                                                      embedArg.dim,
                                                      ctx.systemHost.atomStarts,
-                                                     molSystemHost,
-                                                     &atomNumbers);
+                                                     molSystemHost);
   }
   DistGeom::setStreams(molSystemDevice, stream_);
   nvMolKit::DistGeom::sendContribsAndIndicesToDevice(molSystemHost, molSystemDevice);
