@@ -100,7 +100,8 @@ template <typename T> class PinnedHostVector {
 
   // Capacity operations
   void resize(const size_t newSize) {
-    if (newSize == size_) {
+    if (newSize <= size_) {
+      size_ = newSize;
       return;
     }
     if (newSize == 0) {

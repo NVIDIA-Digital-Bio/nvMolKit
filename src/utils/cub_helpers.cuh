@@ -18,9 +18,10 @@
 
 #include <cub/cub.cuh>
 
-#ifdef NVMOLKIT_HAS_CCCL_GE_3
+#if defined(NVMOLKIT_HAS_CCCL_GE_3) || CUDART_VERSION >= 12090
 // CCCL >= 3.0.0 provides modern C++ functional operators
 using cubMax = cuda::maximum<>;
+using cubMin = cuda::minimum<>;
 using cubSum = cuda::std::plus<>;
 #else
 // Fall back to CUB operators for older CCCL or bundled CUDA headers
@@ -28,7 +29,8 @@ using cubSum = cuda::std::plus<>;
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 using cubMax = cub::Max;
+using cubMin = cub::Min;
 using cubSum = cub::Sum;
 #pragma GCC diagnostic pop
-#endif
+#endif  // NVMOLKIT_HAS_CCCL_GE_3
 #endif  // NVMOLKIT_CUB_HELPERS_H
