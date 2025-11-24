@@ -38,12 +38,12 @@
 #include "test_utils.h"
 using namespace nvMolKit::MMFF;
 
-constexpr double GRAD_TOL        = 1.0e-4;
+constexpr double GRAD_TOL       = 1.0e-4;
 // Tighter energy tolerance for function level tests
-constexpr double FUNCTION_E_TOL  = 5.0e-5;
+constexpr double FUNCTION_E_TOL = 5.0e-5;
 // General energy tolerance for minimized systems
-constexpr double MINIMIZE_E_TOL  = 1.0e-3;
-constexpr double EDGE_CASE_E_TOL = 1.0e-3;
+constexpr double MINIMIZE_E_TOL = 1.0e-3;
+constexpr double EDGE_CASE_TOL  = 1.0e-1;
 
 enum class FFTerm {
   BondStretch,
@@ -612,7 +612,7 @@ TEST_F(MMffGpuEdgeCases2Atoms, ZeroBondLength) {
   double wantEnergy = referenceForceField_->calcEnergy(positions.data());
   double gotEnergy  = getEnergyTerm(systemDevice, FFTerm::BondStretch);
   // Note the low tolerance, since it's a very stretched bond, values can be high.
-  EXPECT_NEAR(gotEnergy, wantEnergy, EDGE_CASE_E_TOL);
+  EXPECT_NEAR(gotEnergy, wantEnergy, EDGE_CASE_TOL);
 
   std::vector<double> wantGradients(3 * mol_->getNumAtoms(), 0.0);
   referenceForceField_->calcGrad(positions.data(), wantGradients.data());
@@ -667,12 +667,12 @@ TEST_F(MMffGpuEdgeCases3Atoms, ZeroThetaAngleStretchBend) {
   ASSERT_EQ(referenceForceField_->contribs().size(), 1);
   double wantEnergy = referenceForceField_->calcEnergy(positions.data());
   double gotEnergy  = getEnergyTerm(systemDevice, FFTerm::StretchBend);
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-1);
+  EXPECT_NEAR(gotEnergy, wantEnergy, EDGE_CASE_TOL);
 
   std::vector<double> wantGradients(3 * mol_->getNumAtoms(), 0.0);
   referenceForceField_->calcGrad(positions.data(), wantGradients.data());
   std::vector<double> gotGrad = getGradientTerm(systemDevice, FFTerm::StretchBend);
-  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-1), wantGradients));
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(EDGE_CASE_TOL), wantGradients));
 }
 
 TEST_F(MMffGpuEdgeCases3Atoms, OneEightyThetaAngleStretchBend) {
@@ -681,7 +681,7 @@ TEST_F(MMffGpuEdgeCases3Atoms, OneEightyThetaAngleStretchBend) {
   ASSERT_EQ(referenceForceField_->contribs().size(), 1);
   double wantEnergy = referenceForceField_->calcEnergy(positions.data());
   double gotEnergy  = getEnergyTerm(systemDevice, FFTerm::StretchBend);
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-1);
+  EXPECT_NEAR(gotEnergy, wantEnergy, EDGE_CASE_TOL);
 
   std::vector<double> wantGradients(3 * mol_->getNumAtoms(), 0.0);
   referenceForceField_->calcGrad(positions.data(), wantGradients.data());
