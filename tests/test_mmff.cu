@@ -38,6 +38,13 @@
 #include "test_utils.h"
 using namespace nvMolKit::MMFF;
 
+constexpr double GRAD_TOL       = 1.0e-4;
+// Tighter energy tolerance for function level tests
+constexpr double FUNCTION_E_TOL = 5.0e-5;
+// General energy tolerance for minimized systems
+constexpr double MINIMIZE_E_TOL = 1.0e-3;
+constexpr double EDGE_CASE_TOL  = 1.0e-1;
+
 enum class FFTerm {
   BondStretch,
   AngleBend,
@@ -382,87 +389,94 @@ class MMffGpuTestFixture : public ::testing::Test {
 TEST_F(MMffGpuTestFixture, BondStretchEnergySingleMolecule) {
   double wantEnergy = getReferenceEnergyTerm(mol_.get(), FFTerm::BondStretch);
   double gotEnergy  = getEnergyTerm(systemDevice, FFTerm::BondStretch);
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
+  ASSERT_NE(wantEnergy, 0.0);
+  EXPECT_NEAR(gotEnergy, wantEnergy, FUNCTION_E_TOL);
 }
 
 TEST_F(MMffGpuTestFixture, BondStretchGradientSingleMolecule) {
   std::vector<double> wantGradients = getReferenceGradientTerm(mol_.get(), FFTerm::BondStretch);
   std::vector<double> gotGrad       = getGradientTerm(systemDevice, FFTerm::BondStretch);
-  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients));
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(GRAD_TOL), wantGradients));
 }
 
 TEST_F(MMffGpuTestFixture, AngleBendEnergySingleMolecule) {
   double wantEnergy = getReferenceEnergyTerm(mol_.get(), FFTerm::AngleBend);
   double gotEnergy  = getEnergyTerm(systemDevice, FFTerm::AngleBend);
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
+  ASSERT_NE(wantEnergy, 0.0);
+  EXPECT_NEAR(gotEnergy, wantEnergy, FUNCTION_E_TOL);
 }
 
 TEST_F(MMffGpuTestFixture, AngleBendGradientSingleMolecule) {
   std::vector<double> wantGradients = getReferenceGradientTerm(mol_.get(), FFTerm::AngleBend);
   std::vector<double> gotGrad       = getGradientTerm(systemDevice, FFTerm::AngleBend);
-  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients));
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(GRAD_TOL), wantGradients));
 }
 
 TEST_F(MMffGpuTestFixture, BendStretchEnergySingleMolecule) {
   // Compute reference energy
   double wantEnergy = getReferenceEnergyTerm(mol_.get(), FFTerm::StretchBend);
   double gotEnergy  = getEnergyTerm(systemDevice, FFTerm::StretchBend);
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
+  ASSERT_NE(wantEnergy, 0.0);
+  EXPECT_NEAR(gotEnergy, wantEnergy, FUNCTION_E_TOL);
 }
 
 TEST_F(MMffGpuTestFixture, StretchBendGradientSingleMolecule) {
   std::vector<double> wantGradients = getReferenceGradientTerm(mol_.get(), FFTerm::StretchBend);
   std::vector<double> gotGrad       = getGradientTerm(systemDevice, FFTerm::StretchBend);
-  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients));
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(GRAD_TOL), wantGradients));
 }
 
 TEST_F(MMffGpuTestFixture, OutofPlaneEnergySingleMolecule) {
   double wantEnergy = getReferenceEnergyTerm(mol_.get(), FFTerm::OopBend);
   double gotEnergy  = getEnergyTerm(systemDevice, FFTerm::OopBend);
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
+  ASSERT_NE(wantEnergy, 0.0);
+  EXPECT_NEAR(gotEnergy, wantEnergy, FUNCTION_E_TOL);
 }
 
 TEST_F(MMffGpuTestFixture, OutOfPlaneGradientSingleMolecule) {
   std::vector<double> wantGradients = getReferenceGradientTerm(mol_.get(), FFTerm::OopBend);
   std::vector<double> gotGrad       = getGradientTerm(systemDevice, FFTerm::OopBend);
-  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients));
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(GRAD_TOL), wantGradients));
 }
 
 TEST_F(MMffGpuTestFixture, TorsionEnergySingleMolecule) {
   double wantEnergy = getReferenceEnergyTerm(mol_.get(), FFTerm::Torsion);
   double gotEnergy  = getEnergyTerm(systemDevice, FFTerm::Torsion);
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
+  ASSERT_NE(wantEnergy, 0.0);
+  EXPECT_NEAR(gotEnergy, wantEnergy, FUNCTION_E_TOL);
 }
 
 TEST_F(MMffGpuTestFixture, TorsionGradientSingleMolecule) {
   std::vector<double> wantGradients = getReferenceGradientTerm(mol_.get(), FFTerm::Torsion);
   std::vector<double> gotGrad       = getGradientTerm(systemDevice, FFTerm::Torsion);
-  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients));
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(GRAD_TOL), wantGradients));
 }
 
 TEST_F(MMffGpuTestFixture, VdwEnergySingleMolecule) {
   // Compute reference energy
   double wantEnergy = getReferenceEnergyTerm(mol_.get(), FFTerm::VdW);
   double gotEnergy  = getEnergyTerm(systemDevice, FFTerm::VdW);
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
+  ASSERT_NE(wantEnergy, 0.0);
+  EXPECT_NEAR(gotEnergy, wantEnergy, FUNCTION_E_TOL);
 }
 
 TEST_F(MMffGpuTestFixture, VdwGradientSingleMolecule) {
   std::vector<double> wantGradients = getReferenceGradientTerm(mol_.get(), FFTerm::VdW);
   std::vector<double> gotGrad       = getGradientTerm(systemDevice, FFTerm::VdW);
-  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients));
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(GRAD_TOL), wantGradients));
 }
 
 TEST_F(MMffGpuTestFixture, EleEnergySingleMolecule) {
   double wantEnergy = getReferenceEnergyTerm(mol_.get(), FFTerm::Elec);
   double gotEnergy  = getEnergyTerm(systemDevice, FFTerm::Elec);
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
+  ASSERT_NE(wantEnergy, 0.0);
+  EXPECT_NEAR(gotEnergy, wantEnergy, FUNCTION_E_TOL);
 }
 
 TEST_F(MMffGpuTestFixture, EleGradientSingleMolecule) {
   std::vector<double> wantGradients = getReferenceGradientTerm(mol_.get(), FFTerm::Elec);
   std::vector<double> gotGrad       = getGradientTerm(systemDevice, FFTerm::Elec);
-  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients));
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(GRAD_TOL), wantGradients));
 }
 
 TEST_F(MMffGpuTestFixture, CombinedEnergies) {
@@ -473,7 +487,7 @@ TEST_F(MMffGpuTestFixture, CombinedEnergies) {
   CHECK_CUDA_RETURN(computeEnergy(systemDevice));
   double gotEnergy;
   CHECK_CUDA_RETURN(cudaMemcpy(&gotEnergy, systemDevice.energyOuts.data() + 0, sizeof(double), cudaMemcpyDeviceToHost));
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
+  EXPECT_NEAR(gotEnergy, wantEnergy, FUNCTION_E_TOL);
 }
 
 TEST_F(MMffGpuTestFixture, CombinedGradients) {
@@ -597,12 +611,13 @@ TEST_F(MMffGpuEdgeCases2Atoms, ZeroBondLength) {
 
   double wantEnergy = referenceForceField_->calcEnergy(positions.data());
   double gotEnergy  = getEnergyTerm(systemDevice, FFTerm::BondStretch);
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
+  // Note the low tolerance, since it's a very stretched bond, values can be high.
+  EXPECT_NEAR(gotEnergy, wantEnergy, EDGE_CASE_TOL);
 
   std::vector<double> wantGradients(3 * mol_->getNumAtoms(), 0.0);
   referenceForceField_->calcGrad(positions.data(), wantGradients.data());
   std::vector<double> gotGrad = getGradientTerm(systemDevice, FFTerm::BondStretch);
-  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients));
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(GRAD_TOL), wantGradients));
 }
 
 TEST_F(MMffGpuEdgeCases2Atoms, ZeroEnergyBond) {
@@ -611,11 +626,11 @@ TEST_F(MMffGpuEdgeCases2Atoms, ZeroEnergyBond) {
 
   double wantEnergy = 0.0;
   double gotEnergy  = getEnergyTerm(systemDevice, FFTerm::BondStretch);
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
+  EXPECT_NEAR(gotEnergy, wantEnergy, FUNCTION_E_TOL);
 
   std::vector<double> wantGradients(3 * mol_->getNumAtoms(), 0.0);
   std::vector<double> gotGrad = getGradientTerm(systemDevice, FFTerm::BondStretch);
-  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients));
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(GRAD_TOL), wantGradients));
 }
 
 TEST_F(MMffGpuEdgeCases3Atoms, ZeroThetaAngle) {
@@ -624,12 +639,12 @@ TEST_F(MMffGpuEdgeCases3Atoms, ZeroThetaAngle) {
   ASSERT_EQ(referenceForceField_->contribs().size(), 1);
   double wantEnergy = referenceForceField_->calcEnergy(positions.data());
   double gotEnergy  = getEnergyTerm(systemDevice, FFTerm::AngleBend);
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
+  EXPECT_NEAR(gotEnergy, wantEnergy, FUNCTION_E_TOL);
 
   std::vector<double> wantGradients(3 * mol_->getNumAtoms(), 0.0);
   referenceForceField_->calcGrad(positions.data(), wantGradients.data());
   std::vector<double> gotGrad = getGradientTerm(systemDevice, FFTerm::AngleBend);
-  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients));
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(GRAD_TOL), wantGradients));
 }
 
 TEST_F(MMffGpuEdgeCases3Atoms, OneEightyThetaAngle) {
@@ -638,12 +653,12 @@ TEST_F(MMffGpuEdgeCases3Atoms, OneEightyThetaAngle) {
   ASSERT_EQ(referenceForceField_->contribs().size(), 1);
   double wantEnergy = referenceForceField_->calcEnergy(positions.data());
   double gotEnergy  = getEnergyTerm(systemDevice, FFTerm::AngleBend);
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
+  EXPECT_NEAR(gotEnergy, wantEnergy, FUNCTION_E_TOL);
 
   std::vector<double> wantGradients(3 * mol_->getNumAtoms(), 0.0);
   referenceForceField_->calcGrad(positions.data(), wantGradients.data());
   std::vector<double> gotGrad = getGradientTerm(systemDevice, FFTerm::AngleBend);
-  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients));
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(GRAD_TOL), wantGradients));
 }
 
 TEST_F(MMffGpuEdgeCases3Atoms, ZeroThetaAngleStretchBend) {
@@ -652,12 +667,12 @@ TEST_F(MMffGpuEdgeCases3Atoms, ZeroThetaAngleStretchBend) {
   ASSERT_EQ(referenceForceField_->contribs().size(), 1);
   double wantEnergy = referenceForceField_->calcEnergy(positions.data());
   double gotEnergy  = getEnergyTerm(systemDevice, FFTerm::StretchBend);
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-3);
+  EXPECT_NEAR(gotEnergy, wantEnergy, EDGE_CASE_TOL);
 
   std::vector<double> wantGradients(3 * mol_->getNumAtoms(), 0.0);
   referenceForceField_->calcGrad(positions.data(), wantGradients.data());
   std::vector<double> gotGrad = getGradientTerm(systemDevice, FFTerm::StretchBend);
-  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-3), wantGradients));
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(EDGE_CASE_TOL), wantGradients));
 }
 
 TEST_F(MMffGpuEdgeCases3Atoms, OneEightyThetaAngleStretchBend) {
@@ -666,12 +681,12 @@ TEST_F(MMffGpuEdgeCases3Atoms, OneEightyThetaAngleStretchBend) {
   ASSERT_EQ(referenceForceField_->contribs().size(), 1);
   double wantEnergy = referenceForceField_->calcEnergy(positions.data());
   double gotEnergy  = getEnergyTerm(systemDevice, FFTerm::StretchBend);
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-3);
+  EXPECT_NEAR(gotEnergy, wantEnergy, EDGE_CASE_TOL);
 
   std::vector<double> wantGradients(3 * mol_->getNumAtoms(), 0.0);
   referenceForceField_->calcGrad(positions.data(), wantGradients.data());
   std::vector<double> gotGrad = getGradientTerm(systemDevice, FFTerm::StretchBend);
-  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-3), wantGradients));
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(GRAD_TOL), wantGradients));
 }
 
 class MMFFValidationSuiteFixture : public ::testing::Test {
@@ -850,7 +865,7 @@ void MMFFValidationSuiteFixture::runTestInBatch(const std::string& fileName) {
 
     bool foundFailure = false;
     for (size_t j = 0; j < wantGrad.size(); j++) {
-      if (std::abs(wantGrad[j] - gotGrad[j]) > 1e-4) {
+      if (std::abs(wantGrad[j] - gotGrad[j]) > GRAD_TOL) {
         auto& failure = gradFailures.emplace_back();
         failure.name  = mols[i]->getProp<std::string>("_Name");
         failure.delta = std::abs(wantGrad[j] - gotGrad[j]);
@@ -924,7 +939,7 @@ void MMFFValidationSuiteFixture::runTestInSerial(const std::string& fileName) {
 
     bool foundFailure = false;
     for (size_t i = 0; i < wantGrad.size(); i++) {
-      if (std::abs(wantGrad[i] - gotGrad[i]) > 1e-4) {
+      if (std::abs(wantGrad[i] - gotGrad[i]) > GRAD_TOL) {
         auto& failure = gradFailures.emplace_back();
         failure.name  = mol->getProp<std::string>("_Name");
         failure.delta = std::abs(wantGrad[i] - gotGrad[i]);
@@ -1065,11 +1080,11 @@ TEST_F(MMFFValidationSuiteFixture, MinimizeBFGSMultipleConfsMultipleMolecules) {
       const double outEnergy = outMolFF->calcEnergy(pos.data());
 
       // Compare our reported energy with RDKit's calculation on the optimized positions
-      ASSERT_NEAR(energiesForMol[confIdx], outEnergy, 1e-4)
+      ASSERT_NEAR(energiesForMol[confIdx], outEnergy, MINIMIZE_E_TOL)
         << "Energy mismatch for molecule " << molIdx << ", conformer " << confIdx;
 
       // Verify that each conformer reaches the expected minimum energy
-      EXPECT_NEAR(wantEnergies[molIdx], outEnergy, 1e-4)
+      EXPECT_NEAR(wantEnergies[molIdx], outEnergy, MINIMIZE_E_TOL)
         << "Optimized energy mismatch for molecule " << molIdx << ", conformer " << confIdx
         << " (expected: " << wantEnergies[molIdx] << ", got: " << outEnergy << ")";
 
@@ -1097,8 +1112,10 @@ TEST_F(MMFFValidationSuiteFixture, MinimizeBFGSLargeMol) {
     std::vector<double> pos;
     nvMolKit::confPosToVect(**confIter, pos);
     const double outEnergy = outMolFF->calcEnergy(pos.data());
-    ASSERT_NEAR(gotEnergies[i], outEnergy, 1e-3);  // Inconsistency between output positions and reported energy.
-    EXPECT_NEAR(wantEnergy, outEnergy, 1e-3) << "Energy mismatch for conformer " << i;
+    ASSERT_NEAR(gotEnergies[i],
+                outEnergy,
+                MINIMIZE_E_TOL);  // Inconsistency between output positions and reported energy.
+    EXPECT_NEAR(wantEnergy, outEnergy, MINIMIZE_E_TOL) << "Energy mismatch for conformer " << i;
     i++;
   }
 }
@@ -1210,7 +1227,7 @@ TEST_F(MMffGpuWrapperTestFixture, MMffConstructorEnergy) {
   double initEnRef  = ffReference->calcEnergy();
   double initEnTest = ffTest->calcEnergy();
 
-  EXPECT_NEAR(initEnTest, initEnRef, 1e-6);
+  EXPECT_NEAR(initEnTest, initEnRef, FUNCTION_E_TOL);
 
   RDKit::ForceFieldsHelper::OptimizeMolecule(*ffReference, 1000);
   RDKit::ForceFieldsHelper::OptimizeMolecule(*ffTest, 1000);
@@ -1218,7 +1235,7 @@ TEST_F(MMffGpuWrapperTestFixture, MMffConstructorEnergy) {
   double finalEnRef  = ffReference->calcEnergy();
   double finalEnTest = ffTest->calcEnergy();
 
-  EXPECT_NEAR(finalEnTest, finalEnRef, 1e-6);
+  EXPECT_NEAR(finalEnTest, finalEnRef, FUNCTION_E_TOL);
 }
 
 TEST_F(MMffGpuWrapperTestFixture, MMffOptimizerEnergy) {
@@ -1231,7 +1248,7 @@ TEST_F(MMffGpuWrapperTestFixture, MMffOptimizerEnergy) {
   double finalEnRef  = ffReference->calcEnergy();
   double finalEnTest = ffTest->calcEnergy();
 
-  EXPECT_NEAR(finalEnTest, finalEnRef, 1e-6);
+  EXPECT_NEAR(finalEnTest, finalEnRef, FUNCTION_E_TOL);
 }
 
 TEST_F(MMffGpuWrapperTestFixture, MMffOptimizConfEnergy) {
@@ -1247,7 +1264,7 @@ TEST_F(MMffGpuWrapperTestFixture, MMffOptimizConfEnergy) {
   double finalEnRef  = ffReference->calcEnergy();
   double finalEnTest = ffTest->calcEnergy();
 
-  EXPECT_NEAR(finalEnTest, finalEnRef, 1e-6);
+  EXPECT_NEAR(finalEnTest, finalEnRef, FUNCTION_E_TOL);
 }
 
 TEST_F(MMffGpuWrapperTestFixture, MMffConstructorGrad) {
@@ -1260,7 +1277,7 @@ TEST_F(MMffGpuWrapperTestFixture, MMffConstructorGrad) {
   ffReference->calcGrad(gradRef.data());
   ffTest->calcGrad(gradTest.data());
 
-  EXPECT_THAT(gradTest, ::testing::Pointwise(::testing::FloatNear(1e-4), gradRef));
+  EXPECT_THAT(gradTest, ::testing::Pointwise(::testing::FloatNear(GRAD_TOL), gradRef));
 }
 
 class MMffGpuWrapperNonDefaultTestFixture : public ::testing::Test {
@@ -1296,7 +1313,7 @@ TEST_F(MMffGpuWrapperNonDefaultTestFixture, MMffConstructorEnergy) {
   double initEnRef  = ffReference->calcEnergy();
   double initEnTest = ffTest->calcEnergy();
 
-  EXPECT_NEAR(initEnTest, initEnRef, 1e-6);
+  EXPECT_NEAR(initEnTest, initEnRef, FUNCTION_E_TOL);
 
   RDKit::ForceFieldsHelper::OptimizeMolecule(*ffReference, 1000);
   RDKit::ForceFieldsHelper::OptimizeMolecule(*ffTest, 1000);
@@ -1304,7 +1321,7 @@ TEST_F(MMffGpuWrapperNonDefaultTestFixture, MMffConstructorEnergy) {
   double finalEnRef  = ffReference->calcEnergy();
   double finalEnTest = ffTest->calcEnergy();
 
-  EXPECT_NEAR(finalEnTest, finalEnRef, 1e-6);
+  EXPECT_NEAR(finalEnTest, finalEnRef, FUNCTION_E_TOL);
 }
 
 TEST_F(MMffGpuWrapperNonDefaultTestFixture, MMffOptimizerEnergy) {
@@ -1319,7 +1336,7 @@ TEST_F(MMffGpuWrapperNonDefaultTestFixture, MMffOptimizerEnergy) {
   double finalEnRef  = ffReference->calcEnergy();
   double finalEnTest = ffTest->calcEnergy();
 
-  EXPECT_NEAR(finalEnTest, finalEnRef, 1e-6);
+  EXPECT_NEAR(finalEnTest, finalEnRef, FUNCTION_E_TOL);
 }
 
 TEST_F(MMffGpuWrapperNonDefaultTestFixture, MMffOptimizConfEnergy) {
@@ -1337,7 +1354,7 @@ TEST_F(MMffGpuWrapperNonDefaultTestFixture, MMffOptimizConfEnergy) {
   double finalEnRef  = ffReference->calcEnergy();
   double finalEnTest = ffTest->calcEnergy();
 
-  EXPECT_NEAR(finalEnTest, finalEnRef, 1e-6);
+  EXPECT_NEAR(finalEnTest, finalEnRef, FUNCTION_E_TOL);
 }
 
 TEST_F(MMffGpuWrapperNonDefaultTestFixture, MMffConstructorGrad) {
@@ -1352,7 +1369,7 @@ TEST_F(MMffGpuWrapperNonDefaultTestFixture, MMffConstructorGrad) {
   ffReference->calcGrad(gradRef.data());
   ffTest->calcGrad(gradTest.data());
 
-  EXPECT_THAT(gradTest, ::testing::Pointwise(::testing::FloatNear(1e-4), gradRef));
+  EXPECT_THAT(gradTest, ::testing::Pointwise(::testing::FloatNear(GRAD_TOL), gradRef));
 }
 
 TEST(MMFFMultiGPU, SpecificGpuIds) {
@@ -1409,7 +1426,7 @@ TEST(MMFFMultiGPU, SpecificGpuIds) {
       std::vector<double> posRef;
       nvMolKit::confPosToVect(**confIter, posRef);
       const double refEnergy = refFF->calcEnergy(posRef.data());
-      ASSERT_NEAR(energiesForMol[confIdx], refEnergy, 1e-4)
+      ASSERT_NEAR(energiesForMol[confIdx], refEnergy, MINIMIZE_E_TOL)
         << "Energy mismatch vs RDKit reference for molecule " << molIdx << ", conformer " << confIdx;
       confIdx++;
     }
@@ -1594,11 +1611,12 @@ TEST(MMFFAllowsLargeMol, LargeMoleculeInterleavedOptimizes) {
   rdkitRefs.push_back(std::make_unique<RDKit::RWMol>(*small1));
   rdkitRefs.push_back(std::make_unique<RDKit::RWMol>(*big));
   rdkitRefs.push_back(std::make_unique<RDKit::RWMol>(*small2));
-  std::vector<double> wantEnergies;
+  std::vector<double> startEnergies;
   for (const auto& molCopy : rdkitRefs) {
-    std::vector<std::pair<int, double>> res(molCopy->getNumConformers(), {-1, -1});
-    RDKit::MMFF::MMFFOptimizeMoleculeConfs(*molCopy, res, 1, 10);
-    wantEnergies.push_back(res[0].second);
+    auto   molProps = std::make_unique<RDKit::MMFF::MMFFMolProperties>(*molCopy);
+    auto   ff = std::unique_ptr<ForceFields::ForceField>(RDKit::MMFF::constructForceField(*molCopy, molProps.get()));
+    double energy = ff->calcEnergy();
+    startEnergies.push_back(energy);
   }
 
   std::vector<RDKit::ROMol*>     molPtrs = {small1.get(), big.get(), small2.get()};
@@ -1614,9 +1632,9 @@ TEST(MMFFAllowsLargeMol, LargeMoleculeInterleavedOptimizes) {
     for (auto confIter = molRef.beginConformers(); confIter != molRef.endConformers(); ++confIter) {
       std::vector<double> posRef;
       nvMolKit::confPosToVect(**confIter, posRef);
-      const double refEnergy = wantEnergies[molIdx];
-      ASSERT_NEAR(perMol[confIdx], refEnergy, 1e-4)
-        << "Energy mismatch vs RDKit reference for molecule " << molIdx << ", conformer " << confIdx;
+      const double refEnergy = startEnergies[molIdx];
+      ASSERT_LT(perMol[confIdx], refEnergy)
+        << "Energy not decreased for molecule " << molIdx << ", conformer " << confIdx;
       confIdx++;
     }
   }

@@ -68,13 +68,13 @@ struct OutOfPlaneTerms {
 };
 
 struct TorsionContribTerms {
-  std::vector<int>    idx1;
-  std::vector<int>    idx2;
-  std::vector<int>    idx3;
-  std::vector<int>    idx4;
-  std::vector<double> V1;
-  std::vector<double> V2;
-  std::vector<double> V3;
+  std::vector<int>   idx1;
+  std::vector<int>   idx2;
+  std::vector<int>   idx3;
+  std::vector<int>   idx4;
+  std::vector<float> V1;
+  std::vector<float> V2;
+  std::vector<float> V3;
 };
 
 struct VdwTerms {
@@ -176,13 +176,13 @@ struct OutOfPlaneTermsDevice {
 };
 
 struct TorsionContribTermsDevice {
-  nvMolKit::AsyncDeviceVector<int>    idx1;
-  nvMolKit::AsyncDeviceVector<int>    idx2;
-  nvMolKit::AsyncDeviceVector<int>    idx3;
-  nvMolKit::AsyncDeviceVector<int>    idx4;
-  nvMolKit::AsyncDeviceVector<double> V1;
-  nvMolKit::AsyncDeviceVector<double> V2;
-  nvMolKit::AsyncDeviceVector<double> V3;
+  nvMolKit::AsyncDeviceVector<int>   idx1;
+  nvMolKit::AsyncDeviceVector<int>   idx2;
+  nvMolKit::AsyncDeviceVector<int>   idx3;
+  nvMolKit::AsyncDeviceVector<int>   idx4;
+  nvMolKit::AsyncDeviceVector<float> V1;
+  nvMolKit::AsyncDeviceVector<float> V2;
+  nvMolKit::AsyncDeviceVector<float> V3;
 };
 
 struct VdwTermsDevice {
