@@ -47,7 +47,8 @@ add_executable(test_work_splitting test_work_splitting.cpp)
 target_link_libraries(test_work_splitting PRIVATE work_splitting)
 
 add_executable(test_openmp_helpers test_openmp_helpers.cpp)
-target_link_libraries(test_openmp_helpers PRIVATE openmp_helpers OpenMP::OpenMP_CXX)
+target_link_libraries(test_openmp_helpers PRIVATE openmp_helpers
+                                                  OpenMP::OpenMP_CXX)
 
 add_library(test_utils test_utils.cpp)
 target_link_libraries(

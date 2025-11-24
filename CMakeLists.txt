@@ -1,17 +1,14 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES.
-# All rights reserved. SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 #
-# Licensed under the Apache License, Version 2.0 (the "License"); you may not
-# use this file except in compliance with the License. You may obtain a copy of
-# the License at
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+# the License. You may obtain a copy of the License at
 #
 # http://www.apache.org/licenses/LICENSE-2.0
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
-# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
-# License for the specific language governing permissions and limitations under
-# the License.
+# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+# specific language governing permissions and limitations under the License.
 
 cmake_minimum_required(VERSION 3.30)
 
@@ -23,7 +20,7 @@ set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CXX_STANDARD 20)
 find_package(CUDAToolkit REQUIRED)
 
-find_package(CCCL QUIET)
+find_package(CCCL HINTS ${CUDAToolkit_LIBRARY_DIR}/cmake/cccl QUIET)
 if(CCCL_FOUND AND CCCL_VERSION VERSION_GREATER_EQUAL "3.0.0")
   message(STATUS "CCCL ${CCCL_VERSION} found, using CCCL::CCCL")
   # Create alias to use the real CCCL target
@@ -35,10 +32,7 @@ else()
   if(CCCL_FOUND)
     message(STATUS "CCCL ${CCCL_VERSION} found but version < 3.0.0")
     if(CMAKE_PREFIX_PATH)
-      message(
-        STATUS
-          "CMAKE_PREFIX_PATH is set - CCCL ${CCCL_VERSION} headers may be used from PREFIX path"
-      )
+      message(STATUS "CMAKE_PREFIX_PATH is set - CCCL ${CCCL_VERSION} headers may be used from PREFIX path")
     else()
       message(STATUS "Using bundled CUDA headers")
     endif()
@@ -53,10 +47,7 @@ set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH};${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 set(CMAKE_BUILD_TYPE
     ${CMAKE_BUILD_TYPE}
-    CACHE
-      STRING
-      "Choose type of build, options are: Debug RelWithDebInfo Release asan tsan ubsan"
-      FORCE)
+    CACHE STRING "Choose type of build, options are: Debug RelWithDebInfo Release asan tsan ubsan" FORCE)
 
 # --------------------------------
 # Global compilation features
@@ -81,13 +72,10 @@ include(boost)
 # Conditional compilation features
 # --------------------------------
 if(NVMOLKIT_BUILD_PYTHON_BINDINGS)
-  message(
-    STATUS "NVMOLKIT_BUILD_PYTHON_BINDINGS set on, Building python bindings")
+  message(STATUS "NVMOLKIT_BUILD_PYTHON_BINDINGS set on, Building python bindings")
   include(python_install)
 else()
-  message(
-    STATUS
-      "NVMOLKIT_BUILD_PYTHON_BINDINGS set off, Not building python bindings")
+  message(STATUS "NVMOLKIT_BUILD_PYTHON_BINDINGS set off, Not building python bindings")
 endif()
 
 if(NVMOLKIT_BUILD_TESTS)

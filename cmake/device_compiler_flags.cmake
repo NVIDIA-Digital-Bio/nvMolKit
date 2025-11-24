@@ -13,9 +13,10 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-# General flags for CUDA compilation
-# Build up all flags in a temporary variable to avoid duplication on reconfigure
-set(NVMOLKIT_NVCC_ALL_FLAGS "-Wno-deprecated-gpu-targets --default-stream per-thread")
+# General flags for CUDA compilation Build up all flags in a temporary variable
+# to avoid duplication on reconfigure
+set(NVMOLKIT_NVCC_ALL_FLAGS
+    "-Wno-deprecated-gpu-targets --default-stream per-thread")
 if(NVMOLKIT_EXTRA_DEV_FLAGS)
   string(APPEND NVMOLKIT_NVCC_ALL_FLAGS " --Werror all-warnings")
 endif()

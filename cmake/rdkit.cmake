@@ -107,6 +107,7 @@ else()
                                   ${NVMOLKIT_BUILD_AGAINST_PIP_BOOSTINCLUDEDIR})
     list(APPEND RDKit_LIBS ${libname})
   endforeach()
+  # cmake-lint: disable=C0103
   set(Boost_INCLUDE_DIRS ${NVMOLKIT_BUILD_AGAINST_PIP_BOOSTINCLUDEDIR})
   message(STATUS "Using boost libs from pip RDKit")
 endif(NOT NVMOLKIT_BUILD_AGAINST_PIP_RDKIT)
