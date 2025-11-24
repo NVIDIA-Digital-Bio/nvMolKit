@@ -22,7 +22,7 @@
 
 namespace nvMolKit {
 void confPosToVect(const RDKit::ROMol& mol, std::vector<double>& positions, const int confId) {
-  const RDKit::Conformer& conf     = mol.getConformer(confId);
+  const RDKit::Conformer& conf = mol.getConformer(confId);
   confPosToVect(conf, positions);
 }
 

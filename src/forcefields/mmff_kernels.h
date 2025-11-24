@@ -21,7 +21,7 @@
 namespace nvMolKit {
 namespace MMFF {
 
-cudaError_t launchBondStretchEnergyKernel(int     numBonds,
+cudaError_t launchBondStretchEnergyKernel(int           numBonds,
                                           const int*    idx1,
                                           const int*    idx2,
                                           const double* r0,
@@ -33,7 +33,7 @@ cudaError_t launchBondStretchEnergyKernel(int     numBonds,
                                           const int*    termBatchStarts,
                                           cudaStream_t  stream = 0);
 
-cudaError_t launchBondStretchGradientKernel(int     numBonds,
+cudaError_t launchBondStretchGradientKernel(int           numBonds,
                                             const int*    idx1,
                                             const int*    idx2,
                                             const double* r0,
@@ -42,7 +42,7 @@ cudaError_t launchBondStretchGradientKernel(int     numBonds,
                                             double*       grad,
                                             cudaStream_t  stream = 0);
 
-cudaError_t launchAngleBendEnergyKernel(int      numAngles,
+cudaError_t launchAngleBendEnergyKernel(int            numAngles,
                                         const int*     idx1,
                                         const int*     idx2,
                                         const int*     idx3,
@@ -56,7 +56,7 @@ cudaError_t launchAngleBendEnergyKernel(int      numAngles,
                                         const int*     termBatchStarts,
                                         cudaStream_t   stream = 0);
 
-cudaError_t launchAngleBendGradientKernel(int      numAngles,
+cudaError_t launchAngleBendGradientKernel(int            numAngles,
                                           const int*     idx1,
                                           const int*     idx2,
                                           const int*     idx3,
@@ -67,7 +67,7 @@ cudaError_t launchAngleBendGradientKernel(int      numAngles,
                                           double*        grad,
                                           cudaStream_t   stream = 0);
 
-cudaError_t launchBendStretchEnergyKernel(int     numAngles,
+cudaError_t launchBendStretchEnergyKernel(int           numAngles,
                                           const int*    idx1,
                                           const int*    idx2,
                                           const int*    idx3,
@@ -83,7 +83,7 @@ cudaError_t launchBendStretchEnergyKernel(int     numAngles,
                                           const int*    termBatchStarts,
                                           cudaStream_t  stream = 0);
 
-cudaError_t launchBendStretchGradientKernel(int     numAngles,
+cudaError_t launchBendStretchGradientKernel(int           numAngles,
                                             const int*    idx1,
                                             const int*    idx2,
                                             const int*    idx3,
@@ -96,7 +96,7 @@ cudaError_t launchBendStretchGradientKernel(int     numAngles,
                                             double*       grad,
                                             cudaStream_t  stream = 0);
 
-cudaError_t launchOopBendEnergyKernel(int     numOopBends,
+cudaError_t launchOopBendEnergyKernel(int           numOopBends,
                                       const int*    idx1,
                                       const int*    idx2,
                                       const int*    idx3,
@@ -109,7 +109,7 @@ cudaError_t launchOopBendEnergyKernel(int     numOopBends,
                                       const int*    termBatchStarts,
                                       cudaStream_t  stream = 0);
 
-cudaError_t launchOopBendGradientKernel(int     numOopBends,
+cudaError_t launchOopBendGradientKernel(int           numOopBends,
                                         const int*    idx1,
                                         const int*    idx2,
                                         const int*    idx3,
@@ -119,14 +119,14 @@ cudaError_t launchOopBendGradientKernel(int     numOopBends,
                                         double*       grad,
                                         cudaStream_t  stream = 0);
 
-cudaError_t launchTorsionEnergyKernel(int     numTorsions,
+cudaError_t launchTorsionEnergyKernel(int           numTorsions,
                                       const int*    idx1,
                                       const int*    idx2,
                                       const int*    idx3,
                                       const int*    idx4,
-                                      const float* V1,
-                                      const float* V2,
-                                      const float* V3,
+                                      const float*  V1,
+                                      const float*  V2,
+                                      const float*  V3,
                                       const double* pos,
                                       double*       energyBuffer,
                                       const int*    energyBufferStarts,
@@ -134,19 +134,19 @@ cudaError_t launchTorsionEnergyKernel(int     numTorsions,
                                       const int*    termBatchStarts,
                                       cudaStream_t  stream = 0);
 
-cudaError_t launchTorsionGradientKernel(int     numTorsions,
+cudaError_t launchTorsionGradientKernel(int           numTorsions,
                                         const int*    idx1,
                                         const int*    idx2,
                                         const int*    idx3,
                                         const int*    idx4,
-                                        const float* V1,
-                                        const float* V2,
-                                        const float* V3,
+                                        const float*  V1,
+                                        const float*  V2,
+                                        const float*  V3,
                                         const double* pos,
                                         double*       grad,
                                         cudaStream_t  stream = 0);
 
-cudaError_t launchVdwEnergyKernel(int     numVdws,
+cudaError_t launchVdwEnergyKernel(int           numVdws,
                                   const int*    idx1,
                                   const int*    idx2,
                                   const double* R_ij_star,
@@ -158,7 +158,7 @@ cudaError_t launchVdwEnergyKernel(int     numVdws,
                                   const int*    termBatchStarts,
                                   cudaStream_t  stream = 0);
 
-cudaError_t launchVdwGradientKernel(int     numVdws,
+cudaError_t launchVdwGradientKernel(int           numVdws,
                                     const int*    idx1,
                                     const int*    idx2,
                                     const double* R_ij_star,
@@ -167,7 +167,7 @@ cudaError_t launchVdwGradientKernel(int     numVdws,
                                     double*       grad,
                                     cudaStream_t  stream = 0);
 
-cudaError_t launchEleEnergyKernel(int      numEles,
+cudaError_t launchEleEnergyKernel(int            numEles,
                                   const int*     idx1,
                                   const int*     idx2,
                                   const double*  chargeTerm,
@@ -180,7 +180,7 @@ cudaError_t launchEleEnergyKernel(int      numEles,
                                   const int*     termBatchStarts,
                                   cudaStream_t   stream = 0);
 
-cudaError_t launchEleGradientKernel(int      numEles,
+cudaError_t launchEleGradientKernel(int            numEles,
                                     const int*     idx1,
                                     const int*     idx2,
                                     const double*  chargeTerm,

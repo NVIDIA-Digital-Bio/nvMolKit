@@ -117,9 +117,9 @@ static __device__ __forceinline__ void torsionGrad(const double* pos,
                                                    const int     idx2,
                                                    const int     idx3,
                                                    const int     idx4,
-                                                   const float  V1,
-                                                   const float  V2,
-                                                   const float  V3,
+                                                   const float   V1,
+                                                   const float   V2,
+                                                   const float   V3,
                                                    double*       grad) {
   // P1 - P2
   const float dx1 = pos[3 * idx1 + 0] - pos[3 * idx2 + 0];
@@ -154,11 +154,11 @@ static __device__ __forceinline__ void torsionGrad(const double* pos,
   const double cosPhi = clamp(dotProduct(cross1x, cross1y, cross1z, cross2x, cross2y, cross2z), -1.0, 1.0);
 
   const float sinPhiSq = 1.0f - cosPhi * cosPhi;
-  float sinTerm = 0.0;
+  float       sinTerm  = 0.0;
   if (sinPhiSq > 0.0) {
-    const float sin2Phi  = 2.0f  * cosPhi;
-    const float sin3Phi  = 3.0f  - 4.0f  * sinPhiSq;
-    sinTerm  = 0.5f * (V1 - 2.0f * V2 * sin2Phi + 3.0f * V3 * sin3Phi);
+    const float sin2Phi = 2.0f * cosPhi;
+    const float sin3Phi = 3.0f - 4.0f * sinPhiSq;
+    sinTerm             = 0.5f * (V1 - 2.0f * V2 * sin2Phi + 3.0f * V3 * sin3Phi);
   }
 
   float dCos_dT0 = invNorm1 * (cross2x - cosPhi * cross1x);
@@ -205,7 +205,7 @@ static __device__ __forceinline__ void vDWGrad(const double* pos,
   constexpr float vdw2t7 = vdw2 * 7.0;
 
   const float invDistance = rsqrtf(distanceSquared(pos, idx1, idx2));
-  const float distance = 1.0f / invDistance;
+  const float distance    = 1.0f / invDistance;
 
   const float invRIJStar = 1.0f / R_ij_star;
 
@@ -219,7 +219,7 @@ static __device__ __forceinline__ void vDWGrad(const double* pos,
   const float t2        = t * t;
   const float t7        = t2 * t2 * t2 * t;
   const float dE_dr     = wellDepth * invRIJStar * t7 *
-                       (-vdw2t7 * q6 * invQ7Term * invQ7Term + ((-vdw2t7 * invQ7Term + 14.0) / (q + vdw1m1)));
+                      (-vdw2t7 * q6 * invQ7Term * invQ7Term + ((-vdw2t7 * invQ7Term + 14.0) / (q + vdw1m1)));
 
   float term1x, term1y, term1z;
   if (distance <= 0.0) {
@@ -254,7 +254,7 @@ static __device__ __forceinline__ double bondStretchEnergy(const double* pos,
   constexpr double csFactorDistSquared = 7.0 / 12.0 * csFactorDist * csFactorDist;
 
   const double distSquared = distanceSquared(pos, idx1, idx2);
-  const float distance    = sqrtf(static_cast<float>(distSquared));
+  const float  distance    = sqrtf(static_cast<float>(distSquared));
 
   const float deltaR  = distance - r0;
   const float deltaR2 = deltaR * deltaR;
@@ -274,13 +274,13 @@ static __device__ __forceinline__ void bondStretchGrad(const double* pos,
 
   double       dx, dy, dz;
   const double distanceSquared = distanceSquaredWithComponents(pos, idx1, idx2, dx, dy, dz);
-  const double invDist        = rsqrt(distanceSquared);
-  const double distance = 1.0 / invDist;
+  const double invDist         = rsqrt(distanceSquared);
+  const double distance        = 1.0 / invDist;
   const double deltaR          = distance - r0;
 
   const double de_dr = c1 * kb * deltaR * (1.0 + csFactorTimesSecondConstant * deltaR + lastFactor * deltaR * deltaR);
 
-  double       dE_dx, dE_dy, dE_dz;
+  double dE_dx, dE_dy, dE_dz;
   if (distance > 0.0) {
     dE_dx = de_dr * dx * invDist;
     dE_dy = de_dr * dy * invDist;
@@ -340,28 +340,28 @@ static __device__ __forceinline__ void angleBendGrad(const int     idx1,
   constexpr double c1       = 143.9325 * degreeToRadian;
   constexpr double cbFactor = -0.006981317 * 1.5;
   // These values are sensitive to double precision.
-  double       dx1, dy1, dz1, dx2, dy2, dz2;
-  const double dist1Squared = distanceSquaredWithComponents(pos, idx1, idx2, dx1, dy1, dz1);
-  const double dist2Squared = distanceSquaredWithComponents(pos, idx3, idx2, dx2, dy2, dz2);
-  const double invDist1        = rsqrt(dist1Squared);
-  const double invDist2       = rsqrt(dist2Squared);
+  double           dx1, dy1, dz1, dx2, dy2, dz2;
+  const double     dist1Squared = distanceSquaredWithComponents(pos, idx1, idx2, dx1, dy1, dz1);
+  const double     dist2Squared = distanceSquaredWithComponents(pos, idx3, idx2, dx2, dy2, dz2);
+  const double     invDist1     = rsqrt(dist1Squared);
+  const double     invDist2     = rsqrt(dist2Squared);
 
-  const double dot         = dx1 * dx2 + dy1 * dy2 + dz1 * dz2;
-  const double cosTheta    = clamp(dot *invDist1 * invDist2, -1.0, 1.0);
-  const double sinThetaSq  = 1.0 - cosTheta * cosTheta;
+  const double dot        = dx1 * dx2 + dy1 * dy2 + dz1 * dz2;
+  const double cosTheta   = clamp(dot * invDist1 * invDist2, -1.0, 1.0);
+  const double sinThetaSq = 1.0 - cosTheta * cosTheta;
   if (isDoubleZero(sinThetaSq) || isDoubleZero(dist1Squared) || isDoubleZero(dist2Squared)) {
     return;
   }
 
   const double invNegSinTheta = -rsqrt(sinThetaSq);
-  const float theta       = radianToDegree * acos(cosTheta);
-  const float deltaTheta  = theta - theta0;
+  const float  theta          = radianToDegree * acos(cosTheta);
+  const float  deltaTheta     = theta - theta0;
 
   float de_dDeltaTheta;
 
   if (isLinear) {
     constexpr float linearPrefactor = 143.9325;
-    de_dDeltaTheta                   = -linearPrefactor * ka * sqrtf(1.0 - (cosTheta * cosTheta));
+    de_dDeltaTheta                  = -linearPrefactor * ka * sqrtf(1.0 - (cosTheta * cosTheta));
   } else {
     de_dDeltaTheta = c1 * ka * deltaTheta * (1.0 + cbFactor * deltaTheta);
   }
@@ -441,22 +441,20 @@ static __device__ __forceinline__ void bendStretchGrad(const double* pos,
   // Note that doing the inverse sqrt would be better here, but it causes drift in some edge case tests.
   const float dist1        = sqrtf(dist1Squared);
   const float dist2        = sqrtf(dist2Squared);
-  const float invDist1 = 1.0f / dist1;
-  const float invDist2 = 1.0f / dist2;
-  const float dot      = dx1 * dx2 + dy1 * dy2 + dz1 * dz2;
-  const float cosTheta = clamp(dot  * invDist1 * invDist2, -1.0f, 1.0f);
-  const float invSinTheta = fmin(rsqrtf(1.0f - cosTheta * cosTheta), 1.0e8f);
+  const float invDist1     = 1.0f / dist1;
+  const float invDist2     = 1.0f / dist2;
+  const float dot          = dx1 * dx2 + dy1 * dy2 + dz1 * dz2;
+  const float cosTheta     = clamp(dot * invDist1 * invDist2, -1.0f, 1.0f);
+  const float invSinTheta  = fmin(rsqrtf(1.0f - cosTheta * cosTheta), 1.0e8f);
 
   constexpr float bondFactor = 180.f / M_PI;
-  const float theta = bondFactor * acos(cosTheta);
+  const float     theta      = bondFactor * acos(cosTheta);
 
   const float deltaTheta = theta - theta0;
   const float deltaR1    = dist1 - restLen1;
   const float deltaR2    = dist2 - restLen2;
 
   const float bondEnergyTerm = bondFactor * (forceConst1 * deltaR1 + forceConst2 * deltaR2);
-
-
 
   const float scaledDx1 = dx1 * invDist1;
   const float scaledDy1 = dy1 * invDist1;
@@ -479,11 +477,11 @@ static __device__ __forceinline__ void bendStretchGrad(const double* pos,
   const float gradz1 = prefactor * (deltaTheta * scaledDz1 * forceConst1 - intermediate3 * bondEnergyTimesInvSinTheta);
 
   const float gradx2 = prefactor * (-deltaTheta * (scaledDx1 * forceConst1 + scaledDx2 * forceConst2) +
-                                     (intermediate1 + intermediate4) * bondEnergyTimesInvSinTheta);
+                                    (intermediate1 + intermediate4) * bondEnergyTimesInvSinTheta);
   const float grady2 = prefactor * (-deltaTheta * (scaledDy1 * forceConst1 + scaledDy2 * forceConst2) +
-                                     (intermediate2 + intermediate5) * bondEnergyTimesInvSinTheta);
+                                    (intermediate2 + intermediate5) * bondEnergyTimesInvSinTheta);
   const float gradz2 = prefactor * (-deltaTheta * (scaledDz1 * forceConst1 + scaledDz2 * forceConst2) +
-                                     (intermediate3 + intermediate6) * bondEnergyTimesInvSinTheta);
+                                    (intermediate3 + intermediate6) * bondEnergyTimesInvSinTheta);
 
   const float gradx3 = prefactor * (deltaTheta * scaledDx2 * forceConst2 - intermediate4 * bondEnergyTimesInvSinTheta);
   const float grady3 = prefactor * (deltaTheta * scaledDy2 * forceConst2 - intermediate5 * bondEnergyTimesInvSinTheta);
@@ -576,8 +574,8 @@ static __device__ __forceinline__ double torsionEnergy(const double* pos,
   const float invCross1Norm = rsqrtf(crossIJKJx * crossIJKJx + crossIJKJy * crossIJKJy + crossIJKJz * crossIJKJz);
   const float invCross2Norm = rsqrtf(crossJKLKx * crossJKLKx + crossJKLKy * crossJKLKy + crossJKLKz * crossJKLKz);
 
-  const float dotProduct = crossIJKJx * crossJKLKx + crossIJKJy * crossJKLKy + crossIJKJz * crossJKLKz;
-  const float cosPhi     = dotProduct * invCross1Norm * invCross2Norm;
+  const float  dotProduct = crossIJKJx * crossJKLKx + crossIJKJy * crossJKLKy + crossIJKJz * crossJKLKz;
+  const float  cosPhi     = dotProduct * invCross1Norm * invCross2Norm;
   const double phi        = acosf(clamp(cosPhi, -1.0f, 1.0f));
 
   return 0.5 * (V1 * (1.0 + cosPhi) + V2 * (1.0 - cosf(2.0 * phi)) + V3 * (1.0 + cosf(3.0 * phi)));
@@ -630,7 +628,7 @@ static __device__ __forceinline__ double eleEnergy(const double* pos,
 static __device__ __forceinline__ void eleGrad(const double* pos,
                                                const int     idx1,
                                                const int     idx2,
-                                               const float  chargeTerm,
+                                               const float   chargeTerm,
                                                const int     dielModel,
                                                const bool    is1_4,
                                                double*       grad) {
@@ -638,8 +636,8 @@ static __device__ __forceinline__ void eleGrad(const double* pos,
   constexpr float bufferingConstant = 0.05;
 
   const float distSquared = distanceSquared(pos, idx1, idx2);
-  const float invDistance    = rsqrtf(distSquared);
-  const float distance = 1.0f / invDistance;
+  const float invDistance = rsqrtf(distSquared);
+  const float distance    = 1.0f / invDistance;
   float       distTerm    = distance + bufferingConstant;
   float       numerator   = -prefactor * chargeTerm;
 
