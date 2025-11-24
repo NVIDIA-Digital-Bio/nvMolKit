@@ -88,8 +88,10 @@ ETKMinimizationStage::ETKMinimizationStage(const std::vector<const RDKit::ROMol*
                                            const std::vector<EmbedArgs>&               eargs,
                                            const RDKit::DGeomHelpers::EmbedParameters& embedParam,
                                            const ETKDGContext&                         ctx,
+                                           BfgsBatchMinimizer& minimizer,
                                            cudaStream_t                                stream)
     : embedParam_(embedParam),
+      minimizer_(minimizer),
       stream_(stream) {
   setStreams(molSystemDevice, stream);
 
@@ -173,12 +175,10 @@ void ETKMinimizationStage::execute(ETKDGContext& ctx) {
   };
 
   // Create and configure BFGS minimizer
-  // TODO: Reuse between iterations.
-  BfgsBatchMinimizer bfgsMinimizer(/*dataDim=*/dim, nvMolKit::DebugLevel::NONE, true, stream_);
 
   // Run minimization
   constexpr int maxIters = 300;  // Taken from hard-coded RDKit value.
-  bfgsMinimizer.minimize(maxIters,
+  minimizer_.minimize(maxIters,
                          embedParam_.optimizerForceTol,
                          ctx.systemHost.atomStarts,
                          ctx.systemDevice.atomStarts,

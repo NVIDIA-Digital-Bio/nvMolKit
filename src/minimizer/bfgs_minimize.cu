@@ -863,9 +863,7 @@ bool BfgsBatchMinimizer::minimize(const int                     numIters,
 
   {
     const ScopedNvtxRange bfgsFullInitialize("BfgsBatchMinimizer::fullInitialize");
-    if (totalNumAtoms != numAtomsTotal_ || numSystems != numSystems_) {
-      initialize(atomStartsHost, atomStarts.data(), positions.data(), grad.data(), energyOuts.data(), activeThisStage);
-    }
+    initialize(atomStartsHost, atomStarts.data(), positions.data(), grad.data(), energyOuts.data(), activeThisStage);
 
     // Set up Hessian. Offsets are n X n, where atomstarts were n.
     setHessianToIdentity();

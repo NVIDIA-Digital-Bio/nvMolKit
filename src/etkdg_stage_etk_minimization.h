@@ -20,6 +20,7 @@
 
 #include "dist_geom.h"
 #include "etkdg_impl.h"
+#include "minimizer/bfgs_minimize.h"
 
 using ::nvMolKit::detail::EmbedArgs;
 using ::nvMolKit::detail::ETKDGContext;
@@ -34,6 +35,7 @@ class ETKMinimizationStage final : public ETKDGStage {
                        const std::vector<EmbedArgs>&               eargs,
                        const RDKit::DGeomHelpers::EmbedParameters& embedParam,
                        const ETKDGContext&                         ctx,
+                       BfgsBatchMinimizer& minimizer,
                        cudaStream_t                                stream = nullptr);
 
   void        execute(ETKDGContext& ctx) override;
@@ -46,6 +48,7 @@ class ETKMinimizationStage final : public ETKDGStage {
   nvMolKit::DistGeom::BatchedMolecular3DDeviceBuffers molSystemDevice;
   nvMolKit::DistGeom::BatchedMolecularSystem3DHost    molSystemHost;
   const RDKit::DGeomHelpers::EmbedParameters&         embedParam_;
+  BfgsBatchMinimizer&                                 minimizer_;
   cudaStream_t                                        stream_;
 };
 

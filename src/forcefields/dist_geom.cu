@@ -643,8 +643,8 @@ cudaError_t computeEnergy(BatchedMolecularDeviceBuffers&             molSystemDe
                           const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
                           const double                              chiralWeight,
                           const double                              fourthDimWeight,
-                          const double*                              positions,
                           const uint8_t*                             activeThisStage,
+                          const double*                              positions,
                           cudaStream_t                               stream) {
   // Prechecks - tempstorage allocated, energybuffer allocated
   assert(molSystemDevice.energyBuffer.size() > 0);

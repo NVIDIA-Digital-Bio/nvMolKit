@@ -674,7 +674,7 @@ std::vector<double> getEnergyTerm(nvMolKit::DistGeom::BatchedMolecularDeviceBuff
       }
       CHECK_CUDA_RETURN(nvMolKit::DistGeom::launchFourthDimEnergyKernel(deviceFF.contribs.fourthTerms.idx.size(),
                                                                         deviceFF.contribs.fourthTerms.idx.data(),
-                                                                        1.0,
+                                                                        0.1,
                                                                         pos,
                                                                         deviceFF.energyBuffer.data(),
                                                                         deviceFF.indices.energyBufferStarts.data(),
@@ -741,7 +741,7 @@ std::vector<double> getGradientTerm(nvMolKit::DistGeom::BatchedMolecularDeviceBu
       }
       CHECK_CUDA_RETURN(nvMolKit::DistGeom::launchFourthDimGradientKernel(deviceFF.contribs.fourthTerms.idx.size(),
                                                                           deviceFF.contribs.fourthTerms.idx.data(),
-                                                                          1.0,
+                                                                          0.1,
                                                                           pos,
                                                                           deviceFF.grad.data(),
                                                                           deviceFF.indices.atomIdxToBatchIdx.data(),
