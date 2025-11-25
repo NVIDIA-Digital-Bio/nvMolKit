@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "device_vector.h"
+#include "dist_geom_kernels.h"
 
 namespace nvMolKit {
 namespace DistGeom {
@@ -41,12 +42,10 @@ struct ChiralViolationContribTerms {
   std::vector<int>    idx4;
   std::vector<double> volUpper;
   std::vector<double> volLower;
-  std::vector<double> weight;
 };
 
 struct FourthDimContribTerms {
-  std::vector<int>    idx;
-  std::vector<double> weight;
+  std::vector<int> idx;
 };
 
 struct EnergyForceContribsHost {
@@ -188,12 +187,10 @@ struct ChiralViolationContribTermsDevice {
   nvMolKit::AsyncDeviceVector<int>    idx4;
   nvMolKit::AsyncDeviceVector<double> volUpper;
   nvMolKit::AsyncDeviceVector<double> volLower;
-  nvMolKit::AsyncDeviceVector<double> weight;
 };
 
 struct FourthDimContribTermsDevice {
-  nvMolKit::AsyncDeviceVector<int>    idx;
-  nvMolKit::AsyncDeviceVector<double> weight;
+  nvMolKit::AsyncDeviceVector<int> idx;
 };
 
 struct TorsionAngleContribTermsDevice {
@@ -382,7 +379,7 @@ void addMoleculeToMolecularSystem3D(const Energy3DForceContribsHost& contribs,
 void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
                         const std::vector<double>&     positions,
                         BatchedMolecularSystemHost&    molSystem,
-                        const int                      dimension,
+                        int                            dimension,
                         std::vector<int>&              ctxAtomStarts,
                         std::vector<double>&           ctxPositions);
 
@@ -476,6 +473,7 @@ cudaError_t computePlanarEnergy(BatchedMolecular3DDeviceBuffers&           molSy
                                 const uint8_t*                             activeThisStage,
                                 const double*                              positions = nullptr,
                                 cudaStream_t                               stream    = nullptr);
+
 }  // namespace DistGeom
 }  // namespace nvMolKit
 
