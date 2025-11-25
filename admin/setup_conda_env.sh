@@ -14,4 +14,4 @@ mkdir -p /var/tmp && wget -q -nc --no-check-certificate -P /var/tmp https://gith
     . /usr/local/anaconda/etc/profile.d/conda.sh && \
     conda activate base && \
     conda config --add channels conda-forge --add channels nvidia --add channels pytorch && \
-    conda install -y  python=$PYTHON_VERSION rdkit=$RDKIT_VERSION libboost-devel libboost-headers libboost-python-devel librdkit-dev pytest pandas psutil cmake cmakelang scikit-build=0.18 eigen
+    conda install -q -y  python=$PYTHON_VERSION rdkit=$RDKIT_VERSION libboost-devel libboost-headers libboost-python-devel librdkit-dev pytest pandas psutil cmake cmakelang scikit-build=0.18 eigen

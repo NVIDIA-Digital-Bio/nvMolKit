@@ -25,7 +25,7 @@ apt-get update -y && \
 
 
 mkdir -p /var/tmp && cd /var/tmp && \
-  wget https://github.com/danmar/cppcheck/archive/refs/tags/2.14.2.tar.gz && \
+  wget -q https://github.com/danmar/cppcheck/archive/refs/tags/2.14.2.tar.gz && \
   tar -xzf 2.14.2.tar.gz  && cd cppcheck-2.14.2 && \
     mkdir -p build && cd build && cmake -DCMAKE_INSTALL_PREFIX=/usr/local -DUSE_MATCHCOMPILER=ON -DCMAKE_BUILD_TYPE=release .. && \
     cmake --build $(pwd) --target all -- -j$(nproc) && \
