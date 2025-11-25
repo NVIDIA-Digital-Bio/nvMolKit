@@ -211,19 +211,16 @@ std::vector<std::vector<int16_t>> ETKDGDriver::getFailures(PinnedHostVector<int1
     totalSize += stageSize;
   }
 
-  // Resize pinned scratch buffer only if needed
   if (failuresScratch.size() < totalSize) {
     failuresScratch.resize(totalSize);
   }
 
-  // Dispatch all device -> pinned memory copies at once (asynchronously)
+  // Dispatch all device -> pinned memory copies at once and then only one sync.
   size_t offset = 0;
   for (size_t i = 0; i < numStages; ++i) {
     context_->totalFailures[i].copyToHost(failuresScratch.data() + offset, stageSizes[i]);
     offset += stageSizes[i];
   }
-
-  // Single synchronization point for all copies
   cudaStreamSynchronize(stream_);
 
   // Split pinned memory into individual std::vectors

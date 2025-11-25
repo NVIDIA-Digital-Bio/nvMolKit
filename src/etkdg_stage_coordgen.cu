@@ -95,7 +95,6 @@ void ETKDGCoordGenRDKitStage::execute(ETKDGContext& ctx) {
     positionsScratch_.resize(requiredPositionsSize);
   }
 
-  // Copy active flags using pinned memory (use sized copy)
   ctx.activeThisStage.copyToHost(activeScratch_.data(), requiredActiveSize);
 
   auto& rng = getDoubleRandomSource();

@@ -142,7 +142,7 @@ class ETKDGDriver {
 
   ETKDGDriver() = default;
 
-  //! Reset the driver with a new context and stages, allowing reuse
+  //! Reset the driver with a new context and stages
   void reset(std::unique_ptr<ETKDGContext>&&            context,
              std::vector<std::unique_ptr<ETKDGStage>>&& stages,
              bool                                       debugMode       = false,

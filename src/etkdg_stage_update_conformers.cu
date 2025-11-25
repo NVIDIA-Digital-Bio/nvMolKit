@@ -50,10 +50,7 @@ void ETKDGUpdateConformersStage::execute(ETKDGContext& ctx) {
     activeScratch_.resize(requiredActiveSize);
   }
 
-  // Copy positions from device to host using pinned memory (use sized copy)
   ctx.systemDevice.positions.copyToHost(positionsScratch_.data(), requiredPositionsSize);
-
-  // Copy active this stage from device to host using pinned memory (use sized copy)
   ctx.activeThisStage.copyToHost(activeScratch_.data(), requiredActiveSize);
   cudaStreamSynchronize(stream_);
 
