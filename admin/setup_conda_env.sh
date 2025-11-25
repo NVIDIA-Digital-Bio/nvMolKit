@@ -5,7 +5,7 @@ RDKIT_VERSION=$2
 
 
 set -ex
-apt update &&  apt install -y wget
+apt update &&  apt install -y wget git
 
 mkdir -p /var/tmp && wget -q -nc --no-check-certificate -P /var/tmp https://github.com/conda-forge/miniforge/releases/download/25.3.0-3/Miniforge3-25.3.0-3-Linux-x86_64.sh && \
     bash /var/tmp/Miniforge3-25.3.0-3-Linux-x86_64.sh -b -p /usr/local/anaconda && \
