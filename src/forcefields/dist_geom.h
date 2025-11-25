@@ -353,6 +353,18 @@ void addMoleculeToContextWithPositions(const std::vector<double>& positions,
                                        std::vector<int>&          ctxAtomStarts,
                                        std::vector<double>&       ctxPositions);
 
+//! Preallocate memory for estimated batch size (4D DG).
+//! Call this after creating the first EnergyForceContribsHost to optimize memory allocation.
+void preallocateEstimatedBatch(const EnergyForceContribsHost& templateContribs,
+                               BatchedMolecularSystemHost&    molSystem,
+                               int                            estimatedBatchSize);
+
+//! Preallocate memory for estimated batch size (3D ETK).
+//! Call this after creating the first Energy3DForceContribsHost to optimize memory allocation.
+void preallocateEstimatedBatch3D(const Energy3DForceContribsHost& templateContribs,
+                                 BatchedMolecularSystem3DHost&    molSystem,
+                                 int                              estimatedBatchSize);
+
 //! Add a molecule to the molecular system.
 void addMoleculeToMolecularSystem(const EnergyForceContribsHost& contribs,
                                   const int                      numAtoms,
@@ -423,6 +435,8 @@ void allocateIntermediateBuffers3D(const BatchedMolecularSystem3DHost& molSystem
 cudaError_t computeEnergy(BatchedMolecularDeviceBuffers&             molSystemDevice,
                           const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
                           const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
+                          double                                     chiralWeight,
+                          double                                     fourthDimWeight,
                           const uint8_t*                             activeThisStage = nullptr,
                           const double*                              positions       = nullptr,
                           cudaStream_t                               stream          = nullptr);
@@ -442,6 +456,8 @@ cudaError_t computeEnergyETK(BatchedMolecular3DDeviceBuffers&           molSyste
 cudaError_t computeGradients(BatchedMolecularDeviceBuffers&             molSystemDevice,
                              const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
                              const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
+                             double                                     chiralWeight,
+                             double                                     fourthDimWeight,
                              const uint8_t*                             activeThisStage = nullptr,
                              cudaStream_t                               stream          = nullptr);
 

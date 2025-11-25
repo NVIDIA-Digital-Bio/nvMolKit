@@ -108,14 +108,14 @@ void benchNvMolKitBatch(const std::vector<RDKit::ROMol*>& mols, const int size) 
   ankerl::nanobench::Bench().run("nvMolKit ETKDG calc energy, nmols = " + std::to_string(size), [&] {
     systemDevice.energyBuffer.zero();
     systemDevice.energyOuts.zero();
-    ankerl::nanobench::doNotOptimizeAway(computeEnergy(systemDevice, atomStartsDevice, positionsDevice));
+    ankerl::nanobench::doNotOptimizeAway(computeEnergy(systemDevice, atomStartsDevice, positionsDevice, 1.0, 0.1));
     ankerl::nanobench::doNotOptimizeAway(cudaDeviceSynchronize());
   });
 
   // Gradient benchmark
   ankerl::nanobench::Bench().run("nvMolKit ETKDG calc gradient, nmols = " + std::to_string(size), [&] {
     systemDevice.grad.zero();
-    ankerl::nanobench::doNotOptimizeAway(computeGradients(systemDevice, atomStartsDevice, positionsDevice));
+    ankerl::nanobench::doNotOptimizeAway(computeGradients(systemDevice, atomStartsDevice, positionsDevice, 1.0, 0.1));
     ankerl::nanobench::doNotOptimizeAway(cudaDeviceSynchronize());
   });
 }

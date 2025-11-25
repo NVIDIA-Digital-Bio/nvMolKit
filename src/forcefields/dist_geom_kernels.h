@@ -20,7 +20,7 @@
 
 namespace nvMolKit {
 namespace DistGeom {
-cudaError_t launchDistViolationEnergyKernel(const int      numDist,
+cudaError_t launchDistViolationEnergyKernel(int            numDist,
                                             const int*     idx1,
                                             const int*     idx2,
                                             const double*  lb2,
@@ -32,11 +32,11 @@ cudaError_t launchDistViolationEnergyKernel(const int      numDist,
                                             const int*     atomIdxToBatchIdx,
                                             const int*     distTermStarts,
                                             const int*     atomStarts,
-                                            const int      dimension,
+                                            int            dimension,
                                             const uint8_t* activeThisStage = nullptr,
                                             cudaStream_t   stream          = 0);
 
-cudaError_t launchDistViolationGradientKernel(const int      numDist,
+cudaError_t launchDistViolationGradientKernel(int            numDist,
                                               const int*     idx1,
                                               const int*     idx2,
                                               const double*  lb2,
@@ -46,70 +46,70 @@ cudaError_t launchDistViolationGradientKernel(const int      numDist,
                                               double*        grad,
                                               const int*     atomIdxToBatchIdx,
                                               const int*     atomStarts,
-                                              const int      dimension,
+                                              int            dimension,
                                               const uint8_t* activeThisStage = nullptr,
                                               cudaStream_t   stream          = 0);
 
-cudaError_t launchChiralViolationEnergyKernel(const int      numChiral,
+cudaError_t launchChiralViolationEnergyKernel(int            numChiral,
                                               const int*     idx1,
                                               const int*     idx2,
                                               const int*     idx3,
                                               const int*     idx4,
                                               const double*  volLower,
                                               const double*  volUpper,
-                                              const double*  weight,
+                                              double         weight,
                                               const double*  pos,
                                               double*        energyBuffer,
                                               const int*     energyBufferStarts,
                                               const int*     atomIdxToBatchIdx,
                                               const int*     chiralTermStarts,
                                               const int*     atomStarts,
-                                              const int      dimension,
+                                              int            dimension,
                                               const uint8_t* activeThisStage = nullptr,
                                               cudaStream_t   stream          = 0);
 
-cudaError_t launchChiralViolationGradientKernel(const int      numChiral,
+cudaError_t launchChiralViolationGradientKernel(int            numChiral,
                                                 const int*     idx1,
                                                 const int*     idx2,
                                                 const int*     idx3,
                                                 const int*     idx4,
                                                 const double*  volLower,
                                                 const double*  volUpper,
-                                                const double*  weight,
+                                                double         weight,
                                                 const double*  pos,
                                                 double*        grad,
                                                 const int*     atomIdxToBatchIdx,
                                                 const int*     atomStarts,
-                                                const int      dimension,
+                                                int            dimension,
                                                 const uint8_t* activeThisStage = nullptr,
                                                 cudaStream_t   stream          = 0);
 
-cudaError_t launchFourthDimEnergyKernel(const int      numFD,
+cudaError_t launchFourthDimEnergyKernel(int            numFD,
                                         const int*     idx,
-                                        const double*  weight,
+                                        double         weight,
                                         const double*  pos,
                                         double*        energyBuffer,
                                         const int*     energyBufferStarts,
                                         const int*     atomIdxToBatchIdx,
                                         const int*     fourthTermStarts,
                                         const int*     atomStarts,
-                                        const int      dimension,
+                                        int            dimension,
                                         const uint8_t* activeThisStage = nullptr,
                                         cudaStream_t   stream          = 0);
 
-cudaError_t launchFourthDimGradientKernel(const int      numFD,
+cudaError_t launchFourthDimGradientKernel(int            numFD,
                                           const int*     idx,
-                                          const double*  weight,
+                                          double         weight,
                                           const double*  pos,
                                           double*        grad,
                                           const int*     atomIdxToBatchIdx,
                                           const int*     atomStarts,
-                                          const int      dimension,
+                                          int            dimension,
                                           const uint8_t* activeThisStage = nullptr,
                                           cudaStream_t   stream          = 0);
 
 // Experimental torsion angle contribution kernels
-cudaError_t launchTorsionAngleEnergyKernel(const int      numTorsion,
+cudaError_t launchTorsionAngleEnergyKernel(int            numTorsion,
                                            const int*     idx1,
                                            const int*     idx2,
                                            const int*     idx3,
@@ -125,7 +125,7 @@ cudaError_t launchTorsionAngleEnergyKernel(const int      numTorsion,
                                            const uint8_t* activeThisStage = nullptr,
                                            cudaStream_t   stream          = 0);
 
-cudaError_t launchTorsionAngleGradientKernel(const int      numTorsion,
+cudaError_t launchTorsionAngleGradientKernel(int            numTorsion,
                                              const int*     idx1,
                                              const int*     idx2,
                                              const int*     idx3,
@@ -140,7 +140,7 @@ cudaError_t launchTorsionAngleGradientKernel(const int      numTorsion,
                                              cudaStream_t   stream          = 0);
 
 // Improper torsion (inversion) contribution kernels
-cudaError_t launchInversionEnergyKernel(const int      numInversion,
+cudaError_t launchInversionEnergyKernel(int            numInversion,
                                         const int*     idx1,
                                         const int*     idx2,
                                         const int*     idx3,
@@ -160,7 +160,7 @@ cudaError_t launchInversionEnergyKernel(const int      numInversion,
                                         const uint8_t* activeThisStage = nullptr,
                                         cudaStream_t   stream          = 0);
 
-cudaError_t launchInversionGradientKernel(const int      numInversion,
+cudaError_t launchInversionGradientKernel(int            numInversion,
                                           const int*     idx1,
                                           const int*     idx2,
                                           const int*     idx3,
@@ -179,7 +179,7 @@ cudaError_t launchInversionGradientKernel(const int      numInversion,
                                           cudaStream_t   stream          = 0);
 
 // Distance constraint contribution kernels
-cudaError_t launchDistanceConstraintEnergyKernel(const int      numDist,
+cudaError_t launchDistanceConstraintEnergyKernel(int            numDist,
                                                  const int*     idx1,
                                                  const int*     idx2,
                                                  const double*  minLen,
@@ -194,7 +194,7 @@ cudaError_t launchDistanceConstraintEnergyKernel(const int      numDist,
                                                  const uint8_t* activeThisStage = nullptr,
                                                  cudaStream_t   stream          = 0);
 
-cudaError_t launchDistanceConstraintGradientKernel(const int      numDist,
+cudaError_t launchDistanceConstraintGradientKernel(int            numDist,
                                                    const int*     idx1,
                                                    const int*     idx2,
                                                    const double*  minLen,
@@ -209,7 +209,7 @@ cudaError_t launchDistanceConstraintGradientKernel(const int      numDist,
 
 // Angle constraint contribution kernels
 constexpr double defaultAngleForceConstant = 1.0;
-cudaError_t      launchAngleConstraintEnergyKernel(const int      numAngle,
+cudaError_t      launchAngleConstraintEnergyKernel(int            numAngle,
                                                    const int*     idx1,
                                                    const int*     idx2,
                                                    const int*     idx3,
@@ -225,7 +225,7 @@ cudaError_t      launchAngleConstraintEnergyKernel(const int      numAngle,
                                                    double         forceConstant   = defaultAngleForceConstant,
                                                    cudaStream_t   stream          = 0);
 
-cudaError_t launchAngleConstraintGradientKernel(const int      numAngle,
+cudaError_t launchAngleConstraintGradientKernel(int            numAngle,
                                                 const int*     idx1,
                                                 const int*     idx2,
                                                 const int*     idx3,

@@ -27,8 +27,7 @@
 #include "embedder_utils.h"
 #include "etkdg_impl.h"
 #include "etkdg_stage_coordgen.h"
-#include "etkdg_stage_firstminimization.h"
-#include "etkdg_stage_fourthdimminimization.h"
+#include "etkdg_stage_distgeom_minimize.h"
 #include "test_utils.h"
 #include "utils/host_vector.h"
 
@@ -157,20 +156,29 @@ class ETKDGMinimizeSingleMolTestFixture : public ::testing::TestWithParam<ETKDGO
     embedParam_                 = getETKDGOption(GetParam());
     embedParam_.useRandomCoords = true;
     initTestComponents();
+
+    // Create minimizer after context is initialized
+    minimizer_ = std::make_unique<nvMolKit::BfgsBatchMinimizer>(4, nvMolKit::DebugLevel::NONE, true, nullptr);
+
+    // Pre-allocate scratch buffers for stages
+    const size_t totalAtoms = context_.systemHost.atomStarts.back();
+    positionsScratch_.resize(totalAtoms * 4);  // 4D for ETKDG
+    activeScratch_.resize(mols_.size());
   }
 
   void initTestComponents() { initTestComponentsCommon(mols_, molsPtrs_, context_, eargs_, embedParam_); }
 
  protected:
-  std::string                                testDataFolderPath_;
-  std::unique_ptr<RDKit::RWMol>              molPtr_;
-  std::vector<std::unique_ptr<RDKit::RWMol>> molsPtrs_;
-  std::vector<const RDKit::ROMol*>           mols_;
-  ETKDGContext                               context_;
-  std::vector<nvMolKit::detail::EmbedArgs>   eargs_;
-  RDKit::DGeomHelpers::EmbedParameters       embedParam_;
-  nvMolKit::PinnedHostVector<double>         positionsScratch_;
-  nvMolKit::PinnedHostVector<uint8_t>        activeScratch_;
+  std::string                                   testDataFolderPath_;
+  std::unique_ptr<RDKit::RWMol>                 molPtr_;
+  std::vector<std::unique_ptr<RDKit::RWMol>>    molsPtrs_;
+  std::vector<const RDKit::ROMol*>              mols_;
+  ETKDGContext                                  context_;
+  std::vector<nvMolKit::detail::EmbedArgs>      eargs_;
+  RDKit::DGeomHelpers::EmbedParameters          embedParam_;
+  std::unique_ptr<nvMolKit::BfgsBatchMinimizer> minimizer_;
+  nvMolKit::PinnedHostVector<double>            positionsScratch_;
+  nvMolKit::PinnedHostVector<uint8_t>           activeScratch_;
 };
 
 // BFGS Stage Tests
@@ -180,8 +188,17 @@ TEST_P(ETKDGMinimizeSingleMolTestFixture, FirstMinimizeStageBFGSTest) {
 
   // Create FirstMinimizeStage
   std::vector<std::unique_ptr<ETKDGStage>> stages;
-  auto  stage    = std::make_unique<nvMolKit::detail::FirstMinimizeStage>(mols_, eargs_, embedParam_, context_);
-  auto* stagePtr = stage.get();  // Store pointer before moving
+  auto                                     stage    = std::make_unique<nvMolKit::detail::DistGeomMinimizeStage>(mols_,
+                                                                         eargs_,
+                                                                         embedParam_,
+                                                                         context_,
+                                                                         *minimizer_,
+                                                                         1.0,
+                                                                         0.1,
+                                                                         400,
+                                                                         true,
+                                                                         "First Minimization");
+  auto*                                    stagePtr = stage.get();  // Store pointer before moving
   stages.push_back(std::move(stage));
 
   // Create and run driver
@@ -211,7 +228,16 @@ TEST_P(ETKDGMinimizeSingleMolTestFixture, FirstMinimizeStageBFGSTest) {
 TEST_P(ETKDGMinimizeSingleMolTestFixture, FourthDimMinimizeStageBFGSTest) {
   // Create FourthDimMinimizeStage
   std::vector<std::unique_ptr<ETKDGStage>> stages;
-  stages.push_back(std::make_unique<nvMolKit::detail::FourthDimMinimizeStage>(mols_, eargs_, embedParam_, context_));
+  stages.push_back(std::make_unique<nvMolKit::detail::DistGeomMinimizeStage>(mols_,
+                                                                             eargs_,
+                                                                             embedParam_,
+                                                                             context_,
+                                                                             *minimizer_,
+                                                                             0.2,
+                                                                             1.0,
+                                                                             200,
+                                                                             false,
+                                                                             "Fourth Dimension Minimization"));
 
   // Create and run driver
   ETKDGDriver driver(std::make_unique<ETKDGContext>(std::move(context_)), std::move(stages));
@@ -234,12 +260,26 @@ TEST_P(ETKDGMinimizeSingleMolTestFixture, FullMinimizationPipelineBFGSTest) {
   // Calculate initial energy
   const std::vector<double> initialEnergies = calculateInitialEnergies(molsPtrs_);
 
-  // Create stages
+  // Create stages - first is base DistGeomMinimizeStage, second is wrapper with different weights
   std::vector<std::unique_ptr<ETKDGStage>> stages;
-  auto  firstStage    = std::make_unique<nvMolKit::detail::FirstMinimizeStage>(mols_, eargs_, embedParam_, context_);
-  auto* firstStagePtr = firstStage.get();  // Store pointer before moving
+  auto                                     firstStage = std::make_unique<nvMolKit::detail::DistGeomMinimizeStage>(mols_,
+                                                                              eargs_,
+                                                                              embedParam_,
+                                                                              context_,
+                                                                              *minimizer_,
+                                                                              1.0,
+                                                                              0.1,
+                                                                              400,
+                                                                              true,
+                                                                              "First Minimization");
+  auto*                                    firstStagePtr = firstStage.get();  // Store pointer before moving
   stages.push_back(std::move(firstStage));
-  stages.push_back(std::make_unique<nvMolKit::detail::FourthDimMinimizeStage>(mols_, eargs_, embedParam_, context_));
+  stages.push_back(std::make_unique<nvMolKit::detail::DistGeomMinimizeWrapperStage>(*firstStagePtr,
+                                                                                    0.2,
+                                                                                    1.0,
+                                                                                    200,
+                                                                                    false,
+                                                                                    "Fourth Dimension Minimization"));
 
   // Create and run driver
   ETKDGDriver driver(std::make_unique<ETKDGContext>(std::move(context_)), std::move(stages));
@@ -281,10 +321,24 @@ TEST_P(ETKDGMinimizeSingleMolTestFixture, FirstPartETKDGPipelineBFGSTest) {
                                                                                eargs_,
                                                                                positionsScratch_,
                                                                                activeScratch_));
-  auto  firstStage    = std::make_unique<nvMolKit::detail::FirstMinimizeStage>(mols_, eargs_, embedParam_, context_);
+  auto  firstStage    = std::make_unique<nvMolKit::detail::DistGeomMinimizeStage>(mols_,
+                                                                              eargs_,
+                                                                              embedParam_,
+                                                                              context_,
+                                                                              *minimizer_,
+                                                                              1.0,
+                                                                              0.1,
+                                                                              400,
+                                                                              true,
+                                                                              "First Minimization");
   auto* firstStagePtr = firstStage.get();  // Store pointer before moving
   stages.push_back(std::move(firstStage));
-  stages.push_back(std::make_unique<nvMolKit::detail::FourthDimMinimizeStage>(mols_, eargs_, embedParam_, context_));
+  stages.push_back(std::make_unique<nvMolKit::detail::DistGeomMinimizeWrapperStage>(*firstStagePtr,
+                                                                                    0.2,
+                                                                                    1.0,
+                                                                                    200,
+                                                                                    false,
+                                                                                    "Fourth Dimension Minimization"));
 
   // Create and run driver
   ETKDGDriver driver(std::make_unique<ETKDGContext>(std::move(context_)), std::move(stages));
@@ -340,19 +394,28 @@ class ETKDGMinimizeMultiMolDiverseTestFixture : public ::testing::TestWithParam<
     embedParam_                 = getETKDGOption(GetParam());
     embedParam_.useRandomCoords = true;
     initTestComponents();
+
+    // Create minimizer after context is initialized
+    minimizer_ = std::make_unique<nvMolKit::BfgsBatchMinimizer>(4, nvMolKit::DebugLevel::NONE, true, nullptr);
+
+    // Pre-allocate scratch buffers for stages
+    const size_t totalAtoms = context_.systemHost.atomStarts.back();
+    positionsScratch_.resize(totalAtoms * 4);  // 4D for ETKDG
+    activeScratch_.resize(mols_.size());
   }
 
   void initTestComponents() { initTestComponentsCommon(mols_, molsPtrs_, context_, eargs_, embedParam_); }
 
  protected:
-  std::string                                testDataFolderPath_;
-  std::vector<std::unique_ptr<RDKit::RWMol>> molsPtrs_;
-  std::vector<const RDKit::ROMol*>           mols_;
-  ETKDGContext                               context_;
-  std::vector<nvMolKit::detail::EmbedArgs>   eargs_;
-  RDKit::DGeomHelpers::EmbedParameters       embedParam_;
-  nvMolKit::PinnedHostVector<double>         positionsScratch_;
-  nvMolKit::PinnedHostVector<uint8_t>        activeScratch_;
+  std::string                                   testDataFolderPath_;
+  std::vector<std::unique_ptr<RDKit::RWMol>>    molsPtrs_;
+  std::vector<const RDKit::ROMol*>              mols_;
+  ETKDGContext                                  context_;
+  std::vector<nvMolKit::detail::EmbedArgs>      eargs_;
+  RDKit::DGeomHelpers::EmbedParameters          embedParam_;
+  std::unique_ptr<nvMolKit::BfgsBatchMinimizer> minimizer_;
+  nvMolKit::PinnedHostVector<double>            positionsScratch_;
+  nvMolKit::PinnedHostVector<uint8_t>           activeScratch_;
 };
 
 // BFGS Stage Tests for diverse molecules
@@ -364,8 +427,17 @@ TEST_P(ETKDGMinimizeMultiMolDiverseTestFixture, FirstMinimizeStageBFGSTest) {
 
   // Create FirstMinimizeStage
   std::vector<std::unique_ptr<ETKDGStage>> stages;
-  auto  stage    = std::make_unique<nvMolKit::detail::FirstMinimizeStage>(mols_, eargs_, embedParam_, context_);
-  auto* stagePtr = stage.get();  // Store pointer before moving
+  auto                                     stage    = std::make_unique<nvMolKit::detail::DistGeomMinimizeStage>(mols_,
+                                                                         eargs_,
+                                                                         embedParam_,
+                                                                         context_,
+                                                                         *minimizer_,
+                                                                         1.0,
+                                                                         0.1,
+                                                                         400,
+                                                                         true,
+                                                                         "First Minimization");
+  auto*                                    stagePtr = stage.get();  // Store pointer before moving
   stages.push_back(std::move(stage));
 
   // Create and run driver
@@ -396,7 +468,16 @@ TEST_P(ETKDGMinimizeMultiMolDiverseTestFixture, FirstMinimizeStageBFGSTest) {
 TEST_P(ETKDGMinimizeMultiMolDiverseTestFixture, FourthDimMinimizeStageBFGSTest) {
   // Create FourthDimMinimizeStage
   std::vector<std::unique_ptr<ETKDGStage>> stages;
-  stages.push_back(std::make_unique<nvMolKit::detail::FourthDimMinimizeStage>(mols_, eargs_, embedParam_, context_));
+  stages.push_back(std::make_unique<nvMolKit::detail::DistGeomMinimizeStage>(mols_,
+                                                                             eargs_,
+                                                                             embedParam_,
+                                                                             context_,
+                                                                             *minimizer_,
+                                                                             0.2,
+                                                                             1.0,
+                                                                             200,
+                                                                             false,
+                                                                             "Fourth Dimension Minimization"));
 
   // Create and run driver
   ETKDGDriver driver(std::make_unique<ETKDGContext>(std::move(context_)), std::move(stages));
@@ -421,14 +502,26 @@ TEST_P(ETKDGMinimizeMultiMolDiverseTestFixture, FullMinimizationPipelineBFGSTest
   // Calculate initial energies for all molecules
   const std::vector<double> initialEnergies = calculateInitialEnergies(molsPtrs_);
 
-  // Create stages
+  // Create stages - first is base DistGeomMinimizeStage, second is wrapper with different weights
   std::vector<std::unique_ptr<ETKDGStage>> stages;
-  auto  firstStage    = std::make_unique<nvMolKit::detail::FirstMinimizeStage>(mols_, eargs_, embedParam_, context_);
-  auto* firstStagePtr = firstStage.get();  // Store pointer before moving
+  auto                                     firstStage = std::make_unique<nvMolKit::detail::DistGeomMinimizeStage>(mols_,
+                                                                              eargs_,
+                                                                              embedParam_,
+                                                                              context_,
+                                                                              *minimizer_,
+                                                                              1.0,
+                                                                              0.1,
+                                                                              400,
+                                                                              true,
+                                                                              "First Minimization");
+  auto*                                    firstStagePtr = firstStage.get();  // Store pointer before moving
   stages.push_back(std::move(firstStage));
-  auto secondStage = std::make_unique<nvMolKit::detail::FourthDimMinimizeStage>(mols_, eargs_, embedParam_, context_);
-  auto secondStagePtr = secondStage.get();
-  stages.push_back(std::move(secondStage));
+  stages.push_back(std::make_unique<nvMolKit::detail::DistGeomMinimizeWrapperStage>(*firstStagePtr,
+                                                                                    0.2,
+                                                                                    1.0,
+                                                                                    200,
+                                                                                    false,
+                                                                                    "Fourth Dimension Minimization"));
 
   // Create and run driver
   ETKDGDriver driver(std::make_unique<ETKDGContext>(std::move(context_)), std::move(stages));
@@ -471,11 +564,24 @@ TEST_P(ETKDGMinimizeMultiMolDiverseTestFixture, FirstPartETKDGPipelineBFGSTest) 
                                                                                eargs_,
                                                                                positionsScratch_,
                                                                                activeScratch_));
-  auto firstStage = std::make_unique<nvMolKit::detail::FirstMinimizeStage>(mols_, eargs_, embedParam_, context_);
+  auto  firstStage    = std::make_unique<nvMolKit::detail::DistGeomMinimizeStage>(mols_,
+                                                                              eargs_,
+                                                                              embedParam_,
+                                                                              context_,
+                                                                              *minimizer_,
+                                                                              1.0,
+                                                                              0.1,
+                                                                              400,
+                                                                              true,
+                                                                              "First Minimization");
+  auto* firstStagePtr = firstStage.get();  // Store pointer before moving
   stages.push_back(std::move(firstStage));
-  auto  secondStage = std::make_unique<nvMolKit::detail::FourthDimMinimizeStage>(mols_, eargs_, embedParam_, context_);
-  auto* secondStagePtr = secondStage.get();  // Store pointer before moving
-  stages.push_back(std::move(secondStage));
+  stages.push_back(std::make_unique<nvMolKit::detail::DistGeomMinimizeWrapperStage>(*firstStagePtr,
+                                                                                    0.2,
+                                                                                    1.0,
+                                                                                    200,
+                                                                                    false,
+                                                                                    "Fourth Dimension Minimization"));
   // Create and run driver
   ETKDGDriver driver(std::make_unique<ETKDGContext>(std::move(context_)), std::move(stages));
   driver.run(3);
@@ -483,8 +589,8 @@ TEST_P(ETKDGMinimizeMultiMolDiverseTestFixture, FirstPartETKDGPipelineBFGSTest) 
   auto                                failureCounts = driver.getFailures(failuresScratch);
 
   // Get final energies from the first stage
-  std::vector<double> finalEnergies(secondStagePtr->molSystemDevice.energyOuts.size());
-  secondStagePtr->molSystemDevice.energyOuts.copyToHost(finalEnergies);
+  std::vector<double> finalEnergies(firstStagePtr->molSystemDevice.energyOuts.size());
+  firstStagePtr->molSystemDevice.energyOuts.copyToHost(finalEnergies);
   cudaDeviceSynchronize();
 
   // Get failure counts
@@ -503,7 +609,16 @@ TEST_P(ETKDGMinimizeMultiMolDiverseTestFixture, FirstPartETKDGPipelineBFGSTest) 
 
 TEST_P(ETKDGMinimizeMultiMolDiverseTestFixture, FirstMinimizeStageBFGSWithInactiveMolecules) {
   // Create FirstMinimizeStage
-  auto stage = std::make_unique<nvMolKit::detail::FirstMinimizeStage>(mols_, eargs_, embedParam_, context_);
+  auto stage = std::make_unique<nvMolKit::detail::DistGeomMinimizeStage>(mols_,
+                                                                         eargs_,
+                                                                         embedParam_,
+                                                                         context_,
+                                                                         *minimizer_,
+                                                                         1.0,
+                                                                         0.1,
+                                                                         400,
+                                                                         true,
+                                                                         "First Minimization");
 
   // Set some molecules as inactive (let's say molecules 1 and 3)
   std::vector<uint8_t> activeRef(context_.nTotalSystems, 1);
