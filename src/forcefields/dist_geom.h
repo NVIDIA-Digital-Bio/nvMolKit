@@ -42,12 +42,10 @@ struct ChiralViolationContribTerms {
   std::vector<int>    idx4;
   std::vector<double> volUpper;
   std::vector<double> volLower;
-  // Note: weight removed - now passed as kernel parameter
 };
 
 struct FourthDimContribTerms {
   std::vector<int> idx;
-  // Note: weight removed - now passed as kernel parameter
 };
 
 struct EnergyForceContribsHost {
@@ -189,12 +187,10 @@ struct ChiralViolationContribTermsDevice {
   nvMolKit::AsyncDeviceVector<int>    idx4;
   nvMolKit::AsyncDeviceVector<double> volUpper;
   nvMolKit::AsyncDeviceVector<double> volLower;
-  // Note: weight removed - now passed as kernel parameter
 };
 
 struct FourthDimContribTermsDevice {
   nvMolKit::AsyncDeviceVector<int> idx;
-  // Note: weight removed - now passed as kernel parameter
 };
 
 struct TorsionAngleContribTermsDevice {
@@ -477,40 +473,6 @@ cudaError_t computePlanarEnergy(BatchedMolecular3DDeviceBuffers&           molSy
                                 const uint8_t*                             activeThisStage,
                                 const double*                              positions = nullptr,
                                 cudaStream_t                               stream    = nullptr);
-
-//! Compute the energy of the batched molecular system using block-per-mol kernels.
-//! This uses consolidated device functions for better performance.
-cudaError_t computeEnergyBlockPerMol(BatchedMolecularDeviceBuffers&             molSystemDevice,
-                                     const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
-                                     const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
-                                     const uint8_t*                             activeThisStage = nullptr,
-                                     const double*                              positions       = nullptr,
-                                     cudaStream_t                               stream          = nullptr);
-
-//! Compute the gradients of the batched molecular system using block-per-mol kernels.
-//! This uses consolidated device functions for better performance.
-cudaError_t computeGradBlockPerMol(BatchedMolecularDeviceBuffers&             molSystemDevice,
-                                   const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
-                                   const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
-                                   const uint8_t*                             activeThisStage = nullptr,
-                                   cudaStream_t                               stream          = nullptr);
-
-//! Compute the energy of the batched 3D molecular system (ETK terms) using block-per-mol kernels.
-//! This uses consolidated device functions for better performance.
-cudaError_t computeEnergyBlockPerMolETK(BatchedMolecular3DDeviceBuffers&           molSystemDevice,
-                                        const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
-                                        const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
-                                        const uint8_t*                             activeThisStage = nullptr,
-                                        const double*                              positions       = nullptr,
-                                        cudaStream_t                               stream          = nullptr);
-
-//! Compute the gradients of the batched 3D molecular system (ETK terms) using block-per-mol kernels.
-//! This uses consolidated device functions for better performance.
-cudaError_t computeGradBlockPerMolETK(BatchedMolecular3DDeviceBuffers&           molSystemDevice,
-                                      const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
-                                      const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
-                                      const uint8_t*                             activeThisStage = nullptr,
-                                      cudaStream_t                               stream          = nullptr);
 
 }  // namespace DistGeom
 }  // namespace nvMolKit

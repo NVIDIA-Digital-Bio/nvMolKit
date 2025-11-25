@@ -21,7 +21,6 @@
 #include "dist_geom_kernels.h"
 #include "dist_geom_kernels_device.cuh"
 #include "kernel_utils.cuh"
-#include "nvtx.h"
 
 namespace nvMolKit {
 namespace DistGeom {

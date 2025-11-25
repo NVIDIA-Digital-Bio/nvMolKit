@@ -30,9 +30,10 @@ using namespace nvMolKit::FFKernelUtils;
 namespace nvMolKit {
 namespace DistGeom {
 
-// Device pointer structs are now defined in dist_geom_kernels.h
+// --------------
+// DG terms
+// --------------
 
-// Device helper functions for energy calculations
 static __device__ __forceinline__ double distViolationEnergy(const double* pos,
                                                              const int     idx1,
                                                              const int     idx2,
@@ -146,7 +147,8 @@ static __device__ __forceinline__ double chiralViolationEnergy(const double* pos
 
   if (vol < lb) {
     return weight * (vol - lb) * (vol - lb);
-  } else if (vol > ub) {
+  }
+  if (vol > ub) {
     return weight * (vol - ub) * (vol - ub);
   }
   return 0.0;
@@ -230,7 +232,10 @@ static __device__ __forceinline__ void fourthDimGrad(const double* pos,
   atomicAdd(&grad[posIdx + 3], weight * fourthVal);
 }
 
-// Helper device functions for ETK energy calculations
+// ----------------------
+// ETK Terms
+// ----------------------
+
 static __device__ __forceinline__ float calcTorsionEnergyM6(const double* forceConstants,
                                                             const int*    signs,
                                                             const double  cosPhi) {
@@ -445,7 +450,6 @@ static __device__ __forceinline__ double angleConstraintEnergy(const double* pos
   return forceConstant * angleTerm * angleTerm;
 }
 
-// Experimental torsion angle gradient
 static __device__ __forceinline__ void torsionAngleGrad(const double* pos,
                                                         const int     idx1,
                                                         const int     idx2,
@@ -572,7 +576,6 @@ static __device__ __forceinline__ void torsionAngleGrad(const double* pos,
   atomicAdd(&grad[posIdx4 + 2], g4z);
 }
 
-// Improper torsion (inversion) gradient
 static __device__ __forceinline__ void inversionGrad(const double* pos,
                                                      const int     idx1,
                                                      const int     idx2,
@@ -702,7 +705,6 @@ static __device__ __forceinline__ void inversionGrad(const double* pos,
   atomicAdd(&grad[posIdx4 + 2], dE_dW * tg4z);
 }
 
-// Distance constraint gradient
 static __device__ __forceinline__ void distanceConstraintGrad(const double* pos,
                                                               const int     idx1,
                                                               const int     idx2,
