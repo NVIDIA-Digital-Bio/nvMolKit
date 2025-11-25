@@ -63,11 +63,11 @@ void ETKDGDriver::reset(std::unique_ptr<ETKDGContext>&&            context,
                         bool                                       debugMode,
                         cudaStream_t                               stream,
                         const std::atomic<bool>*                   earlyExitToggle) {
-  context_    = std::move(context);
-  stages_     = std::move(stages);
-  stream_     = stream;
-  earlyExit_  = earlyExitToggle;
-  debugMode_  = debugMode;
+  context_   = std::move(context);
+  stages_    = std::move(stages);
+  stream_    = stream;
+  earlyExit_ = earlyExitToggle;
+  debugMode_ = debugMode;
 
   // Reset counters
   numFinished_ = 0;
@@ -202,7 +202,7 @@ std::vector<std::vector<int16_t>> ETKDGDriver::getFailures(PinnedHostVector<int1
   const size_t numStages = context_->totalFailures.size();
 
   // Calculate total required size for all stages
-  size_t totalSize = 0;
+  size_t              totalSize = 0;
   std::vector<size_t> stageSizes;
   stageSizes.reserve(numStages);
   for (const auto& stageFailures : context_->totalFailures) {

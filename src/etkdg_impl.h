@@ -135,10 +135,10 @@ struct StageTiming {
 class ETKDGDriver {
  public:
   ETKDGDriver(std::unique_ptr<ETKDGContext>&&            context,
-            std::vector<std::unique_ptr<ETKDGStage>>&& stages,
-            bool                                       debugMode       = false,
-            cudaStream_t                               stream          = nullptr,
-            const std::atomic<bool>*                   earlyExitToggle = nullptr);
+              std::vector<std::unique_ptr<ETKDGStage>>&& stages,
+              bool                                       debugMode       = false,
+              cudaStream_t                               stream          = nullptr,
+              const std::atomic<bool>*                   earlyExitToggle = nullptr);
 
   ETKDGDriver() = default;
 
@@ -172,19 +172,19 @@ class ETKDGDriver {
   void run(int maxIterations);
 
  private:
-  std::unique_ptr<ETKDGContext>            context_;
-  std::vector<std::unique_ptr<ETKDGStage>> stages_;
-  int                                      totalConfs_   = 0;
-  int                                      numFinished_  = 0;
-  int                                      iteration_    = 0;
-  cudaStream_t                             stream_       = nullptr;
-  const std::atomic<bool>*                 earlyExit_    = nullptr;  // Optional early exit flag for external control
+  std::unique_ptr<ETKDGContext>                context_;
+  std::vector<std::unique_ptr<ETKDGStage>>     stages_;
+  int                                          totalConfs_  = 0;
+  int                                          numFinished_ = 0;
+  int                                          iteration_   = 0;
+  cudaStream_t                                 stream_      = nullptr;
+  const std::atomic<bool>*                     earlyExit_   = nullptr;  // Optional early exit flag for external control
   // Debug mode members
-  bool                                         debugMode_ = false;
+  bool                                         debugMode_   = false;
   std::unordered_map<std::string, StageTiming> stageTimings_;
 
   // Pinned memory buffer for D2H transfer of finished count
-  PinnedHostVector<int>                        finishedCountHost_{1};
+  PinnedHostVector<int> finishedCountHost_{1};
 
   // Helper method to initialize driver state from context and stages
   void initialize();

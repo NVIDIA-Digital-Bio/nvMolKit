@@ -71,13 +71,13 @@ ETKDGCoordGenRDKitStage::ETKDGCoordGenRDKitStage(const RDKit::DGeomHelpers::Embe
                                                  const std::vector<const RDKit::ROMol*>&     mols,
                                                  const std::vector<EmbedArgs>&               eargs,
                                                  PinnedHostVector<double>&                   positionsScratch,
-PinnedHostVector<uint8_t>&                  activeScratch,
+                                                 PinnedHostVector<uint8_t>&                  activeScratch,
                                                  cudaStream_t                                stream)
     : params_(params),
       mols_(mols),
       eargs_(eargs),
-positionsScratch_(positionsScratch),
-activeScratch_(activeScratch),
+      positionsScratch_(positionsScratch),
+      activeScratch_(activeScratch),
       stream_(stream) {}
 
 void ETKDGCoordGenRDKitStage::execute(ETKDGContext& ctx) {
@@ -115,8 +115,8 @@ void ETKDGCoordGenRDKitStage::execute(ETKDGContext& ctx) {
     for (size_t atomIdx = 0; atomIdx < mols_[molIdx]->getNumAtoms(); ++atomIdx) {
       for (int dim = 0; dim < eargs_[molIdx].dim; ++dim) {
         // Generate random position
-        double    pos      = (rng() - 0.5) * boxSize;
-        const int idx      = (ctx.systemHost.atomStarts[molIdx] + atomIdx) * eargs_[molIdx].dim + dim;
+        double    pos          = (rng() - 0.5) * boxSize;
+        const int idx          = (ctx.systemHost.atomStarts[molIdx] + atomIdx) * eargs_[molIdx].dim + dim;
         positionsScratch_[idx] = pos;
       }
     }

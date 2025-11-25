@@ -33,7 +33,7 @@ class ETKDGUpdateConformersStage final : public ETKDGStage {
     const std::vector<EmbedArgs>&                                                            eargs,
     std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<RDKit::Conformer>>>& conformers,
     PinnedHostVector<double>&                                                                positionsScratch,
-PinnedHostVector<uint8_t>&                                                               activeScratch,
+    PinnedHostVector<uint8_t>&                                                               activeScratch,
     cudaStream_t                                                                             stream          = nullptr,
     std::mutex*                                                                              conformer_mutex = nullptr,
     int                                                                                      maxConformersPerMol = -1);

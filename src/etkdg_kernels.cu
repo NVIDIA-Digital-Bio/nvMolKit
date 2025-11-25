@@ -95,7 +95,11 @@ int launchGetFinishedKernels(ETKDGContext& context, const int iteration, int* fi
                                                           context.finishedOnIteration.data(),
                                                           context.countFinishedThisIteration.data());
   cudaCheckError(cudaGetLastError());
-  cudaCheckError(cudaMemcpyAsync(finishedCountHost, context.countFinishedThisIteration.data(), sizeof(int), cudaMemcpyDeviceToHost, stream));
+  cudaCheckError(cudaMemcpyAsync(finishedCountHost,
+                                 context.countFinishedThisIteration.data(),
+                                 sizeof(int),
+                                 cudaMemcpyDeviceToHost,
+                                 stream));
   cudaStreamSynchronize(stream);
   return *finishedCountHost;
 }

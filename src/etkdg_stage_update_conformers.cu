@@ -25,15 +25,15 @@ ETKDGUpdateConformersStage::ETKDGUpdateConformersStage(
   const std::vector<EmbedArgs>&                                                            eargs,
   std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<RDKit::Conformer>>>& conformers,
   PinnedHostVector<double>&                                                                positionsScratch,
-PinnedHostVector<uint8_t>&                                                               activeScratch,
+  PinnedHostVector<uint8_t>&                                                               activeScratch,
   cudaStream_t                                                                             stream,
   std::mutex*                                                                              conformer_mutex,
   const int                                                                                maxConformersPerMol)
     : mols_(mols),
       eargs_(eargs),
       conformers_(conformers),
-positionsScratch_(positionsScratch),
-activeScratch_(activeScratch),
+      positionsScratch_(positionsScratch),
+      activeScratch_(activeScratch),
       stream_(stream),
       conformer_mutex_(conformer_mutex),
       maxConformersPerMol_(maxConformersPerMol) {}
@@ -72,7 +72,8 @@ void ETKDGUpdateConformersStage::execute(ETKDGContext& ctx) {
 
     for (int j = 0; j < nAtoms; ++j) {
       const int       posIdx = startPosIdx + j * dim;
-      RDGeom::Point3D pos(positionsScratch_[posIdx], positionsScratch_[posIdx + 1], positionsScratch_[posIdx + 2]);      newConf->setAtomPos(j, pos);
+      RDGeom::Point3D pos(positionsScratch_[posIdx], positionsScratch_[posIdx + 1], positionsScratch_[posIdx + 2]);
+      newConf->setAtomPos(j, pos);
     }
 
     // Thread-safe conformer addition with count checking

@@ -92,7 +92,7 @@ TEST(EtkdgCoordGenTest, TestGenerateInitialCoords) {
   EXPECT_LE(driver.numConfsFinished(), 8);  // At least two failed first stage both iterations.
 
   nvMolKit::PinnedHostVector<int16_t> failuresScratch;
-  auto failureCounts = driver.getFailures(failuresScratch);
+  auto                                failureCounts = driver.getFailures(failuresScratch);
   EXPECT_EQ(failureCounts.size(), 2);
 
   auto stage0Failures = failureCounts[0];
