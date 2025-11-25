@@ -90,7 +90,9 @@ TEST(EtkdgCoordGenTest, TestGenerateInitialCoords) {
   ASSERT_EQ(driver.iterationsComplete(), 2);
   EXPECT_GT(driver.numConfsFinished(), 0);  // Statistically likely at least one conformer finished.
   EXPECT_LE(driver.numConfsFinished(), 8);  // At least two failed first stage both iterations.
-  auto failureCounts = driver.getFailures();
+
+  nvMolKit::PinnedHostVector<int16_t> failuresScratch;
+  auto                                failureCounts = driver.getFailures(failuresScratch);
   EXPECT_EQ(failureCounts.size(), 2);
 
   auto stage0Failures = failureCounts[0];

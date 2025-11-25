@@ -213,7 +213,8 @@ TEST_P(ETKDGMinimizeSingleMolTestFixture, FirstMinimizeStageBFGSTest) {
   EXPECT_EQ(driver.numConfsFinished(), 1);
   EXPECT_EQ(driver.iterationsComplete(), 1);
 
-  auto failureCounts = driver.getFailures();
+  nvMolKit::PinnedHostVector<int16_t> failuresScratch;
+  auto                                failureCounts = driver.getFailures(failuresScratch);
   EXPECT_EQ(failureCounts.size(), 1);                      // One stage
   EXPECT_THAT(failureCounts[0], testing::ElementsAre(0));  // FirstMinimizeStage
 
@@ -246,7 +247,8 @@ TEST_P(ETKDGMinimizeSingleMolTestFixture, FourthDimMinimizeStageBFGSTest) {
   EXPECT_EQ(driver.numConfsFinished(), 1);
   EXPECT_EQ(driver.iterationsComplete(), 1);
 
-  auto failureCounts = driver.getFailures();
+  nvMolKit::PinnedHostVector<int16_t> failuresScratch;
+  auto                                failureCounts = driver.getFailures(failuresScratch);
   EXPECT_EQ(failureCounts.size(), 1);                      // One stage
   EXPECT_THAT(failureCounts[0], testing::ElementsAre(0));  // FourthDimMinimizeStage
 
@@ -291,7 +293,8 @@ TEST_P(ETKDGMinimizeSingleMolTestFixture, FullMinimizationPipelineBFGSTest) {
   EXPECT_EQ(driver.numConfsFinished(), 1);
   EXPECT_EQ(driver.iterationsComplete(), 1);
 
-  auto failureCounts = driver.getFailures();
+  nvMolKit::PinnedHostVector<int16_t> failuresScratch;
+  auto                                failureCounts = driver.getFailures(failuresScratch);
   EXPECT_EQ(failureCounts.size(), 2);                      // Two stages
   EXPECT_THAT(failureCounts[0], testing::ElementsAre(0));  // FirstMinimizeStage
   EXPECT_THAT(failureCounts[1], testing::ElementsAre(0));  // FourthDimMinimizeStage
@@ -313,7 +316,11 @@ TEST_P(ETKDGMinimizeSingleMolTestFixture, FirstPartETKDGPipelineBFGSTest) {
 
   // Create stages in order: coordgen -> first minimize BFGS -> fourthdim BFGS
   std::vector<std::unique_ptr<ETKDGStage>> stages;
-  stages.push_back(std::make_unique<nvMolKit::detail::ETKDGCoordGenRDKitStage>(embedParam_, mols_, eargs_));
+  stages.push_back(std::make_unique<nvMolKit::detail::ETKDGCoordGenRDKitStage>(embedParam_,
+                                                                               mols_,
+                                                                               eargs_,
+                                                                               positionsScratch_,
+                                                                               activeScratch_));
   auto  firstStage    = std::make_unique<nvMolKit::detail::DistGeomMinimizeStage>(mols_,
                                                                               eargs_,
                                                                               embedParam_,
@@ -345,7 +352,8 @@ TEST_P(ETKDGMinimizeSingleMolTestFixture, FirstPartETKDGPipelineBFGSTest) {
   EXPECT_EQ(driver.numConfsFinished(), 1);
   EXPECT_LE(driver.iterationsComplete(), 2);  // Allow for 1 failure.
 
-  auto failureCounts = driver.getFailures();
+  nvMolKit::PinnedHostVector<int16_t> failuresScratch;
+  auto                                failureCounts = driver.getFailures(failuresScratch);
   EXPECT_EQ(failureCounts.size(), 3);                                              // Three stages
   EXPECT_THAT(failureCounts[0], testing::Each(0));                                 // CoordGenStage
   EXPECT_THAT(failureCounts[1], testing::Each(testing::Le(maxFailedIterations)));  // FirstMinimizeStage
@@ -441,7 +449,8 @@ TEST_P(ETKDGMinimizeMultiMolDiverseTestFixture, FirstMinimizeStageBFGSTest) {
   stagePtr->molSystemDevice.energyOuts.copyToHost(finalEnergies);
 
   // Get failure counts
-  auto failureCounts = driver.getFailures();
+  nvMolKit::PinnedHostVector<int16_t> failuresScratch;
+  auto                                failureCounts = driver.getFailures(failuresScratch);
   EXPECT_EQ(failureCounts.size(), 1);                                              // One stage
   EXPECT_THAT(failureCounts[0], testing::Each(testing::Le(maxFailedIterations)));  // FirstMinimizeStage
 
@@ -478,7 +487,8 @@ TEST_P(ETKDGMinimizeMultiMolDiverseTestFixture, FourthDimMinimizeStageBFGSTest) 
   EXPECT_EQ(driver.numConfsFinished(), 5);
   EXPECT_EQ(driver.iterationsComplete(), 1);
 
-  auto failureCounts = driver.getFailures();
+  nvMolKit::PinnedHostVector<int16_t> failuresScratch;
+  auto                                failureCounts = driver.getFailures(failuresScratch);
   EXPECT_EQ(failureCounts.size(), 1);               // One stage
   EXPECT_THAT(failureCounts[0], testing::Each(0));  // FourthDimMinimizeStage
 
@@ -522,7 +532,8 @@ TEST_P(ETKDGMinimizeMultiMolDiverseTestFixture, FullMinimizationPipelineBFGSTest
   firstStagePtr->molSystemDevice.energyOuts.copyToHost(finalEnergies);
 
   // Get failure counts
-  auto failureCounts = driver.getFailures();
+  nvMolKit::PinnedHostVector<int16_t> failuresScratch;
+  auto                                failureCounts = driver.getFailures(failuresScratch);
   EXPECT_EQ(failureCounts.size(), 2);                                              // Two stages
   EXPECT_THAT(failureCounts[0], testing::Each(testing::Le(maxFailedIterations)));  // FirstMinimizeStage
   EXPECT_THAT(failureCounts[1], testing::Each(testing::Le(maxFailedIterations)));  // FourthDimMinimizeStage
@@ -548,7 +559,12 @@ TEST_P(ETKDGMinimizeMultiMolDiverseTestFixture, FirstPartETKDGPipelineBFGSTest) 
 
   // Create stages in order: coordgen -> first minimize BFGS -> fourthdim BFGS
   std::vector<std::unique_ptr<ETKDGStage>> stages;
-  stages.push_back(std::make_unique<nvMolKit::detail::ETKDGCoordGenRDKitStage>(embedParam_, mols_, eargs_));
+
+  stages.push_back(std::make_unique<nvMolKit::detail::ETKDGCoordGenRDKitStage>(embedParam_,
+                                                                               mols_,
+                                                                               eargs_,
+                                                                               positionsScratch_,
+                                                                               activeScratch_));
   auto  firstStage    = std::make_unique<nvMolKit::detail::DistGeomMinimizeStage>(mols_,
                                                                               eargs_,
                                                                               embedParam_,
@@ -570,7 +586,8 @@ TEST_P(ETKDGMinimizeMultiMolDiverseTestFixture, FirstPartETKDGPipelineBFGSTest) 
   // Create and run driver
   ETKDGDriver driver(std::make_unique<ETKDGContext>(std::move(context_)), std::move(stages));
   driver.run(3);
-  auto failureCounts = driver.getFailures();
+  nvMolKit::PinnedHostVector<int16_t> failuresScratch;
+  auto                                failureCounts = driver.getFailures(failuresScratch);
 
   // Get final energies from the first stage
   std::vector<double> finalEnergies(firstStagePtr->molSystemDevice.energyOuts.size());

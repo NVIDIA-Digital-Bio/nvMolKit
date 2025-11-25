@@ -267,7 +267,8 @@ TEST_P(ETKStageSingleMolTestFixture, MinimizeCompare) {
   EXPECT_EQ(driver.numConfsFinished(), 1);
   EXPECT_EQ(driver.iterationsComplete(), 1);
 
-  const auto failureCounts = driver.getFailures();
+  nvMolKit::PinnedHostVector<int16_t> failuresScratch;
+  const auto                          failureCounts = driver.getFailures(failuresScratch);
   EXPECT_EQ(failureCounts.size(), 1);                      // One stage
   EXPECT_THAT(failureCounts[0], testing::ElementsAre(0));  // FirstMinimizeStage
 
@@ -361,7 +362,8 @@ TEST_P(ETKStageMultiMolTestFixture, MinimizeCompare) {
   // Check other results first
   ASSERT_EQ(driver.iterationsComplete(), 1);
 
-  const auto failureCounts = driver.getFailures();
+  nvMolKit::PinnedHostVector<int16_t> failuresScratch;
+  const auto                          failureCounts = driver.getFailures(failuresScratch);
   ASSERT_EQ(failureCounts.size(), 1);  // One stage
 
   // Minimize the molecules on the CPU to compare results.

@@ -21,6 +21,7 @@
 
 #include "coord_gen.h"
 #include "etkdg_impl.h"
+#include "host_vector.h"
 
 namespace nvMolKit {
 
@@ -45,6 +46,8 @@ class ETKDGCoordGenRDKitStage final : public ETKDGStage {
   ETKDGCoordGenRDKitStage(const RDKit::DGeomHelpers::EmbedParameters& params,
                           const std::vector<const RDKit::ROMol*>&     mols,
                           const std::vector<EmbedArgs>&               eargs,
+                          PinnedHostVector<double>&                   positionsScratch,
+                          PinnedHostVector<uint8_t>&                  activeScratch,
                           cudaStream_t                                stream = nullptr);
   ~ETKDGCoordGenRDKitStage() override = default;
 
@@ -55,6 +58,8 @@ class ETKDGCoordGenRDKitStage final : public ETKDGStage {
   const RDKit::DGeomHelpers::EmbedParameters& params_;
   const std::vector<const RDKit::ROMol*>&     mols_;
   const std::vector<EmbedArgs>&               eargs_;
+  PinnedHostVector<double>&                   positionsScratch_;
+  PinnedHostVector<uint8_t>&                  activeScratch_;
   cudaStream_t                                stream_;
 };
 
