@@ -106,7 +106,8 @@ void allPassChecks(const ETKDGDriver& driver, int expectedExceptions = 0) {
   EXPECT_EQ(driver.numConfsFinished(), wantNumConfsParsedMMFF - expectedExceptions);
   EXPECT_EQ(driver.iterationsComplete(), 1);
 
-  const auto failureCounts = driver.getFailures();
+  nvMolKit::PinnedHostVector<int16_t> failuresScratch;
+  const auto                          failureCounts = driver.getFailures(failuresScratch);
   EXPECT_EQ(failureCounts.size(), 1);  // One stage
 
   const auto totalFailures =

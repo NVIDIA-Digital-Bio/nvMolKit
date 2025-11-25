@@ -93,7 +93,8 @@ TEST(ETKDGDriverEdgeCaseTest, SingleConformer) {
   EXPECT_EQ(driver.numConfsFinished(), 1);
   EXPECT_EQ(driver.iterationsComplete(), 3);
 
-  auto failureCounts = driver.getFailures();
+  nvMolKit::PinnedHostVector<int16_t> failuresScratch;
+  const auto                          failureCounts = driver.getFailures(failuresScratch);
   EXPECT_EQ(failureCounts.size(), 2);
   EXPECT_THAT(failureCounts[0], testing::ElementsAre(1));
   EXPECT_THAT(failureCounts[1], testing::ElementsAre(1));
@@ -137,7 +138,8 @@ TEST_F(ETKDGDriverTest, SingleStageAllPassFirstIteration) {
   EXPECT_EQ(driver.numConfsFinished(), 4);
   EXPECT_EQ(driver.iterationsComplete(), 1);
 
-  auto failureCounts = driver.getFailures();
+  nvMolKit::PinnedHostVector<int16_t> failuresScratch;
+  const auto                          failureCounts = driver.getFailures(failuresScratch);
   EXPECT_EQ(failureCounts.size(), 1);
   EXPECT_THAT(failureCounts[0], testing::ElementsAre(0, 0, 0, 0));
   auto completed = driver.completedConformers();
@@ -164,7 +166,8 @@ TEST_F(ETKDGDriverTest, SingleStageAllPassSecondIteration) {
   EXPECT_EQ(driver.numConfsFinished(), 4);
   EXPECT_EQ(driver.iterationsComplete(), 2);
 
-  auto failureCounts = driver.getFailures();
+  nvMolKit::PinnedHostVector<int16_t> failuresScratch;
+  const auto                          failureCounts = driver.getFailures(failuresScratch);
   EXPECT_EQ(failureCounts.size(), 1);
   EXPECT_THAT(failureCounts[0], testing::ElementsAre(1, 1, 1, 1));
   auto completed = driver.completedConformers();
@@ -193,7 +196,8 @@ TEST_F(ETKDGDriverTest, SingleStageVariablePass) {
   EXPECT_EQ(driver.numConfsFinished(), 4);
   EXPECT_EQ(driver.iterationsComplete(), 4);
 
-  auto failureCounts = driver.getFailures();
+  nvMolKit::PinnedHostVector<int16_t> failuresScratch;
+  const auto                          failureCounts = driver.getFailures(failuresScratch);
   EXPECT_EQ(failureCounts.size(), 1);
   EXPECT_THAT(failureCounts[0], testing::ElementsAre(0, 1, 2, 3));
   auto completed = driver.completedConformers();
@@ -222,7 +226,8 @@ TEST_F(ETKDGDriverTest, SingleStageSomeNotPassed) {
   EXPECT_EQ(driver.numConfsFinished(), 2);
   EXPECT_EQ(driver.iterationsComplete(), 5);
 
-  auto failureCounts = driver.getFailures();
+  nvMolKit::PinnedHostVector<int16_t> failuresScratch;
+  const auto                          failureCounts = driver.getFailures(failuresScratch);
   EXPECT_EQ(failureCounts.size(), 1);
   EXPECT_THAT(failureCounts[0], testing::ElementsAre(0, 1, 5, 5));
 }
@@ -267,7 +272,8 @@ TEST_F(ETKDGDriverTest, MultiStageAllFail) {
   EXPECT_EQ(driver.numConfsFinished(), 0);
   EXPECT_EQ(driver.iterationsComplete(), 5);
 
-  auto failureCounts = driver.getFailures();
+  nvMolKit::PinnedHostVector<int16_t> failuresScratch;
+  const auto                          failureCounts = driver.getFailures(failuresScratch);
   EXPECT_EQ(failureCounts.size(), 3);
   EXPECT_THAT(failureCounts[0], testing::ElementsAre(0, 0, 0, 0));
   EXPECT_THAT(failureCounts[1], testing::ElementsAre(5, 5, 5, 5));
@@ -322,7 +328,8 @@ TEST_F(ETKDGDriverTest, MultiStageMixed) {
   EXPECT_EQ(driver.numConfsFinished(), 2);
   EXPECT_EQ(driver.iterationsComplete(), 5);
 
-  auto failureCounts = driver.getFailures();
+  nvMolKit::PinnedHostVector<int16_t> failuresScratch;
+  const auto                          failureCounts = driver.getFailures(failuresScratch);
   EXPECT_EQ(failureCounts.size(), 3);
   EXPECT_THAT(failureCounts[0], testing::ElementsAre(0, 0, 2, 1));
   EXPECT_THAT(failureCounts[1], testing::ElementsAre(5, 0, 2, 2));
@@ -389,7 +396,12 @@ TEST_F(ETKDGPipelineUpdateConformersTestFixture, UpdateConformersStage) {
 
   // Create and execute the stage
   std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<Conformer>>> conformers;
-  nvMolKit::detail::ETKDGUpdateConformersStage stage(mols_, eargs, conformers, nullptr, nullptr, -1);
+  nvMolKit::PinnedHostVector<double>                                               positionsScratch(totalAtoms * 3);
+  nvMolKit::PinnedHostVector<uint8_t>                                              activeScratch(mols_.size());
+
+  nvMolKit::detail::ETKDGUpdateConformersStage
+    stage(mols_, eargs, conformers, positionsScratch, activeScratch, nullptr, nullptr, -1);
+
   stage.execute(context);
   for (size_t i = 0; i < mols_.size(); ++i) {
     auto it = conformers.find(mols_[i]);
@@ -451,7 +463,12 @@ TEST_F(ETKDGPipelineUpdateConformersTestFixture, UpdateConformersStageWithInacti
   // Create and execute the stage
   auto                                                                             params = DGeomHelpers::ETKDGv3;
   std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<Conformer>>> conformers;
-  nvMolKit::detail::ETKDGUpdateConformersStage stage(mols_, eargs, conformers, nullptr, nullptr, -1);
+  // Create scratch buffers for the stage
+  nvMolKit::PinnedHostVector<double>                                               positionsScratch(totalAtoms * 3);
+  nvMolKit::PinnedHostVector<uint8_t>                                              activeScratch(mols_.size());
+
+  nvMolKit::detail::ETKDGUpdateConformersStage
+    stage(mols_, eargs, conformers, positionsScratch, activeScratch, nullptr, nullptr, -1);
   stage.execute(context);
   for (size_t i = 0; i < mols_.size(); ++i) {
     if (i == 1) {

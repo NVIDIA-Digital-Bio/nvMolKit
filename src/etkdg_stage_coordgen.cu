@@ -70,10 +70,14 @@ void ETKDGCoordGenStage::execute(ETKDGContext& ctx) {
 ETKDGCoordGenRDKitStage::ETKDGCoordGenRDKitStage(const RDKit::DGeomHelpers::EmbedParameters& params,
                                                  const std::vector<const RDKit::ROMol*>&     mols,
                                                  const std::vector<EmbedArgs>&               eargs,
+                                                 PinnedHostVector<double>&                   positionsScratch,
+                                                 PinnedHostVector<uint8_t>&                  activeScratch,
                                                  cudaStream_t                                stream)
     : params_(params),
       mols_(mols),
       eargs_(eargs),
+      positionsScratch_(positionsScratch),
+      activeScratch_(activeScratch),
       stream_(stream) {}
 
 void ETKDGCoordGenRDKitStage::execute(ETKDGContext& ctx) {
@@ -81,10 +85,19 @@ void ETKDGCoordGenRDKitStage::execute(ETKDGContext& ctx) {
   if (numSystems == 0) {
     return;
   }
-  std::vector<uint8_t> activeHost(ctx.activeThisStage.size());
-  ctx.activeThisStage.copyToHost(activeHost);
-  std::vector<double> hostPositions(ctx.systemHost.atomStarts.back() * eargs_[0].dim);
-  auto&               rng = getDoubleRandomSource();
+  const size_t requiredActiveSize    = ctx.activeThisStage.size();
+  const size_t requiredPositionsSize = ctx.systemHost.atomStarts.back() * eargs_[0].dim;
+
+  if (activeScratch_.size() < requiredActiveSize) {
+    activeScratch_.resize(requiredActiveSize);
+  }
+  if (positionsScratch_.size() < requiredPositionsSize) {
+    positionsScratch_.resize(requiredPositionsSize);
+  }
+
+  ctx.activeThisStage.copyToHost(activeScratch_.data(), requiredActiveSize);
+
+  auto& rng = getDoubleRandomSource();
 
   double boxSize;
   if (params_.boxSizeMult > 0) {
@@ -95,22 +108,22 @@ void ETKDGCoordGenRDKitStage::execute(ETKDGContext& ctx) {
   cudaStreamSynchronize(stream_);  // for status check
   // First pass: Generate coordinates for each active molecule
   for (size_t molIdx = 0; molIdx < ctx.systemHost.atomStarts.size() - 1; ++molIdx) {
-    if (!activeHost[molIdx]) {
+    if (!activeScratch_[molIdx]) {
       continue;
     }
     for (size_t atomIdx = 0; atomIdx < mols_[molIdx]->getNumAtoms(); ++atomIdx) {
       for (int dim = 0; dim < eargs_[molIdx].dim; ++dim) {
         // Generate random position
-        double    pos      = (rng() - 0.5) * boxSize;
-        const int idx      = (ctx.systemHost.atomStarts[molIdx] + atomIdx) * eargs_[molIdx].dim + dim;
-        hostPositions[idx] = pos;
+        double    pos          = (rng() - 0.5) * boxSize;
+        const int idx          = (ctx.systemHost.atomStarts[molIdx] + atomIdx) * eargs_[molIdx].dim + dim;
+        positionsScratch_[idx] = pos;
       }
     }
   }
 
   // Update device positions in one go
-  ctx.systemDevice.positions.resize(hostPositions.size());
-  ctx.systemDevice.positions.copyFromHost(hostPositions);
+  ctx.systemDevice.positions.resize(requiredPositionsSize);
+  ctx.systemDevice.positions.copyFromHost(positionsScratch_.data(), requiredPositionsSize);
 }
 
 }  // namespace detail

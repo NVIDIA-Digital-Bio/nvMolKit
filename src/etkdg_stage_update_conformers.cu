@@ -24,31 +24,39 @@ ETKDGUpdateConformersStage::ETKDGUpdateConformersStage(
   const std::vector<RDKit::ROMol*>&                                                        mols,
   const std::vector<EmbedArgs>&                                                            eargs,
   std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<RDKit::Conformer>>>& conformers,
+  PinnedHostVector<double>&                                                                positionsScratch,
+  PinnedHostVector<uint8_t>&                                                               activeScratch,
   cudaStream_t                                                                             stream,
   std::mutex*                                                                              conformer_mutex,
   const int                                                                                maxConformersPerMol)
     : mols_(mols),
       eargs_(eargs),
       conformers_(conformers),
+      positionsScratch_(positionsScratch),
+      activeScratch_(activeScratch),
       stream_(stream),
       conformer_mutex_(conformer_mutex),
       maxConformersPerMol_(maxConformersPerMol) {}
 
 void ETKDGUpdateConformersStage::execute(ETKDGContext& ctx) {
   // Copy positions from device to host
-  std::vector<double> hostPositions;
-  hostPositions.resize(ctx.systemDevice.positions.size());
-  ctx.systemDevice.positions.copyToHost(hostPositions);
+  const size_t requiredPositionsSize = ctx.systemDevice.positions.size();
+  const size_t requiredActiveSize    = ctx.activeThisStage.size();
 
-  // Copy active this stage from device to host
-  std::vector<uint8_t> hostActiveThisStage;
-  hostActiveThisStage.resize(ctx.activeThisStage.size());
-  ctx.activeThisStage.copyToHost(hostActiveThisStage);
+  if (positionsScratch_.size() < requiredPositionsSize) {
+    positionsScratch_.resize(requiredPositionsSize);
+  }
+  if (activeScratch_.size() < requiredActiveSize) {
+    activeScratch_.resize(requiredActiveSize);
+  }
+
+  ctx.systemDevice.positions.copyToHost(positionsScratch_.data(), requiredPositionsSize);
+  ctx.activeThisStage.copyToHost(activeScratch_.data(), requiredActiveSize);
   cudaStreamSynchronize(stream_);
 
   for (size_t i = 0; i < mols_.size(); ++i) {
     // Skip if not active this stage
-    if (hostActiveThisStage[i] != 1) {
+    if (activeScratch_[i] != 1) {
       continue;
     }
 
@@ -61,7 +69,7 @@ void ETKDGUpdateConformersStage::execute(ETKDGContext& ctx) {
 
     for (int j = 0; j < nAtoms; ++j) {
       const int       posIdx = startPosIdx + j * dim;
-      RDGeom::Point3D pos(hostPositions[posIdx], hostPositions[posIdx + 1], hostPositions[posIdx + 2]);
+      RDGeom::Point3D pos(positionsScratch_[posIdx], positionsScratch_[posIdx + 1], positionsScratch_[posIdx + 2]);
       newConf->setAtomPos(j, pos);
     }
 
