@@ -29,6 +29,7 @@
 #include "etkdg_stage_fourthdimminimization.h"
 #include "etkdg_stage_stereochem_checks.h"
 #include "etkdg_stage_update_conformers.h"
+#include "host_vector.h"
 #include "nvtx.h"
 #include "openmp_helpers.h"
 
@@ -186,6 +187,12 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
 #pragma omp parallel num_threads(numThreadsGpuBatching) default(shared)
   {
     try {
+      // Pinned reusable buffers for common copies.
+      PinnedHostVector<double>                positionsScratch;
+      PinnedHostVector<uint8_t>               activeScratch;
+      PinnedHostVector<int16_t>               failuresScratch;
+      detail::ETKDGDriver driver;
+
       while (!workComplete.load()) {
         // Dispatch work for this thread
         std::vector<int> molIds = Scheduler.dispatch(effectiveBatchSize);
@@ -231,7 +238,7 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
         // Create coordinate generation stage based on parameter
         // FIXME: arguments still involve useRDKitcoordgen.
         stages.push_back(
-          std::make_unique<detail::ETKDGCoordGenRDKitStage>(paramsCopy, constMolPtrs, batchEargs, streamPtr));
+          std::make_unique<detail::ETKDGCoordGenRDKitStage>(paramsCopy, constMolPtrs, batchEargs, positionsScratch, activeScratch, streamPtr));
 
         // First minimize, then first round of chiral checks.
         stages.push_back(
@@ -276,14 +283,15 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
         stages.push_back(std::make_unique<detail::ETKDGUpdateConformersStage>(batchMolsWithConfs,
                                                                               batchEargs,
                                                                               conformers,
+                                                                              positionsScratch,
+                                                                              activeScratch,
                                                                               streamPtr,
                                                                               &conformer_mutex,
                                                                               confsPerMolecule));
 
         // Create and run driver
         auto                context_ptr = std::make_unique<detail::ETKDGContext>(std::move(context));
-        detail::ETKDGDriver driver(std::move(context_ptr), std::move(stages), debugMode, streamPtr, &allFinished);
-        stageSetupRange.pop();
+        driver.reset(std::move(context_ptr), std::move(stages), debugMode, streamPtr, &allFinished);        stageSetupRange.pop();
 
         ScopedNvtxRange runRange("ETKDG execute");
         driver.run(1);
@@ -294,7 +302,7 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
 
         // Handle failures if requested
         if (failures != nullptr) {
-          auto batchFailures = driver.getFailures();
+          auto batchFailures = driver.getFailures(failuresScratch);
 
           const std::lock_guard<std::mutex> failureLock(failure_mutex);
           // Initialize failures structure on first batch (outer vector is per stage, inner per conformer)

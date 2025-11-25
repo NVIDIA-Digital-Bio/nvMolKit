@@ -85,7 +85,7 @@ void launchCollectAndFilterFailuresKernel(ETKDGContext& context, const int stage
   cudaCheckError(cudaGetLastError());
 }
 
-int launchGetFinishedKernels(ETKDGContext& context, const int iteration, cudaStream_t stream) {
+int launchGetFinishedKernels(ETKDGContext& context, const int iteration, int* finishedCountHost, cudaStream_t stream) {
   const int numTerms = context.nTotalSystems;
   int       gridSize = (numTerms + kBlockSize - 1) / kBlockSize;
   context.countFinishedThisIteration.memSet(0);
@@ -95,10 +95,9 @@ int launchGetFinishedKernels(ETKDGContext& context, const int iteration, cudaStr
                                                           context.finishedOnIteration.data(),
                                                           context.countFinishedThisIteration.data());
   cudaCheckError(cudaGetLastError());
-  int result;
-  context.countFinishedThisIteration.get(result);
+  cudaCheckError(cudaMemcpyAsync(finishedCountHost, context.countFinishedThisIteration.data(), sizeof(int), cudaMemcpyDeviceToHost, stream));
   cudaStreamSynchronize(stream);
-  return result;
+  return *finishedCountHost;
 }
 
 void launchSetRunFilterForIterationKernel(ETKDGContext& context, cudaStream_t stream) {

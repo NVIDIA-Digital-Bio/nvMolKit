@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "etkdg_impl.h"
+#include "host_vector.h"
 
 namespace nvMolKit {
 namespace detail {
@@ -31,6 +32,8 @@ class ETKDGUpdateConformersStage final : public ETKDGStage {
     const std::vector<RDKit::ROMol*>&                                                        mols,
     const std::vector<EmbedArgs>&                                                            eargs,
     std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<RDKit::Conformer>>>& conformers,
+    PinnedHostVector<double>&                                                                positionsScratch,
+PinnedHostVector<uint8_t>&                                                               activeScratch,
     cudaStream_t                                                                             stream          = nullptr,
     std::mutex*                                                                              conformer_mutex = nullptr,
     int                                                                                      maxConformersPerMol = -1);
@@ -42,6 +45,8 @@ class ETKDGUpdateConformersStage final : public ETKDGStage {
   const std::vector<RDKit::ROMol*>&                                                        mols_;
   const std::vector<EmbedArgs>&                                                            eargs_;
   std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<RDKit::Conformer>>>& conformers_;
+  PinnedHostVector<double>&                                                                positionsScratch_;
+  PinnedHostVector<uint8_t>&                                                               activeScratch_;
   cudaStream_t                                                                             stream_;
   std::mutex*                                                                              conformer_mutex_;
   int                                                                                      maxConformersPerMol_;
