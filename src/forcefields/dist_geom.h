@@ -383,7 +383,7 @@ void addMoleculeToMolecularSystem3D(const Energy3DForceContribsHost& contribs,
 void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
                         const std::vector<double>&     positions,
                         BatchedMolecularSystemHost&    molSystem,
-                        int                      dimension,
+                        int                            dimension,
                         std::vector<int>&              ctxAtomStarts,
                         std::vector<double>&           ctxPositions);
 

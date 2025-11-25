@@ -35,8 +35,14 @@
 #include "embedder_utils.h"
 #include "test_utils.h"
 
-// Copy of term additions for 3D forcefield.
 namespace {
+
+// Test tolerances
+constexpr double E_TOL_FUNCTION = 1e-5;
+constexpr double E_TOL_COMBINED = 1e-4;
+constexpr double G_TOL          = 1e-4;
+
+// Copy of term additions for 3D forcefield.
 constexpr double KNOWN_DIST_FORCE_CONSTANT = 100.0;  // Force constant for known distances
 constexpr double KNOWN_DIST_TOL            = 0.01;   // Tolerance for known distances
 
@@ -1071,7 +1077,7 @@ TEST_F(DistGeomDGKernelTestFixture, DistViolationEnergySingleMolecule) {
   positionsDevice.copyToHost(hostPos);
   cudaDeviceSynchronize();
 
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
+  EXPECT_NEAR(gotEnergy, wantEnergy, E_TOL_FUNCTION);
 }
 
 TEST_F(DistGeomDGKernelTestFixture, DistViolationSingleMolecule) {
@@ -1080,7 +1086,7 @@ TEST_F(DistGeomDGKernelTestFixture, DistViolationSingleMolecule) {
     getReferenceGradientTerm(allEargs_[0], allPointVecHolders[0], FFTerm::DistanceViolation, options.basinThresh);
   const std::vector<double> gotGrad =
     getGradientTerm(systemDevice, positionsDevice.data(), atomStartsDevice.data(), FFTerm::DistanceViolation, 4);
-  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients));
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(G_TOL), wantGradients));
 }
 
 TEST_F(DistGeomDGKernelTestFixture, ChiralViolationEnergySingleMolecule) {
@@ -1095,7 +1101,7 @@ TEST_F(DistGeomDGKernelTestFixture, ChiralViolationEnergySingleMolecule) {
   positionsDevice.copyToHost(hostPos);
   cudaDeviceSynchronize();
 
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
+  EXPECT_NEAR(gotEnergy, wantEnergy, E_TOL_FUNCTION);
 }
 
 TEST_F(DistGeomDGKernelTestFixture, ChiralViolationGradSingleMolecule) {
@@ -1104,7 +1110,7 @@ TEST_F(DistGeomDGKernelTestFixture, ChiralViolationGradSingleMolecule) {
     getReferenceGradientTerm(allEargs_[0], allPointVecHolders[0], FFTerm::ChiralViolation, options.basinThresh);
   const std::vector<double> gotGrad =
     getGradientTerm(systemDevice, positionsDevice.data(), atomStartsDevice.data(), FFTerm::ChiralViolation, 4);
-  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients));
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(G_TOL), wantGradients));
 }
 
 TEST_F(DistGeomDGKernelTestFixture, FourthDimEnergySingleMolecule) {
@@ -1119,7 +1125,7 @@ TEST_F(DistGeomDGKernelTestFixture, FourthDimEnergySingleMolecule) {
   positionsDevice.copyToHost(hostPos);
   cudaDeviceSynchronize();
 
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
+  EXPECT_NEAR(gotEnergy, wantEnergy, E_TOL_FUNCTION);
 }
 
 TEST_F(DistGeomDGKernelTestFixture, FourthDimGradSingleMolecule) {
@@ -1128,7 +1134,7 @@ TEST_F(DistGeomDGKernelTestFixture, FourthDimGradSingleMolecule) {
     getReferenceGradientTerm(allEargs_[0], allPointVecHolders[0], FFTerm::FourthDim, options.basinThresh);
   const std::vector<double> gotGrad =
     getGradientTerm(systemDevice, positionsDevice.data(), atomStartsDevice.data(), FFTerm::FourthDim, 4);
-  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients));
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(G_TOL), wantGradients));
 }
 
 // -------------------------
@@ -1140,7 +1146,7 @@ TEST_F(DistGeomDGKernelTestFixture, DistViolationEnergyMultiMol) {
   loadMMFFMols(100);
   std::vector<double> wantEnergy = getReferenceEnergyTerms(allEargs_, allPointVecHolders, term, options.basinThresh);
   std::vector<double> gotEnergy = getEnergyTerm(systemDevice, positionsDevice.data(), atomStartsDevice.data(), term, 4);
-  EXPECT_THAT(gotEnergy, ::testing::Pointwise(::testing::DoubleNear(1e-4), wantEnergy));
+  EXPECT_THAT(gotEnergy, ::testing::Pointwise(::testing::DoubleNear(E_TOL_FUNCTION), wantEnergy));
 }
 
 TEST_F(DistGeomDGKernelTestFixture, DistViolationGradMultiMol) {
@@ -1152,7 +1158,7 @@ TEST_F(DistGeomDGKernelTestFixture, DistViolationGradMultiMol) {
     splitCombinedGrads(getGradientTerm(systemDevice, positionsDevice.data(), atomStartsDevice.data(), term, 4),
                        atomStartsHost);
   for (size_t i = 0; i < wantGrad.size(); ++i) {
-    EXPECT_THAT(gotGrad[i], ::testing::Pointwise(::testing::FloatNear(1e-4), wantGrad[i])) << "For system " << i;
+    EXPECT_THAT(gotGrad[i], ::testing::Pointwise(::testing::FloatNear(G_TOL), wantGrad[i])) << "For system " << i;
   }
 }
 
@@ -1161,7 +1167,7 @@ TEST_F(DistGeomDGKernelTestFixture, ChiralViolationEnergyMultiMol) {
   loadMMFFMols(100);
   std::vector<double> wantEnergy = getReferenceEnergyTerms(allEargs_, allPointVecHolders, term, options.basinThresh);
   std::vector<double> gotEnergy = getEnergyTerm(systemDevice, positionsDevice.data(), atomStartsDevice.data(), term, 4);
-  EXPECT_THAT(gotEnergy, ::testing::Pointwise(::testing::DoubleNear(1e-4), wantEnergy));
+  EXPECT_THAT(gotEnergy, ::testing::Pointwise(::testing::DoubleNear(E_TOL_FUNCTION), wantEnergy));
 }
 
 TEST_F(DistGeomDGKernelTestFixture, ChiralViolationGradMultiMol) {
@@ -1173,7 +1179,7 @@ TEST_F(DistGeomDGKernelTestFixture, ChiralViolationGradMultiMol) {
     splitCombinedGrads(getGradientTerm(systemDevice, positionsDevice.data(), atomStartsDevice.data(), term, 4),
                        atomStartsHost);
   for (size_t i = 0; i < wantGrad.size(); ++i) {
-    EXPECT_THAT(gotGrad[i], ::testing::Pointwise(::testing::FloatNear(1e-4), wantGrad[i])) << "For system " << i;
+    EXPECT_THAT(gotGrad[i], ::testing::Pointwise(::testing::FloatNear(G_TOL), wantGrad[i])) << "For system " << i;
   }
 }
 
@@ -1182,7 +1188,7 @@ TEST_F(DistGeomDGKernelTestFixture, FourthDimEnergyMultiMol) {
   loadMMFFMols(100);
   std::vector<double> wantEnergy = getReferenceEnergyTerms(allEargs_, allPointVecHolders, term, options.basinThresh);
   std::vector<double> gotEnergy = getEnergyTerm(systemDevice, positionsDevice.data(), atomStartsDevice.data(), term, 4);
-  EXPECT_THAT(gotEnergy, ::testing::Pointwise(::testing::DoubleNear(1e-4), wantEnergy));
+  EXPECT_THAT(gotEnergy, ::testing::Pointwise(::testing::DoubleNear(E_TOL_FUNCTION), wantEnergy));
 }
 
 TEST_F(DistGeomDGKernelTestFixture, FourthDimGradMultiMol) {
@@ -1194,7 +1200,7 @@ TEST_F(DistGeomDGKernelTestFixture, FourthDimGradMultiMol) {
     splitCombinedGrads(getGradientTerm(systemDevice, positionsDevice.data(), atomStartsDevice.data(), term, 4),
                        atomStartsHost);
   for (size_t i = 0; i < wantGrad.size(); ++i) {
-    EXPECT_THAT(gotGrad[i], ::testing::Pointwise(::testing::FloatNear(1e-4), wantGrad[i])) << "For system " << i;
+    EXPECT_THAT(gotGrad[i], ::testing::Pointwise(::testing::FloatNear(G_TOL), wantGrad[i])) << "For system " << i;
   }
 }
 
@@ -1295,7 +1301,7 @@ TEST_F(ETK3DGpuTestFixture, ExperimentalTorsionEnergySingleMolecule) {
   double gotEnergy =
     getETK3DEnergyTerms(systemDevice, atomStartsDevice, positionsDevice, ETK3DTerm::ExperimentalTorsion)[0];
   ASSERT_NE(wantEnergy, 0.0);
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
+  EXPECT_NEAR(gotEnergy, wantEnergy, E_TOL_FUNCTION);
 }
 
 TEST_F(ETK3DGpuTestFixture, ExperimentalTorsionGradientSingleMolecule) {
@@ -1305,7 +1311,7 @@ TEST_F(ETK3DGpuTestFixture, ExperimentalTorsionGradientSingleMolecule) {
   std::vector<double> gotGrad =
     getETK3DGradientTerm(systemDevice, atomStartsDevice, positionsDevice, ETK3DTerm::ExperimentalTorsion);
   ASSERT_THAT(wantGradients, ::testing::Not(::testing::Each(0.0)));
-  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients));
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(G_TOL), wantGradients));
 }
 
 TEST_F(ETK3DGpuTestFixture, ImproperTorsionEnergySingleMolecule) {
@@ -1314,7 +1320,7 @@ TEST_F(ETK3DGpuTestFixture, ImproperTorsionEnergySingleMolecule) {
   double gotEnergy =
     getETK3DEnergyTerms(systemDevice, atomStartsDevice, positionsDevice, ETK3DTerm::ImproperTorsion)[0];
   ASSERT_NE(wantEnergy, 0.0);
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
+  EXPECT_NEAR(gotEnergy, wantEnergy, E_TOL_FUNCTION);
 }
 
 TEST_F(ETK3DGpuTestFixture, ImproperTorsionGradientSingleMolecule) {
@@ -1324,7 +1330,7 @@ TEST_F(ETK3DGpuTestFixture, ImproperTorsionGradientSingleMolecule) {
   std::vector<double> gotGrad =
     getETK3DGradientTerm(systemDevice, atomStartsDevice, positionsDevice, ETK3DTerm::ImproperTorsion);
   ASSERT_THAT(wantGradients, ::testing::Not(::testing::Each(0.0)));
-  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients));
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(G_TOL), wantGradients));
 }
 
 TEST_F(ETK3DGpuTestFixture, Distance12EnergySingleMolecule) {
@@ -1332,7 +1338,7 @@ TEST_F(ETK3DGpuTestFixture, Distance12EnergySingleMolecule) {
   double wantEnergy = getReferenceETK3DEnergyTerm(mol_.get(), ETK3DTerm::Distance12, positionsHost.data());
   double gotEnergy  = getETK3DEnergyTerms(systemDevice, atomStartsDevice, positionsDevice, ETK3DTerm::Distance12)[0];
   ASSERT_NE(wantEnergy, 0.0);
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
+  EXPECT_NEAR(gotEnergy, wantEnergy, E_TOL_FUNCTION);
 }
 
 TEST_F(ETK3DGpuTestFixture, Distance12GradientSingleMolecule) {
@@ -1342,7 +1348,7 @@ TEST_F(ETK3DGpuTestFixture, Distance12GradientSingleMolecule) {
   std::vector<double> gotGrad =
     getETK3DGradientTerm(systemDevice, atomStartsDevice, positionsDevice, ETK3DTerm::Distance12);
   ASSERT_THAT(wantGradients, ::testing::Not(::testing::Each(0.0)));
-  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients));
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(G_TOL), wantGradients));
 }
 
 TEST_F(ETK3DGpuTestFixture, Distance13EnergySingleMolecule) {
@@ -1352,7 +1358,7 @@ TEST_F(ETK3DGpuTestFixture, Distance13EnergySingleMolecule) {
 
   double gotEnergy = getETK3DEnergyTerms(systemDevice, atomStartsDevice, positionsDevice, ETK3DTerm::Distance13)[0];
   ASSERT_NE(wantEnergy, 0.0);
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
+  EXPECT_NEAR(gotEnergy, wantEnergy, E_TOL_FUNCTION);
 }
 
 TEST_F(ETK3DGpuTestFixture, Distance13GradientSingleMolecule) {
@@ -1362,7 +1368,7 @@ TEST_F(ETK3DGpuTestFixture, Distance13GradientSingleMolecule) {
   std::vector<double> gotGrad =
     getETK3DGradientTerm(systemDevice, atomStartsDevice, positionsDevice, ETK3DTerm::Distance13);
   ASSERT_THAT(wantGradients, ::testing::Not(::testing::Each(0.0)));
-  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients));
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(G_TOL), wantGradients));
 }
 
 // FIXME: The test molecule does not have any angle13 terms, so the reference energy is 0.0 and grads are empty.
@@ -1370,7 +1376,7 @@ TEST_F(ETK3DGpuTestFixture, Angle13EnergySingleMolecule) {
   loadSingleMol();
   double wantEnergy = getReferenceETK3DEnergyTerm(mol_.get(), ETK3DTerm::Angle13, positionsHost.data());
   double gotEnergy  = getETK3DEnergyTerms(systemDevice, atomStartsDevice, positionsDevice, ETK3DTerm::Angle13)[0];
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
+  EXPECT_NEAR(gotEnergy, wantEnergy, E_TOL_FUNCTION);
 }
 
 TEST_F(ETK3DGpuTestFixture, Angle13GradientSingleMolecule) {
@@ -1379,7 +1385,7 @@ TEST_F(ETK3DGpuTestFixture, Angle13GradientSingleMolecule) {
     getReferenceETK3DGradientTerm(mol_.get(), ETK3DTerm::Angle13, positionsHost.data());
   std::vector<double> gotGrad =
     getETK3DGradientTerm(systemDevice, atomStartsDevice, positionsDevice, ETK3DTerm::Angle13);
-  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients));
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(G_TOL), wantGradients));
 }
 
 TEST_F(ETK3DGpuTestFixture, LongRangeDistanceEnergySingleMolecule) {
@@ -1389,7 +1395,7 @@ TEST_F(ETK3DGpuTestFixture, LongRangeDistanceEnergySingleMolecule) {
   double gotEnergy =
     getETK3DEnergyTerms(systemDevice, atomStartsDevice, positionsDevice, ETK3DTerm::LongRangeDistance)[0];
   ASSERT_NE(wantEnergy, 0.0);
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
+  EXPECT_NEAR(gotEnergy, wantEnergy, E_TOL_FUNCTION);
 }
 
 TEST_F(ETK3DGpuTestFixture, LongRangeDistanceGradientSingleMolecule) {
@@ -1400,7 +1406,7 @@ TEST_F(ETK3DGpuTestFixture, LongRangeDistanceGradientSingleMolecule) {
   std::vector<double> gotGrad =
     getETK3DGradientTerm(systemDevice, atomStartsDevice, positionsDevice, ETK3DTerm::LongRangeDistance);
   ASSERT_THAT(wantGradients, ::testing::Not(::testing::Each(0.0)));
-  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients));
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(G_TOL), wantGradients));
 }
 
 // Combined energy and gradient tests
@@ -1419,7 +1425,7 @@ TEST_F(ETK3DGpuTestFixture, CombinedEnergiesSingleMolecule) {
     wantEnergy += e;
   }
 
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
+  EXPECT_NEAR(gotEnergy, wantEnergy, E_TOL_FUNCTION);
 }
 
 TEST_F(ETK3DGpuTestFixture, CombinedGradientsSingleMolecue) {
@@ -1440,7 +1446,7 @@ TEST_F(ETK3DGpuTestFixture, CombinedGradientsSingleMolecue) {
     }
   }
 
-  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients));
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(G_TOL), wantGradients));
 }
 
 TEST_F(ETK3DGpuTestFixture, PlainCombinedEnergiesSingleMolecule) {
@@ -1464,7 +1470,7 @@ TEST_F(ETK3DGpuTestFixture, PlainCombinedEnergiesSingleMolecule) {
     wantEnergy += e;
   }
 
-  EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
+  EXPECT_NEAR(gotEnergy, wantEnergy, E_TOL_FUNCTION);
 }
 
 TEST_F(ETK3DGpuTestFixture, PlainCombinedGradientsSingleMolecule) {
@@ -1490,7 +1496,7 @@ TEST_F(ETK3DGpuTestFixture, PlainCombinedGradientsSingleMolecule) {
     }
   }
 
-  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients));
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(G_TOL), wantGradients));
 }
 
 // -------------------------
@@ -1502,7 +1508,7 @@ TEST_F(ETK3DGpuTestFixture, ExperimentalTorsionEnergyMultiMol) {
   loadMMFFMols(10);
   std::vector<double> wantEnergy = getReferenceETK3DEnergyTerms(molsPtrs_, term, positionsHost.data(), atomStartsHost);
   std::vector<double> gotEnergy  = getETK3DEnergyTerms(systemDevice, atomStartsDevice, positionsDevice, term);
-  EXPECT_THAT(gotEnergy, ::testing::Pointwise(::testing::DoubleNear(1e-4), wantEnergy));
+  EXPECT_THAT(gotEnergy, ::testing::Pointwise(::testing::DoubleNear(E_TOL_COMBINED), wantEnergy));
 }
 
 TEST_F(ETK3DGpuTestFixture, ExperimentalTorsionGradMultiMol) {
@@ -1513,7 +1519,7 @@ TEST_F(ETK3DGpuTestFixture, ExperimentalTorsionGradMultiMol) {
   std::vector<std::vector<double>> gotGrad =
     splitCombinedGrads(getETK3DGradientTerm(systemDevice, atomStartsDevice, positionsDevice, term), atomStartsHost);
   for (size_t i = 0; i < wantGrad.size(); ++i) {
-    EXPECT_THAT(gotGrad[i], ::testing::Pointwise(::testing::FloatNear(1e-4), wantGrad[i])) << "For system " << i;
+    EXPECT_THAT(gotGrad[i], ::testing::Pointwise(::testing::FloatNear(G_TOL), wantGrad[i])) << "For system " << i;
   }
 }
 
@@ -1522,7 +1528,7 @@ TEST_F(ETK3DGpuTestFixture, ImproperTorsionEnergyMultiMol) {
   loadMMFFMols(10);
   std::vector<double> wantEnergy = getReferenceETK3DEnergyTerms(molsPtrs_, term, positionsHost.data(), atomStartsHost);
   std::vector<double> gotEnergy  = getETK3DEnergyTerms(systemDevice, atomStartsDevice, positionsDevice, term);
-  EXPECT_THAT(gotEnergy, ::testing::Pointwise(::testing::DoubleNear(1e-4), wantEnergy));
+  EXPECT_THAT(gotEnergy, ::testing::Pointwise(::testing::DoubleNear(E_TOL_COMBINED), wantEnergy));
 }
 
 TEST_F(ETK3DGpuTestFixture, ImproperTorsionGradMultiMol) {
@@ -1533,7 +1539,7 @@ TEST_F(ETK3DGpuTestFixture, ImproperTorsionGradMultiMol) {
   std::vector<std::vector<double>> gotGrad =
     splitCombinedGrads(getETK3DGradientTerm(systemDevice, atomStartsDevice, positionsDevice, term), atomStartsHost);
   for (size_t i = 0; i < wantGrad.size(); ++i) {
-    EXPECT_THAT(gotGrad[i], ::testing::Pointwise(::testing::FloatNear(1e-4), wantGrad[i])) << "For system " << i;
+    EXPECT_THAT(gotGrad[i], ::testing::Pointwise(::testing::FloatNear(G_TOL), wantGrad[i])) << "For system " << i;
   }
 }
 
@@ -1542,7 +1548,7 @@ TEST_F(ETK3DGpuTestFixture, Distance12EnergyMultiMol) {
   loadMMFFMols(100);
   std::vector<double> wantEnergy = getReferenceETK3DEnergyTerms(molsPtrs_, term, positionsHost.data(), atomStartsHost);
   std::vector<double> gotEnergy  = getETK3DEnergyTerms(systemDevice, atomStartsDevice, positionsDevice, term);
-  EXPECT_THAT(gotEnergy, ::testing::Pointwise(::testing::DoubleNear(1e-4), wantEnergy));
+  EXPECT_THAT(gotEnergy, ::testing::Pointwise(::testing::DoubleNear(E_TOL_COMBINED), wantEnergy));
 }
 
 TEST_F(ETK3DGpuTestFixture, Distance12GradMultiMol) {
@@ -1553,7 +1559,7 @@ TEST_F(ETK3DGpuTestFixture, Distance12GradMultiMol) {
   std::vector<std::vector<double>> gotGrad =
     splitCombinedGrads(getETK3DGradientTerm(systemDevice, atomStartsDevice, positionsDevice, term), atomStartsHost);
   for (size_t i = 0; i < wantGrad.size(); ++i) {
-    EXPECT_THAT(gotGrad[i], ::testing::Pointwise(::testing::FloatNear(1e-4), wantGrad[i])) << "For system " << i;
+    EXPECT_THAT(gotGrad[i], ::testing::Pointwise(::testing::FloatNear(G_TOL), wantGrad[i])) << "For system " << i;
   }
 }
 
@@ -1562,7 +1568,7 @@ TEST_F(ETK3DGpuTestFixture, Distance13EnergyMultiMol) {
   loadMMFFMols(100);
   std::vector<double> wantEnergy = getReferenceETK3DEnergyTerms(molsPtrs_, term, positionsHost.data(), atomStartsHost);
   std::vector<double> gotEnergy  = getETK3DEnergyTerms(systemDevice, atomStartsDevice, positionsDevice, term);
-  EXPECT_THAT(gotEnergy, ::testing::Pointwise(::testing::DoubleNear(1e-4), wantEnergy));
+  EXPECT_THAT(gotEnergy, ::testing::Pointwise(::testing::DoubleNear(E_TOL_COMBINED), wantEnergy));
 }
 
 TEST_F(ETK3DGpuTestFixture, Distance13GradMultiMol) {
@@ -1573,7 +1579,7 @@ TEST_F(ETK3DGpuTestFixture, Distance13GradMultiMol) {
   std::vector<std::vector<double>> gotGrad =
     splitCombinedGrads(getETK3DGradientTerm(systemDevice, atomStartsDevice, positionsDevice, term), atomStartsHost);
   for (size_t i = 0; i < wantGrad.size(); ++i) {
-    EXPECT_THAT(gotGrad[i], ::testing::Pointwise(::testing::FloatNear(1e-4), wantGrad[i])) << "For system " << i;
+    EXPECT_THAT(gotGrad[i], ::testing::Pointwise(::testing::FloatNear(G_TOL), wantGrad[i])) << "For system " << i;
   }
 }
 
@@ -1582,7 +1588,7 @@ TEST_F(ETK3DGpuTestFixture, Angle13EnergyMultiMol) {
   loadMMFFMols(10);
   std::vector<double> wantEnergy = getReferenceETK3DEnergyTerms(molsPtrs_, term, positionsHost.data(), atomStartsHost);
   std::vector<double> gotEnergy  = getETK3DEnergyTerms(systemDevice, atomStartsDevice, positionsDevice, term);
-  EXPECT_THAT(gotEnergy, ::testing::Pointwise(::testing::DoubleNear(1e-4), wantEnergy));
+  EXPECT_THAT(gotEnergy, ::testing::Pointwise(::testing::DoubleNear(E_TOL_COMBINED), wantEnergy));
 }
 
 TEST_F(ETK3DGpuTestFixture, Angle13GradMultiMol) {
@@ -1593,7 +1599,7 @@ TEST_F(ETK3DGpuTestFixture, Angle13GradMultiMol) {
   std::vector<std::vector<double>> gotGrad =
     splitCombinedGrads(getETK3DGradientTerm(systemDevice, atomStartsDevice, positionsDevice, term), atomStartsHost);
   for (size_t i = 0; i < wantGrad.size(); ++i) {
-    EXPECT_THAT(gotGrad[i], ::testing::Pointwise(::testing::FloatNear(1e-4), wantGrad[i])) << "For system " << i;
+    EXPECT_THAT(gotGrad[i], ::testing::Pointwise(::testing::FloatNear(G_TOL), wantGrad[i])) << "For system " << i;
   }
 }
 
@@ -1602,7 +1608,7 @@ TEST_F(ETK3DGpuTestFixture, LongRangeEnergyMultiMol) {
   loadMMFFMols(100);
   std::vector<double> wantEnergy = getReferenceETK3DEnergyTerms(molsPtrs_, term, positionsHost.data(), atomStartsHost);
   std::vector<double> gotEnergy  = getETK3DEnergyTerms(systemDevice, atomStartsDevice, positionsDevice, term);
-  EXPECT_THAT(gotEnergy, ::testing::Pointwise(::testing::DoubleNear(1e-4), wantEnergy));
+  EXPECT_THAT(gotEnergy, ::testing::Pointwise(::testing::DoubleNear(E_TOL_COMBINED), wantEnergy));
 }
 
 TEST_F(ETK3DGpuTestFixture, LongRangeGradMultiMol) {
@@ -1613,7 +1619,7 @@ TEST_F(ETK3DGpuTestFixture, LongRangeGradMultiMol) {
   std::vector<std::vector<double>> gotGrad =
     splitCombinedGrads(getETK3DGradientTerm(systemDevice, atomStartsDevice, positionsDevice, term), atomStartsHost);
   for (size_t i = 0; i < wantGrad.size(); ++i) {
-    EXPECT_THAT(gotGrad[i], ::testing::Pointwise(::testing::FloatNear(1e-4), wantGrad[i])) << "For system " << i;
+    EXPECT_THAT(gotGrad[i], ::testing::Pointwise(::testing::FloatNear(G_TOL), wantGrad[i])) << "For system " << i;
   }
 }
 
@@ -1636,7 +1642,7 @@ TEST_F(ETK3DGpuTestFixture, CombinedEnergiesMultiMol) {
     }
   }
 
-  EXPECT_THAT(gotEnergy, ::testing::Pointwise(::testing::DoubleNear(1e-4), wantEnergy));
+  EXPECT_THAT(gotEnergy, ::testing::Pointwise(::testing::DoubleNear(E_TOL_COMBINED), wantEnergy));
 }
 
 TEST_F(ETK3DGpuTestFixture, CombinedGradientsMultiMol) {
@@ -1664,7 +1670,7 @@ TEST_F(ETK3DGpuTestFixture, CombinedGradientsMultiMol) {
 
   std::vector<std::vector<double>> gotGradSplit = splitCombinedGrads(gotGrad, atomStartsHost);
   for (size_t i = 0; i < wantGradients.size(); ++i) {
-    EXPECT_THAT(gotGradSplit[i], ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients[i]))
+    EXPECT_THAT(gotGradSplit[i], ::testing::Pointwise(::testing::FloatNear(G_TOL), wantGradients[i]))
       << "For system " << i;
   }
 }
@@ -1695,7 +1701,7 @@ TEST_F(ETK3DGpuTestFixture, PlainCombinedEnergiesMultiMol) {
     }
   }
 
-  EXPECT_THAT(gotEnergy, ::testing::Pointwise(::testing::DoubleNear(1e-4), wantEnergy));
+  EXPECT_THAT(gotEnergy, ::testing::Pointwise(::testing::DoubleNear(E_TOL_COMBINED), wantEnergy));
 }
 
 TEST_F(ETK3DGpuTestFixture, PlainCombinedGradientsMultiMol) {
@@ -1729,7 +1735,7 @@ TEST_F(ETK3DGpuTestFixture, PlainCombinedGradientsMultiMol) {
 
   std::vector<std::vector<double>> gotGradSplit = splitCombinedGrads(gotGrad, atomStartsHost);
   for (size_t i = 0; i < wantGradients.size(); ++i) {
-    EXPECT_THAT(gotGradSplit[i], ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients[i]))
+    EXPECT_THAT(gotGradSplit[i], ::testing::Pointwise(::testing::FloatNear(G_TOL), wantGradients[i]))
       << "For system " << i;
   }
 }

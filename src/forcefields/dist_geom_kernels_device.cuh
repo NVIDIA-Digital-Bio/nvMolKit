@@ -16,8 +16,9 @@
 #ifndef NVMOLKIT_DISTGEOM_KERNELS_DEVICE_CUH
 #define NVMOLKIT_DISTGEOM_KERNELS_DEVICE_CUH
 
-#include "kernel_utils.cuh"
 #include <cooperative_groups.h>
+
+#include "kernel_utils.cuh"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -77,14 +78,14 @@ static __device__ __forceinline__ void distViolationGrad(const double* pos,
   const float dGradx = weight * preFactor * (pos[posIdx1 + 0] - pos[posIdx2 + 0]);
   const float dGrady = weight * preFactor * (pos[posIdx1 + 1] - pos[posIdx2 + 1]);
   const float dGradz = weight * preFactor * (pos[posIdx1 + 2] - pos[posIdx2 + 2]);
-  
+
   atomicAdd(&grad[posIdx1 + 0], dGradx);
   atomicAdd(&grad[posIdx1 + 1], dGrady);
   atomicAdd(&grad[posIdx1 + 2], dGradz);
   atomicAdd(&grad[posIdx2 + 0], -dGradx);
   atomicAdd(&grad[posIdx2 + 1], -dGrady);
   atomicAdd(&grad[posIdx2 + 2], -dGradz);
-  
+
   if (dimension == 4) {
     const float dGradw = weight * preFactor * (pos[posIdx1 + 3] - pos[posIdx2 + 3]);
     atomicAdd(&grad[posIdx1 + 3], dGradw);
@@ -92,21 +93,21 @@ static __device__ __forceinline__ void distViolationGrad(const double* pos,
   }
 }
 
-template<typename T>
+template <typename T>
 static __device__ __forceinline__ T calcChiralVolume(const int&    posIdx1,
-                                                          const int&    posIdx2,
-                                                          const int&    posIdx3,
-                                                          const int&    posIdx4,
-                                                          const double* pos,
-                                                          T&       v1x,
-                                                          T&       v1y,
-                                                          T&       v1z,
-                                                          T&       v2x,
-                                                          T&       v2y,
-                                                          T&       v2z,
-                                                          T&       v3x,
-                                                          T&       v3y,
-                                                          T&       v3z) {
+                                                     const int&    posIdx2,
+                                                     const int&    posIdx3,
+                                                     const int&    posIdx4,
+                                                     const double* pos,
+                                                     T&            v1x,
+                                                     T&            v1y,
+                                                     T&            v1z,
+                                                     T&            v2x,
+                                                     T&            v2y,
+                                                     T&            v2z,
+                                                     T&            v3x,
+                                                     T&            v3y,
+                                                     T&            v3z) {
   v1x = pos[posIdx1 + 0] - pos[posIdx4 + 0];
   v1y = pos[posIdx1 + 1] - pos[posIdx4 + 1];
   v1z = pos[posIdx1 + 2] - pos[posIdx4 + 2];
@@ -231,8 +232,8 @@ static __device__ __forceinline__ void fourthDimGrad(const double* pos,
 
 // Helper device functions for ETK energy calculations
 static __device__ __forceinline__ float calcTorsionEnergyM6(const double* forceConstants,
-                                                             const int*    signs,
-                                                             const double  cosPhi) {
+                                                            const int*    signs,
+                                                            const double  cosPhi) {
   const float cosPhi2 = cosPhi * cosPhi;
   const float cosPhi3 = cosPhi * cosPhi2;
   const float cosPhi4 = cosPhi * cosPhi3;
@@ -277,15 +278,15 @@ static __device__ __forceinline__ double calcTorsionCosPhi(const double* pos,
   double t2x, t2y, t2z;
   crossProduct(r3x, r3y, r3z, r4x, r4y, r4z, t2x, t2y, t2z);
 
-  const double t1_lenSquared = t1x * t1x + t1y * t1y + t1z * t1z;
-  const double t2_lenSquared = t2x * t2x + t2y * t2y + t2z * t2z;
+  const double t1_lenSquared      = t1x * t1x + t1y * t1y + t1z * t1z;
+  const double t2_lenSquared      = t2x * t2x + t2y * t2y + t2z * t2z;
   const double lenSquaredCombined = t1_lenSquared * t2_lenSquared;
 
   if (isDoubleZero(lenSquaredCombined)) {
     return 0.0;
   }
   const double invLenComb = rsqrtf(lenSquaredCombined);
-  double cosPhi = dotProduct(t1x, t1y, t1z, t2x, t2y, t2z) * invLenComb;
+  double       cosPhi     = dotProduct(t1x, t1y, t1z, t2x, t2y, t2z) * invLenComb;
   clipToOne(cosPhi);
   return cosPhi;
 }
@@ -307,10 +308,10 @@ static __device__ __forceinline__ double torsionAngleEnergy(const double* pos,
 }
 
 static __device__ __forceinline__ float calcInversionCosY(const double* pos,
-                                                           const int     posIdx1,
-                                                           const int     posIdx2,
-                                                           const int     posIdx3,
-                                                           const int     posIdx4) {
+                                                          const int     posIdx1,
+                                                          const int     posIdx2,
+                                                          const int     posIdx3,
+                                                          const int     posIdx4) {
   constexpr float inversionZeroTol = 1.0e-16f;
 
   float rJIx = pos[posIdx1 + 0] - pos[posIdx2 + 0];
@@ -428,8 +429,8 @@ static __device__ __forceinline__ double angleConstraintEnergy(const double* pos
   double dy2 = pos[posIdx3 + 1] - pos[posIdx2 + 1];
   double dz2 = pos[posIdx3 + 2] - pos[posIdx2 + 2];
 
-  const double dist1Sq = dx1 * dx1 + dy1 * dy1 + dz1 * dz1;
-  const double dist2Sq = dx2 * dx2 + dy2 * dy2 + dz2 * dz2;
+  const double dist1Sq  = dx1 * dx1 + dy1 * dy1 + dz1 * dz1;
+  const double dist2Sq  = dx2 * dx2 + dy2 * dy2 + dz2 * dz2;
   const double distTerm = dist1Sq * dist2Sq;
   if (isDoubleZero(distTerm)) {
     return 0.0;
@@ -462,16 +463,16 @@ static __device__ __forceinline__ void torsionAngleGrad(const double* pos,
   const double r1x = pos[posIdx1 + 0] - pos[posIdx2 + 0];
   const double r1y = pos[posIdx1 + 1] - pos[posIdx2 + 1];
   const double r1z = pos[posIdx1 + 2] - pos[posIdx2 + 2];
-  
+
   const double r2x = pos[posIdx3 + 0] - pos[posIdx2 + 0];
   const double r2y = pos[posIdx3 + 1] - pos[posIdx2 + 1];
   const double r2z = pos[posIdx3 + 2] - pos[posIdx2 + 2];
-  
+
   // Calculate bond vectors r3 = p2-p3, r4 = p4-p3
   const double r3x = -r2x;
   const double r3y = -r2y;
   const double r3z = -r2z;
-  
+
   const double r4x = pos[posIdx4 + 0] - pos[posIdx3 + 0];
   const double r4y = pos[posIdx4 + 1] - pos[posIdx3 + 1];
   const double r4z = pos[posIdx4 + 2] - pos[posIdx3 + 2];
@@ -479,7 +480,7 @@ static __device__ __forceinline__ void torsionAngleGrad(const double* pos,
   // Calculate plane normals via cross products: t0 = r1 × r2, t1 = r3 × r4
   double t0x, t0y, t0z;
   crossProduct(r1x, r1y, r1z, r2x, r2y, r2z, t0x, t0y, t0z);
-  
+
   double t1x, t1y, t1z;
   crossProduct(r3x, r3y, r3z, r4x, r4y, r4z, t1x, t1y, t1z);
 
@@ -541,14 +542,20 @@ static __device__ __forceinline__ void torsionAngleGrad(const double* pos,
   const double g4z = sinTerm * (dCos_dT1x * r3y - dCos_dT1y * r3x);
 
   // Atom 2 gradient: more complex, involves both cross products
-  const double g2x = sinTerm * (dCos_dT0y * (r2z - r1z) + dCos_dT0z * (r1y - r2y) + dCos_dT1y * (-r4z) + dCos_dT1z * (r4y));
-  const double g2y = sinTerm * (dCos_dT0x * (r1z - r2z) + dCos_dT0z * (r2x - r1x) + dCos_dT1x * (r4z) + dCos_dT1z * (-r4x));
-  const double g2z = sinTerm * (dCos_dT0x * (r2y - r1y) + dCos_dT0y * (r1x - r2x) + dCos_dT1x * (-r4y) + dCos_dT1y * (r4x));
+  const double g2x =
+    sinTerm * (dCos_dT0y * (r2z - r1z) + dCos_dT0z * (r1y - r2y) + dCos_dT1y * (-r4z) + dCos_dT1z * (r4y));
+  const double g2y =
+    sinTerm * (dCos_dT0x * (r1z - r2z) + dCos_dT0z * (r2x - r1x) + dCos_dT1x * (r4z) + dCos_dT1z * (-r4x));
+  const double g2z =
+    sinTerm * (dCos_dT0x * (r2y - r1y) + dCos_dT0y * (r1x - r2x) + dCos_dT1x * (-r4y) + dCos_dT1y * (r4x));
 
   // Atom 3 gradient: grad3 = -(grad1 + grad2 + grad4) by conservation
-  const double g3x = sinTerm * (dCos_dT0y * r1z + dCos_dT0z * (-r1y) + dCos_dT1y * (r4z - r3z) + dCos_dT1z * (r3y - r4y));
-  const double g3y = sinTerm * (dCos_dT0x * (-r1z) + dCos_dT0z * r1x + dCos_dT1x * (r3z - r4z) + dCos_dT1z * (r4x - r3x));
-  const double g3z = sinTerm * (dCos_dT0x * r1y + dCos_dT0y * (-r1x) + dCos_dT1x * (r4y - r3y) + dCos_dT1y * (r3x - r4x));
+  const double g3x =
+    sinTerm * (dCos_dT0y * r1z + dCos_dT0z * (-r1y) + dCos_dT1y * (r4z - r3z) + dCos_dT1z * (r3y - r4y));
+  const double g3y =
+    sinTerm * (dCos_dT0x * (-r1z) + dCos_dT0z * r1x + dCos_dT1x * (r3z - r4z) + dCos_dT1z * (r4x - r3x));
+  const double g3z =
+    sinTerm * (dCos_dT0x * r1y + dCos_dT0y * (-r1x) + dCos_dT1x * (r4y - r3y) + dCos_dT1y * (r3x - r4x));
 
   // Add gradients using atomic operations
   atomicAdd(&grad[posIdx1 + 0], g1x);
@@ -606,8 +613,6 @@ static __device__ __forceinline__ void inversionGrad(const double* pos,
   float invdJK = rsqrtf(dJKsq);
   float invdJL = rsqrtf(dJLsq);
 
-
-
   // Normalize vectors
   rJIx *= invdJI;
   rJIy *= invdJI;
@@ -659,8 +664,8 @@ static __device__ __forceinline__ void inversionGrad(const double* pos,
   crossProduct(rJKx, rJKy, rJKz, rJIx, rJIy, rJIz, t3x, t3y, t3z);
 
   // Calculate terms for gradient
-  const double inverseTerm1 = 1.0 / (sinY * sinTheta);
-  const double term2 = cosY / (sinY * sinThetaSq);
+  const double inverseTerm1   = 1.0 / (sinY * sinTheta);
+  const double term2          = cosY / (sinY * sinThetaSq);
   const double cosY_over_sinY = cosY / sinY;
 
   // Compute gradient components on-the-fly and apply directly
@@ -717,10 +722,10 @@ static __device__ __forceinline__ void distanceConstraintGrad(const double* pos,
   double preFactor;
   if (distance2 < minLen2) {
     const double distance = sqrt(distance2);
-    preFactor = forceConstant * (distance - minLen) / fmax(1.0e-8, distance);
+    preFactor             = forceConstant * (distance - minLen) / fmax(1.0e-8, distance);
   } else if (distance2 > maxLen2) {
     const double distance = sqrt(distance2);
-    preFactor = forceConstant * (distance - maxLen) / fmax(1.0e-8, distance);
+    preFactor             = forceConstant * (distance - maxLen) / fmax(1.0e-8, distance);
   } else {
     return;  // Distance within bounds, no gradient contribution
   }
@@ -759,7 +764,7 @@ static __device__ __forceinline__ void angleConstraintGrad(const double* pos,
   // Calculate squared lengths and take max with 1.0e-5 as in RDKit
   const double r1LengthSq = fmax(1.0e-5, r1x * r1x + r1y * r1y + r1z * r1z);
   const double r2LengthSq = fmax(1.0e-5, r2x * r2x + r2y * r2y + r2z * r2z);
-  const double denom = rsqrt(r1LengthSq * r2LengthSq);
+  const double denom      = rsqrt(r1LengthSq * r2LengthSq);
 
   // Calculate cosine of angle using dot product
   double cosTheta = dotProduct(r1x, r1y, r1z, r2x, r2y, r2z) * denom;
@@ -781,9 +786,9 @@ static __device__ __forceinline__ void angleConstraintGrad(const double* pos,
   crossProduct(r2x, r2y, r2z, r1x, r1y, r1z, rpx, rpy, rpz);
 
   // Calculate length of rp and prefactor
-  const double rpLengthSq = fmax(rpx * rpx + rpy * rpy + rpz * rpz, 1e-10);
-  const double rpLengthInv   = rsqrt(rpLengthSq);
-  const double prefactor  = dE_dTheta * rpLengthInv;
+  const double rpLengthSq  = fmax(rpx * rpx + rpy * rpy + rpz * rpz, 1e-10);
+  const double rpLengthInv = rsqrt(rpLengthSq);
+  const double prefactor   = dE_dTheta * rpLengthInv;
 
   // Calculate t factors
   const double t1 = -prefactor / r1LengthSq;
@@ -824,9 +829,7 @@ static __device__ __forceinline__ void angleConstraintGrad(const double* pos,
   atomicAdd(&grad[posIdx3 + 2], dedp3z);
 }
 
-
 }  // namespace DistGeom
 }  // namespace nvMolKit
 
 #endif  // NVMOLKIT_DISTGEOM_KERNELS_DEVICE_CUH
-

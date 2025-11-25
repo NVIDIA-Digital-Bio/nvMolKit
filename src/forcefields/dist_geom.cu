@@ -208,20 +208,20 @@ void addMoleculeToMolecularSystem(const EnergyForceContribsHost& contribs,
   contribHolder.distTerms.lb2.reserve(contribHolder.distTerms.lb2.size() + numDistTerms);
   contribHolder.distTerms.ub2.reserve(contribHolder.distTerms.ub2.size() + numDistTerms);
   contribHolder.distTerms.weight.reserve(contribHolder.distTerms.weight.size() + numDistTerms);
-  
+
   for (size_t i = 0; i < numDistTerms; i++) {
     contribHolder.distTerms.idx1.push_back(contribs.distTerms.idx1[i] + previousLastAtomIndex);
     contribHolder.distTerms.idx2.push_back(contribs.distTerms.idx2[i] + previousLastAtomIndex);
   }
-  contribHolder.distTerms.lb2.insert(contribHolder.distTerms.lb2.end(), 
-                                      contribs.distTerms.lb2.begin(), 
-                                      contribs.distTerms.lb2.end());
-  contribHolder.distTerms.ub2.insert(contribHolder.distTerms.ub2.end(), 
-                                      contribs.distTerms.ub2.begin(), 
-                                      contribs.distTerms.ub2.end());
-  contribHolder.distTerms.weight.insert(contribHolder.distTerms.weight.end(), 
-                                         contribs.distTerms.weight.begin(), 
-                                         contribs.distTerms.weight.end());
+  contribHolder.distTerms.lb2.insert(contribHolder.distTerms.lb2.end(),
+                                     contribs.distTerms.lb2.begin(),
+                                     contribs.distTerms.lb2.end());
+  contribHolder.distTerms.ub2.insert(contribHolder.distTerms.ub2.end(),
+                                     contribs.distTerms.ub2.begin(),
+                                     contribs.distTerms.ub2.end());
+  contribHolder.distTerms.weight.insert(contribHolder.distTerms.weight.end(),
+                                        contribs.distTerms.weight.begin(),
+                                        contribs.distTerms.weight.end());
 
   // ChiralViolation term
   const size_t numChiralTerms = contribs.chiralTerms.idx1.size();
@@ -231,25 +231,25 @@ void addMoleculeToMolecularSystem(const EnergyForceContribsHost& contribs,
   contribHolder.chiralTerms.idx4.reserve(contribHolder.chiralTerms.idx4.size() + numChiralTerms);
   contribHolder.chiralTerms.volLower.reserve(contribHolder.chiralTerms.volLower.size() + numChiralTerms);
   contribHolder.chiralTerms.volUpper.reserve(contribHolder.chiralTerms.volUpper.size() + numChiralTerms);
-  
+
   for (size_t i = 0; i < numChiralTerms; i++) {
     contribHolder.chiralTerms.idx1.push_back(contribs.chiralTerms.idx1[i] + previousLastAtomIndex);
     contribHolder.chiralTerms.idx2.push_back(contribs.chiralTerms.idx2[i] + previousLastAtomIndex);
     contribHolder.chiralTerms.idx3.push_back(contribs.chiralTerms.idx3[i] + previousLastAtomIndex);
     contribHolder.chiralTerms.idx4.push_back(contribs.chiralTerms.idx4[i] + previousLastAtomIndex);
   }
-  contribHolder.chiralTerms.volLower.insert(contribHolder.chiralTerms.volLower.end(), 
-                                             contribs.chiralTerms.volLower.begin(), 
-                                             contribs.chiralTerms.volLower.end());
-  contribHolder.chiralTerms.volUpper.insert(contribHolder.chiralTerms.volUpper.end(), 
-                                             contribs.chiralTerms.volUpper.begin(), 
-                                             contribs.chiralTerms.volUpper.end());
+  contribHolder.chiralTerms.volLower.insert(contribHolder.chiralTerms.volLower.end(),
+                                            contribs.chiralTerms.volLower.begin(),
+                                            contribs.chiralTerms.volLower.end());
+  contribHolder.chiralTerms.volUpper.insert(contribHolder.chiralTerms.volUpper.end(),
+                                            contribs.chiralTerms.volUpper.begin(),
+                                            contribs.chiralTerms.volUpper.end());
   // Note: weight no longer stored in structure
 
   // FourthDim term
   const size_t numFourthTerms = contribs.fourthTerms.idx.size();
   contribHolder.fourthTerms.idx.reserve(contribHolder.fourthTerms.idx.size() + numFourthTerms);
-  
+
   for (size_t i = 0; i < numFourthTerms; i++) {
     contribHolder.fourthTerms.idx.push_back(contribs.fourthTerms.idx[i] + previousLastAtomIndex);
   }
@@ -301,13 +301,19 @@ void addMoleculeToMolecularSystem3D(const Energy3DForceContribsHost& contribs,
   // Update contributions
   // Experimental torsion terms
   const size_t numExpTorsionTerms = contribs.experimentalTorsionTerms.idx1.size();
-  contribHolder.experimentalTorsionTerms.idx1.reserve(contribHolder.experimentalTorsionTerms.idx1.size() + numExpTorsionTerms);
-  contribHolder.experimentalTorsionTerms.idx2.reserve(contribHolder.experimentalTorsionTerms.idx2.size() + numExpTorsionTerms);
-  contribHolder.experimentalTorsionTerms.idx3.reserve(contribHolder.experimentalTorsionTerms.idx3.size() + numExpTorsionTerms);
-  contribHolder.experimentalTorsionTerms.idx4.reserve(contribHolder.experimentalTorsionTerms.idx4.size() + numExpTorsionTerms);
-  contribHolder.experimentalTorsionTerms.forceConstants.reserve(contribHolder.experimentalTorsionTerms.forceConstants.size() + numExpTorsionTerms * 6);
-  contribHolder.experimentalTorsionTerms.signs.reserve(contribHolder.experimentalTorsionTerms.signs.size() + numExpTorsionTerms * 6);
-  
+  contribHolder.experimentalTorsionTerms.idx1.reserve(contribHolder.experimentalTorsionTerms.idx1.size() +
+                                                      numExpTorsionTerms);
+  contribHolder.experimentalTorsionTerms.idx2.reserve(contribHolder.experimentalTorsionTerms.idx2.size() +
+                                                      numExpTorsionTerms);
+  contribHolder.experimentalTorsionTerms.idx3.reserve(contribHolder.experimentalTorsionTerms.idx3.size() +
+                                                      numExpTorsionTerms);
+  contribHolder.experimentalTorsionTerms.idx4.reserve(contribHolder.experimentalTorsionTerms.idx4.size() +
+                                                      numExpTorsionTerms);
+  contribHolder.experimentalTorsionTerms.forceConstants.reserve(
+    contribHolder.experimentalTorsionTerms.forceConstants.size() + numExpTorsionTerms * 6);
+  contribHolder.experimentalTorsionTerms.signs.reserve(contribHolder.experimentalTorsionTerms.signs.size() +
+                                                       numExpTorsionTerms * 6);
+
   for (size_t i = 0; i < numExpTorsionTerms; i++) {
     contribHolder.experimentalTorsionTerms.idx1.push_back(contribs.experimentalTorsionTerms.idx1[i] +
                                                           previousLastAtomIndex);
@@ -322,10 +328,9 @@ void addMoleculeToMolecularSystem3D(const Energy3DForceContribsHost& contribs,
     contribHolder.experimentalTorsionTerms.forceConstants.end(),
     contribs.experimentalTorsionTerms.forceConstants.begin(),
     contribs.experimentalTorsionTerms.forceConstants.end());
-  contribHolder.experimentalTorsionTerms.signs.insert(
-    contribHolder.experimentalTorsionTerms.signs.end(),
-    contribs.experimentalTorsionTerms.signs.begin(),
-    contribs.experimentalTorsionTerms.signs.end());
+  contribHolder.experimentalTorsionTerms.signs.insert(contribHolder.experimentalTorsionTerms.signs.end(),
+                                                      contribs.experimentalTorsionTerms.signs.begin(),
+                                                      contribs.experimentalTorsionTerms.signs.end());
 
   // Improper torsion terms
   const size_t numImproperTerms = contribs.improperTorsionTerms.idx1.size();
@@ -333,13 +338,16 @@ void addMoleculeToMolecularSystem3D(const Energy3DForceContribsHost& contribs,
   contribHolder.improperTorsionTerms.idx2.reserve(contribHolder.improperTorsionTerms.idx2.size() + numImproperTerms);
   contribHolder.improperTorsionTerms.idx3.reserve(contribHolder.improperTorsionTerms.idx3.size() + numImproperTerms);
   contribHolder.improperTorsionTerms.idx4.reserve(contribHolder.improperTorsionTerms.idx4.size() + numImproperTerms);
-  contribHolder.improperTorsionTerms.at2AtomicNum.reserve(contribHolder.improperTorsionTerms.at2AtomicNum.size() + numImproperTerms);
-  contribHolder.improperTorsionTerms.isCBoundToO.reserve(contribHolder.improperTorsionTerms.isCBoundToO.size() + numImproperTerms);
+  contribHolder.improperTorsionTerms.at2AtomicNum.reserve(contribHolder.improperTorsionTerms.at2AtomicNum.size() +
+                                                          numImproperTerms);
+  contribHolder.improperTorsionTerms.isCBoundToO.reserve(contribHolder.improperTorsionTerms.isCBoundToO.size() +
+                                                         numImproperTerms);
   contribHolder.improperTorsionTerms.C0.reserve(contribHolder.improperTorsionTerms.C0.size() + numImproperTerms);
   contribHolder.improperTorsionTerms.C1.reserve(contribHolder.improperTorsionTerms.C1.size() + numImproperTerms);
   contribHolder.improperTorsionTerms.C2.reserve(contribHolder.improperTorsionTerms.C2.size() + numImproperTerms);
-  contribHolder.improperTorsionTerms.forceConstant.reserve(contribHolder.improperTorsionTerms.forceConstant.size() + numImproperTerms);
-  
+  contribHolder.improperTorsionTerms.forceConstant.reserve(contribHolder.improperTorsionTerms.forceConstant.size() +
+                                                           numImproperTerms);
+
   for (size_t i = 0; i < numImproperTerms; i++) {
     contribHolder.improperTorsionTerms.idx1.push_back(contribs.improperTorsionTerms.idx1[i] + previousLastAtomIndex);
     contribHolder.improperTorsionTerms.idx2.push_back(contribs.improperTorsionTerms.idx2[i] + previousLastAtomIndex);
@@ -347,24 +355,24 @@ void addMoleculeToMolecularSystem3D(const Energy3DForceContribsHost& contribs,
     contribHolder.improperTorsionTerms.idx4.push_back(contribs.improperTorsionTerms.idx4[i] + previousLastAtomIndex);
   }
   contribHolder.improperTorsionTerms.at2AtomicNum.insert(contribHolder.improperTorsionTerms.at2AtomicNum.end(),
-                                                          contribs.improperTorsionTerms.at2AtomicNum.begin(),
-                                                          contribs.improperTorsionTerms.at2AtomicNum.end());
+                                                         contribs.improperTorsionTerms.at2AtomicNum.begin(),
+                                                         contribs.improperTorsionTerms.at2AtomicNum.end());
   contribHolder.improperTorsionTerms.isCBoundToO.insert(contribHolder.improperTorsionTerms.isCBoundToO.end(),
-                                                         contribs.improperTorsionTerms.isCBoundToO.begin(),
-                                                         contribs.improperTorsionTerms.isCBoundToO.end());
+                                                        contribs.improperTorsionTerms.isCBoundToO.begin(),
+                                                        contribs.improperTorsionTerms.isCBoundToO.end());
   contribHolder.improperTorsionTerms.C0.insert(contribHolder.improperTorsionTerms.C0.end(),
-                                                contribs.improperTorsionTerms.C0.begin(),
-                                                contribs.improperTorsionTerms.C0.end());
+                                               contribs.improperTorsionTerms.C0.begin(),
+                                               contribs.improperTorsionTerms.C0.end());
   contribHolder.improperTorsionTerms.C1.insert(contribHolder.improperTorsionTerms.C1.end(),
-                                                contribs.improperTorsionTerms.C1.begin(),
-                                                contribs.improperTorsionTerms.C1.end());
+                                               contribs.improperTorsionTerms.C1.begin(),
+                                               contribs.improperTorsionTerms.C1.end());
   contribHolder.improperTorsionTerms.C2.insert(contribHolder.improperTorsionTerms.C2.end(),
-                                                contribs.improperTorsionTerms.C2.begin(),
-                                                contribs.improperTorsionTerms.C2.end());
+                                               contribs.improperTorsionTerms.C2.begin(),
+                                               contribs.improperTorsionTerms.C2.end());
   contribHolder.improperTorsionTerms.forceConstant.insert(contribHolder.improperTorsionTerms.forceConstant.end(),
-                                                           contribs.improperTorsionTerms.forceConstant.begin(),
-                                                           contribs.improperTorsionTerms.forceConstant.end());
-  
+                                                          contribs.improperTorsionTerms.forceConstant.begin(),
+                                                          contribs.improperTorsionTerms.forceConstant.end());
+
   // Add numImpropers count (0 if no improper torsions, otherwise the count from the source)
   if (contribs.improperTorsionTerms.numImpropers.empty()) {
     contribHolder.improperTorsionTerms.numImpropers.push_back(0);
@@ -379,20 +387,20 @@ void addMoleculeToMolecularSystem3D(const Energy3DForceContribsHost& contribs,
   contribHolder.dist12Terms.minLen.reserve(contribHolder.dist12Terms.minLen.size() + numDist12Terms);
   contribHolder.dist12Terms.maxLen.reserve(contribHolder.dist12Terms.maxLen.size() + numDist12Terms);
   contribHolder.dist12Terms.forceConstant.reserve(contribHolder.dist12Terms.forceConstant.size() + numDist12Terms);
-  
+
   for (size_t i = 0; i < numDist12Terms; i++) {
     contribHolder.dist12Terms.idx1.push_back(contribs.dist12Terms.idx1[i] + previousLastAtomIndex);
     contribHolder.dist12Terms.idx2.push_back(contribs.dist12Terms.idx2[i] + previousLastAtomIndex);
   }
   contribHolder.dist12Terms.minLen.insert(contribHolder.dist12Terms.minLen.end(),
-                                           contribs.dist12Terms.minLen.begin(),
-                                           contribs.dist12Terms.minLen.end());
+                                          contribs.dist12Terms.minLen.begin(),
+                                          contribs.dist12Terms.minLen.end());
   contribHolder.dist12Terms.maxLen.insert(contribHolder.dist12Terms.maxLen.end(),
-                                           contribs.dist12Terms.maxLen.begin(),
-                                           contribs.dist12Terms.maxLen.end());
+                                          contribs.dist12Terms.maxLen.begin(),
+                                          contribs.dist12Terms.maxLen.end());
   contribHolder.dist12Terms.forceConstant.insert(contribHolder.dist12Terms.forceConstant.end(),
-                                                  contribs.dist12Terms.forceConstant.begin(),
-                                                  contribs.dist12Terms.forceConstant.end());
+                                                 contribs.dist12Terms.forceConstant.begin(),
+                                                 contribs.dist12Terms.forceConstant.end());
 
   // 1-3 distance terms
   const size_t numDist13Terms = contribs.dist13Terms.idx1.size();
@@ -401,25 +409,26 @@ void addMoleculeToMolecularSystem3D(const Energy3DForceContribsHost& contribs,
   contribHolder.dist13Terms.minLen.reserve(contribHolder.dist13Terms.minLen.size() + numDist13Terms);
   contribHolder.dist13Terms.maxLen.reserve(contribHolder.dist13Terms.maxLen.size() + numDist13Terms);
   contribHolder.dist13Terms.forceConstant.reserve(contribHolder.dist13Terms.forceConstant.size() + numDist13Terms);
-  contribHolder.dist13Terms.isImproperConstrained.reserve(contribHolder.dist13Terms.isImproperConstrained.size() + numDist13Terms);
-  
+  contribHolder.dist13Terms.isImproperConstrained.reserve(contribHolder.dist13Terms.isImproperConstrained.size() +
+                                                          numDist13Terms);
+
   for (size_t i = 0; i < numDist13Terms; i++) {
     contribHolder.dist13Terms.idx1.push_back(contribs.dist13Terms.idx1[i] + previousLastAtomIndex);
     contribHolder.dist13Terms.idx2.push_back(contribs.dist13Terms.idx2[i] + previousLastAtomIndex);
   }
   contribHolder.dist13Terms.minLen.insert(contribHolder.dist13Terms.minLen.end(),
-                                           contribs.dist13Terms.minLen.begin(),
-                                           contribs.dist13Terms.minLen.end());
+                                          contribs.dist13Terms.minLen.begin(),
+                                          contribs.dist13Terms.minLen.end());
   contribHolder.dist13Terms.maxLen.insert(contribHolder.dist13Terms.maxLen.end(),
-                                           contribs.dist13Terms.maxLen.begin(),
-                                           contribs.dist13Terms.maxLen.end());
+                                          contribs.dist13Terms.maxLen.begin(),
+                                          contribs.dist13Terms.maxLen.end());
   contribHolder.dist13Terms.forceConstant.insert(contribHolder.dist13Terms.forceConstant.end(),
-                                                  contribs.dist13Terms.forceConstant.begin(),
-                                                  contribs.dist13Terms.forceConstant.end());
+                                                 contribs.dist13Terms.forceConstant.begin(),
+                                                 contribs.dist13Terms.forceConstant.end());
   // Note this is only done here, not for 1-2 or LR
   contribHolder.dist13Terms.isImproperConstrained.insert(contribHolder.dist13Terms.isImproperConstrained.end(),
-                                                          contribs.dist13Terms.isImproperConstrained.begin(),
-                                                          contribs.dist13Terms.isImproperConstrained.end());
+                                                         contribs.dist13Terms.isImproperConstrained.begin(),
+                                                         contribs.dist13Terms.isImproperConstrained.end());
 
   // 1-3 angle terms
   const size_t numAngle13Terms = contribs.angle13Terms.idx1.size();
@@ -428,40 +437,43 @@ void addMoleculeToMolecularSystem3D(const Energy3DForceContribsHost& contribs,
   contribHolder.angle13Terms.idx3.reserve(contribHolder.angle13Terms.idx3.size() + numAngle13Terms);
   contribHolder.angle13Terms.minAngle.reserve(contribHolder.angle13Terms.minAngle.size() + numAngle13Terms);
   contribHolder.angle13Terms.maxAngle.reserve(contribHolder.angle13Terms.maxAngle.size() + numAngle13Terms);
-  
+
   for (size_t i = 0; i < numAngle13Terms; i++) {
     contribHolder.angle13Terms.idx1.push_back(contribs.angle13Terms.idx1[i] + previousLastAtomIndex);
     contribHolder.angle13Terms.idx2.push_back(contribs.angle13Terms.idx2[i] + previousLastAtomIndex);
     contribHolder.angle13Terms.idx3.push_back(contribs.angle13Terms.idx3[i] + previousLastAtomIndex);
   }
   contribHolder.angle13Terms.minAngle.insert(contribHolder.angle13Terms.minAngle.end(),
-                                              contribs.angle13Terms.minAngle.begin(),
-                                              contribs.angle13Terms.minAngle.end());
+                                             contribs.angle13Terms.minAngle.begin(),
+                                             contribs.angle13Terms.minAngle.end());
   contribHolder.angle13Terms.maxAngle.insert(contribHolder.angle13Terms.maxAngle.end(),
-                                              contribs.angle13Terms.maxAngle.begin(),
-                                              contribs.angle13Terms.maxAngle.end());
+                                             contribs.angle13Terms.maxAngle.begin(),
+                                             contribs.angle13Terms.maxAngle.end());
 
   // Long range distance terms
   const size_t numLongRangeDistTerms = contribs.longRangeDistTerms.idx1.size();
   contribHolder.longRangeDistTerms.idx1.reserve(contribHolder.longRangeDistTerms.idx1.size() + numLongRangeDistTerms);
   contribHolder.longRangeDistTerms.idx2.reserve(contribHolder.longRangeDistTerms.idx2.size() + numLongRangeDistTerms);
-  contribHolder.longRangeDistTerms.minLen.reserve(contribHolder.longRangeDistTerms.minLen.size() + numLongRangeDistTerms);
-  contribHolder.longRangeDistTerms.maxLen.reserve(contribHolder.longRangeDistTerms.maxLen.size() + numLongRangeDistTerms);
-  contribHolder.longRangeDistTerms.forceConstant.reserve(contribHolder.longRangeDistTerms.forceConstant.size() + numLongRangeDistTerms);
-  
+  contribHolder.longRangeDistTerms.minLen.reserve(contribHolder.longRangeDistTerms.minLen.size() +
+                                                  numLongRangeDistTerms);
+  contribHolder.longRangeDistTerms.maxLen.reserve(contribHolder.longRangeDistTerms.maxLen.size() +
+                                                  numLongRangeDistTerms);
+  contribHolder.longRangeDistTerms.forceConstant.reserve(contribHolder.longRangeDistTerms.forceConstant.size() +
+                                                         numLongRangeDistTerms);
+
   for (size_t i = 0; i < numLongRangeDistTerms; i++) {
     contribHolder.longRangeDistTerms.idx1.push_back(contribs.longRangeDistTerms.idx1[i] + previousLastAtomIndex);
     contribHolder.longRangeDistTerms.idx2.push_back(contribs.longRangeDistTerms.idx2[i] + previousLastAtomIndex);
   }
   contribHolder.longRangeDistTerms.minLen.insert(contribHolder.longRangeDistTerms.minLen.end(),
-                                                  contribs.longRangeDistTerms.minLen.begin(),
-                                                  contribs.longRangeDistTerms.minLen.end());
+                                                 contribs.longRangeDistTerms.minLen.begin(),
+                                                 contribs.longRangeDistTerms.minLen.end());
   contribHolder.longRangeDistTerms.maxLen.insert(contribHolder.longRangeDistTerms.maxLen.end(),
-                                                  contribs.longRangeDistTerms.maxLen.begin(),
-                                                  contribs.longRangeDistTerms.maxLen.end());
+                                                 contribs.longRangeDistTerms.maxLen.begin(),
+                                                 contribs.longRangeDistTerms.maxLen.end());
   contribHolder.longRangeDistTerms.forceConstant.insert(contribHolder.longRangeDistTerms.forceConstant.end(),
-                                                         contribs.longRangeDistTerms.forceConstant.begin(),
-                                                         contribs.longRangeDistTerms.forceConstant.end());
+                                                        contribs.longRangeDistTerms.forceConstant.begin(),
+                                                        contribs.longRangeDistTerms.forceConstant.end());
 }
 
 void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
@@ -508,11 +520,11 @@ void sendContribsAndIndicesToDevice(const BatchedMolecularSystemHost& molSystemH
   deviceContribs.chiralTerms.idx4.setFromVector(hostContribs.chiralTerms.idx4);
   deviceContribs.chiralTerms.volLower.setFromVector(hostContribs.chiralTerms.volLower);
   deviceContribs.chiralTerms.volUpper.setFromVector(hostContribs.chiralTerms.volUpper);
-    // Note: weight no longer stored in device structure
+  // Note: weight no longer stored in device structure
 
   // FourthDim term
   deviceContribs.fourthTerms.idx.setFromVector(hostContribs.fourthTerms.idx);
-    // Note: weight no longer stored in device structure
+  // Note: weight no longer stored in device structure
 
   // Indices
   auto&       deviceIndices = molSystemDevice.indices;
@@ -628,9 +640,9 @@ void setStreams(BatchedMolecularDeviceBuffers& devBuffers, cudaStream_t stream) 
   devBuffers.contribs.chiralTerms.idx4.setStream(stream);
   devBuffers.contribs.chiralTerms.volLower.setStream(stream);
   devBuffers.contribs.chiralTerms.volUpper.setStream(stream);
-    // Note: weight no longer stored in device structure
+  // Note: weight no longer stored in device structure
   devBuffers.contribs.fourthTerms.idx.setStream(stream);
-    // Note: weight no longer stored in device structure
+  // Note: weight no longer stored in device structure
 }
 //! Set all DeviceVector streams for the batched 3D molecular device buffers.
 void setStreams(BatchedMolecular3DDeviceBuffers& devBuffers, cudaStream_t stream) {
@@ -743,9 +755,7 @@ cudaError_t computeEnergy(BatchedMolecularDeviceBuffers&             molSystemDe
                           const double                               fourthDimWeight,
                           const uint8_t*                             activeThisStage,
                           const double*                              positions,
-                          cudaStream_t                               stream,
-                          double                                     chiralWeight,
-                          double                                     fourthDimWeight) {
+                          cudaStream_t                               stream) {
   // Prechecks - tempstorage allocated, energybuffer allocated
   assert(molSystemDevice.energyBuffer.size() > 0);
   assert(molSystemDevice.energyOuts.data() != nullptr);
@@ -825,9 +835,7 @@ cudaError_t computeGradients(BatchedMolecularDeviceBuffers&             molSyste
                              const double                               chiralWeight,
                              const double                               fourthDimWeight,
                              const uint8_t*                             activeThisStage,
-                             cudaStream_t                               stream,
-                             double                                     chiralWeight,
-                             double                                     fourthDimWeight) {
+                             cudaStream_t                               stream) {
   // Dispatch each term if there is a contrib for it.
   const auto& contribs = molSystemDevice.contribs;
 

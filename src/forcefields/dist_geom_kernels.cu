@@ -78,11 +78,11 @@ __global__ void DistViolationGradientKernel(const int      numDist,
 
     // Check if activeThisStage is nullptr or if this molecule/conformer is active in this stage
     if (activeThisStage == nullptr || activeThisStage[batchIdx] == 1) {
-      const int idx2   = idx2s[idx];
+      const int    idx2   = idx2s[idx];
       const double lb2    = lb2s[idx];
       const double ub2    = ub2s[idx];
       const double weight = weights[idx];
-      
+
       distViolationGrad(pos, idx1, idx2, lb2, ub2, weight, dimension, grad);
     }
   }
@@ -125,8 +125,8 @@ __global__ void ChiralViolationEnergyKernel(const int      numChiral,
       double vol =
         calcChiralVolume(posIdx1, posIdx2, posIdx3, posIdx4, pos, v1x, v1y, v1z, v2x, v2y, v2z, v3x, v3y, v3z);
 
-      const double energy  = chiralViolationEnergy(pos, idx1, idx2, idx3, idx4, lb, ub, weight, dimension);
-      const int outputIdx = getEnergyAccumulatorIndex(idx, batchIdx, energyBufferStarts, chiralTermStarts);
+      const double energy    = chiralViolationEnergy(pos, idx1, idx2, idx3, idx4, lb, ub, weight, dimension);
+      const int    outputIdx = getEnergyAccumulatorIndex(idx, batchIdx, energyBufferStarts, chiralTermStarts);
       energyBuffer[outputIdx] += energy;
     }
   }
@@ -278,7 +278,7 @@ __global__ void TorsionAngleEnergyKernel(const int      numTorsion,
 
       const double* fc = &forceConstants[idx * 6];
       const int*    s  = &signs[idx * 6];
-      
+
       const double energy = torsionAngleEnergy(pos, idx1, idx2, idx3, idx4, fc, s);
 
       // Accumulate energy in the appropriate buffer
@@ -341,7 +341,8 @@ __global__ void InversionEnergyKernel(const int      numInversion,
       const int idx3 = idx3s[idx];
       const int idx4 = idx4s[idx];
 
-      const double energy = inversionEnergy(pos, idx1, idx2, idx3, idx4, C0[idx], C1[idx], C2[idx], forceConstants[idx]);
+      const double energy =
+        inversionEnergy(pos, idx1, idx2, idx3, idx4, C0[idx], C1[idx], C2[idx], forceConstants[idx]);
 
       // Accumulate energy in the appropriate buffer
       const int outputIdx = getEnergyAccumulatorIndex(idx, batchIdx, energyBufferStarts, inversionTermStarts);
@@ -373,7 +374,16 @@ __global__ void InversionGradientKernel(const int      numInversion,
 
     // Check if activeThisStage is nullptr or if this molecule/conformer is active in this stage
     if (activeThisStage == nullptr || activeThisStage[batchIdx] == 1) {
-      inversionGrad(pos, idx1, idx2s[idx], idx3s[idx], idx4s[idx], C0[idx], C1[idx], C2[idx], forceConstants[idx], grad);
+      inversionGrad(pos,
+                    idx1,
+                    idx2s[idx],
+                    idx3s[idx],
+                    idx4s[idx],
+                    C0[idx],
+                    C1[idx],
+                    C2[idx],
+                    forceConstants[idx],
+                    grad);
     }
   }
 }
