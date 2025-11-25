@@ -74,6 +74,7 @@ podTemplate(cloud:'blsm-prod-cloud', yaml : """
                                sh 'cd ${WORKSPACE} && bash admin/setup_conda_env.sh 3.10 2024.9.6'
                                println "Running build and test on oldest supported CUDA"
                                // Build and test logic for CUDA 12.6 will be added here
+                               mkdir /build && cd /build && cmake ${WORKSPACE} && make -j && ctest
                                
                                githubHelper.updateCommitStatus("$BUILD_URL", "build_test_oldest_supported Complete", GitHubCommitState.SUCCESS)
                            } catch (Exception e) {
@@ -90,7 +91,8 @@ podTemplate(cloud:'blsm-prod-cloud', yaml : """
                                sh 'cd ${WORKSPACE} && bash admin/setup_conda_env.sh 3.13 2025.3.1'
                                println "Running build and test on newest supported CUDA"
                                // Build and test logic for CUDA 13.0 will be added here
-                               
+                              sh 'source /usr/local/anaconda/etc/profile.d/conda.sh && conda activate base && mkdir /build && cd /build && cmake ${WORKSPACE} && make -j && ctest'
+
                                githubHelper.updateCommitStatus("$BUILD_URL", "build_test_newest_supported Complete", GitHubCommitState.SUCCESS)
                            } catch (Exception e) {
                                githubHelper.updateCommitStatus("$BUILD_URL", "build_test_newest_supported Failed", GitHubCommitState.FAILURE)

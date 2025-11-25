@@ -1,6 +1,6 @@
 #!/bin/bash
 
-source ~/.bashrc && conda activate base
+source /usr/local/anaconda/etc/profile.d/conda.sh && conda activate base
 set -ex
 apt-get update -y && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
