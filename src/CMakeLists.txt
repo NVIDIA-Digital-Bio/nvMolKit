@@ -90,13 +90,12 @@ target_include_directories(etkdg_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 add_library(
   etkdg_stages
   etkdg_stage_coordgen.cu etkdg_stage_distgeom_minimize.cu
-  etkdg_stage_update_conformers.cu
-  etkdg_stage_stereochem_checks.cu etkdg_stage_etk_minimization.cu)
+  etkdg_stage_update_conformers.cu etkdg_stage_stereochem_checks.cu
+  etkdg_stage_etk_minimization.cu)
 
 target_link_libraries(
   etkdg_stages
-        PUBLIC
-        bfgs
+  PUBLIC bfgs
   PRIVATE device_vector
           ${RDKit_LIBS}
           ff_kernel_utils
@@ -122,5 +121,8 @@ target_link_libraries(
 target_include_directories(etkdg PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(butina butina.cu)
-target_link_libraries(butina PUBLIC device_vector PRIVATE cub_helpers nvtx)
+target_link_libraries(
+  butina
+  PUBLIC device_vector
+  PRIVATE cub_helpers nvtx)
 target_include_directories(butina PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

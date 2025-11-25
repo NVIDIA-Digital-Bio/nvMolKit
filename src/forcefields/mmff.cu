@@ -23,7 +23,6 @@
 namespace nvMolKit {
 namespace MMFF {
 void setStreams(BatchedMolecularDeviceBuffers& molSystemDevice, cudaStream_t stream) {
-  molSystemDevice.atomNumbers.setStream(stream);
   molSystemDevice.positions.setStream(stream);
   molSystemDevice.grad.setStream(stream);
   molSystemDevice.energyOuts.setStream(stream);
@@ -171,17 +170,12 @@ void sendContribsAndIndicesToDevice(const BatchedMolecularSystemHost& molSystemH
 
 void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
                         const std::vector<double>&     positions,
-                        BatchedMolecularSystemHost&    molSystem,
-                        std::vector<int>*              atomNumbers) {
+                        BatchedMolecularSystemHost&    molSystem) {
   const int previousLastAtomIndex = molSystem.indices.atomStarts.back();
   const int numBatches            = molSystem.indices.atomStarts.size() - 1;
   const int newNumAtoms           = positions.size() / 3;
   molSystem.indices.atomStarts.push_back(molSystem.indices.atomStarts.back() + newNumAtoms);
   molSystem.maxNumAtoms = std::max(molSystem.maxNumAtoms, newNumAtoms);
-
-  if (atomNumbers) {
-    molSystem.atomNumbers.insert(molSystem.atomNumbers.end(), atomNumbers->begin(), atomNumbers->end());
-  }
 
   auto& indexHolder   = molSystem.indices;
   auto& contribHolder = molSystem.contribs;
@@ -284,13 +278,6 @@ void allocateIntermediateBuffers(const BatchedMolecularSystemHost& molSystemHost
   nvMolKit::FFKernelUtils::allocateIntermediateBuffers(molSystemHost,
                                                        molSystemDevice,
                                                        molSystemHost.indices.atomStarts.size() - 1);
-}
-
-void allocateDim4ConversionBuffers(const BatchedMolecularSystemHost& molSystemHost,
-                                   BatchedMolecularDeviceBuffers&    molSystemDevice) {
-  nvMolKit::FFKernelUtils::allocateDim4ConversionBuffers(molSystemHost,
-                                                         molSystemDevice,
-                                                         molSystemHost.indices.atomStarts.size() - 1);
 }
 
 // TODO: More sophisticated error handling for energy and gradient.

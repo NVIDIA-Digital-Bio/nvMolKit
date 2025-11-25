@@ -162,8 +162,6 @@ struct BatchedIndices3DHost {
 struct BatchedMolecularSystemHost {
   EnergyForceContribsHost contribs;
   BatchedIndicesHost      indices;
-  //! Size total num atoms
-  std::vector<int>        atomNumbers;
   //! Largest system size in the batch
   int                     maxNumAtoms = 0;
   //! Dimension of all molecules in the batch (3 or 4)
@@ -292,38 +290,6 @@ struct BatchedIndices3DDevice {
   nvMolKit::AsyncDeviceVector<int> longRangeDistTermStarts;        // Start indices for long range distance terms
 };
 
-//! Buffers for interfacing with the 4D padded L-BFGS minimizer.
-//! The minimizer requires homogenous batches, so we need to pad the positions
-//! and gradients. It also works in double4s, so we need to convert.
-//!
-//!  Operation flow between buffers:
-//!      In energy calculation:
-//!         - Copy interface padded d4 positions to our condensed d3.
-//!         - Compute energies
-//!         - return enegies, no additional copying needed since 1 per molecule.
-//!
-//!      In grad calculation:
-//!         - Copy interface padded d4 positions to our condensed d3
-//!         - Compute gradients
-//!         - Copy d3 gradients to interface padded d3 gradients
-//!
-//!      In output gathering:
-//!         - Copy d4 padded positions to our d3 condensed and download
-//! TODO: Potential optimization points:
-//!    - Kernels that work on d4 padded positions and gradients directly
-//!    - One copy of positions for energy and gradient. This might be shaky
-
-struct PaddedInterfaceBuffers {
-  //! Size n_molecules * (max atoms in batch) * 4
-  nvMolKit::AsyncDeviceVector<double> positionsD4Padded;
-  //! Size n_molecules * (max atoms in batch) * 3
-  nvMolKit::AsyncDeviceVector<double> gradD3Padded;
-  //! Size n_molecules * (max atoms in batch) * 4, will be -1 for padded or 4th dims.
-  nvMolKit::AsyncDeviceVector<int>    writeBackIndices;
-  //! Size n_molecules * (max atoms in batch)
-  nvMolKit::AsyncDeviceVector<int>    atomNumbers;
-};
-
 //! Device buffers for the batched molecular system.
 //! Most of the terms are either 1 per molecule or CSR-like format with the BatchedIndicesDevice terms used for
 //! indexing.
@@ -346,8 +312,6 @@ struct BatchedMolecularDeviceBuffers {
   EnergyForceContribsDevice           contribs;
   //! Size n_molecules
   BatchedIndicesDevice                indices;
-  //! Size total num atoms
-  nvMolKit::AsyncDeviceVector<int>    atomNumbers;
   //! Size total num positions of all molecules
   nvMolKit::AsyncDeviceVector<double> grad;
   //! Variable size - max terms in each molecule concatenated.
@@ -355,8 +319,6 @@ struct BatchedMolecularDeviceBuffers {
   nvMolKit::AsyncDeviceVector<double> energyBuffer;
   //! Size n_molecules
   nvMolKit::AsyncDeviceVector<double> energyOuts;
-  //! Dimension change and padding buffers
-  PaddedInterfaceBuffers              dataFormatInterchangeBuffers;
   //! Dimension of all molecules in the batch (3 or 4)
   int                                 dimension = 3;
 };
@@ -408,8 +370,7 @@ void addMoleculeToMolecularSystem(const EnergyForceContribsHost& contribs,
                                   const int                      numAtoms,
                                   const int                      dimension,
                                   const std::vector<int>&        ctxAtomStarts,
-                                  BatchedMolecularSystemHost&    molSystem,
-                                  std::vector<int>*              atomNumbers = nullptr);
+                                  BatchedMolecularSystemHost&    molSystem);
 
 //! Add a molecule to the molecular system.
 void addMoleculeToMolecularSystem3D(const Energy3DForceContribsHost& contribs,
@@ -423,8 +384,7 @@ void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
                         BatchedMolecularSystemHost&    molSystem,
                         const int                      dimension,
                         std::vector<int>&              ctxAtomStarts,
-                        std::vector<double>&           ctxPositions,
-                        std::vector<int>*              atomNumbers = nullptr);
+                        std::vector<double>&           ctxPositions);
 
 //! Add a molecule to the batched molecular system.
 //! Populates the molSystem with the molecule's energy force contribs, and adds the current positions.
@@ -469,10 +429,6 @@ void allocateIntermediateBuffers(const BatchedMolecularSystemHost& molSystemHost
 //! These include the gradients, energy buffer, and energy outs.
 void allocateIntermediateBuffers3D(const BatchedMolecularSystem3DHost& molSystemHost,
                                    BatchedMolecular3DDeviceBuffers&    molSystemDevice);
-
-//! Allocate the buffers for the 4D padded interface.
-void allocateDim4ConversionBuffers(const BatchedMolecularSystemHost& molSystemHost,
-                                   BatchedMolecularDeviceBuffers&    molSystemDevice);
 
 //! Compute the energy of the batched molecular system. This will populate the energyOuts buffer on device.
 //! energyOuts and energyBuffer must be zeroed before calling this function.

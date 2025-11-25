@@ -157,8 +157,7 @@ void addMoleculeToMolecularSystem(const EnergyForceContribsHost& contribs,
                                   const int                      numAtoms,
                                   const int                      dimension,
                                   const std::vector<int>&        ctxAtomStarts,
-                                  BatchedMolecularSystemHost&    molSystem,
-                                  std::vector<int>*              atomNumbers) {
+                                  BatchedMolecularSystemHost&    molSystem) {
   // Use distTermStarts.size() - 1 to get the current batch index
   const int batchIdx              = molSystem.indices.distTermStarts.size() - 1;
   // Get the previous last atom index from ctxAtomStarts using the current batch index
@@ -175,11 +174,6 @@ void addMoleculeToMolecularSystem(const EnergyForceContribsHost& contribs,
   } else {
     // Ensure all molecules have the same dimension
     assert(molSystem.dimension == dimension);
-  }
-
-  // Handle atom numbers if provided
-  if (atomNumbers) {
-    molSystem.atomNumbers.insert(molSystem.atomNumbers.end(), atomNumbers->begin(), atomNumbers->end());
   }
 
   // Resize atomIdxToBatchIdx using the next atom start index
@@ -357,18 +351,12 @@ void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
                         BatchedMolecularSystemHost&    molSystem,
                         const int                      dimension,
                         std::vector<int>&              ctxAtomStarts,
-                        std::vector<double>&           ctxPositions,
-                        std::vector<int>*              atomNumbers) {
+                        std::vector<double>&           ctxPositions) {
   // First update context data
   addMoleculeToContextWithPositions(positions, dimension, ctxAtomStarts, ctxPositions);
 
   // Then update the molecular system
-  addMoleculeToMolecularSystem(contribs,
-                               positions.size() / dimension,
-                               dimension,
-                               ctxAtomStarts,
-                               molSystem,
-                               atomNumbers);
+  addMoleculeToMolecularSystem(contribs, positions.size() / dimension, dimension, ctxAtomStarts, molSystem);
 }
 
 void addMoleculeToBatch3D(const Energy3DForceContribsHost& contribs,
@@ -498,7 +486,6 @@ void sendContribsAndIndicesToDevice3D(const BatchedMolecularSystem3DHost& molSys
 //! Set all DeviceVector streams for the batched molecular device buffers.
 void setStreams(BatchedMolecularDeviceBuffers& devBuffers, cudaStream_t stream) {
   // First the isolated buffers.
-  devBuffers.atomNumbers.setStream(stream);
   devBuffers.energyBuffer.setStream(stream);
   devBuffers.grad.setStream(stream);
   devBuffers.energyOuts.setStream(stream);
@@ -628,13 +615,6 @@ void setupDeviceBuffers3D(BatchedMolecularSystem3DHost&    molSystemHost,
   nvMolKit::FFKernelUtils::allocateIntermediateBuffers(molSystemHost, molSystemDevice, numMols);
   molSystemDevice.grad.resize(ctxPositionsHost.size());
   molSystemDevice.grad.zero();
-}
-
-void allocateDim4ConversionBuffers(const BatchedMolecularSystemHost& molSystemHost,
-                                   BatchedMolecularDeviceBuffers&    molSystemDevice) {
-  nvMolKit::FFKernelUtils::allocateDim4ConversionBuffers(molSystemHost,
-                                                         molSystemDevice,
-                                                         molSystemHost.indices.distTermStarts.size() - 1);
 }
 
 // TODO: More sophisticated error handling for energy and gradient.

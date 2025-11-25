@@ -129,19 +129,14 @@ std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKi
         auto*          mol      = confInfo.mol;
         const uint32_t numAtoms = mol->getNumAtoms();
 
-        auto             ffParams = constructForcefieldContribs(*mol, nonBondedThreshold);
-        std::vector<int> atomNumbers;
-        atomNumbers.reserve(numAtoms);
-        for (uint32_t i = 0; i < numAtoms; ++i) {
-          atomNumbers.push_back(mol->getAtomWithIdx(i)->getAtomicNum());
-        }
+        auto ffParams = constructForcefieldContribs(*mol, nonBondedThreshold);
 
         // Add this conformer to the batch
         conformerAtomStarts.push_back(currentAtomOffset);
         currentAtomOffset += numAtoms;
 
         nvMolKit::confPosToVect(*confInfo.conformer, pos);
-        nvMolKit::MMFF::addMoleculeToBatch(ffParams, pos, systemHost, &atomNumbers);
+        nvMolKit::MMFF::addMoleculeToBatch(ffParams, pos, systemHost);
       }
 
       // Send to device and set up streams
