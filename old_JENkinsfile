@@ -1,0 +1,95 @@
+@Library('blossom-github-lib@master') 
+import ipp.blossom.*
+
+podTemplate(cloud:'blsm-prod-cloud', yaml : """
+  apiVersion: v1
+  kind: Pod
+  spec:
+    serviceAccountName: "bionemo-nvmolkit-sa"
+    nodeSelector:
+      kubernetes.io/os: linux""",
+  containers: [
+    containerTemplate(name: 'golang', image: 'golang:1.12.9', ttyEnabled: true, command: 'cat')
+  ]) {
+      node(POD_LABEL) {
+          def githubHelper
+          stage('Get Token') {
+              withCredentials([usernamePassword(credentialsId: 'github-token', passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')]) {
+                  // create new instance of helper object
+                  githubHelper = GithubHelper.getInstance("${GIT_PASSWORD}", githubData)
+                  
+              }
+              
+          }
+          def stageName = '' 
+          try {
+              currentBuild.description = githubHelper.getBuildDescription()
+              stageName = 'Code checkout'
+              stage(stageName) {
+                  // update status on github
+                  githubHelper.updateCommitStatus("$BUILD_URL", "$stageName Running", GitHubCommitState.PENDING)
+                  if("Open".equalsIgnoreCase(githubHelper.getPRState())){
+                    println "PR State is Open"
+                    // checkout head of pull request
+                    checkout changelog: true, poll: true, scm: [$class: 'GitSCM', branches: [[name: "pr/"+githubHelper.getPRNumber()]],                   doGenerateSubmoduleConfigurations: false,
+                    submoduleCfg: [],
+                    userRemoteConfigs: [[credentialsId: 'github-token', url: githubHelper.getCloneUrl(), refspec: '+refs/pull/*/head:refs/remotes/origin/pr/*']]]
+                  } 
+                  else if("Merged".equalsIgnoreCase(githubHelper.getPRState())){
+                    println "PR State is Merged"
+                    // use following if you want to build merged code of the head & base branch
+                    // ref : https://developer.github.com/v3/pulls/
+                    checkout changelog: true, poll: true, scm: [$class: 'GitSCM', branches: [[name: githubHelper.getMergedSHA()]],
+                    doGenerateSubmoduleConfigurations: false,
+                    submoduleCfg: [],
+                    userRemoteConfigs: [[credentialsId: 'github-token', url: githubHelper.getCloneUrl(), refspec: '+refs/pull/*/merge:refs/remotes/origin/pr/*']]]
+                  }
+              }
+          
+              stageName = 'Build'
+              stage(stageName) {
+                  container('golang') {
+                      githubHelper.updateCommitStatus("$BUILD_URL", "$stageName Running", GitHubCommitState.PENDING)
+                      //add build steps
+                      println "Building code"
+                      sh "sleep 10"
+                  
+                  }
+              }
+          
+              stageName = 'Test'
+              stage(stageName) {
+                  container('golang') {
+                      githubHelper.updateCommitStatus("$BUILD_URL", "$stageName Running", GitHubCommitState.PENDING)
+                      // add test cases here
+                      println "Running test"
+                  
+                  }
+              }
+              // upload jenkins job logs to github for external users
+              // this function remove sensitive data from logs before upload
+              // user can provide list of plain guard words (sensitive words) or regular expression for guard words 
+              // def guardWords = ["gitlab-master.nvidia.com"]
+              // 
+              // githubHelper.uploadLogs(this, env.JOB_NAME, env.BUILD_NUMBER, guardWords, <extraGuardWordRegEx>) 
+              githubHelper.uploadLogs(this, env.JOB_NAME, env.BUILD_NUMBER, null, null)
+
+              // update status on github
+              githubHelper.updateCommitStatus("$BUILD_URL", "Complete", GitHubCommitState.SUCCESS)
+          }
+          catch (Exception ex){
+              currentBuild.result = 'FAILURE'
+              println ex
+              // upload jenkins job logs to github for external users
+              // this function remove sensitive data from logs before upload
+              // user can provide list of plain guard words (sensitive words) or regular expression for guard words 
+              // def guardWords = ["gitlab-master.nvidia.com"]
+              // 
+              // githubHelper.uploadLogs(this, env.JOB_NAME, env.BUILD_NUMBER, guardWords, <extraGuardWordRegEx>) 
+              githubHelper.uploadLogs(this, env.JOB_NAME, env.BUILD_NUMBER, null, null) 
+              githubHelper.updateCommitStatus("$BUILD_URL", "$stageName Failed", GitHubCommitState.FAILURE)
+          }
+          
+      }
+      
+  }
