@@ -36,6 +36,8 @@ namespace nvMolKit::DistGeom {
 void DistGeomMinimizeBFGS(BatchedMolecularSystemHost&    molSystemHost,
                           BatchedMolecularDeviceBuffers& molSystemDevice,
                           detail::ETKDGContext&          context,
+                          double                         chiralWeight,
+                          double                         fourthDimWeight,
                           int                            maxIters             = 200,
                           double                         gradTol              = 1e-4,
                           bool                           repeatUntilConverged = false,

@@ -21,17 +21,9 @@
 #include <vector>
 
 namespace nvMolKit {
-void confPosToVect(const RDKit::ROMol& mol, std::vector<double>& positions, int confId) {
-  const unsigned int      numAtoms = mol.getNumAtoms();
-  const RDKit::Conformer& conf     = mol.getConformer(confId);
-  positions.resize(3 * numAtoms);
-
-  // Fill positions vector with conformer coordinates
-  for (unsigned int i = 0; i < numAtoms; ++i) {
-    positions[3 * i]     = conf.getAtomPos(i).x;
-    positions[3 * i + 1] = conf.getAtomPos(i).y;
-    positions[3 * i + 2] = conf.getAtomPos(i).z;
-  }
+void confPosToVect(const RDKit::ROMol& mol, std::vector<double>& positions, const int confId) {
+  const RDKit::Conformer& conf = mol.getConformer(confId);
+  confPosToVect(conf, positions);
 }
 
 void confPosToVect(const RDKit::Conformer& conf, std::vector<double>& positions) {
@@ -40,9 +32,10 @@ void confPosToVect(const RDKit::Conformer& conf, std::vector<double>& positions)
 
   // Fill positions vector with conformer coordinates
   for (unsigned int i = 0; i < numAtoms; ++i) {
-    positions[3 * i]     = conf.getAtomPos(i).x;
-    positions[3 * i + 1] = conf.getAtomPos(i).y;
-    positions[3 * i + 2] = conf.getAtomPos(i).z;
+    const auto& rdkitPos = conf.getAtomPos(i);
+    positions[3 * i]     = rdkitPos.x;
+    positions[3 * i + 1] = rdkitPos.y;
+    positions[3 * i + 2] = rdkitPos.z;
   }
 }
 

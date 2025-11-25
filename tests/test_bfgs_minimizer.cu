@@ -1017,9 +1017,10 @@ TEST_F(BFGSMinimizerHarmonicTestFixture, MultipleMinimizeCallsConvergedSystemUnc
   std::vector<int16_t> statuses = getStatusesFromDevice(minimizer);
   EXPECT_THAT(statuses, ::testing::Each(0));  // expect all converged
 
-  // Store the converged positions
-  std::vector<double> convergedPositions = getPositionsFromDevice();
-
+  std::vector<double> energiesBefore(energyOutsDevice_.size());
+  energyOutsDevice_.copyToHost(energiesBefore);
+  cudaStreamSynchronize(energyOutsDevice_.stream());
+  ASSERT_THAT(energiesBefore, ::testing::Each(::testing::DoubleNear(0.0, 1e-5)));
   // Call minimize again on the converged system
   minimizer.minimize(50,
                      1e-4,
@@ -1032,9 +1033,10 @@ TEST_F(BFGSMinimizerHarmonicTestFixture, MultipleMinimizeCallsConvergedSystemUnc
                      eFunc,
                      gFunc);
 
-  // Verify that positions haven't changed
-  std::vector<double> unchangedPositions = getPositionsFromDevice();
-  EXPECT_THAT(unchangedPositions, ::testing::Pointwise(::testing::DoubleNear(1e-4), convergedPositions));
+  std::vector<double> energiesAfter(energyOutsDevice_.size());
+  energyOutsDevice_.copyToHost(energiesAfter);
+  cudaStreamSynchronize(energyOutsDevice_.stream());
+  ASSERT_THAT(energiesAfter, ::testing::Each(::testing::DoubleNear(0.0, 1e-5)));
 }
 
 TEST_F(BFGSMinimizerHarmonicTestFixture, MultipleMinimizeCallsEquivalentToSingleCall) {

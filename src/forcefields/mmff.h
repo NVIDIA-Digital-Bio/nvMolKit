@@ -68,13 +68,13 @@ struct OutOfPlaneTerms {
 };
 
 struct TorsionContribTerms {
-  std::vector<int>    idx1;
-  std::vector<int>    idx2;
-  std::vector<int>    idx3;
-  std::vector<int>    idx4;
-  std::vector<double> V1;
-  std::vector<double> V2;
-  std::vector<double> V3;
+  std::vector<int>   idx1;
+  std::vector<int>   idx2;
+  std::vector<int>   idx3;
+  std::vector<int>   idx4;
+  std::vector<float> V1;
+  std::vector<float> V2;
+  std::vector<float> V3;
 };
 
 struct VdwTerms {
@@ -134,10 +134,8 @@ struct BatchedMolecularSystemHost {
   //! Size total num atoms * 3
   std::vector<double>     positions;
 
-  //! Size total num atoms
-  std::vector<int> atomNumbers;
   //! Largest system size in the batch
-  int              maxNumAtoms = 0;
+  int maxNumAtoms = 0;
 };
 
 struct BondStretchContribTermsDevice {
@@ -176,13 +174,13 @@ struct OutOfPlaneTermsDevice {
 };
 
 struct TorsionContribTermsDevice {
-  nvMolKit::AsyncDeviceVector<int>    idx1;
-  nvMolKit::AsyncDeviceVector<int>    idx2;
-  nvMolKit::AsyncDeviceVector<int>    idx3;
-  nvMolKit::AsyncDeviceVector<int>    idx4;
-  nvMolKit::AsyncDeviceVector<double> V1;
-  nvMolKit::AsyncDeviceVector<double> V2;
-  nvMolKit::AsyncDeviceVector<double> V3;
+  nvMolKit::AsyncDeviceVector<int>   idx1;
+  nvMolKit::AsyncDeviceVector<int>   idx2;
+  nvMolKit::AsyncDeviceVector<int>   idx3;
+  nvMolKit::AsyncDeviceVector<int>   idx4;
+  nvMolKit::AsyncDeviceVector<float> V1;
+  nvMolKit::AsyncDeviceVector<float> V2;
+  nvMolKit::AsyncDeviceVector<float> V3;
 };
 
 struct VdwTermsDevice {
@@ -226,37 +224,6 @@ struct BatchedIndicesDevice {
   nvMolKit::AsyncDeviceVector<int> eleTermStarts;
 };
 
-//! Buffers for interfacing with the 4D padded L-BFGS minimizer.
-//! The minimizer requires homogenous batches, so we need to pad the positions
-//! and gradients. It also works in double4s, so we need to convert.
-//!
-//!  Operation flow between buffers:
-//!      In energy calculation:
-//!         - Copy interface padded d4 positions to our condensed d3.
-//!         - Compute energies
-//!         - return enegies, no additional copying needed since 1 per molecule.
-//!
-//!      In grad calculation:
-//!         - Copy interface padded d4 positions to our condensed d3
-//!         - Compute gradients
-//!         - Copy d3 gradients to interface padded d4 gradients
-//!
-//!      In output gathering:
-//!         - Copy d4 padded positions to our d3 condensed and download
-//! TODO: Potential optimization points:
-//!    - Kernels that work on d4 padded positions and gradients directly
-//!    - One copy of positions for energy and gradient. This might be shaky
-struct Dim4PaddedInterfaceBuffers {
-  //! Size n_molecules * (max atoms in batch) * 4
-  nvMolKit::AsyncDeviceVector<double> positionsD4Padded;
-  //! Size n_molecules * (max atoms in batch) * 3
-  nvMolKit::AsyncDeviceVector<double> gradD3Padded;
-  //! Size n_molecules * (max atoms in batch) * 4, will be -1 for padded or 4th dims.
-  nvMolKit::AsyncDeviceVector<int>    writeBackIndices;
-  //! Size n_molecules * (max atoms in batch)
-  nvMolKit::AsyncDeviceVector<int>    atomNumbers;
-};
-
 //! Device buffers for the batched molecular system.
 //! Most of the terms are either 1 per molecule or CSR-like format with the BatchedIndicesDevice terms used for
 //! indexing.
@@ -281,8 +248,6 @@ struct BatchedMolecularDeviceBuffers {
   BatchedIndicesDevice                indices;
   //! Size total num atoms * 3
   nvMolKit::AsyncDeviceVector<double> positions;
-  //! Size total num atoms
-  nvMolKit::AsyncDeviceVector<int>    atomNumbers;
   //! Size total num atoms * 3
   nvMolKit::AsyncDeviceVector<double> grad;
   //! Variable size - max terms in each molecule concatenated.
@@ -290,16 +255,13 @@ struct BatchedMolecularDeviceBuffers {
   nvMolKit::AsyncDeviceVector<double> energyBuffer;
   //! Size n_molecules
   nvMolKit::AsyncDeviceVector<double> energyOuts;
-  //! Dimension change and padding buffers
-  Dim4PaddedInterfaceBuffers          dataFormatInterchangeBuffers;
 };
 
 //! Add a molecule to the batched molecular system.
 //! Populates the molSystem with the molecule's energy force contribs, and adds the current positions.
 void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
                         const std::vector<double>&     positions,
-                        BatchedMolecularSystemHost&    molSystem,
-                        std::vector<int>*              atomNumbers = nullptr);
+                        BatchedMolecularSystemHost&    molSystem);
 
 //! Send the batched molecular system to the device.
 void sendContribsAndIndicesToDevice(const BatchedMolecularSystemHost& molSystemHost,
@@ -312,10 +274,6 @@ void setStreams(BatchedMolecularDeviceBuffers& molSystemDevice, cudaStream_t str
 //! These include the gradients, energy buffer, and energy outs.
 void allocateIntermediateBuffers(const BatchedMolecularSystemHost& molSystemHost,
                                  BatchedMolecularDeviceBuffers&    molSystemDevice);
-
-//! Allocate the buffers for the 4D padded interface.
-void allocateDim4ConversionBuffers(const BatchedMolecularSystemHost& molSystemHost,
-                                   BatchedMolecularDeviceBuffers&    molSystemDevice);
 
 //! Compute the energy of the batched molecular system. This will populate the energyOuts buffer on device.
 //! energyOuts and energyBuffer must be zeroed before calling this function.

@@ -111,7 +111,7 @@ TEST_P(ETKDGFFGpuTestFixture, CombinedEnergies) {
   if (std::get<1>(GetParam()) == -1) {
     double wantEnergy = field_->calcEnergy();
     // Test without active stage parameters
-    CHECK_CUDA_RETURN(computeEnergy(systemDevice_, atomStartsDevice_, positionsDevice_));
+    CHECK_CUDA_RETURN(computeEnergy(systemDevice_, atomStartsDevice_, positionsDevice_, 1.0, 0.1));
     CHECK_CUDA_RETURN(
       cudaMemcpy(&gotEnergy, systemDevice_.energyOuts.data() + 0, sizeof(double), cudaMemcpyDeviceToHost));
     EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
@@ -121,7 +121,8 @@ TEST_P(ETKDGFFGpuTestFixture, CombinedEnergies) {
     nvMolKit::AsyncDeviceVector<uint8_t> d_activeThisStage;
     d_activeThisStage.setFromVector(h_activeThisStage);
 
-    CHECK_CUDA_RETURN(computeEnergy(systemDevice_, atomStartsDevice_, positionsDevice_, d_activeThisStage.data()));
+    CHECK_CUDA_RETURN(
+      computeEnergy(systemDevice_, atomStartsDevice_, positionsDevice_, 1.0, 0.1, d_activeThisStage.data()));
     CHECK_CUDA_RETURN(
       cudaMemcpy(&gotEnergy, systemDevice_.energyOuts.data() + 0, sizeof(double), cudaMemcpyDeviceToHost));
 
@@ -140,7 +141,7 @@ TEST_P(ETKDGFFGpuTestFixture, CombinedGradients) {
     std::vector<double> wantGradients(field_->dimension() * field_->positions().size(), 0.0);
     field_->calcGrad(wantGradients.data());
     // Test without active stage parameters
-    CHECK_CUDA_RETURN(computeGradients(systemDevice_, atomStartsDevice_, positionsDevice_));
+    CHECK_CUDA_RETURN(computeGradients(systemDevice_, atomStartsDevice_, positionsDevice_, 1.0, 0.1));
     std::vector<double> gotGrad(positionsHost_.size(), 0.0);
     systemDevice_.grad.copyToHost(gotGrad);
     cudaDeviceSynchronize();
@@ -151,7 +152,8 @@ TEST_P(ETKDGFFGpuTestFixture, CombinedGradients) {
     nvMolKit::AsyncDeviceVector<uint8_t> d_activeThisStage;
     d_activeThisStage.setFromVector(h_activeThisStage);
 
-    CHECK_CUDA_RETURN(computeGradients(systemDevice_, atomStartsDevice_, positionsDevice_, d_activeThisStage.data()));
+    CHECK_CUDA_RETURN(
+      computeGradients(systemDevice_, atomStartsDevice_, positionsDevice_, 1.0, 0.1, d_activeThisStage.data()));
     std::vector<double> gotGrad(positionsHost_.size(), 0.0);
     systemDevice_.grad.copyToHost(gotGrad);
     cudaDeviceSynchronize();
@@ -219,7 +221,7 @@ INSTANTIATE_TEST_SUITE_P(ETKDGFFOneTwoAtoms,
 // Test energy calculation
 TEST_P(ETKDGFFGpuEdgeCases, CombinedEnergies) {
   double wantEnergy = field_->calcEnergy();
-  CHECK_CUDA_RETURN(computeEnergy(systemDevice_, atomStartsDevice_, positionsDevice_));
+  CHECK_CUDA_RETURN(computeEnergy(systemDevice_, atomStartsDevice_, positionsDevice_, 1.0, 0.1));
   double gotEnergy;
   CHECK_CUDA_RETURN(
     cudaMemcpy(&gotEnergy, systemDevice_.energyOuts.data() + 0, sizeof(double), cudaMemcpyDeviceToHost));
@@ -231,7 +233,7 @@ TEST_P(ETKDGFFGpuEdgeCases, CombinedGradients) {
   std::vector<double> wantGradients(field_->dimension() * field_->positions().size(), 0.0);
   field_->calcGrad(wantGradients.data());
 
-  CHECK_CUDA_RETURN(computeGradients(systemDevice_, atomStartsDevice_, positionsDevice_));
+  CHECK_CUDA_RETURN(computeGradients(systemDevice_, atomStartsDevice_, positionsDevice_, 1.0, 0.1));
   std::vector<double> gotGrad(positionsHost_.size(), 0.0);
   systemDevice_.grad.copyToHost(gotGrad);
   cudaDeviceSynchronize();
@@ -365,11 +367,11 @@ void runTestInBatch(const std::vector<std::unique_ptr<RDKit::ROMol>>& mols,
   setupDeviceBuffers(systemHost, systemDevice, positionsHost, atomStartsHost.size() - 1);
 
   if (d_activeThisStage) {
-    computeEnergy(systemDevice, atomStartsDevice, positionsDevice, d_activeThisStage);
-    computeGradients(systemDevice, atomStartsDevice, positionsDevice, d_activeThisStage);
+    computeEnergy(systemDevice, atomStartsDevice, positionsDevice, 1.0, 0.1, d_activeThisStage);
+    computeGradients(systemDevice, atomStartsDevice, positionsDevice, 1.0, 0.1, d_activeThisStage);
   } else {
-    computeEnergy(systemDevice, atomStartsDevice, positionsDevice);
-    computeGradients(systemDevice, atomStartsDevice, positionsDevice);
+    computeEnergy(systemDevice, atomStartsDevice, positionsDevice, 1.0, 0.1);
+    computeGradients(systemDevice, atomStartsDevice, positionsDevice, 1.0, 0.1);
   }
   std::vector<double> gotEnergies(systemDevice.energyOuts.size(), 0.0);
   systemDevice.energyOuts.copyToHost(gotEnergies);
@@ -447,7 +449,7 @@ void runTestInSerial(const std::vector<std::unique_ptr<RDKit::ROMol>>& mols,
     double      gotEnergy  = 0.0;
     std::string exceptionStr;
     try {
-      CHECK_CUDA_RETURN(computeEnergy(systemDevice, atomStartsDevice, positionsDevice));
+      CHECK_CUDA_RETURN(computeEnergy(systemDevice, atomStartsDevice, positionsDevice, 1.0, 0.1));
       CHECK_CUDA_RETURN(
         cudaMemcpy(&gotEnergy, systemDevice.energyOuts.data() + 0, sizeof(double), cudaMemcpyDeviceToHost));
     } catch (const std::runtime_error& e) {
@@ -466,7 +468,7 @@ void runTestInSerial(const std::vector<std::unique_ptr<RDKit::ROMol>>& mols,
     std::vector<double> wantGrad(field->dimension() * mol->getNumAtoms(), 0.0);
     field->calcGrad(wantGrad.data());
     systemDevice.grad.zero();
-    CHECK_CUDA_RETURN(computeGradients(systemDevice, atomStartsDevice, positionsDevice));
+    CHECK_CUDA_RETURN(computeGradients(systemDevice, atomStartsDevice, positionsDevice, 1.0, 0.1));
     std::vector<double> gotGrad(positionsHost.size(), 0.0);
     systemDevice.grad.copyToHost(gotGrad);
     cudaDeviceSynchronize();

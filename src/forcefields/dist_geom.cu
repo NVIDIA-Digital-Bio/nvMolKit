@@ -45,6 +45,116 @@ void addMoleculeToContextWithPositions(const std::vector<double>& positions,
   ctxAtomStarts.push_back(ctxAtomStarts.back() + numAtoms);
 }
 
+void preallocateEstimatedBatch(const EnergyForceContribsHost& templateContribs,
+                               BatchedMolecularSystemHost&    molSystem,
+                               const int                      estimatedBatchSize) {
+  const size_t bufferMultiplier = static_cast<size_t>(estimatedBatchSize * 1.2);
+
+  auto& contribHolder = molSystem.contribs;
+
+  // Preallocate DistViolation terms
+  const size_t numDistTerms = templateContribs.distTerms.idx1.size();
+  contribHolder.distTerms.idx1.reserve(numDistTerms * bufferMultiplier);
+  contribHolder.distTerms.idx2.reserve(numDistTerms * bufferMultiplier);
+  contribHolder.distTerms.lb2.reserve(numDistTerms * bufferMultiplier);
+  contribHolder.distTerms.ub2.reserve(numDistTerms * bufferMultiplier);
+  contribHolder.distTerms.weight.reserve(numDistTerms * bufferMultiplier);
+
+  // Preallocate ChiralViolation terms
+  const size_t numChiralTerms = templateContribs.chiralTerms.idx1.size();
+  contribHolder.chiralTerms.idx1.reserve(numChiralTerms * bufferMultiplier);
+  contribHolder.chiralTerms.idx2.reserve(numChiralTerms * bufferMultiplier);
+  contribHolder.chiralTerms.idx3.reserve(numChiralTerms * bufferMultiplier);
+  contribHolder.chiralTerms.idx4.reserve(numChiralTerms * bufferMultiplier);
+  contribHolder.chiralTerms.volLower.reserve(numChiralTerms * bufferMultiplier);
+  contribHolder.chiralTerms.volUpper.reserve(numChiralTerms * bufferMultiplier);
+
+  // Preallocate FourthDim terms
+  const size_t numFourthTerms = templateContribs.fourthTerms.idx.size();
+  contribHolder.fourthTerms.idx.reserve(numFourthTerms * bufferMultiplier);
+
+  // Preallocate index vectors
+  auto& indexHolder = molSystem.indices;
+  indexHolder.distTermStarts.reserve(estimatedBatchSize + 1);
+  indexHolder.chiralTermStarts.reserve(estimatedBatchSize + 1);
+  indexHolder.fourthTermStarts.reserve(estimatedBatchSize + 1);
+  indexHolder.energyBufferStarts.reserve(estimatedBatchSize + 1);
+}
+
+void preallocateEstimatedBatch3D(const Energy3DForceContribsHost& templateContribs,
+                                 BatchedMolecularSystem3DHost&    molSystem,
+                                 const int                        estimatedBatchSize) {
+  const size_t bufferMultiplier = static_cast<size_t>(estimatedBatchSize * 1.2);
+
+  auto& contribHolder = molSystem.contribs;
+
+  // Preallocate experimental torsion terms
+  const size_t numExpTorsionTerms = templateContribs.experimentalTorsionTerms.idx1.size();
+  contribHolder.experimentalTorsionTerms.idx1.reserve(numExpTorsionTerms * bufferMultiplier);
+  contribHolder.experimentalTorsionTerms.idx2.reserve(numExpTorsionTerms * bufferMultiplier);
+  contribHolder.experimentalTorsionTerms.idx3.reserve(numExpTorsionTerms * bufferMultiplier);
+  contribHolder.experimentalTorsionTerms.idx4.reserve(numExpTorsionTerms * bufferMultiplier);
+  contribHolder.experimentalTorsionTerms.forceConstants.reserve(numExpTorsionTerms * 6 * bufferMultiplier);
+  contribHolder.experimentalTorsionTerms.signs.reserve(numExpTorsionTerms * 6 * bufferMultiplier);
+
+  // Preallocate improper torsion terms
+  const size_t numImproperTerms = templateContribs.improperTorsionTerms.idx1.size();
+  contribHolder.improperTorsionTerms.idx1.reserve(numImproperTerms * bufferMultiplier);
+  contribHolder.improperTorsionTerms.idx2.reserve(numImproperTerms * bufferMultiplier);
+  contribHolder.improperTorsionTerms.idx3.reserve(numImproperTerms * bufferMultiplier);
+  contribHolder.improperTorsionTerms.idx4.reserve(numImproperTerms * bufferMultiplier);
+  contribHolder.improperTorsionTerms.at2AtomicNum.reserve(numImproperTerms * bufferMultiplier);
+  contribHolder.improperTorsionTerms.isCBoundToO.reserve(numImproperTerms * bufferMultiplier);
+  contribHolder.improperTorsionTerms.C0.reserve(numImproperTerms * bufferMultiplier);
+  contribHolder.improperTorsionTerms.C1.reserve(numImproperTerms * bufferMultiplier);
+  contribHolder.improperTorsionTerms.C2.reserve(numImproperTerms * bufferMultiplier);
+  contribHolder.improperTorsionTerms.forceConstant.reserve(numImproperTerms * bufferMultiplier);
+  contribHolder.improperTorsionTerms.numImpropers.reserve(estimatedBatchSize);
+
+  // Preallocate 1-2 distance terms
+  const size_t numDist12Terms = templateContribs.dist12Terms.idx1.size();
+  contribHolder.dist12Terms.idx1.reserve(numDist12Terms * bufferMultiplier);
+  contribHolder.dist12Terms.idx2.reserve(numDist12Terms * bufferMultiplier);
+  contribHolder.dist12Terms.minLen.reserve(numDist12Terms * bufferMultiplier);
+  contribHolder.dist12Terms.maxLen.reserve(numDist12Terms * bufferMultiplier);
+  contribHolder.dist12Terms.forceConstant.reserve(numDist12Terms * bufferMultiplier);
+
+  // Preallocate 1-3 distance terms
+  const size_t numDist13Terms = templateContribs.dist13Terms.idx1.size();
+  contribHolder.dist13Terms.idx1.reserve(numDist13Terms * bufferMultiplier);
+  contribHolder.dist13Terms.idx2.reserve(numDist13Terms * bufferMultiplier);
+  contribHolder.dist13Terms.minLen.reserve(numDist13Terms * bufferMultiplier);
+  contribHolder.dist13Terms.maxLen.reserve(numDist13Terms * bufferMultiplier);
+  contribHolder.dist13Terms.forceConstant.reserve(numDist13Terms * bufferMultiplier);
+  contribHolder.dist13Terms.isImproperConstrained.reserve(numDist13Terms * bufferMultiplier);
+
+  // Preallocate 1-3 angle terms
+  const size_t numAngle13Terms = templateContribs.angle13Terms.idx1.size();
+  contribHolder.angle13Terms.idx1.reserve(numAngle13Terms * bufferMultiplier);
+  contribHolder.angle13Terms.idx2.reserve(numAngle13Terms * bufferMultiplier);
+  contribHolder.angle13Terms.idx3.reserve(numAngle13Terms * bufferMultiplier);
+  contribHolder.angle13Terms.minAngle.reserve(numAngle13Terms * bufferMultiplier);
+  contribHolder.angle13Terms.maxAngle.reserve(numAngle13Terms * bufferMultiplier);
+
+  // Preallocate long range distance terms
+  const size_t numLongRangeTerms = templateContribs.longRangeDistTerms.idx1.size();
+  contribHolder.longRangeDistTerms.idx1.reserve(numLongRangeTerms * bufferMultiplier);
+  contribHolder.longRangeDistTerms.idx2.reserve(numLongRangeTerms * bufferMultiplier);
+  contribHolder.longRangeDistTerms.minLen.reserve(numLongRangeTerms * bufferMultiplier);
+  contribHolder.longRangeDistTerms.maxLen.reserve(numLongRangeTerms * bufferMultiplier);
+  contribHolder.longRangeDistTerms.forceConstant.reserve(numLongRangeTerms * bufferMultiplier);
+
+  // Preallocate index vectors
+  auto& indexHolder = molSystem.indices;
+  indexHolder.experimentalTorsionTermStarts.reserve(estimatedBatchSize + 1);
+  indexHolder.improperTorsionTermStarts.reserve(estimatedBatchSize + 1);
+  indexHolder.dist12TermStarts.reserve(estimatedBatchSize + 1);
+  indexHolder.dist13TermStarts.reserve(estimatedBatchSize + 1);
+  indexHolder.angle13TermStarts.reserve(estimatedBatchSize + 1);
+  indexHolder.longRangeDistTermStarts.reserve(estimatedBatchSize + 1);
+  indexHolder.energyBufferStarts.reserve(estimatedBatchSize + 1);
+}
+
 void addMoleculeToMolecularSystem(const EnergyForceContribsHost& contribs,
                                   const int                      numAtoms,
                                   const int                      dimension,
@@ -364,11 +474,7 @@ void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
   addMoleculeToContextWithPositions(positions, dimension, ctxAtomStarts, ctxPositions);
 
   // Then update the molecular system
-  addMoleculeToMolecularSystem(contribs,
-                               positions.size() / dimension,
-                               dimension,
-                               ctxAtomStarts,
-                               molSystem);
+  addMoleculeToMolecularSystem(contribs, positions.size() / dimension, dimension, ctxAtomStarts, molSystem);
 }
 
 void addMoleculeToBatch3D(const Energy3DForceContribsHost& contribs,
@@ -629,11 +735,12 @@ void setupDeviceBuffers3D(BatchedMolecularSystem3DHost&    molSystemHost,
   molSystemDevice.grad.zero();
 }
 
-
 // TODO: More sophisticated error handling for energy and gradient.
 cudaError_t computeEnergy(BatchedMolecularDeviceBuffers&             molSystemDevice,
                           const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
                           const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
+                          const double                               chiralWeight,
+                          const double                               fourthDimWeight,
                           const uint8_t*                             activeThisStage,
                           const double*                              positions,
                           cudaStream_t                               stream,
@@ -675,7 +782,7 @@ cudaError_t computeEnergy(BatchedMolecularDeviceBuffers&             molSystemDe
                                             contribs.chiralTerms.idx4.data(),
                                             contribs.chiralTerms.volLower.data(),
                                             contribs.chiralTerms.volUpper.data(),
-                                                chiralWeight,
+                                            chiralWeight,
                                             posData,
                                             molSystemDevice.energyBuffer.data(),
                                             molSystemDevice.indices.energyBufferStarts.data(),
@@ -689,7 +796,7 @@ cudaError_t computeEnergy(BatchedMolecularDeviceBuffers&             molSystemDe
   if (err == cudaSuccess && contribs.fourthTerms.idx.size() > 0) {
     err = launchFourthDimEnergyKernel(contribs.fourthTerms.idx.size(),
                                       contribs.fourthTerms.idx.data(),
-                                          fourthDimWeight,
+                                      fourthDimWeight,
                                       posData,
                                       molSystemDevice.energyBuffer.data(),
                                       molSystemDevice.indices.energyBufferStarts.data(),
@@ -715,6 +822,8 @@ cudaError_t computeEnergy(BatchedMolecularDeviceBuffers&             molSystemDe
 cudaError_t computeGradients(BatchedMolecularDeviceBuffers&             molSystemDevice,
                              const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
                              const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
+                             const double                               chiralWeight,
+                             const double                               fourthDimWeight,
                              const uint8_t*                             activeThisStage,
                              cudaStream_t                               stream,
                              double                                     chiralWeight,
