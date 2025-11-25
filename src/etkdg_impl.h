@@ -32,6 +32,7 @@
 #include "device_vector.h"
 #include "dist_geom.h"
 #include "embedder_utils.h"
+#include "host_vector.h"
 
 // forward declarations
 
@@ -89,7 +90,8 @@ void setStreams(ETKDGContext& ctx, cudaStream_t stream);
 void launchCollectAndFilterFailuresKernel(ETKDGContext& context, int stageId, cudaStream_t stream);
 
 //! Checks for newly finished conformers, returns the number of remaining conformers.
-int launchGetFinishedKernels(ETKDGContext& context, int iteration, cudaStream_t stream);
+//! Accepts pinned scratch buffer for finished counts.
+int launchGetFinishedKernels(ETKDGContext& context, int iteration, int* finishedCountHost, cudaStream_t stream);
 
 //! Set initial active filter, based on if a conformer has succeeded in the previous iteration.
 void launchSetRunFilterForIterationKernel(ETKDGContext& context, cudaStream_t stream);
@@ -122,11 +124,11 @@ struct StageTiming {
 };
 
 //! ETKDG Runner class.
-//! Note that this class cannot be reused. It is designed to forward in iterations once.
+//! Can be reused across multiple batches by calling reset() with a new context and stages.
 //!
 //! The runner is designed to operate on batches of molecules. Conformers for the same molecule are considered
 //! independent, and any shared setup upstream of this class should be finished by the time the context is passed to the
-//! constructor.
+//! constructor or reset() method.
 //!
 //! At each iteration, an active subset of conformers are attempted to be generated. A conformer is inactive if a
 //! previous iteration completed succesfully, OR if a previous stage in the current iteration has failed.
@@ -137,6 +139,15 @@ class ETKDGDriver {
               bool                                       debugMode       = false,
               cudaStream_t                               stream          = nullptr,
               const std::atomic<bool>*                   earlyExitToggle = nullptr);
+
+  ETKDGDriver() = default;
+
+  //! Reset the driver with a new context and stages
+  void reset(std::unique_ptr<ETKDGContext>&&            context,
+             std::vector<std::unique_ptr<ETKDGStage>>&& stages,
+             bool                                       debugMode       = false,
+             cudaStream_t                               stream          = nullptr,
+             const std::atomic<bool>*                   earlyExitToggle = nullptr);
 
   //! Run one iteration. The iteration ID is incremented.
   void                              iterate();
@@ -150,7 +161,8 @@ class ETKDGDriver {
   std::vector<int16_t>              completedConformers() const;
   //! Returns failure counts. The outer vector is per stage, the inner vector is per conformer,
   //! so getFailures()[i][j] is the number of times that conformer j has failed stage i.
-  std::vector<std::vector<int16_t>> getFailures() const;
+  //! Uses single pinned memory buffer for intermediate D2H transfer (all stages concatenated).
+  std::vector<std::vector<int16_t>> getFailures(PinnedHostVector<int16_t>& failuresScratch) const;
   const ETKDGContext&               context() const { return *context_; }
 
   //! Iterate until all conformers are finished or maxIterations is reached. Does not reset iterations,
@@ -160,17 +172,22 @@ class ETKDGDriver {
   void run(int maxIterations);
 
  private:
-  std::unique_ptr<ETKDGContext>            context_;
-  std::vector<std::unique_ptr<ETKDGStage>> stages_;
-  int                                      totalConfs_;
-  int                                      numFinished_ = 0;
-  int                                      iteration_   = 0;
-  cudaStream_t                             stream_;
-  const std::atomic<bool>*                 earlyExit_;  // Optional early exit flag for external control
-
+  std::unique_ptr<ETKDGContext>                context_;
+  std::vector<std::unique_ptr<ETKDGStage>>     stages_;
+  int                                          totalConfs_  = 0;
+  int                                          numFinished_ = 0;
+  int                                          iteration_   = 0;
+  cudaStream_t                                 stream_      = nullptr;
+  const std::atomic<bool>*                     earlyExit_   = nullptr;  // Optional early exit flag for external control
   // Debug mode members
-  bool                                         debugMode_ = false;
+  bool                                         debugMode_   = false;
   std::unordered_map<std::string, StageTiming> stageTimings_;
+
+  // Pinned memory buffer for D2H transfer of finished count
+  PinnedHostVector<int> finishedCountHost_{1};
+
+  // Helper method to initialize driver state from context and stages
+  void initialize();
 
   // Helper method to record timing for a stage
   void recordStageTiming(const std::string& stageName, double duration);
