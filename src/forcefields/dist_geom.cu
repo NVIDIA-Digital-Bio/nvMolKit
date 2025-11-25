@@ -243,7 +243,6 @@ void addMoleculeToMolecularSystem(const EnergyForceContribsHost& contribs,
   contribHolder.chiralTerms.volUpper.insert(contribHolder.chiralTerms.volUpper.end(),
                                             contribs.chiralTerms.volUpper.begin(),
                                             contribs.chiralTerms.volUpper.end());
-  // Note: weight no longer stored in structure
 
   // FourthDim term
   const size_t numFourthTerms = contribs.fourthTerms.idx.size();
@@ -252,7 +251,6 @@ void addMoleculeToMolecularSystem(const EnergyForceContribsHost& contribs,
   for (size_t i = 0; i < numFourthTerms; i++) {
     contribHolder.fourthTerms.idx.push_back(contribs.fourthTerms.idx[i] + previousLastAtomIndex);
   }
-  // Note: weight no longer stored in structure
 }
 
 void addMoleculeToMolecularSystem3D(const Energy3DForceContribsHost& contribs,
@@ -519,11 +517,9 @@ void sendContribsAndIndicesToDevice(const BatchedMolecularSystemHost& molSystemH
   deviceContribs.chiralTerms.idx4.setFromVector(hostContribs.chiralTerms.idx4);
   deviceContribs.chiralTerms.volLower.setFromVector(hostContribs.chiralTerms.volLower);
   deviceContribs.chiralTerms.volUpper.setFromVector(hostContribs.chiralTerms.volUpper);
-  // Note: weight no longer stored in device structure
 
   // FourthDim term
   deviceContribs.fourthTerms.idx.setFromVector(hostContribs.fourthTerms.idx);
-  // Note: weight no longer stored in device structure
 
   // Indices
   auto&       deviceIndices = molSystemDevice.indices;
@@ -639,9 +635,7 @@ void setStreams(BatchedMolecularDeviceBuffers& devBuffers, cudaStream_t stream) 
   devBuffers.contribs.chiralTerms.idx4.setStream(stream);
   devBuffers.contribs.chiralTerms.volLower.setStream(stream);
   devBuffers.contribs.chiralTerms.volUpper.setStream(stream);
-  // Note: weight no longer stored in device structure
   devBuffers.contribs.fourthTerms.idx.setStream(stream);
-  // Note: weight no longer stored in device structure
 }
 //! Set all DeviceVector streams for the batched 3D molecular device buffers.
 void setStreams(BatchedMolecular3DDeviceBuffers& devBuffers, cudaStream_t stream) {
