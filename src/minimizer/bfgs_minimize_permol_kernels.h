@@ -39,8 +39,8 @@ cudaError_t launchBfgsMinimizePerMolKernel(const int*                           
                                            double*                                   inverseHessian,
                                            double**                                  scratchBuffers,
                                            double*                                   energyOuts,
-                                           uint8_t*                                  convergenceStatus = nullptr,
-                                           cudaStream_t                              stream            = nullptr);
+                                           int16_t*                                  statuses = nullptr,
+                                           cudaStream_t                              stream   = nullptr);
 
 }  // namespace nvMolKit
 

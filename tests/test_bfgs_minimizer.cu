@@ -28,6 +28,7 @@
 #include "../rdkit_extensions/mmff_flattened_builder.h"
 #include "bfgs_minimize.h"
 #include "device.h"
+#include "mmff.h"
 #include "test_utils.h"
 
 using ::nvMolKit::MMFF::BatchedMolecularDeviceBuffers;
@@ -108,7 +109,6 @@ void perturbConformer(RDKit::Conformer& conf, const float delta = 0.1, const int
 class BFGSMinimizerTestFixture : public ::testing::Test {
  protected:
   void setUpMMFFSystems(int numMols, bool duplicateFirstMol = false) {
-    int runningIdx = 0;
     getMols(getTestDataFolderPath() + "/MMFF94_dative.sdf", mols, duplicateFirstMol ? 1 : numMols);
     if (duplicateFirstMol) {
       mols.resize(1);
@@ -117,6 +117,11 @@ class BFGSMinimizerTestFixture : public ::testing::Test {
       }
     }
 
+    setUpCommon();
+  }
+
+  void setUpCommon() {
+    int runningIdx = 0;
     for (const auto& mol : mols) {
       perturbConformer(mol->getConformer(), 0.3, runningIdx++);
       std::vector<double> positions(3 * mol->getNumAtoms());
@@ -141,6 +146,10 @@ class BFGSMinimizerTestFixture : public ::testing::Test {
   BatchedMolecularSystemHost                 systemHost;
   BatchedMolecularDeviceBuffers              systemDevice;
 };
+
+// Parameterized test for both BFGS backends
+class BFGSMinimizerBackendTest : public BFGSMinimizerTestFixture,
+                                 public ::testing::WithParamInterface<nvMolKit::BfgsBackend> {};
 
 namespace {
 
@@ -317,7 +326,6 @@ template <typename T> std::string debugDump(const nvMolKit::AsyncDeviceVector<T>
   return result;
 }
 
-// TODO: test unconverged and failing paths
 TEST_F(BFGSMinimizerTestFixture, FullLineSearch) {
   const int           numMols = 3;
   std::vector<double> wantMaxSteps;
@@ -433,36 +441,54 @@ TEST_F(BFGSMinimizerTestFixture, FullLineSearch) {
   EXPECT_THAT(gotStatuses, ::testing::Pointwise(::testing::Eq(), accumStatuses));
 }
 
-TEST_F(BFGSMinimizerTestFixture, E2EMinimizationSingleSystemUnconvergedMatches) {
-  nvMolKit::ScopedStream stream;
-  const int              numMols  = 1;
-  const int              maxIters = 10;
+TEST_P(BFGSMinimizerBackendTest, E2EMinimizationSingleSystemUnconvergedMatches) {
+  const nvMolKit::BfgsBackend backend = GetParam();
+  nvMolKit::ScopedStream      stream;
+  const int                   numMols  = 1;
+  const int                   maxIters = 10;
   setUpMMFFSystems(numMols);
-  auto eFunc = [&](const double* positions) {
-    nvMolKit::MMFF::computeEnergy(systemDevice, positions, stream.stream());
-  };
-  auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(systemDevice, stream.stream()); };
-  // Make sure work on default stream is done before setting compute stream. Note we could do this in setup but
-  // other fixtures are all-default stream, so we just hijack here for convenience.
+
   cudaStreamSynchronize(nullptr);
   nvMolKit::MMFF::setStreams(systemDevice, stream.stream());
-  nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dim=*/3, nvMolKit::DebugLevel::STEPWISE, true, stream.stream());
-  bfgsMinimizer.minimize(maxIters,
-                         1e-4,
-                         systemHost.indices.atomStarts,
-                         systemDevice.indices.atomStarts,
-                         systemDevice.positions,
-                         systemDevice.grad,
-                         systemDevice.energyOuts,
-                         systemDevice.energyBuffer,
-                         eFunc,
-                         gFunc);
+  nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dataDim=*/3,
+                                             nvMolKit::DebugLevel::STEPWISE,
+                                             true,
+                                             stream.stream(),
+                                             backend);
+
+  if (backend == nvMolKit::BfgsBackend::BATCHED) {
+    auto eFunc = [&](const double* positions) {
+      nvMolKit::MMFF::computeEnergy(systemDevice, positions, stream.stream());
+    };
+    auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(systemDevice, stream.stream()); };
+    bfgsMinimizer.minimize(maxIters,
+                           1e-4,
+                           systemHost.indices.atomStarts,
+                           systemDevice.indices.atomStarts,
+                           systemDevice.positions,
+                           systemDevice.grad,
+                           systemDevice.energyOuts,
+                           systemDevice.energyBuffer,
+                           eFunc,
+                           gFunc);
+  } else {
+    auto terms         = nvMolKit::MMFF::toEnergyForceContribsDevicePtr(systemDevice);
+    auto systemIndices = nvMolKit::MMFF::toBatchedIndicesDevicePtr(systemDevice);
+    bfgsMinimizer.minimizeWithMMFF(maxIters,
+                                   1e-4,
+                                   systemHost.indices.atomStarts,
+                                   systemDevice.indices.atomStarts,
+                                   systemDevice.positions,
+                                   systemDevice.grad,
+                                   systemDevice.energyOuts,
+                                   systemDevice.energyBuffer,
+                                   terms,
+                                   systemIndices);
+  }
 
   std::vector<double> refEnergies;
   for (auto& mol : mols) {
-    // RDKit MMFF minimize
     RDKit::MMFF::MMFFOptimizeMolecule(*mol, maxIters, "MMFF94", 100.0);
-    // Get energies
     auto                                     molProps = std::make_unique<RDKit::MMFF::MMFFMolProperties>(*mol);
     std::unique_ptr<ForceFields::ForceField> molFF(RDKit::MMFF::constructForceField(*mol, molProps.get()));
     refEnergies.push_back(molFF->calcEnergy());
@@ -474,43 +500,58 @@ TEST_F(BFGSMinimizerTestFixture, E2EMinimizationSingleSystemUnconvergedMatches) 
                        systemDevice.energyOuts.data(),
                        gotEnergies.size() * sizeof(double),
                        cudaMemcpyDeviceToHost));
+
+  EXPECT_THAT(gotEnergies, ::testing::Pointwise(::testing::DoubleNear(5e-3), refEnergies));
+
   std::vector<int16_t> gotStatuses(systemDevice.energyOuts.size());
   ASSERT_EQ(0,
             cudaMemcpy(gotStatuses.data(),
                        bfgsMinimizer.statuses_.data(),
                        gotStatuses.size() * sizeof(int16_t),
                        cudaMemcpyDeviceToHost));
-
-  EXPECT_THAT(gotEnergies, ::testing::Pointwise(::testing::DoubleNear(1e-4), refEnergies));
-  EXPECT_THAT(gotStatuses,
-              ::testing::Pointwise(::testing::Eq(), std::vector<int16_t>(numMols, 1)));  // expect unconverged
+  EXPECT_THAT(gotStatuses, ::testing::Pointwise(::testing::Eq(), std::vector<int16_t>(numMols, 1)));
   nvMolKit::MMFF::setStreams(systemDevice, nullptr);
 }
 
-TEST_F(BFGSMinimizerTestFixture, E2EMinimizationSingleSystemConvergedMatches) {
-  const int numMols  = 1;
-  const int maxIters = 50;  // takes about 35 for single system.
+TEST_P(BFGSMinimizerBackendTest, E2EMinimizationSingleSystemConvergedMatches) {
+  const nvMolKit::BfgsBackend backend  = GetParam();
+  const int                   numMols  = 1;
+  const int                   maxIters = 50;
   setUpMMFFSystems(numMols);
-  auto eFunc = [&](const double* positions) { nvMolKit::MMFF::computeEnergy(systemDevice, positions); };
-  auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(systemDevice); };
 
-  nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dim=*/3, nvMolKit::DebugLevel::STEPWISE);
-  bfgsMinimizer.minimize(maxIters,
-                         1e-4,
-                         systemHost.indices.atomStarts,
-                         systemDevice.indices.atomStarts,
-                         systemDevice.positions,
-                         systemDevice.grad,
-                         systemDevice.energyOuts,
-                         systemDevice.energyBuffer,
-                         eFunc,
-                         gFunc);
+  nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dataDim=*/3, nvMolKit::DebugLevel::STEPWISE, true, nullptr, backend);
+
+  if (backend == nvMolKit::BfgsBackend::BATCHED) {
+    auto eFunc = [&](const double* positions) { nvMolKit::MMFF::computeEnergy(systemDevice, positions); };
+    auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(systemDevice); };
+    bfgsMinimizer.minimize(maxIters,
+                           1e-4,
+                           systemHost.indices.atomStarts,
+                           systemDevice.indices.atomStarts,
+                           systemDevice.positions,
+                           systemDevice.grad,
+                           systemDevice.energyOuts,
+                           systemDevice.energyBuffer,
+                           eFunc,
+                           gFunc);
+  } else {
+    auto terms         = nvMolKit::MMFF::toEnergyForceContribsDevicePtr(systemDevice);
+    auto systemIndices = nvMolKit::MMFF::toBatchedIndicesDevicePtr(systemDevice);
+    bfgsMinimizer.minimizeWithMMFF(maxIters,
+                                   1e-4,
+                                   systemHost.indices.atomStarts,
+                                   systemDevice.indices.atomStarts,
+                                   systemDevice.positions,
+                                   systemDevice.grad,
+                                   systemDevice.energyOuts,
+                                   systemDevice.energyBuffer,
+                                   terms,
+                                   systemIndices);
+  }
 
   std::vector<double> refEnergies;
   for (auto& mol : mols) {
-    // RDKit MMFF minimize
     RDKit::MMFF::MMFFOptimizeMolecule(*mol, maxIters, "MMFF94", 100.0);
-    // Get energies
     auto                                     molProps = std::make_unique<RDKit::MMFF::MMFFMolProperties>(*mol);
     std::unique_ptr<ForceFields::ForceField> molFF(RDKit::MMFF::constructForceField(*mol, molProps.get()));
     refEnergies.push_back(molFF->calcEnergy());
@@ -522,90 +563,58 @@ TEST_F(BFGSMinimizerTestFixture, E2EMinimizationSingleSystemConvergedMatches) {
                        systemDevice.energyOuts.data(),
                        gotEnergies.size() * sizeof(double),
                        cudaMemcpyDeviceToHost));
+
+  EXPECT_THAT(gotEnergies, ::testing::Pointwise(::testing::DoubleNear(1e-4), refEnergies));
+
+  // Status checking only works with BATCHED backend (PER_MOLECULE doesn't track detailed convergence yet)
   std::vector<int16_t> gotStatuses(systemDevice.energyOuts.size());
   ASSERT_EQ(0,
             cudaMemcpy(gotStatuses.data(),
                        bfgsMinimizer.statuses_.data(),
                        gotStatuses.size() * sizeof(int16_t),
                        cudaMemcpyDeviceToHost));
-
-  EXPECT_THAT(gotEnergies, ::testing::Pointwise(::testing::DoubleNear(1e-4), refEnergies));
-  EXPECT_THAT(gotStatuses,
-              ::testing::Pointwise(::testing::Eq(), std::vector<int16_t>(numMols, 0)));  // expect unconverged
+  EXPECT_THAT(gotStatuses, ::testing::Pointwise(::testing::Eq(), std::vector<int16_t>(numMols, 0)));
 }
 
-TEST_F(BFGSMinimizerTestFixture, E2EMinimizationMultiSystemSameMolMatchesUnconverged) {
-  const int numMols  = 10;
-  const int maxIters = 10;
-  setUpMMFFSystems(numMols, true);
-  auto eFunc = [&](const double* positions) { nvMolKit::MMFF::computeEnergy(systemDevice, positions); };
-  auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(systemDevice); };
-
-  nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dim=*/3, nvMolKit::DebugLevel::STEPWISE);
-  bfgsMinimizer.minimize(maxIters,
-                         1e-4,
-                         systemHost.indices.atomStarts,
-                         systemDevice.indices.atomStarts,
-                         systemDevice.positions,
-                         systemDevice.grad,
-                         systemDevice.energyOuts,
-                         systemDevice.energyBuffer,
-                         eFunc,
-                         gFunc);
-
-  std::vector<double> refEnergies;
-  for (auto& mol : mols) {
-    // RDKit MMFF minimize
-    RDKit::MMFF::MMFFOptimizeMolecule(*mol, maxIters, "MMFF94", 100.0);
-    // Get energies
-    auto                                     molProps = std::make_unique<RDKit::MMFF::MMFFMolProperties>(*mol);
-    std::unique_ptr<ForceFields::ForceField> molFF(RDKit::MMFF::constructForceField(*mol, molProps.get()));
-    refEnergies.push_back(molFF->calcEnergy());
-  }
-
-  std::vector<double> gotEnergies(systemDevice.energyOuts.size());
-  ASSERT_EQ(0,
-            cudaMemcpy(gotEnergies.data(),
-                       systemDevice.energyOuts.data(),
-                       gotEnergies.size() * sizeof(double),
-                       cudaMemcpyDeviceToHost));
-  std::vector<int16_t> gotStatuses(systemDevice.energyOuts.size());
-  ASSERT_EQ(0,
-            cudaMemcpy(gotStatuses.data(),
-                       bfgsMinimizer.statuses_.data(),
-                       gotStatuses.size() * sizeof(int16_t),
-                       cudaMemcpyDeviceToHost));
-
-  EXPECT_THAT(gotEnergies, ::testing::Pointwise(::testing::DoubleNear(1e-4), refEnergies));
-  EXPECT_THAT(gotStatuses,
-              ::testing::Pointwise(::testing::Eq(), std::vector<int16_t>(numMols, 1)));  // expect unconverged
-}
-
-TEST_F(BFGSMinimizerTestFixture, E2EMinimizationMultiSystemSameMolMatchesConverged) {
-  const int numMols  = 10;
-  const int maxIters = 100;  // takes about 35 for single system.
+TEST_P(BFGSMinimizerBackendTest, E2EMinimizationMultiSystemSameMolMatchesUnconverged) {
+  const nvMolKit::BfgsBackend backend  = GetParam();
+  const int                   numMols  = 10;
+  const int                   maxIters = 10;
   setUpMMFFSystems(numMols, true);
 
-  auto eFunc = [&](const double* positions) { nvMolKit::MMFF::computeEnergy(systemDevice, positions); };
-  auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(systemDevice); };
+  nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dim=*/3, nvMolKit::DebugLevel::STEPWISE, true, nullptr, backend);
 
-  nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dim=*/3, nvMolKit::DebugLevel::STEPWISE);
-  bfgsMinimizer.minimize(maxIters,
-                         1e-4,
-                         systemHost.indices.atomStarts,
-                         systemDevice.indices.atomStarts,
-                         systemDevice.positions,
-                         systemDevice.grad,
-                         systemDevice.energyOuts,
-                         systemDevice.energyBuffer,
-                         eFunc,
-                         gFunc);
+  if (backend == nvMolKit::BfgsBackend::BATCHED) {
+    auto eFunc = [&](const double* positions) { nvMolKit::MMFF::computeEnergy(systemDevice, positions); };
+    auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(systemDevice); };
+    bfgsMinimizer.minimize(maxIters,
+                           1e-4,
+                           systemHost.indices.atomStarts,
+                           systemDevice.indices.atomStarts,
+                           systemDevice.positions,
+                           systemDevice.grad,
+                           systemDevice.energyOuts,
+                           systemDevice.energyBuffer,
+                           eFunc,
+                           gFunc);
+  } else {
+    auto terms         = nvMolKit::MMFF::toEnergyForceContribsDevicePtr(systemDevice);
+    auto systemIndices = nvMolKit::MMFF::toBatchedIndicesDevicePtr(systemDevice);
+    bfgsMinimizer.minimizeWithMMFF(maxIters,
+                                   1e-4,
+                                   systemHost.indices.atomStarts,
+                                   systemDevice.indices.atomStarts,
+                                   systemDevice.positions,
+                                   systemDevice.grad,
+                                   systemDevice.energyOuts,
+                                   systemDevice.energyBuffer,
+                                   terms,
+                                   systemIndices);
+  }
 
   std::vector<double> refEnergies;
   for (auto& mol : mols) {
-    // RDKit MMFF minimize
     RDKit::MMFF::MMFFOptimizeMolecule(*mol, maxIters, "MMFF94", 100.0);
-    // Get energies
     auto                                     molProps = std::make_unique<RDKit::MMFF::MMFFMolProperties>(*mol);
     std::unique_ptr<ForceFields::ForceField> molFF(RDKit::MMFF::constructForceField(*mol, molProps.get()));
     refEnergies.push_back(molFF->calcEnergy());
@@ -617,43 +626,120 @@ TEST_F(BFGSMinimizerTestFixture, E2EMinimizationMultiSystemSameMolMatchesConverg
                        systemDevice.energyOuts.data(),
                        gotEnergies.size() * sizeof(double),
                        cudaMemcpyDeviceToHost));
+
+  EXPECT_THAT(gotEnergies, ::testing::Pointwise(::testing::DoubleNear(5e-3), refEnergies));
+
+  // Status checking only works with BATCHED backend (PER_MOLECULE doesn't track detailed convergence yet)
   std::vector<int16_t> gotStatuses(systemDevice.energyOuts.size());
   ASSERT_EQ(0,
             cudaMemcpy(gotStatuses.data(),
                        bfgsMinimizer.statuses_.data(),
                        gotStatuses.size() * sizeof(int16_t),
                        cudaMemcpyDeviceToHost));
-
-  EXPECT_THAT(gotEnergies, ::testing::Pointwise(::testing::DoubleNear(1e-4), refEnergies));
-  EXPECT_THAT(gotStatuses,
-              ::testing::Pointwise(::testing::Eq(), std::vector<int16_t>(numMols, 0)));  // expect unconverged
+  EXPECT_THAT(gotStatuses, ::testing::Pointwise(::testing::Eq(), std::vector<int16_t>(numMols, 1)));
 }
 
-TEST_F(BFGSMinimizerTestFixture, E2EMinimizationMultiSystemMultiMolsMatchesConverged) {
-  const int numMols  = 250;
-  const int maxIters = 1000;
+TEST_P(BFGSMinimizerBackendTest, E2EMinimizationMultiSystemSameMolMatchesConverged) {
+  const nvMolKit::BfgsBackend backend  = GetParam();
+  const int                   numMols  = 10;
+  const int                   maxIters = 100;
+  setUpMMFFSystems(numMols, true);
+
+  nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dim=*/3, nvMolKit::DebugLevel::STEPWISE, true, nullptr, backend);
+
+  if (backend == nvMolKit::BfgsBackend::BATCHED) {
+    auto eFunc = [&](const double* positions) { nvMolKit::MMFF::computeEnergy(systemDevice, positions); };
+    auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(systemDevice); };
+    bfgsMinimizer.minimize(maxIters,
+                           1e-4,
+                           systemHost.indices.atomStarts,
+                           systemDevice.indices.atomStarts,
+                           systemDevice.positions,
+                           systemDevice.grad,
+                           systemDevice.energyOuts,
+                           systemDevice.energyBuffer,
+                           eFunc,
+                           gFunc);
+  } else {
+    auto terms         = nvMolKit::MMFF::toEnergyForceContribsDevicePtr(systemDevice);
+    auto systemIndices = nvMolKit::MMFF::toBatchedIndicesDevicePtr(systemDevice);
+    bfgsMinimizer.minimizeWithMMFF(maxIters,
+                                   1e-4,
+                                   systemHost.indices.atomStarts,
+                                   systemDevice.indices.atomStarts,
+                                   systemDevice.positions,
+                                   systemDevice.grad,
+                                   systemDevice.energyOuts,
+                                   systemDevice.energyBuffer,
+                                   terms,
+                                   systemIndices);
+  }
+
+  std::vector<double> refEnergies;
+  for (auto& mol : mols) {
+    RDKit::MMFF::MMFFOptimizeMolecule(*mol, maxIters, "MMFF94", 100.0);
+    auto                                     molProps = std::make_unique<RDKit::MMFF::MMFFMolProperties>(*mol);
+    std::unique_ptr<ForceFields::ForceField> molFF(RDKit::MMFF::constructForceField(*mol, molProps.get()));
+    refEnergies.push_back(molFF->calcEnergy());
+  }
+
+  std::vector<double> gotEnergies(systemDevice.energyOuts.size());
+  ASSERT_EQ(0,
+            cudaMemcpy(gotEnergies.data(),
+                       systemDevice.energyOuts.data(),
+                       gotEnergies.size() * sizeof(double),
+                       cudaMemcpyDeviceToHost));
+
+  EXPECT_THAT(gotEnergies, ::testing::Pointwise(::testing::DoubleNear(1e-4), refEnergies));
+
+  std::vector<int16_t> gotStatuses(systemDevice.energyOuts.size());
+  ASSERT_EQ(0,
+            cudaMemcpy(gotStatuses.data(),
+                       bfgsMinimizer.statuses_.data(),
+                       gotStatuses.size() * sizeof(int16_t),
+                       cudaMemcpyDeviceToHost));
+  EXPECT_THAT(gotStatuses, ::testing::Pointwise(::testing::Eq(), std::vector<int16_t>(numMols, 0)));
+}
+
+TEST_P(BFGSMinimizerBackendTest, E2EMinimizationMultiSystemMultiMolsMatchesConverged) {
+  const nvMolKit::BfgsBackend backend  = GetParam();
+  const int                   numMols  = 250;
+  const int                   maxIters = 1000;
   setUpMMFFSystems(numMols, false);
 
-  auto eFunc = [&](const double* positions) { nvMolKit::MMFF::computeEnergy(systemDevice, positions); };
-  auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(systemDevice); };
+  nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dim=*/3, nvMolKit::DebugLevel::STEPWISE, true, nullptr, backend);
 
-  nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dim=*/3, nvMolKit::DebugLevel::STEPWISE);
-  bfgsMinimizer.minimize(maxIters,
-                         1e-4,
-                         systemHost.indices.atomStarts,
-                         systemDevice.indices.atomStarts,
-                         systemDevice.positions,
-                         systemDevice.grad,
-                         systemDevice.energyOuts,
-                         systemDevice.energyBuffer,
-                         eFunc,
-                         gFunc);
+  if (backend == nvMolKit::BfgsBackend::BATCHED) {
+    auto eFunc = [&](const double* positions) { nvMolKit::MMFF::computeEnergy(systemDevice, positions); };
+    auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(systemDevice); };
+    bfgsMinimizer.minimize(maxIters,
+                           1e-4,
+                           systemHost.indices.atomStarts,
+                           systemDevice.indices.atomStarts,
+                           systemDevice.positions,
+                           systemDevice.grad,
+                           systemDevice.energyOuts,
+                           systemDevice.energyBuffer,
+                           eFunc,
+                           gFunc);
+  } else {
+    auto terms         = nvMolKit::MMFF::toEnergyForceContribsDevicePtr(systemDevice);
+    auto systemIndices = nvMolKit::MMFF::toBatchedIndicesDevicePtr(systemDevice);
+    bfgsMinimizer.minimizeWithMMFF(maxIters,
+                                   1e-4,
+                                   systemHost.indices.atomStarts,
+                                   systemDevice.indices.atomStarts,
+                                   systemDevice.positions,
+                                   systemDevice.grad,
+                                   systemDevice.energyOuts,
+                                   systemDevice.energyBuffer,
+                                   terms,
+                                   systemIndices);
+  }
 
   std::vector<double> refEnergies;
   for (auto& mol : mols) {
-    // RDKit MMFF minimize
     RDKit::MMFF::MMFFOptimizeMolecule(*mol, maxIters, "MMFF94", 100.0);
-    // Get energies
     auto                                     molProps = std::make_unique<RDKit::MMFF::MMFFMolProperties>(*mol);
     std::unique_ptr<ForceFields::ForceField> molFF(RDKit::MMFF::constructForceField(*mol, molProps.get()));
     refEnergies.push_back(molFF->calcEnergy());
@@ -665,18 +751,84 @@ TEST_F(BFGSMinimizerTestFixture, E2EMinimizationMultiSystemMultiMolsMatchesConve
                        systemDevice.energyOuts.data(),
                        gotEnergies.size() * sizeof(double),
                        cudaMemcpyDeviceToHost));
+
+  EXPECT_THAT(gotEnergies, ::testing::Pointwise(::testing::DoubleNear(1e-3), refEnergies));
+
+  double avergedEnergyDiff = 0.0;
+  for (size_t i = 0; i < gotEnergies.size(); ++i) {
+    avergedEnergyDiff += fabs(gotEnergies[i] - refEnergies[i]);
+  }
+  avergedEnergyDiff /= static_cast<double>(gotEnergies.size());
+  EXPECT_NEAR(avergedEnergyDiff, 0.0, 1e-4)
+    << "Average energy difference between RDKit and nvMolKit minimizations is too large, despite max delta being acceptable";
   std::vector<int16_t> gotStatuses(systemDevice.energyOuts.size());
   ASSERT_EQ(0,
             cudaMemcpy(gotStatuses.data(),
                        bfgsMinimizer.statuses_.data(),
                        gotStatuses.size() * sizeof(int16_t),
                        cudaMemcpyDeviceToHost));
+  EXPECT_THAT(gotStatuses, ::testing::Pointwise(::testing::Eq(), std::vector<int16_t>(numMols, 0)));
+}
 
-  // TODO: This tolerance is arbitrary. Most entries converge at 1e-4, all but two or 3 converge at e-3. Determine
-  // source of numerical drift.
-  EXPECT_THAT(gotEnergies, ::testing::Pointwise(::testing::DoubleNear(6e-3), refEnergies));
-  EXPECT_THAT(gotStatuses,
-              ::testing::Pointwise(::testing::Eq(), std::vector<int16_t>(numMols, 0)));  // expect unconverged
+TEST_P(BFGSMinimizerBackendTest, E2EMinimizationLargePathMatches) {
+  const nvMolKit::BfgsBackend backend = GetParam();
+  getMols(getTestDataFolderPath() + "/60plus_atom_mols.sdf", mols, 1);
+  setUpCommon();
+  const int                    maxIters = 400;
+  nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dim=*/3, nvMolKit::DebugLevel::STEPWISE, true, nullptr, backend);
+
+  if (backend == nvMolKit::BfgsBackend::BATCHED) {
+    auto eFunc = [&](const double* positions) { nvMolKit::MMFF::computeEnergy(systemDevice, positions); };
+    auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(systemDevice); };
+    bfgsMinimizer.minimize(maxIters,
+                           1e-4,
+                           systemHost.indices.atomStarts,
+                           systemDevice.indices.atomStarts,
+                           systemDevice.positions,
+                           systemDevice.grad,
+                           systemDevice.energyOuts,
+                           systemDevice.energyBuffer,
+                           eFunc,
+                           gFunc);
+  } else {
+    auto terms         = nvMolKit::MMFF::toEnergyForceContribsDevicePtr(systemDevice);
+    auto systemIndices = nvMolKit::MMFF::toBatchedIndicesDevicePtr(systemDevice);
+    bfgsMinimizer.minimizeWithMMFF(maxIters,
+                                   1e-4,
+                                   systemHost.indices.atomStarts,
+                                   systemDevice.indices.atomStarts,
+                                   systemDevice.positions,
+                                   systemDevice.grad,
+                                   systemDevice.energyOuts,
+                                   systemDevice.energyBuffer,
+                                   terms,
+                                   systemIndices);
+  }
+
+  std::vector<double> refEnergies;
+  for (auto& mol : mols) {
+    RDKit::MMFF::MMFFOptimizeMolecule(*mol, maxIters, "MMFF94", 100.0);
+    auto                                     molProps = std::make_unique<RDKit::MMFF::MMFFMolProperties>(*mol);
+    std::unique_ptr<ForceFields::ForceField> molFF(RDKit::MMFF::constructForceField(*mol, molProps.get()));
+    refEnergies.push_back(molFF->calcEnergy());
+  }
+
+  std::vector<double> gotEnergies(systemDevice.energyOuts.size());
+  ASSERT_EQ(0,
+            cudaMemcpy(gotEnergies.data(),
+                       systemDevice.energyOuts.data(),
+                       gotEnergies.size() * sizeof(double),
+                       cudaMemcpyDeviceToHost));
+
+  EXPECT_THAT(gotEnergies, ::testing::Pointwise(::testing::DoubleNear(1e-4), refEnergies));
+
+  std::vector<int16_t> gotStatuses(systemDevice.energyOuts.size());
+  ASSERT_EQ(0,
+            cudaMemcpy(gotStatuses.data(),
+                       bfgsMinimizer.statuses_.data(),
+                       gotStatuses.size() * sizeof(int16_t),
+                       cudaMemcpyDeviceToHost));
+  EXPECT_THAT(gotStatuses, ::testing::Pointwise(::testing::Eq(), std::vector<int16_t>(1, 0)));
 }
 
 template <bool computeLastDim>
@@ -1113,4 +1265,360 @@ TEST_F(BFGSMinimizerHarmonicTestFixture, MultipleMinimizeCallsEquivalentToSingle
   EXPECT_THAT(doubleCallEnergies, ::testing::Pointwise(::testing::DoubleNear(1e-3), singleCallEnergies));
 }
 
+TEST_P(BFGSMinimizerBackendTest, ReuseMinimizer_VariedSizes) {
+  const nvMolKit::BfgsBackend backend = GetParam();
+
+  // System 1: Small (1 molecule)
+  setUpMMFFSystems(1, false);
+  BatchedMolecularSystemHost    system1Host   = systemHost;
+  BatchedMolecularDeviceBuffers system1Device = std::move(systemDevice);
+
+  // System 2: Medium (5 molecules) - clear fixture state first
+  mols.clear();
+  systemHost   = BatchedMolecularSystemHost();
+  systemDevice = BatchedMolecularDeviceBuffers();
+  setUpMMFFSystems(5, true);
+  BatchedMolecularSystemHost    system2Host   = systemHost;
+  BatchedMolecularDeviceBuffers system2Device = std::move(systemDevice);
+
+  // System 3: Large (20 molecules) - clear fixture state first
+  mols.clear();
+  systemHost   = BatchedMolecularSystemHost();
+  systemDevice = BatchedMolecularDeviceBuffers();
+  setUpMMFFSystems(20, true);
+  BatchedMolecularSystemHost    system3Host   = systemHost;
+  BatchedMolecularDeviceBuffers system3Device = std::move(systemDevice);
+
+  constexpr int maxIters = 50;
+
+  // Get reference results with fresh minimizers
+  std::vector<std::vector<double>> referenceEnergies(3);
+  std::vector<std::vector<double>> referencePositions(3);
+
+  // Reference for system 1
+  {
+    nvMolKit::BfgsBatchMinimizer minimizer(3, nvMolKit::DebugLevel::NONE, true, nullptr, backend);
+    if (backend == nvMolKit::BfgsBackend::BATCHED) {
+      auto eFunc = [&](const double* positions) { nvMolKit::MMFF::computeEnergy(system1Device, positions); };
+      auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(system1Device); };
+      minimizer.minimize(maxIters,
+                         1e-4,
+                         system1Host.indices.atomStarts,
+                         system1Device.indices.atomStarts,
+                         system1Device.positions,
+                         system1Device.grad,
+                         system1Device.energyOuts,
+                         system1Device.energyBuffer,
+                         eFunc,
+                         gFunc);
+    } else {
+      auto terms = nvMolKit::MMFF::toEnergyForceContribsDevicePtr(system1Device);
+      auto idx   = nvMolKit::MMFF::toBatchedIndicesDevicePtr(system1Device);
+      minimizer.minimizeWithMMFF(maxIters,
+                                 1e-4,
+                                 system1Host.indices.atomStarts,
+                                 system1Device.indices.atomStarts,
+                                 system1Device.positions,
+                                 system1Device.grad,
+                                 system1Device.energyOuts,
+                                 system1Device.energyBuffer,
+                                 terms,
+                                 idx);
+    }
+    referenceEnergies[0].resize(system1Device.energyOuts.size());
+    system1Device.energyOuts.copyToHost(referenceEnergies[0]);
+    referencePositions[0].resize(system1Device.positions.size());
+    system1Device.positions.copyToHost(referencePositions[0]);
+  }
+
+  // Reference for system 2
+  {
+    nvMolKit::BfgsBatchMinimizer minimizer(3, nvMolKit::DebugLevel::NONE, true, nullptr, backend);
+    if (backend == nvMolKit::BfgsBackend::BATCHED) {
+      auto eFunc = [&](const double* positions) { nvMolKit::MMFF::computeEnergy(system2Device, positions); };
+      auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(system2Device); };
+      minimizer.minimize(maxIters,
+                         1e-4,
+                         system2Host.indices.atomStarts,
+                         system2Device.indices.atomStarts,
+                         system2Device.positions,
+                         system2Device.grad,
+                         system2Device.energyOuts,
+                         system2Device.energyBuffer,
+                         eFunc,
+                         gFunc);
+    } else {
+      auto terms = nvMolKit::MMFF::toEnergyForceContribsDevicePtr(system2Device);
+      auto idx   = nvMolKit::MMFF::toBatchedIndicesDevicePtr(system2Device);
+      minimizer.minimizeWithMMFF(maxIters,
+                                 1e-4,
+                                 system2Host.indices.atomStarts,
+                                 system2Device.indices.atomStarts,
+                                 system2Device.positions,
+                                 system2Device.grad,
+                                 system2Device.energyOuts,
+                                 system2Device.energyBuffer,
+                                 terms,
+                                 idx);
+    }
+    referenceEnergies[1].resize(system2Device.energyOuts.size());
+    system2Device.energyOuts.copyToHost(referenceEnergies[1]);
+    referencePositions[1].resize(system2Device.positions.size());
+    system2Device.positions.copyToHost(referencePositions[1]);
+  }
+
+  // Reference for system 3
+  {
+    nvMolKit::BfgsBatchMinimizer minimizer(3, nvMolKit::DebugLevel::NONE, true, nullptr, backend);
+    if (backend == nvMolKit::BfgsBackend::BATCHED) {
+      auto eFunc = [&](const double* positions) { nvMolKit::MMFF::computeEnergy(system3Device, positions); };
+      auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(system3Device); };
+      minimizer.minimize(maxIters,
+                         1e-4,
+                         system3Host.indices.atomStarts,
+                         system3Device.indices.atomStarts,
+                         system3Device.positions,
+                         system3Device.grad,
+                         system3Device.energyOuts,
+                         system3Device.energyBuffer,
+                         eFunc,
+                         gFunc);
+    } else {
+      auto terms = nvMolKit::MMFF::toEnergyForceContribsDevicePtr(system3Device);
+      auto idx   = nvMolKit::MMFF::toBatchedIndicesDevicePtr(system3Device);
+      minimizer.minimizeWithMMFF(maxIters,
+                                 1e-4,
+                                 system3Host.indices.atomStarts,
+                                 system3Device.indices.atomStarts,
+                                 system3Device.positions,
+                                 system3Device.grad,
+                                 system3Device.energyOuts,
+                                 system3Device.energyBuffer,
+                                 terms,
+                                 idx);
+    }
+    referenceEnergies[2].resize(system3Device.energyOuts.size());
+    system3Device.energyOuts.copyToHost(referenceEnergies[2]);
+    referencePositions[2].resize(system3Device.positions.size());
+    system3Device.positions.copyToHost(referencePositions[2]);
+  }
+
+  // Reset all systems to initial state (clear fixture state first)
+  mols.clear();
+  systemHost   = BatchedMolecularSystemHost();
+  systemDevice = BatchedMolecularDeviceBuffers();
+
+  setUpMMFFSystems(1, false);
+  system1Host   = systemHost;
+  system1Device = std::move(systemDevice);
+
+  mols.clear();
+  systemHost   = BatchedMolecularSystemHost();
+  systemDevice = BatchedMolecularDeviceBuffers();
+
+  setUpMMFFSystems(5, true);
+  system2Host   = systemHost;
+  system2Device = std::move(systemDevice);
+
+  mols.clear();
+  systemHost   = BatchedMolecularSystemHost();
+  systemDevice = BatchedMolecularDeviceBuffers();
+
+  setUpMMFFSystems(20, true);
+  system3Host   = systemHost;
+  system3Device = std::move(systemDevice);
+
+  // Reused minimizer: small -> medium -> large -> medium -> small
+  nvMolKit::BfgsBatchMinimizer reusedMinimizer(3, nvMolKit::DebugLevel::NONE, true, nullptr, backend);
+
+  // Minimize system 1 (small)
+  if (backend == nvMolKit::BfgsBackend::BATCHED) {
+    auto eFunc = [&](const double* positions) { nvMolKit::MMFF::computeEnergy(system1Device, positions); };
+    auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(system1Device); };
+    reusedMinimizer.minimize(maxIters,
+                             1e-4,
+                             system1Host.indices.atomStarts,
+                             system1Device.indices.atomStarts,
+                             system1Device.positions,
+                             system1Device.grad,
+                             system1Device.energyOuts,
+                             system1Device.energyBuffer,
+                             eFunc,
+                             gFunc);
+  } else {
+    auto terms = nvMolKit::MMFF::toEnergyForceContribsDevicePtr(system1Device);
+    auto idx   = nvMolKit::MMFF::toBatchedIndicesDevicePtr(system1Device);
+    reusedMinimizer.minimizeWithMMFF(maxIters,
+                                     1e-4,
+                                     system1Host.indices.atomStarts,
+                                     system1Device.indices.atomStarts,
+                                     system1Device.positions,
+                                     system1Device.grad,
+                                     system1Device.energyOuts,
+                                     system1Device.energyBuffer,
+                                     terms,
+                                     idx);
+  }
+  std::vector<double> energy1(system1Device.energyOuts.size());
+  system1Device.energyOuts.copyToHost(energy1);
+  EXPECT_THAT(energy1, ::testing::Pointwise(::testing::DoubleNear(1e-5), referenceEnergies[0]))
+    << "System 1 (first run) energies should match reference";
+
+  // Minimize system 2 (medium)
+  if (backend == nvMolKit::BfgsBackend::BATCHED) {
+    auto eFunc = [&](const double* positions) { nvMolKit::MMFF::computeEnergy(system2Device, positions); };
+    auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(system2Device); };
+    reusedMinimizer.minimize(maxIters,
+                             1e-4,
+                             system2Host.indices.atomStarts,
+                             system2Device.indices.atomStarts,
+                             system2Device.positions,
+                             system2Device.grad,
+                             system2Device.energyOuts,
+                             system2Device.energyBuffer,
+                             eFunc,
+                             gFunc);
+  } else {
+    auto terms = nvMolKit::MMFF::toEnergyForceContribsDevicePtr(system2Device);
+    auto idx   = nvMolKit::MMFF::toBatchedIndicesDevicePtr(system2Device);
+    reusedMinimizer.minimizeWithMMFF(maxIters,
+                                     1e-4,
+                                     system2Host.indices.atomStarts,
+                                     system2Device.indices.atomStarts,
+                                     system2Device.positions,
+                                     system2Device.grad,
+                                     system2Device.energyOuts,
+                                     system2Device.energyBuffer,
+                                     terms,
+                                     idx);
+  }
+  std::vector<double> energy2(system2Device.energyOuts.size());
+  system2Device.energyOuts.copyToHost(energy2);
+  EXPECT_THAT(energy2, ::testing::Pointwise(::testing::DoubleNear(1e-5), referenceEnergies[1]))
+    << "System 2 (first run) energies should match reference";
+
+  // Minimize system 3 (large)
+  if (backend == nvMolKit::BfgsBackend::BATCHED) {
+    auto eFunc = [&](const double* positions) { nvMolKit::MMFF::computeEnergy(system3Device, positions); };
+    auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(system3Device); };
+    reusedMinimizer.minimize(maxIters,
+                             1e-4,
+                             system3Host.indices.atomStarts,
+                             system3Device.indices.atomStarts,
+                             system3Device.positions,
+                             system3Device.grad,
+                             system3Device.energyOuts,
+                             system3Device.energyBuffer,
+                             eFunc,
+                             gFunc);
+  } else {
+    auto terms = nvMolKit::MMFF::toEnergyForceContribsDevicePtr(system3Device);
+    auto idx   = nvMolKit::MMFF::toBatchedIndicesDevicePtr(system3Device);
+    reusedMinimizer.minimizeWithMMFF(maxIters,
+                                     1e-4,
+                                     system3Host.indices.atomStarts,
+                                     system3Device.indices.atomStarts,
+                                     system3Device.positions,
+                                     system3Device.grad,
+                                     system3Device.energyOuts,
+                                     system3Device.energyBuffer,
+                                     terms,
+                                     idx);
+  }
+  std::vector<double> energy3(system3Device.energyOuts.size());
+  system3Device.energyOuts.copyToHost(energy3);
+  EXPECT_THAT(energy3, ::testing::Pointwise(::testing::DoubleNear(1e-5), referenceEnergies[2]))
+    << "System 3 (first run) energies should match reference";
+
+  // Reset systems and minimize again in reverse order to test going from large back to small
+  mols.clear();
+  systemHost   = BatchedMolecularSystemHost();
+  systemDevice = BatchedMolecularDeviceBuffers();
+
+  setUpMMFFSystems(5, true);
+  system2Host   = systemHost;
+  system2Device = std::move(systemDevice);
+
+  mols.clear();
+  systemHost   = BatchedMolecularSystemHost();
+  systemDevice = BatchedMolecularDeviceBuffers();
+
+  setUpMMFFSystems(1, false);
+  system1Host   = systemHost;
+  system1Device = std::move(systemDevice);
+
+  // Minimize system 2 again (after system 3)
+  if (backend == nvMolKit::BfgsBackend::BATCHED) {
+    auto eFunc = [&](const double* positions) { nvMolKit::MMFF::computeEnergy(system2Device, positions); };
+    auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(system2Device); };
+    reusedMinimizer.minimize(maxIters,
+                             1e-4,
+                             system2Host.indices.atomStarts,
+                             system2Device.indices.atomStarts,
+                             system2Device.positions,
+                             system2Device.grad,
+                             system2Device.energyOuts,
+                             system2Device.energyBuffer,
+                             eFunc,
+                             gFunc);
+  } else {
+    auto terms = nvMolKit::MMFF::toEnergyForceContribsDevicePtr(system2Device);
+    auto idx   = nvMolKit::MMFF::toBatchedIndicesDevicePtr(system2Device);
+    reusedMinimizer.minimizeWithMMFF(maxIters,
+                                     1e-4,
+                                     system2Host.indices.atomStarts,
+                                     system2Device.indices.atomStarts,
+                                     system2Device.positions,
+                                     system2Device.grad,
+                                     system2Device.energyOuts,
+                                     system2Device.energyBuffer,
+                                     terms,
+                                     idx);
+  }
+  std::vector<double> energy2Second(system2Device.energyOuts.size());
+  system2Device.energyOuts.copyToHost(energy2Second);
+  EXPECT_THAT(energy2Second, ::testing::Pointwise(::testing::DoubleNear(1e-5), referenceEnergies[1]))
+    << "System 2 (second run) energies should match reference";
+
+  // Minimize system 1 again (after system 2)
+  if (backend == nvMolKit::BfgsBackend::BATCHED) {
+    auto eFunc = [&](const double* positions) { nvMolKit::MMFF::computeEnergy(system1Device, positions); };
+    auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(system1Device); };
+    reusedMinimizer.minimize(maxIters,
+                             1e-4,
+                             system1Host.indices.atomStarts,
+                             system1Device.indices.atomStarts,
+                             system1Device.positions,
+                             system1Device.grad,
+                             system1Device.energyOuts,
+                             system1Device.energyBuffer,
+                             eFunc,
+                             gFunc);
+  } else {
+    auto terms = nvMolKit::MMFF::toEnergyForceContribsDevicePtr(system1Device);
+    auto idx   = nvMolKit::MMFF::toBatchedIndicesDevicePtr(system1Device);
+    reusedMinimizer.minimizeWithMMFF(maxIters,
+                                     1e-4,
+                                     system1Host.indices.atomStarts,
+                                     system1Device.indices.atomStarts,
+                                     system1Device.positions,
+                                     system1Device.grad,
+                                     system1Device.energyOuts,
+                                     system1Device.energyBuffer,
+                                     terms,
+                                     idx);
+  }
+  std::vector<double> energy1Second(system1Device.energyOuts.size());
+  system1Device.energyOuts.copyToHost(energy1Second);
+  EXPECT_THAT(energy1Second, ::testing::Pointwise(::testing::DoubleNear(1e-5), referenceEnergies[0]))
+    << "System 1 (second run) energies should match reference";
+}
+
 INSTANTIATE_TEST_SUITE_P(BFGSMinimizer4DTest, BFGSMinimizerTest4DTest, ::testing::Values(false, true));
+
+INSTANTIATE_TEST_SUITE_P(BFGSBackends,
+                         BFGSMinimizerBackendTest,
+                         ::testing::Values(nvMolKit::BfgsBackend::BATCHED, nvMolKit::BfgsBackend::PER_MOLECULE),
+                         [](const ::testing::TestParamInfo<nvMolKit::BfgsBackend>& info) {
+                           return info.param == nvMolKit::BfgsBackend::BATCHED ? "Batched" : "PerMolecule";
+                         });

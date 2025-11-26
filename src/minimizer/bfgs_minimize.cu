@@ -1103,10 +1103,6 @@ bool BfgsBatchMinimizer::minimizeWithMMFF(const int                             
     binMolIds[i] = perMolBinListsDevice_[i].data();
   }
 
-  // Allocate convergence status buffer
-  AsyncDeviceVector<uint8_t> convergenceStatus(numSystems, stream_);
-  convergenceStatus.zero();
-
   cudaError_t err = launchBfgsMinimizePerMolKernel(binCounts,
                                                    binMolIds,
                                                    atomStarts.data(),
@@ -1121,21 +1117,23 @@ bool BfgsBatchMinimizer::minimizeWithMMFF(const int                             
                                                    inverseHessian_.data(),
                                                    scratchBuffersDevice_.data(),
                                                    energyOuts.data(),
-                                                   convergenceStatus.data(),
+                                                   statuses_.data(),
                                                    stream_);
 
   if (err != cudaSuccess) {
     throw std::runtime_error(std::string("Per-molecule BFGS kernel failed: ") + cudaGetErrorString(err));
   }
 
-  // Check convergence status to determine if more iterations are needed (using pinned memory)
-  convergenceStatus.copyToHost(convergenceHost_.data(), numSystems);
+  // Check convergence status to determine if more iterations are needed
+  // Copy statuses to host
+  statuses_.copyToHost(convergenceHost_.data(), numSystems);
   cudaCheckError(cudaStreamSynchronize(stream_));
 
   // Check if any molecule in the binning lists (i.e., active molecules) needs more iterations
+  // Status 0 = converged, non-zero = needs more iterations
   for (int bin = 0; bin < 5; ++bin) {
     for (const int molIdx : perMolBinLists_[bin]) {
-      if (convergenceHost_[molIdx] == 0) {
+      if (convergenceHost_[molIdx] != 0) {
         return true;  // true = needs more iterations
       }
     }

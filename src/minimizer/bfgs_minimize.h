@@ -195,7 +195,7 @@ struct BfgsBatchMinimizer {
 
   // Pinned host buffers for async transfers (allocated lazily in initialize())
   PinnedHostVector<uint8_t> activeHost_;
-  PinnedHostVector<uint8_t> convergenceHost_;
+  PinnedHostVector<int16_t> convergenceHost_;  // Changed to int16_t to match statuses_
   PinnedHostVector<double*> scratchBufferPointersHost_;
 
   cudaStream_t stream_ = nullptr;

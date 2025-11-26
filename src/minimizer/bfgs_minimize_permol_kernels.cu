@@ -417,7 +417,7 @@ __global__ void bfgsMinimizeKernel(const int          numIters,
                                    double*            inverseHessian,
                                    double**           scratchBuffers,
                                    double*            energyOuts,
-                                   uint8_t*           convergenceStatus,
+                                   int16_t*           statuses,
                                    double             chiralWeight,
                                    double             fourthDimWeight) {
   const int     molIdx = molIdList[blockIdx.x];
@@ -721,14 +721,14 @@ __global__ void bfgsMinimizeKernel(const int          numIters,
     __syncthreads();
   }
 
-  // Write final energy and convergence status
+  // Write final energy and status
   if (tid == 0) {
     // printf("Writing final energy for mol %d: %f\n", static_cast<int>(blockIdx.x), prevE);
     energyOuts[molIdx] = prevE;
-    // Write convergence status if requested (1 = converged, 0 = not converged)
-    if (convergenceStatus != nullptr) {
-      // printf("Writing converged value: %d\n", converged ? 1 : 0);
-      convergenceStatus[molIdx] = converged ? 1 : 0;
+    // Write status to match batched kernel behavior (0 = converged, 1 = not converged)
+    if (statuses != nullptr) {
+      // printf("Writing status value: %d\n", converged ? 0 : 1);
+      statuses[molIdx] = converged ? 0 : 1;
     } else {
       // printf("Skipping status write\n");
     }
@@ -752,7 +752,7 @@ cudaError_t launchBinnedKernel(int                numMolsInBin,
                                double*            inverseHessian,
                                double**           scratchBuffers,
                                double*            energyOuts,
-                               uint8_t*           convergenceStatus,
+                               int16_t*           statuses,
                                cudaStream_t       stream,
                                double             chiralWeight,
                                double             fourthDimWeight) {
@@ -774,7 +774,7 @@ cudaError_t launchBinnedKernel(int                numMolsInBin,
                                               inverseHessian,
                                               scratchBuffers,
                                               energyOuts,
-                                              convergenceStatus,
+                                              statuses,
                                               chiralWeight,
                                               fourthDimWeight);
 
@@ -797,7 +797,7 @@ cudaError_t launchBfgsMinimizePerMolKernel(const int*                           
                                            double*                                   inverseHessian,
                                            double**                                  scratchBuffers,
                                            double*                                   energyOuts,
-                                           uint8_t*                                  convergenceStatus,
+                                           int16_t*                                  statuses,
                                            cudaStream_t                              stream) {
   // Prepare device pointers for terms and indices
   const AsyncDevicePtr<MMFF::EnergyForceContribsDevicePtr> devTerms(terms, stream);
@@ -822,7 +822,7 @@ cudaError_t launchBfgsMinimizePerMolKernel(const int*                           
                                                            inverseHessian,
                                                            scratchBuffers,
                                                            energyOuts,
-                                                           convergenceStatus,
+                                                           statuses,
                                                            stream,
                                                            1.0,
                                                            1.0);
@@ -844,7 +844,7 @@ cudaError_t launchBfgsMinimizePerMolKernel(const int*                           
                                                            inverseHessian,
                                                            scratchBuffers,
                                                            energyOuts,
-                                                           convergenceStatus,
+                                                           statuses,
                                                            stream,
                                                            1.0,
                                                            1.0);
@@ -866,7 +866,7 @@ cudaError_t launchBfgsMinimizePerMolKernel(const int*                           
                                                              inverseHessian,
                                                              scratchBuffers,
                                                              energyOuts,
-                                                             convergenceStatus,
+                                                             statuses,
                                                              stream,
                                                              1.0,
                                                              1.0);
@@ -888,7 +888,7 @@ cudaError_t launchBfgsMinimizePerMolKernel(const int*                           
                                                              inverseHessian,
                                                              scratchBuffers,
                                                              energyOuts,
-                                                             convergenceStatus,
+                                                             statuses,
                                                              stream,
                                                              1.0,
                                                              1.0);
@@ -910,7 +910,7 @@ cudaError_t launchBfgsMinimizePerMolKernel(const int*                           
                                                               inverseHessian,
                                                               scratchBuffers,
                                                               energyOuts,
-                                                              convergenceStatus,
+                                                              statuses,
                                                               stream,
                                                               1.0,
                                                               1.0);
