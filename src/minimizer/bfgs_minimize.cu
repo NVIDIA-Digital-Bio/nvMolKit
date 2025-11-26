@@ -1142,6 +1142,193 @@ bool BfgsBatchMinimizer::minimizeWithMMFF(const int                             
   return false;  // false = all active molecules converged
 }
 
+bool BfgsBatchMinimizer::minimizeWithETK(const int                                       numIters,
+                                         const double                                    gradTol,
+                                         const std::vector<int>&                         atomStartsHost,
+                                         const AsyncDeviceVector<int>&                   atomStarts,
+                                         AsyncDeviceVector<double>&                      positions,
+                                         AsyncDeviceVector<double>&                      grad,
+                                         AsyncDeviceVector<double>&                      energyOuts,
+                                         AsyncDeviceVector<double>&                      energyBuffer,
+                                         const DistGeom::Energy3DForceContribsDevicePtr& terms,
+                                         const DistGeom::BatchedIndices3DDevicePtr&      systemIndices,
+                                         const uint8_t*                                  activeThisStage) {
+  const int numSystems = atomStartsHost.size() - 1;
+
+  if (backend_ != BfgsBackend::PER_MOLECULE) {
+    throw std::runtime_error(
+      "minimizeWithETK currently only supports PER_MOLECULE backend. "
+      "Use minimize() with ETK functors for BATCHED backend.");
+  }
+
+  // Initialize buffers and binning if needed
+  initialize(atomStartsHost, atomStarts.data(), positions.data(), grad.data(), energyOuts.data(), activeThisStage);
+
+  // Initialize Hessian to identity
+  setHessianToIdentity();
+
+  // Use per-molecule kernel with ETK specialization
+  const ScopedNvtxRange bfgsPerMoleculeETK("BfgsBatchMinimizer::perMoleculeMinimizeETK");
+
+  // Prepare scratch buffer pointers array on host (using pinned memory)
+  scratchBufferPointersHost_[0] = grad.data();               // oldPos for shared memory mode
+  scratchBufferPointersHost_[1] = lineSearchDir_.data();     // localDir
+  scratchBufferPointersHost_[2] = scratchPositions_.data();  // scratchPos
+  scratchBufferPointersHost_[3] = hessDGrad_.data();         // dGrad
+  scratchBufferPointersHost_[4] = scratchGrad_.data();       // oldPos for non-shared mode
+
+  // Copy pointer array to device
+  cudaCheckError(cudaMemcpyAsync(scratchBuffersDevice_.data(),
+                                 scratchBufferPointersHost_.data(),
+                                 5 * sizeof(double*),
+                                 cudaMemcpyHostToDevice,
+                                 stream_));
+
+  // Prepare binning data pointers and counts
+  int        binCounts[5];
+  const int* binMolIds[5];
+  for (int i = 0; i < 5; ++i) {
+    binCounts[i] = static_cast<int>(perMolBinLists_[i].size());
+    binMolIds[i] = perMolBinListsDevice_[i].data();
+  }
+
+  cudaError_t err = launchBfgsMinimizePerMolKernelETK(binCounts,
+                                                      binMolIds,
+                                                      atomStarts.data(),
+                                                      hessianStarts_.data(),
+                                                      numIters,
+                                                      gradTol,
+                                                      scaleGrads_,
+                                                      terms,
+                                                      systemIndices,
+                                                      positions.data(),
+                                                      grad.data(),
+                                                      inverseHessian_.data(),
+                                                      scratchBuffersDevice_.data(),
+                                                      energyOuts.data(),
+                                                      statuses_.data(),
+                                                      stream_);
+
+  if (err != cudaSuccess) {
+    throw std::runtime_error(std::string("Per-molecule BFGS ETK kernel failed: ") + cudaGetErrorString(err));
+  }
+
+  // Check convergence status to determine if more iterations are needed
+  // Copy statuses to host
+  statuses_.copyToHost(convergenceHost_.data(), numSystems);
+  cudaCheckError(cudaStreamSynchronize(stream_));
+
+  // Check if any molecule in the binning lists (i.e., active molecules) needs more iterations
+  // Status 0 = converged, non-zero = needs more iterations
+  for (int bin = 0; bin < 5; ++bin) {
+    for (const int molIdx : perMolBinLists_[bin]) {
+      if (convergenceHost_[molIdx] != 0) {
+        return true;  // true = needs more iterations
+      }
+    }
+  }
+
+  return false;  // false = all active molecules converged
+}
+
+bool BfgsBatchMinimizer::minimizeWithDG(const int                                     numIters,
+                                        const double                                  gradTol,
+                                        const std::vector<int>&                       atomStartsHost,
+                                        const AsyncDeviceVector<int>&                 atomStarts,
+                                        AsyncDeviceVector<double>&                    positions,
+                                        AsyncDeviceVector<double>&                    grad,
+                                        AsyncDeviceVector<double>&                    energyOuts,
+                                        AsyncDeviceVector<double>&                    energyBuffer,
+                                        const DistGeom::EnergyForceContribsDevicePtr& terms,
+                                        const DistGeom::BatchedIndicesDevicePtr&      systemIndices,
+                                        double                                        chiralWeight,
+                                        double                                        fourthDimWeight,
+                                        const uint8_t*                                activeThisStage) {
+  const int numSystems = atomStartsHost.size() - 1;
+
+  if (backend_ != BfgsBackend::PER_MOLECULE) {
+    throw std::runtime_error(
+      "minimizeWithDG currently only supports PER_MOLECULE backend. "
+      "Use minimize() with DG functors for BATCHED backend.");
+  }
+
+  // Ensure minimizer was constructed with dataDim=4 for DG
+  if (dataDim_ != 4) {
+    throw std::runtime_error("minimizeWithDG requires BfgsBatchMinimizer to be constructed with dataDim=4");
+  }
+
+  // Initialize buffers and binning if needed
+  initialize(atomStartsHost, atomStarts.data(), positions.data(), grad.data(), energyOuts.data(), activeThisStage);
+
+  // Initialize Hessian to identity
+  setHessianToIdentity();
+
+  // Use per-molecule kernel with DG specialization
+  const ScopedNvtxRange bfgsPerMoleculeDG("BfgsBatchMinimizer::perMoleculeMinimizeDG");
+
+  // Prepare scratch buffer pointers array on host (using pinned memory)
+  scratchBufferPointersHost_[0] = grad.data();               // oldPos for shared memory mode
+  scratchBufferPointersHost_[1] = lineSearchDir_.data();     // localDir
+  scratchBufferPointersHost_[2] = scratchPositions_.data();  // scratchPos
+  scratchBufferPointersHost_[3] = hessDGrad_.data();         // dGrad
+  scratchBufferPointersHost_[4] = scratchGrad_.data();       // oldPos for non-shared mode
+
+  // Copy pointer array to device
+  cudaCheckError(cudaMemcpyAsync(scratchBuffersDevice_.data(),
+                                 scratchBufferPointersHost_.data(),
+                                 5 * sizeof(double*),
+                                 cudaMemcpyHostToDevice,
+                                 stream_));
+
+  // Prepare binning data pointers and counts
+  int        binCounts[5];
+  const int* binMolIds[5];
+  for (int i = 0; i < 5; ++i) {
+    binCounts[i] = static_cast<int>(perMolBinLists_[i].size());
+    binMolIds[i] = perMolBinListsDevice_[i].data();
+  }
+
+  cudaError_t err = launchBfgsMinimizePerMolKernelDG(binCounts,
+                                                     binMolIds,
+                                                     atomStarts.data(),
+                                                     hessianStarts_.data(),
+                                                     numIters,
+                                                     gradTol,
+                                                     scaleGrads_,
+                                                     terms,
+                                                     systemIndices,
+                                                     positions.data(),
+                                                     grad.data(),
+                                                     inverseHessian_.data(),
+                                                     scratchBuffersDevice_.data(),
+                                                     energyOuts.data(),
+                                                     chiralWeight,
+                                                     fourthDimWeight,
+                                                     statuses_.data(),
+                                                     stream_);
+
+  if (err != cudaSuccess) {
+    throw std::runtime_error(std::string("Per-molecule BFGS DG kernel failed: ") + cudaGetErrorString(err));
+  }
+
+  // Check convergence status to determine if more iterations are needed
+  // Copy statuses to host
+  statuses_.copyToHost(convergenceHost_.data(), numSystems);
+  cudaCheckError(cudaStreamSynchronize(stream_));
+
+  // Check if any molecule in the binning lists (i.e., active molecules) needs more iterations
+  // Status 0 = converged, non-zero = needs more iterations
+  for (int bin = 0; bin < 5; ++bin) {
+    for (const int molIdx : perMolBinLists_[bin]) {
+      if (convergenceHost_[molIdx] != 0) {
+        return true;  // true = needs more iterations
+      }
+    }
+  }
+
+  return false;  // false = all active molecules converged
+}
+
 void copyAndInvert(const AsyncDeviceVector<double>& src, AsyncDeviceVector<double>& dst) {
   const size_t numElements = src.size();
   cudaStream_t stream      = dst.stream();
