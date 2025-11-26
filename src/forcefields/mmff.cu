@@ -22,6 +22,73 @@
 
 namespace nvMolKit {
 namespace MMFF {
+namespace {
+EnergyForceContribsDevicePtr toPointerStruct(const EnergyForceContribsDevice& src) {
+  EnergyForceContribsDevicePtr dst;
+  dst.bondTerms.idx1 = src.bondTerms.idx1.data();
+  dst.bondTerms.idx2 = src.bondTerms.idx2.data();
+  dst.bondTerms.r0   = src.bondTerms.r0.data();
+  dst.bondTerms.kb   = src.bondTerms.kb.data();
+
+  dst.angleTerms.idx1     = src.angleTerms.idx1.data();
+  dst.angleTerms.idx2     = src.angleTerms.idx2.data();
+  dst.angleTerms.idx3     = src.angleTerms.idx3.data();
+  dst.angleTerms.theta0   = src.angleTerms.theta0.data();
+  dst.angleTerms.ka       = src.angleTerms.ka.data();
+  dst.angleTerms.isLinear = src.angleTerms.isLinear.data();
+
+  dst.bendTerms.idx1        = src.bendTerms.idx1.data();
+  dst.bendTerms.idx2        = src.bendTerms.idx2.data();
+  dst.bendTerms.idx3        = src.bendTerms.idx3.data();
+  dst.bendTerms.theta0      = src.bendTerms.theta0.data();
+  dst.bendTerms.restLen1    = src.bendTerms.restLen1.data();
+  dst.bendTerms.restLen2    = src.bendTerms.restLen2.data();
+  dst.bendTerms.forceConst1 = src.bendTerms.forceConst1.data();
+  dst.bendTerms.forceConst2 = src.bendTerms.forceConst2.data();
+
+  dst.oopTerms.idx1 = src.oopTerms.idx1.data();
+  dst.oopTerms.idx2 = src.oopTerms.idx2.data();
+  dst.oopTerms.idx3 = src.oopTerms.idx3.data();
+  dst.oopTerms.idx4 = src.oopTerms.idx4.data();
+  dst.oopTerms.koop = src.oopTerms.koop.data();
+
+  dst.torsionTerms.idx1 = src.torsionTerms.idx1.data();
+  dst.torsionTerms.idx2 = src.torsionTerms.idx2.data();
+  dst.torsionTerms.idx3 = src.torsionTerms.idx3.data();
+  dst.torsionTerms.idx4 = src.torsionTerms.idx4.data();
+  dst.torsionTerms.V1   = src.torsionTerms.V1.data();
+  dst.torsionTerms.V2   = src.torsionTerms.V2.data();
+  dst.torsionTerms.V3   = src.torsionTerms.V3.data();
+
+  dst.vdwTerms.idx1      = src.vdwTerms.idx1.data();
+  dst.vdwTerms.idx2      = src.vdwTerms.idx2.data();
+  dst.vdwTerms.R_ij_star = src.vdwTerms.R_ij_star.data();
+  dst.vdwTerms.wellDepth = src.vdwTerms.wellDepth.data();
+
+  dst.eleTerms.idx1       = src.eleTerms.idx1.data();
+  dst.eleTerms.idx2       = src.eleTerms.idx2.data();
+  dst.eleTerms.chargeTerm = src.eleTerms.chargeTerm.data();
+  dst.eleTerms.dielModel  = src.eleTerms.dielModel.data();
+  dst.eleTerms.is1_4      = src.eleTerms.is1_4.data();
+
+  return dst;
+}
+
+BatchedIndicesDevicePtr toPointerStruct(const BatchedIndicesDevice& src) {
+  BatchedIndicesDevicePtr dst;
+  dst.atomStarts        = src.atomStarts.data();
+  dst.bondTermStarts    = src.bondTermStarts.data();
+  dst.angleTermStarts   = src.angleTermStarts.data();
+  dst.bendTermStarts    = src.bendTermStarts.data();
+  dst.oopTermStarts     = src.oopTermStarts.data();
+  dst.torsionTermStarts = src.torsionTermStarts.data();
+  dst.vdwTermStarts     = src.vdwTermStarts.data();
+  dst.eleTermStarts     = src.eleTermStarts.data();
+
+  return dst;
+}
+}  // namespace
+
 void setStreams(BatchedMolecularDeviceBuffers& molSystemDevice, cudaStream_t stream) {
   molSystemDevice.positions.setStream(stream);
   molSystemDevice.grad.setStream(stream);
@@ -495,5 +562,36 @@ cudaError_t computeGradients(BatchedMolecularDeviceBuffers& molSystemDevice, cud
   return err;
 }
 
+cudaError_t computeEnergyBlockPerMol(BatchedMolecularDeviceBuffers& molSystemDevice,
+                                     const double*                  coords,
+                                     cudaStream_t                   stream) {
+  const auto pointers = toPointerStruct(molSystemDevice.contribs);
+  const auto indices  = toPointerStruct(molSystemDevice.indices);
+  return launchBlockPerMolEnergyKernel(molSystemDevice.indices.atomStarts.size() - 1,
+                                       pointers,
+                                       indices,
+                                       coords != nullptr ? coords : molSystemDevice.positions.data(),
+                                       molSystemDevice.energyOuts.data(),
+                                       stream);
+}
+
+cudaError_t computeGradBlockPerMol(BatchedMolecularDeviceBuffers& molSystemDevice, cudaStream_t stream) {
+  const auto pointers = toPointerStruct(molSystemDevice.contribs);
+  const auto indices  = toPointerStruct(molSystemDevice.indices);
+  return launchBlockPerMolGradKernel(molSystemDevice.indices.atomStarts.size() - 1,
+                                     pointers,
+                                     indices,
+                                     molSystemDevice.positions.data(),
+                                     molSystemDevice.grad.data(),
+                                     stream);
+}
+
+EnergyForceContribsDevicePtr toEnergyForceContribsDevicePtr(const BatchedMolecularDeviceBuffers& molSystemDevice) {
+  return toPointerStruct(molSystemDevice.contribs);
+}
+
+BatchedIndicesDevicePtr toBatchedIndicesDevicePtr(const BatchedMolecularDeviceBuffers& molSystemDevice) {
+  return toPointerStruct(molSystemDevice.indices);
+}
 }  // namespace MMFF
 }  // namespace nvMolKit

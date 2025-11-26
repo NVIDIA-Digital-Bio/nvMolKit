@@ -653,5 +653,85 @@ cudaError_t launchReduceEnergiesKernel(const int     numBlocks,
     outs);
   return cudaGetLastError();
 }
+
+constexpr int blockSizePerMol = 128;
+
+// molEnergy and molGrad are now defined in mmff_kernels_device.cuh as inline functions
+
+__global__ void combinedEnergiesKernel(const EnergyForceContribsDevicePtr* terms,
+                                       const BatchedIndicesDevicePtr*      systemIndices,
+                                       const double*                       coords,
+                                       double*                             energies) {
+  const int molIdx  = blockIdx.x;
+  const int tid     = threadIdx.x;
+  const int stride  = blockDim.x;
+  using BlockReduce = cub::BlockReduce<double, blockSizePerMol>;
+  __shared__ typename BlockReduce::TempStorage tempStorage;
+
+  const double threadEnergy = molEnergy(*terms, *systemIndices, coords, molIdx, tid, stride);
+  const double blockEnergy  = BlockReduce(tempStorage).Sum(threadEnergy);
+
+  if (tid == 0) {
+    energies[molIdx] = blockEnergy;
+  }
+}
+
+__global__ void combinedGradKernel(const EnergyForceContribsDevicePtr* terms,
+                                   const BatchedIndicesDevicePtr*      systemIndices,
+                                   const double*                       coords,
+                                   double*                             grad) {
+  const int molIdx = blockIdx.x;
+  const int tid    = threadIdx.x;
+  const int stride = blockDim.x;
+
+  const int atomStart = systemIndices->atomStarts[molIdx];
+  const int atomEnd   = systemIndices->atomStarts[molIdx + 1];
+  const int numAtoms  = atomEnd - atomStart;
+
+  constexpr int     maxAtomSize = 256;
+  __shared__ double accumGrad[maxAtomSize * 3];
+
+  const bool useSharedMem = numAtoms <= maxAtomSize;
+  double*    molGradBase  = useSharedMem ? accumGrad : grad + atomStart * 3;
+
+  for (int i = tid; i < numAtoms * 3; i += stride) {
+    molGradBase[i] = 0.0;
+  }
+  __syncthreads();
+
+  molGrad(*terms, *systemIndices, coords, molGradBase, molIdx, tid, stride);
+  __syncthreads();
+
+  if (useSharedMem) {
+    double* globalGrad = grad + (atomStart * 3);
+    for (int i = tid; i < numAtoms * 3; i += stride) {
+      globalGrad[i] = molGradBase[i];
+    }
+  }
+}
+
+cudaError_t launchBlockPerMolEnergyKernel(int                                 numMols,
+                                          const EnergyForceContribsDevicePtr& terms,
+                                          const BatchedIndicesDevicePtr&      sytemIndices,
+                                          const double*                       coords,
+                                          double*                             energies,
+                                          cudaStream_t                        stream) {
+  const AsyncDevicePtr<EnergyForceContribsDevicePtr> devTerms(terms, stream);
+  const AsyncDevicePtr<BatchedIndicesDevicePtr>      devSysIdx(sytemIndices, stream);
+  combinedEnergiesKernel<<<numMols, blockSizePerMol, 0, stream>>>(devTerms.data(), devSysIdx.data(), coords, energies);
+  return cudaGetLastError();
+}
+
+cudaError_t launchBlockPerMolGradKernel(int                                 numMols,
+                                        const EnergyForceContribsDevicePtr& terms,
+                                        const BatchedIndicesDevicePtr&      sytemIndices,
+                                        const double*                       coords,
+                                        double*                             grad,
+                                        cudaStream_t                        stream) {
+  const AsyncDevicePtr<EnergyForceContribsDevicePtr> devTerms(terms, stream);
+  const AsyncDevicePtr<BatchedIndicesDevicePtr>      devSysIdx(sytemIndices, stream);
+  combinedGradKernel<<<numMols, blockSizePerMol, 0, stream>>>(devTerms.data(), devSysIdx.data(), coords, grad);
+  return cudaGetLastError();
+}
 }  // namespace MMFF
 }  // namespace nvMolKit
