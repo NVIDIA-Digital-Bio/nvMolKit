@@ -111,20 +111,11 @@ __global__ void ChiralViolationEnergyKernel(const int      numChiral,
 
     // Check if activeThisStage is nullptr or if this molecule/conformer is active in this stage
     if (activeThisStage == nullptr || activeThisStage[batchIdx] == 1) {
-      const int    idx2    = idx2s[idx];
-      const int    idx3    = idx3s[idx];
-      const int    idx4    = idx4s[idx];
-      const double lb      = volLower[idx];
-      const double ub      = volUpper[idx];
-      const int    posIdx1 = idx1 * dimension;
-      const int    posIdx2 = idx2 * dimension;
-      const int    posIdx3 = idx3 * dimension;
-      const int    posIdx4 = idx4 * dimension;
-
-      double v1x, v1y, v1z, v2x, v2y, v2z, v3x, v3y, v3z;
-      double vol =
-        calcChiralVolume(posIdx1, posIdx2, posIdx3, posIdx4, pos, v1x, v1y, v1z, v2x, v2y, v2z, v3x, v3y, v3z);
-
+      const int    idx2      = idx2s[idx];
+      const int    idx3      = idx3s[idx];
+      const int    idx4      = idx4s[idx];
+      const double lb        = volLower[idx];
+      const double ub        = volUpper[idx];
       const double energy    = chiralViolationEnergy(pos, idx1, idx2, idx3, idx4, lb, ub, weight, dimension);
       const int    outputIdx = getEnergyAccumulatorIndex(idx, batchIdx, energyBufferStarts, chiralTermStarts);
       energyBuffer[outputIdx] += energy;
@@ -153,53 +144,12 @@ __global__ void ChiralViolationGradientKernel(const int      numChiral,
 
     // Check if activeThisStage is nullptr or if this molecule/conformer is active in this stage
     if (activeThisStage == nullptr || activeThisStage[batchIdx] == 1) {
-      const int    idx2    = idx2s[idx];
-      const int    idx3    = idx3s[idx];
-      const int    idx4    = idx4s[idx];
-      const double lb      = volLower[idx];
-      const double ub      = volUpper[idx];
-      const int    posIdx1 = idx1 * dimension;
-      const int    posIdx2 = idx2 * dimension;
-      const int    posIdx3 = idx3 * dimension;
-      const int    posIdx4 = idx4 * dimension;
-
-      double v1x, v1y, v1z, v2x, v2y, v2z, v3x, v3y, v3z;
-      double vol =
-        calcChiralVolume(posIdx1, posIdx2, posIdx3, posIdx4, pos, v1x, v1y, v1z, v2x, v2y, v2z, v3x, v3y, v3z);
-
-      if (vol < lb || vol > ub) {
-        double preFactor;
-        if (vol < lb) {
-          preFactor = weight * (vol - lb);
-        } else {  // guaranteed != with outer conditional.
-          preFactor = weight * (vol - ub);
-        }
-
-        atomicAdd(&grad[posIdx1 + 0], preFactor * (v2y * v3z - v2z * v3y));
-        atomicAdd(&grad[posIdx1 + 1], preFactor * (v2z * v3x - v2x * v3z));
-        atomicAdd(&grad[posIdx1 + 2], preFactor * (v2x * v3y - v2y * v3x));
-
-        atomicAdd(&grad[posIdx2 + 0], preFactor * (v3y * v1z - v3z * v1y));
-        atomicAdd(&grad[posIdx2 + 1], preFactor * (v3z * v1x - v3x * v1z));
-        atomicAdd(&grad[posIdx2 + 2], preFactor * (v3x * v1y - v3y * v1x));
-
-        atomicAdd(&grad[posIdx3 + 0], preFactor * (v2z * v1y - v2y * v1z));
-        atomicAdd(&grad[posIdx3 + 1], preFactor * (v2x * v1z - v2z * v1x));
-        atomicAdd(&grad[posIdx3 + 2], preFactor * (v2y * v1x - v2x * v1y));
-
-        double x1 = pos[posIdx1 + 0];
-        double y1 = pos[posIdx1 + 1];
-        double z1 = pos[posIdx1 + 2];
-        double x2 = pos[posIdx2 + 0];
-        double y2 = pos[posIdx2 + 1];
-        double z2 = pos[posIdx2 + 2];
-        double x3 = pos[posIdx3 + 0];
-        double y3 = pos[posIdx3 + 1];
-        double z3 = pos[posIdx3 + 2];
-        atomicAdd(&grad[posIdx4 + 0], preFactor * (z1 * (y2 - y3) + z2 * (y3 - y1) + z3 * (y1 - y2)));
-        atomicAdd(&grad[posIdx4 + 1], preFactor * (x1 * (z2 - z3) + x2 * (z3 - z1) + x3 * (z1 - z2)));
-        atomicAdd(&grad[posIdx4 + 2], preFactor * (y1 * (x2 - x3) + y2 * (x3 - x1) + y3 * (x1 - x2)));
-      }
+      const int    idx2 = idx2s[idx];
+      const int    idx3 = idx3s[idx];
+      const int    idx4 = idx4s[idx];
+      const double lb   = volLower[idx];
+      const double ub   = volUpper[idx];
+      chiralViolationGrad(pos, idx1, idx2, idx3, idx4, lb, ub, weight, dimension, grad);
     }
   }
 }
