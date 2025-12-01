@@ -33,11 +33,14 @@ namespace nvMolKit {
  *                 that item. Modified in-place.
  * @param cutoff Distance threshold for clustering. Items with distance < cutoff are
  *               considered neighbors.
+ * @param enforceStrictIndexing If true, cluster IDs are assigned in strict largest-first order.
+ *                              If false, allows parallel assignment for better performance.
  * @param stream CUDA stream to execute operations on. Defaults to stream 0.
  */
 void butinaGpu(cuda::std::span<const double> distanceMatrix,
                cuda::std::span<int>          clusters,
                double                        cutoff,
+               bool                          enforceStrictIndexing = true,
                cudaStream_t                  stream = nullptr);
 
 /**
@@ -57,9 +60,14 @@ void butinaGpu(cuda::std::span<const double> distanceMatrix,
  *                  are neighbors (distance < cutoff), 0 otherwise.
  * @param clusters Output array of size N. Each element will contain the cluster ID for
  *                 that item. Modified in-place.
+ * @param enforceStrictIndexing If true, cluster IDs are assigned in strict largest-first order.
+ *                              If false, allows parallel assignment for better performance.
  * @param stream CUDA stream to execute operations on. Defaults to stream 0.
  */
-void butinaGpu(cuda::std::span<const uint8_t> hitMatrix, cuda::std::span<int> clusters, cudaStream_t stream = nullptr);
+void butinaGpu(cuda::std::span<const uint8_t> hitMatrix,
+               cuda::std::span<int>           clusters,
+               bool                           enforceStrictIndexing = true,
+               cudaStream_t                   stream = nullptr);
 }  // namespace nvMolKit
 
 #endif  // NVMOLKIT_BUTINA_H

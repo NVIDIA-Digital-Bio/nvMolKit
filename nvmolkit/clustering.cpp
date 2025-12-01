@@ -22,7 +22,7 @@
 BOOST_PYTHON_MODULE(_clustering) {
   boost::python::def(
     "butina",
-    +[](const boost::python::dict& distanceMatrix, const double cutoff) {
+    +[](const boost::python::dict& distanceMatrix, const double cutoff, const bool enforceStrictIndexing) {
       // Extract boost::python::tuple from dict['shape']
       boost::python::tuple             shape   = boost::python::extract<boost::python::tuple>(distanceMatrix["shape"]);
       const size_t                     matDim1 = boost::python::extract<size_t>(shape[0]);
@@ -31,9 +31,10 @@ BOOST_PYTHON_MODULE(_clustering) {
       boost::python::tuple data        = boost::python::extract<boost::python::tuple>(distanceMatrix["data"]);
       const size_t         dataPointer = boost::python::extract<std::size_t>(data[0]);
       const auto matSpan = nvMolKit::getSpanFromDictElems<double>(reinterpret_cast<void*>(dataPointer), shape);
-      nvMolKit::butinaGpu(matSpan, toSpan(clusterIds), cutoff);
+      nvMolKit::butinaGpu(matSpan, toSpan(clusterIds), cutoff, enforceStrictIndexing);
 
       return nvMolKit::makePyArray(clusterIds, boost::python::make_tuple(matDim1));
     },
+    (boost::python::arg("distance_matrix"), boost::python::arg("cutoff"), boost::python::arg("enforce_strict_indexing") = true),
     boost::python::return_value_policy<boost::python::manage_new_object>());
 };
