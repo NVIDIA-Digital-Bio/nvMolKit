@@ -656,8 +656,6 @@ cudaError_t launchReduceEnergiesKernel(const int     numBlocks,
 
 constexpr int blockSizePerMol = 128;
 
-// molEnergy and molGrad are now defined in mmff_kernels_device.cuh as inline functions
-
 __global__ void combinedEnergiesKernel(const EnergyForceContribsDevicePtr* terms,
                                        const BatchedIndicesDevicePtr*      systemIndices,
                                        const double*                       coords,
