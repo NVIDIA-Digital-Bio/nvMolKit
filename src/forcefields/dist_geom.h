@@ -492,6 +492,8 @@ cudaError_t computePlanarEnergy(BatchedMolecular3DDeviceBuffers&           molSy
 cudaError_t computeEnergyBlockPerMol(BatchedMolecularDeviceBuffers&             molSystemDevice,
                                      const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
                                      const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
+                                     double                                     chiralWeight,
+                                     double                                     fourthDimWeight,
                                      const uint8_t*                             activeThisStage = nullptr,
                                      const double*                              positions       = nullptr,
                                      cudaStream_t                               stream          = nullptr);
@@ -500,6 +502,8 @@ cudaError_t computeEnergyBlockPerMol(BatchedMolecularDeviceBuffers&             
 cudaError_t computeGradBlockPerMol(BatchedMolecularDeviceBuffers&             molSystemDevice,
                                    const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
                                    const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
+                                   double                                     chiralWeight,
+                                   double                                     fourthDimWeight,
                                    const uint8_t*                             activeThisStage = nullptr,
                                    cudaStream_t                               stream          = nullptr);
 

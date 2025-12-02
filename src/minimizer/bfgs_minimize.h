@@ -35,8 +35,8 @@ struct BatchedIndicesDevicePtr;
 namespace DistGeom {
 struct Energy3DForceContribsDevicePtr;
 struct BatchedIndices3DDevicePtr;
-struct EnergyForceContribsDevicePtr;  // 4D version
-struct BatchedIndicesDevicePtr;       // 4D version
+struct EnergyForceContribsDevicePtr;
+struct BatchedIndicesDevicePtr;
 }  // namespace DistGeom
 
 //! Compute energies, optionally on an external set of positions. If nullptr, expect to find in internal coordinates.

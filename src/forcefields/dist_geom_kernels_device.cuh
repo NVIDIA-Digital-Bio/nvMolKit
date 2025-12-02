@@ -860,8 +860,6 @@ static __device__ __inline__ double molEnergyDG(const EnergyForceContribsDeviceP
   const int fourthStart = systemIndices.fourthTermStarts[molIdx];
   const int fourthEnd   = systemIndices.fourthTermStarts[molIdx + 1];
 
-  const int totalTerms = (distEnd - distStart) + (chiralEnd - chiralStart) + (fourthEnd - fourthStart);
-
   // Get term data
   const auto& [d_idx1s, d_idx2s, d_ub2s, d_lb2s, d_weights]                  = terms.distTerms;
   const auto& [c_idx1s, c_idx2s, c_idx3s, c_idx4s, c_volUppers, c_volLowers] = terms.chiralTerms;
@@ -959,8 +957,6 @@ static __device__ __inline__ void molGradDG(const EnergyForceContribsDevicePtr& 
   const int chiralEnd   = systemIndices.chiralTermStarts[molIdx + 1];
   const int fourthStart = systemIndices.fourthTermStarts[molIdx];
   const int fourthEnd   = systemIndices.fourthTermStarts[molIdx + 1];
-
-  const int totalTerms = (distEnd - distStart) + (chiralEnd - chiralStart) + (fourthEnd - fourthStart);
 
   // Get term data
   const auto& [d_idx1s, d_idx2s, d_ub2s, d_lb2s, d_weights]                  = terms.distTerms;

@@ -1260,6 +1260,8 @@ inline BatchedIndicesDevicePtr toPointerStruct(const BatchedIndicesDevice& src) 
 cudaError_t computeEnergyBlockPerMol(BatchedMolecularDeviceBuffers&             molSystemDevice,
                                      const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
                                      const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
+                                     const double                               chiralWeight,
+                                     const double                               fourthDimWeight,
                                      const uint8_t*                             activeThisStage,
                                      const double*                              positions,
                                      cudaStream_t                               stream) {
@@ -1276,8 +1278,8 @@ cudaError_t computeEnergyBlockPerMol(BatchedMolecularDeviceBuffers&             
                                        positions != nullptr ? positions : ctxPositionsDevice.data(),
                                        molSystemDevice.energyOuts.data(),
                                        molSystemDevice.dimension,
-                                       1.0,  // chiralWeight
-                                       1.0,  // fourthDimWeight
+                                       chiralWeight,
+                                       fourthDimWeight,
                                        activeThisStage,
                                        stream);
 }
@@ -1285,6 +1287,8 @@ cudaError_t computeEnergyBlockPerMol(BatchedMolecularDeviceBuffers&             
 cudaError_t computeGradBlockPerMol(BatchedMolecularDeviceBuffers&             molSystemDevice,
                                    const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
                                    const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
+                                   const double                               chiralWeight,
+                                   const double                               fourthDimWeight,
                                    const uint8_t*                             activeThisStage,
                                    cudaStream_t                               stream) {
   const auto              pointers = toPointerStruct(molSystemDevice.contribs);
@@ -1300,8 +1304,8 @@ cudaError_t computeGradBlockPerMol(BatchedMolecularDeviceBuffers&             mo
                                      ctxPositionsDevice.data(),
                                      molSystemDevice.grad.data(),
                                      molSystemDevice.dimension,
-                                     1.0,  // chiralWeight
-                                     1.0,  // fourthDimWeight
+                                     chiralWeight,
+                                     fourthDimWeight,
                                      activeThisStage,
                                      stream);
 }
