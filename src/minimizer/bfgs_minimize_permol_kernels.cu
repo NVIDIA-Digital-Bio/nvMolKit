@@ -404,22 +404,22 @@ template <> struct DataDimTraits<ForceFieldType::DG> {
 }  // namespace
 
 template <int MaxAtoms, bool UseSharedMem, ForceFieldType FFType, typename TermsType, typename IndicesType>
-__global__ void bfgsMinimizeKernel(const int          numIters,
-                                   const double       gradTol,
-                                   const bool         scaleGrads,
-                                   const TermsType*   terms,
-                                   const IndicesType* systemIndices,
-                                   const int*         molIdList,
-                                   const int*         atomStarts,
-                                   const int*         hessianStarts,
-                                   double*            positions,
-                                   double*            grad,
-                                   double*            inverseHessian,
-                                   double**           scratchBuffers,
-                                   double*            energyOuts,
-                                   int16_t*           statuses,
-                                   double             chiralWeight,
-                                   double             fourthDimWeight) {
+__global__ void bfgsMinimizeKernel(const int               numIters,
+                                   const double            gradTol,
+                                   const bool              scaleGrads,
+                                   const TermsType*        terms,
+                                   const IndicesType*      systemIndices,
+                                   const int*              molIdList,
+                                   const int*              atomStarts,
+                                   const int*              hessianStarts,
+                                   double*                 positions,
+                                   double*                 grad,
+                                   double*                 inverseHessian,
+                                   double**                scratchBuffers,
+                                   double*                 energyOuts,
+                                   int16_t*                statuses,
+                                   [[maybe_unused]] double chiralWeight,
+                                   [[maybe_unused]] double fourthDimWeight) {
   const int     molIdx = molIdList[blockIdx.x];
   const int16_t tid    = threadIdx.x;
   const int     stride = blockDim.x;
@@ -443,7 +443,6 @@ __global__ void bfgsMinimizeKernel(const int          numIters,
 
   if constexpr (UseSharedMem) {
     // Shared memory for small molecules (≤64 atoms)
-    // Note: oldPos moved to global memory to reduce shared memory pressure
     __shared__ double sharedLocalPos[maxTerms];
     __shared__ double sharedLocalGrad[maxTerms];
     __shared__ double sharedLocalDir[maxTerms];
@@ -538,13 +537,9 @@ __global__ void bfgsMinimizeKernel(const int          numIters,
   if (tid == 0) {
     prevE              = blockEnergy;
     energyOuts[molIdx] = blockEnergy;
-    if (blockIdx.x == 0) {
-      // printf("Initial energy for mol %d: %f\n", static_cast<int>(blockIdx.x), blockEnergy);
-    }
   }
   __syncthreads();
 
-  // Compute initial gradient
   for (int16_t i = tid; i < numTerms; i += stride) {
     localGrad[i] = 0.0;
   }
@@ -577,25 +572,14 @@ __global__ void bfgsMinimizeKernel(const int          numIters,
   } else {
     scaleGrad<false>(numTerms, localGrad, gradScale, tempStorage);
   }
-  if (tid == 0) {
-    // printf("After scaling: gradScale=%f, grad[0]=%f, grad[%d]=%f\n",  gradScale, localGrad[0], numTerms-1,
-    // localGrad[numTerms-1]);
-  }
-
   // Set initial direction as negative gradient
   for (int i = tid; i < numTerms; i += stride) {
     localDir[i] = -localGrad[i];
   }
   __syncthreads();
-  if (tid == 0) {
-    // printf("Initial dir[0]=%f, dir[%d]=%f\n", localDir[0], numTerms-1, localDir[numTerms-1]);
-  }
 
   // Set max step
   setMaxStep(localPos, numTerms, &maxStep, tempStorage);
-  if (tid == 0) {
-    // printf("maxStep=%f\n", maxStep);
-  }
   __syncthreads();
 
   // Main BFGS loop
@@ -606,9 +590,6 @@ __global__ void bfgsMinimizeKernel(const int          numIters,
   __syncthreads();
 
   while (!converged && currIter < numIters) {
-    if (tid == 0) {
-      // printf("Iter %d", currIter);
-    }
     // Save current position before line search
     for (int16_t i = tid; i < numTerms; i += stride) {
       oldPos[i] = localPos[i];
@@ -629,15 +610,12 @@ __global__ void bfgsMinimizeKernel(const int          numIters,
     __shared__ int16_t lineSearchIter;
     if (tid == 0) {
       lineSearchIter = 0;
-      // printf("  Line search setup: slope=%f, lambdaMin=%f, lambda=%f\n", slope, lambdaMin, lambda);
     }
     __syncthreads();
 
     while (!lineSearchConverged && lineSearchIter < MAX_LINESEARCH_ITERS) {
       // Perturb positions from saved oldPos (not localPos, which may have been modified)
-      //////printf("Pre perturb x[0] and x[end]: %f %f\n", localPos[0], localPos[numTerms - 1]);
       lineSearchPerturb(numTerms, oldPos, localDir, lambda, scratchPos);
-      //////printf("Post perturb x[0] and x[end]: %f %f\n", scratchPos[0], scratchPos[numTerms - 1]);
 
       // Copy to global for energy calculation
       for (int i = tid; i < numTerms; i += stride) {
@@ -666,7 +644,6 @@ __global__ void bfgsMinimizeKernel(const int          numIters,
 
       if (tid == 0) {
         currE = lsBlockEnergy;
-        // printf("  Line search iter %d, lambda=%f, energy=%f\n", lineSearchIter, lambda, lsBlockEnergy);
       }
       __syncthreads();
 
@@ -691,18 +668,12 @@ __global__ void bfgsMinimizeKernel(const int          numIters,
     // Set direction (compute xi = new - old)
     setDirection(numTerms, scratchPos, oldPos, localDir, dGrad, localGrad, converged, tempStorage);
     if (converged) {
-      if (tid == 0) {
-        // printf("Converged due to small position change.\n");
-      }
       break;
     }
 
     // Update stored energy for next iteration
     if (tid == 0) {
       prevE = currE;
-      if (blockIdx.x == 0) {
-        // printf("Line search result energy: %f\n", currE);
-      }
     }
     __syncthreads();
 
@@ -740,9 +711,6 @@ __global__ void bfgsMinimizeKernel(const int          numIters,
     // Update dGrad and check convergence
     updateDGrad(numTerms, gradTol, currE, gradScale, localGrad, localPos, dGrad, converged, tempStorage);
     if (converged) {
-      if (tid == 0) {
-        // printf("Converged due to gradient tolerance.\n");
-      }
       break;
     }
 
@@ -757,14 +725,10 @@ __global__ void bfgsMinimizeKernel(const int          numIters,
 
   // Write final energy and status
   if (tid == 0) {
-    // printf("Writing final energy for mol %d: %f\n", static_cast<int>(blockIdx.x), prevE);
     energyOuts[molIdx] = prevE;
     // Write status to match batched kernel behavior (0 = converged, 1 = not converged)
     if (statuses != nullptr) {
-      // printf("Writing status value: %d\n", converged ? 0 : 1);
       statuses[molIdx] = converged ? 0 : 1;
-    } else {
-      // printf("Skipping status write\n");
     }
   }
 }
@@ -1220,4 +1184,5 @@ cudaError_t launchBfgsMinimizePerMolKernelDG(const int*                         
 
   return err;
 }
+
 }  // namespace nvMolKit

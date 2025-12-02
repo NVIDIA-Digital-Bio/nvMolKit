@@ -21,6 +21,7 @@
 #include <functional>
 #include <vector>
 
+#include "bfgs_types.h"
 #include "host_vector.h"
 
 namespace nvMolKit {
@@ -38,26 +39,10 @@ struct EnergyForceContribsDevicePtr;  // 4D version
 struct BatchedIndicesDevicePtr;       // 4D version
 }  // namespace DistGeom
 
-enum class ForceFieldType {
-  MMFF = 0,
-  ETK  = 1,
-  DG   = 2
-};
-
 //! Compute energies, optionally on an external set of positions. If nullptr, expect to find in internal coordinates.
 using EnergyFunctor = std::function<void(const double*)>;
 //! Compute gradients on internal positions writing to internal buffer.
 using GradFunctor   = std::function<void()>;
-
-enum class DebugLevel {
-  NONE     = 0,
-  STEPWISE = 1,
-};
-
-enum class BfgsBackend {
-  BATCHED      = 0,  //!< Original batched implementation
-  PER_MOLECULE = 1   //!< Per-molecule kernel implementation
-};
 
 //! BFGS Batch Minimizer
 //!
@@ -105,7 +90,7 @@ struct BfgsBatchMinimizer {
                         const MMFF::BatchedIndicesDevicePtr&      systemIndices,
                         const uint8_t*                            activeThisStage = nullptr);
 
-  //! Run BFGS minimization with ETK (3D) interface
+  //! Run BFGS minimization with ETK interface
   //! Returns 0 if all systems converged, 1 if some systems did not converge.
   bool minimizeWithETK(int                                             numIters,
                        double                                          gradTol,
@@ -119,7 +104,7 @@ struct BfgsBatchMinimizer {
                        const DistGeom::BatchedIndices3DDevicePtr&      systemIndices,
                        const uint8_t*                                  activeThisStage = nullptr);
 
-  //! Run BFGS minimization with DG (4D) interface
+  //! Run BFGS minimization with DG interface
   //! Returns 0 if all systems converged, 1 if some systems did not converge.
   bool minimizeWithDG(int                                           numIters,
                       double                                        gradTol,

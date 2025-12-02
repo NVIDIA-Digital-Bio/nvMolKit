@@ -18,7 +18,7 @@
 
 #include <cuda_runtime.h>
 
-#include "bfgs_minimize.h"
+#include "bfgs_types.h"
 #include "dist_geom_kernels.h"
 #include "mmff_kernels.h"
 

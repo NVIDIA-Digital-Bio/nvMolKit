@@ -976,39 +976,17 @@ bool BfgsBatchMinimizer::minimize(const int                     numIters,
 
     // Initial E and F
     eFunc(nullptr);
-    // std::vector<double> dump = debugDump(energyOuts);
-    // printf("Initial energy for mol 0: %f\n", dump[0]);
     gFunc();
-    // auto graddump  = debugDump(grad);
-    // printf("Initial grad[0]=%f, grad[%d]=%f\n", graddump[0], static_cast<int>(graddump.size()-1), graddump.back());
     scaleGrad(/*preLoop=*/true);
-    // auto gradscaleddump  = debugDump(gradScales_);
-    // auto graddump2  = debugDump(grad);
-    // printf("After scaling: gradScale=%f, grad[0]=%f, grad[%d]=%f\n", gradscaleddump[0], graddump2[0],
-    // static_cast<int>(graddump2.size()-1), graddump2.back());
 
     collectDebugData();
     // Set up xi as negative grad.
     copyAndInvert(grad, lineSearchDir_);
-    // auto dirdump = debugDump(lineSearchDir_);
-    // printf("Initial dir[0]=%f, dir[%d]=%f\n", dirdump[0], static_cast<int>(dirdump.size()-1), dirdump.back());
 
     setMaxStep();
-    // auto maxstepdump = debugDump(lineSearchMaxSteps_);
-    // printf("maxStep=%f\n", maxstepdump[0]);
   }
 
   for (int currIter = 0; currIter < numIters && compactAndCountConverged() < numSystems; currIter++) {
-    //("Iter %d\n, ", currIter);
-    {
-      const ScopedNvtxRange bfgsLineSearchSetup("BfgsBatchMinimizer::lineSearchSetup");
-      doLineSearchSetup(energyOuts.data());
-      // auto slopedump = debugDump(lineSearchSlope_);
-      // auto lambdamindump = debugDump(lineSearchLambdaMins_);
-      // auto lambdadump = debugDump(lineSearchLambdas_);
-      // printf("  Line search setup: slope=%f, lambdaMin=%f, lambda=%f\n", slopedump[0], lambdamindump[0],
-      // lambdadump[0]);
-    }
     {
       const ScopedNvtxRange bfgsLineSearch("BfgsBatchMinimizer::lineSearch");
       doLineSearchSetup(energyOuts.data());
@@ -1026,14 +1004,11 @@ bool BfgsBatchMinimizer::minimize(const int                     numIters,
         energyBuffer.zero();
         energyOuts.zero();
         eFunc(scratchPositions_.data());
-        // auto dump2 = debugDump(energyOuts);
-        // printf("  Line search iter %d, energy for mol 0: %f\n", lineSearchIter, dump2[0]);
         doLineSearchPostEnergy(lineSearchIter);
         lineSearchIter++;
       }
       doLineSearchPostLoop();
     }
-    // printf("Post line search, energies for mol 0: %f\n", debugDump(energyOuts)[0]);
     setDirection();
 
     {
@@ -1078,9 +1053,7 @@ bool BfgsBatchMinimizer::minimizeWithMMFF(const int                             
   // Initialize Hessian to identity
   setHessianToIdentity();
 
-  // Use per-molecule kernel
   const ScopedNvtxRange bfgsPerMolecule("BfgsBatchMinimizer::perMoleculeMinimize");
-
   // Prepare scratch buffer pointers array on host (using pinned memory)
   scratchBufferPointersHost_[0] = grad.data();               // oldPos for shared memory mode
   scratchBufferPointersHost_[1] = lineSearchDir_.data();     // localDir
@@ -1134,7 +1107,7 @@ bool BfgsBatchMinimizer::minimizeWithMMFF(const int                             
   for (int bin = 0; bin < 5; ++bin) {
     for (const int molIdx : perMolBinLists_[bin]) {
       if (convergenceHost_[molIdx] != 0) {
-        return true;  // true = needs more iterations
+        return true;
       }
     }
   }
@@ -1326,7 +1299,7 @@ bool BfgsBatchMinimizer::minimizeWithDG(const int                               
     }
   }
 
-  return false;  // false = all active molecules converged
+  return false;
 }
 
 void copyAndInvert(const AsyncDeviceVector<double>& src, AsyncDeviceVector<double>& dst) {
