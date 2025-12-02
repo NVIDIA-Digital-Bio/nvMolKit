@@ -21,19 +21,21 @@
 #include <functional>
 #include <vector>
 
+#include "bfgs_types.h"
 #include "host_vector.h"
 
 namespace nvMolKit {
+
+// Forward declarations for forcefield types
+namespace MMFF {
+struct EnergyForceContribsDevicePtr;
+struct BatchedIndicesDevicePtr;
+}  // namespace MMFF
 
 //! Compute energies, optionally on an external set of positions. If nullptr, expect to find in internal coordinates.
 using EnergyFunctor = std::function<void(const double*)>;
 //! Compute gradients on internal positions writing to internal buffer.
 using GradFunctor   = std::function<void()>;
-
-enum class DebugLevel {
-  NONE     = 0,
-  STEPWISE = 1,
-};
 
 //! BFGS Batch Minimizer
 //!
@@ -49,7 +51,8 @@ struct BfgsBatchMinimizer {
   explicit BfgsBatchMinimizer(int          dataDim    = 3,
                               DebugLevel   debugLevel = DebugLevel::NONE,
                               bool         scaleGrads = true,
-                              cudaStream_t stream     = nullptr);
+                              cudaStream_t stream     = nullptr,
+                              BfgsBackend  backend    = BfgsBackend::BATCHED);
   ~BfgsBatchMinimizer();
 
   //! Run up to numIters iterations of BFGS minimization
@@ -65,6 +68,20 @@ struct BfgsBatchMinimizer {
                 EnergyFunctor                 eFunc,
                 GradFunctor                   gFunc,
                 const uint8_t*                activeThisStage = nullptr);
+
+  //! Run BFGS minimization with MMFF-specific interface.
+  //! Returns 0 if all systems converged, 1 if some systems did not converge.
+  bool minimizeWithMMFF(int                                       numIters,
+                        double                                    gradTol,
+                        const std::vector<int>&                   atomStartsHost,
+                        const AsyncDeviceVector<int>&             atomStarts,
+                        AsyncDeviceVector<double>&                positions,
+                        AsyncDeviceVector<double>&                grad,
+                        AsyncDeviceVector<double>&                energyOuts,
+                        AsyncDeviceVector<double>&                energyBuffer,
+                        const MMFF::EnergyForceContribsDevicePtr& terms,
+                        const MMFF::BatchedIndicesDevicePtr&      systemIndices,
+                        const uint8_t*                            activeThisStage = nullptr);
 
   // Set up the minimizer for a new system.
   void initialize(const std::vector<int>& atomStartsHost,
@@ -150,8 +167,21 @@ struct BfgsBatchMinimizer {
   double*    energyOutsDevice = nullptr;
 
   DebugLevel                        debugLevel_ = DebugLevel::NONE;
+  BfgsBackend                       backend_    = BfgsBackend::BATCHED;
   std::vector<std::vector<int16_t>> stepwiseStatuses;
   std::vector<std::vector<double>>  stepwiseEnergies;
+
+  // Per-molecule kernel binning data (used when backend_ == PER_MOLECULE)
+  std::vector<std::vector<int>>       perMolBinLists_;        // Molecule IDs for each bin
+  std::vector<AsyncDeviceVector<int>> perMolBinListsDevice_;  // Device copies of bin lists
+
+  // Device-side array of scratch buffer pointers (used by per-molecule kernel)
+  AsyncDeviceVector<double*> scratchBuffersDevice_;
+
+  // Pinned host buffers for async transfers (allocated lazily in initialize())
+  PinnedHostVector<uint8_t> activeHost_;
+  PinnedHostVector<int16_t> convergenceHost_;  // Changed to int16_t to match statuses_
+  PinnedHostVector<double*> scratchBufferPointersHost_;
 
   cudaStream_t stream_ = nullptr;
 };

@@ -505,6 +505,32 @@ TEST_F(MMffGpuTestFixture, CombinedGradients) {
   EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients));
 }
 
+TEST_F(MMffGpuTestFixture, CombinedEnergiesPerMolKernels) {
+  auto                                     mmffProperties = std::make_unique<RDKit::MMFF::MMFFMolProperties>(*mol_);
+  std::unique_ptr<ForceFields::ForceField> ff(RDKit::MMFF::constructForceField(*mol_, mmffProperties.get()));
+
+  double wantEnergy = ff->calcEnergy(systemHost.positions.data());
+  CHECK_CUDA_RETURN(computeEnergyBlockPerMol(systemDevice));
+  double gotEnergy;
+  CHECK_CUDA_RETURN(cudaMemcpy(&gotEnergy, systemDevice.energyOuts.data() + 0, sizeof(double), cudaMemcpyDeviceToHost));
+  EXPECT_NEAR(gotEnergy, wantEnergy, FUNCTION_E_TOL);
+}
+
+TEST_F(MMffGpuTestFixture, CombinedGradientsPerMolKernels) {
+  auto                                     mmffProperties = std::make_unique<RDKit::MMFF::MMFFMolProperties>(*mol_);
+  std::unique_ptr<ForceFields::ForceField> ff(RDKit::MMFF::constructForceField(*mol_, mmffProperties.get()));
+
+  std::vector<double> wantGradients(3 * mol_->getNumAtoms(), 0.0);
+  ff->calcGrad(systemHost.positions.data(), wantGradients.data());
+
+  CHECK_CUDA_RETURN(computeGradBlockPerMol(systemDevice));
+  std::vector<double> gotGrad(systemHost.positions.size(), 0.0);
+  systemDevice.grad.copyToHost(gotGrad);
+  cudaDeviceSynchronize();
+  // Test up to default force tolerance.
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(GRAD_TOL), wantGradients));
+}
+
 class MMffGpuEdgeCasesBase : public ::testing::Test {
  public:
   void SetUp() override {

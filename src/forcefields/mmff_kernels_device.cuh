@@ -658,4 +658,211 @@ static __device__ __forceinline__ void eleGrad(const double* pos,
   atomicAdd(&grad[3 * idx2 + 2], -dE_dz);
 }
 
+namespace nvMolKit {
+namespace MMFF {
+
+static __device__ __inline__ double molEnergy(const EnergyForceContribsDevicePtr& terms,
+                                              const BatchedIndicesDevicePtr&      systemIndices,
+                                              const double*                       coords,
+                                              const int                           molIdx,
+                                              const int                           tid,
+                                              const int                           stride) {
+  const int     atomStart = systemIndices.atomStarts[molIdx];
+  const double* molCoords = coords + atomStart * 3;
+
+  double energy = 0.0;
+
+  const auto& [idx1s, idx2s, r0s, kbs] = terms.bondTerms;
+  const int bondStart                  = systemIndices.bondTermStarts[molIdx];
+  const int bondEnd                    = systemIndices.bondTermStarts[molIdx + 1];
+#pragma unroll 1
+  for (int i = bondStart + tid; i < bondEnd; i += stride) {
+    const int localIdx1 = idx1s[i] - atomStart;
+    const int localIdx2 = idx2s[i] - atomStart;
+    energy += bondStretchEnergy(molCoords, localIdx1, localIdx2, r0s[i], kbs[i]);
+  }
+
+  const auto& [a_idx1s, a_idx2s, a_idx3s, theta0s, kas, isLinears] = terms.angleTerms;
+  const int angleStart                                             = systemIndices.angleTermStarts[molIdx];
+  const int angleEnd                                               = systemIndices.angleTermStarts[molIdx + 1];
+#pragma unroll 1
+  for (int i = angleStart + tid; i < angleEnd; i += stride) {
+    const int  localIdx1 = a_idx1s[i] - atomStart;
+    const int  localIdx2 = a_idx2s[i] - atomStart;
+    const int  localIdx3 = a_idx3s[i] - atomStart;
+    const bool isLinear  = static_cast<bool>(isLinears[i]);
+    energy += angleBendEnergy(molCoords, localIdx1, localIdx2, localIdx3, theta0s[i], kas[i], isLinear);
+  }
+
+  const auto& [bs_idx1s, bs_idx2s, bs_idx3s, bs_theta0s, restLen1s, restLen2s, forceConst1s, forceConst2s] =
+    terms.bendTerms;
+  const int bendStart = systemIndices.bendTermStarts[molIdx];
+  const int bendEnd   = systemIndices.bendTermStarts[molIdx + 1];
+#pragma unroll 1
+  for (int i = bendStart + tid; i < bendEnd; i += stride) {
+    const int localIdx1 = bs_idx1s[i] - atomStart;
+    const int localIdx2 = bs_idx2s[i] - atomStart;
+    const int localIdx3 = bs_idx3s[i] - atomStart;
+    energy += bendStretchEnergy(molCoords,
+                                localIdx1,
+                                localIdx2,
+                                localIdx3,
+                                bs_theta0s[i],
+                                restLen1s[i],
+                                restLen2s[i],
+                                forceConst1s[i],
+                                forceConst2s[i]);
+  }
+
+  const auto& [o_idx1s, o_idx2s, o_idx3s, o_idx4s, koops] = terms.oopTerms;
+  const int oopStart                                      = systemIndices.oopTermStarts[molIdx];
+  const int oopEnd                                        = systemIndices.oopTermStarts[molIdx + 1];
+#pragma unroll 1
+  for (int i = oopStart + tid; i < oopEnd; i += stride) {
+    const int localIdx1 = o_idx1s[i] - atomStart;
+    const int localIdx2 = o_idx2s[i] - atomStart;
+    const int localIdx3 = o_idx3s[i] - atomStart;
+    const int localIdx4 = o_idx4s[i] - atomStart;
+    energy += oopBendEnergy(molCoords, localIdx1, localIdx2, localIdx3, localIdx4, koops[i]);
+  }
+
+  const auto& [t_idx1s, t_idx2s, t_idx3s, t_idx4s, V1s, V2s, V3s] = terms.torsionTerms;
+  const int torsionStart                                          = systemIndices.torsionTermStarts[molIdx];
+  const int torsionEnd                                            = systemIndices.torsionTermStarts[molIdx + 1];
+#pragma unroll 1
+  for (int i = torsionStart + tid; i < torsionEnd; i += stride) {
+    const int localIdx1 = t_idx1s[i] - atomStart;
+    const int localIdx2 = t_idx2s[i] - atomStart;
+    const int localIdx3 = t_idx3s[i] - atomStart;
+    const int localIdx4 = t_idx4s[i] - atomStart;
+    energy += torsionEnergy(molCoords, localIdx1, localIdx2, localIdx3, localIdx4, V1s[i], V2s[i], V3s[i]);
+  }
+
+  const auto& [v_idx1s, v_idx2s, R_ij_stars, wellDepths] = terms.vdwTerms;
+  const int vdwStart                                     = systemIndices.vdwTermStarts[molIdx];
+  const int vdwEnd                                       = systemIndices.vdwTermStarts[molIdx + 1];
+#pragma unroll 1
+  for (int i = vdwStart + tid; i < vdwEnd; i += stride) {
+    const int localIdx1 = v_idx1s[i] - atomStart;
+    const int localIdx2 = v_idx2s[i] - atomStart;
+    energy += vdwEnergy(molCoords, localIdx1, localIdx2, R_ij_stars[i], wellDepths[i]);
+  }
+
+  const auto& [e_idx1s, e_idx2s, chargeTerms, dielModels, is1_4s] = terms.eleTerms;
+  const int eleStart                                              = systemIndices.eleTermStarts[molIdx];
+  const int eleEnd                                                = systemIndices.eleTermStarts[molIdx + 1];
+#pragma unroll 1
+  for (int i = eleStart + tid; i < eleEnd; i += stride) {
+    const int  localIdx1 = e_idx1s[i] - atomStart;
+    const int  localIdx2 = e_idx2s[i] - atomStart;
+    const int  dielModel = static_cast<int>(dielModels[i]);
+    const bool is14      = is1_4s[i] > 0;
+    energy += eleEnergy(molCoords, localIdx1, localIdx2, chargeTerms[i], dielModel, is14);
+  }
+
+  return energy;
+}
+
+static __device__ __inline__ void molGrad(const EnergyForceContribsDevicePtr& terms,
+                                          const BatchedIndicesDevicePtr&      systemIndices,
+                                          const double*                       coords,
+                                          double*                             grad,
+                                          const int                           molIdx,
+                                          const int                           tid,
+                                          const int                           stride) {
+  const int     atomStart = systemIndices.atomStarts[molIdx];
+  const double* molCoords = coords + atomStart * 3;
+
+  const auto& [idx1s, idx2s, r0s, kbs] = terms.bondTerms;
+  const int bondStart                  = systemIndices.bondTermStarts[molIdx];
+  const int bondEnd                    = systemIndices.bondTermStarts[molIdx + 1];
+#pragma unroll 1
+  for (int i = bondStart + tid; i < bondEnd; i += stride) {
+    const int localIdx1 = idx1s[i] - atomStart;
+    const int localIdx2 = idx2s[i] - atomStart;
+    bondStretchGrad(molCoords, localIdx1, localIdx2, r0s[i], kbs[i], grad);
+  }
+
+  const auto& [a_idx1s, a_idx2s, a_idx3s, theta0s, kas, isLinears] = terms.angleTerms;
+  const int angleStart                                             = systemIndices.angleTermStarts[molIdx];
+  const int angleEnd                                               = systemIndices.angleTermStarts[molIdx + 1];
+#pragma unroll 1
+  for (int i = angleStart + tid; i < angleEnd; i += stride) {
+    const int  localIdx1 = a_idx1s[i] - atomStart;
+    const int  localIdx2 = a_idx2s[i] - atomStart;
+    const int  localIdx3 = a_idx3s[i] - atomStart;
+    const bool isLinear  = static_cast<bool>(isLinears[i]);
+    angleBendGrad(localIdx1, localIdx2, localIdx3, theta0s[i], kas[i], isLinear, molCoords, grad);
+  }
+
+  const auto& [bs_idx1s, bs_idx2s, bs_idx3s, bs_theta0s, restLen1s, restLen2s, forceConst1s, forceConst2s] =
+    terms.bendTerms;
+  const int bendStart = systemIndices.bendTermStarts[molIdx];
+  const int bendEnd   = systemIndices.bendTermStarts[molIdx + 1];
+#pragma unroll 1
+  for (int i = bendStart + tid; i < bendEnd; i += stride) {
+    const int localIdx1 = bs_idx1s[i] - atomStart;
+    const int localIdx2 = bs_idx2s[i] - atomStart;
+    const int localIdx3 = bs_idx3s[i] - atomStart;
+    bendStretchGrad(molCoords,
+                    localIdx1,
+                    localIdx2,
+                    localIdx3,
+                    bs_theta0s[i],
+                    restLen1s[i],
+                    restLen2s[i],
+                    forceConst1s[i],
+                    forceConst2s[i],
+                    grad);
+  }
+
+  const auto& [o_idx1s, o_idx2s, o_idx3s, o_idx4s, koops] = terms.oopTerms;
+  const int oopStart                                      = systemIndices.oopTermStarts[molIdx];
+  const int oopEnd                                        = systemIndices.oopTermStarts[molIdx + 1];
+#pragma unroll 1
+  for (int i = oopStart + tid; i < oopEnd; i += stride) {
+    const int localIdx1 = o_idx1s[i] - atomStart;
+    const int localIdx2 = o_idx2s[i] - atomStart;
+    const int localIdx3 = o_idx3s[i] - atomStart;
+    const int localIdx4 = o_idx4s[i] - atomStart;
+    rdkit_ports::oopGrad(molCoords, localIdx1, localIdx2, localIdx3, localIdx4, koops[i], grad);
+  }
+
+  const auto& [t_idx1s, t_idx2s, t_idx3s, t_idx4s, V1s, V2s, V3s] = terms.torsionTerms;
+  const int torsionStart                                          = systemIndices.torsionTermStarts[molIdx];
+  const int torsionEnd                                            = systemIndices.torsionTermStarts[molIdx + 1];
+#pragma unroll 1
+  for (int i = torsionStart + tid; i < torsionEnd; i += stride) {
+    const int localIdx1 = t_idx1s[i] - atomStart;
+    const int localIdx2 = t_idx2s[i] - atomStart;
+    const int localIdx3 = t_idx3s[i] - atomStart;
+    const int localIdx4 = t_idx4s[i] - atomStart;
+    rdkit_ports::torsionGrad(molCoords, localIdx1, localIdx2, localIdx3, localIdx4, V1s[i], V2s[i], V3s[i], grad);
+  }
+
+  const auto& [v_idx1s, v_idx2s, R_ij_stars, wellDepths] = terms.vdwTerms;
+  const int vdwStart                                     = systemIndices.vdwTermStarts[molIdx];
+  const int vdwEnd                                       = systemIndices.vdwTermStarts[molIdx + 1];
+#pragma unroll 1
+  for (int i = vdwStart + tid; i < vdwEnd; i += stride) {
+    const int localIdx1 = v_idx1s[i] - atomStart;
+    const int localIdx2 = v_idx2s[i] - atomStart;
+    rdkit_ports::vDWGrad(molCoords, localIdx1, localIdx2, R_ij_stars[i], wellDepths[i], grad);
+  }
+
+  const auto& [e_idx1s, e_idx2s, chargeTerms, dielModels, is1_4s] = terms.eleTerms;
+  const int eleStart                                              = systemIndices.eleTermStarts[molIdx];
+  const int eleEnd                                                = systemIndices.eleTermStarts[molIdx + 1];
+#pragma unroll 1
+  for (int i = eleStart + tid; i < eleEnd; i += stride) {
+    const int  localIdx1 = e_idx1s[i] - atomStart;
+    const int  localIdx2 = e_idx2s[i] - atomStart;
+    const bool is14      = is1_4s[i] > 0;
+    eleGrad(molCoords, localIdx1, localIdx2, chargeTerms[i], dielModels[i], is14, grad);
+  }
+}
+
+}  // namespace MMFF
+}  // namespace nvMolKit
+
 #endif  // NVMOLKIT_MMFF_KERNELS_DEVICE_CUH
