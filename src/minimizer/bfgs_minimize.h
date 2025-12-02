@@ -21,6 +21,7 @@
 #include <functional>
 #include <vector>
 
+#include "bfgs_types.h"
 #include "host_vector.h"
 
 namespace nvMolKit {
@@ -31,26 +32,10 @@ struct EnergyForceContribsDevicePtr;
 struct BatchedIndicesDevicePtr;
 }  // namespace MMFF
 
-enum class ForceFieldType {
-  MMFF = 0,
-  ETK  = 1,
-  DG   = 2
-};
-
 //! Compute energies, optionally on an external set of positions. If nullptr, expect to find in internal coordinates.
 using EnergyFunctor = std::function<void(const double*)>;
 //! Compute gradients on internal positions writing to internal buffer.
 using GradFunctor   = std::function<void()>;
-
-enum class DebugLevel {
-  NONE     = 0,
-  STEPWISE = 1,
-};
-
-enum class BfgsBackend {
-  BATCHED      = 0,  //!< Original batched implementation
-  PER_MOLECULE = 1   //!< Per-molecule kernel implementation
-};
 
 //! BFGS Batch Minimizer
 //!
