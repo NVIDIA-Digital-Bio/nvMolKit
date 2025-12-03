@@ -32,7 +32,7 @@ while getopts ":d" opt; do
   esac
 done
 
-ROOT_DIR=$(git rev-parse --show-toplevel)
+ROOT_DIR=$(pwd)
 
 # Find all CMakeLists.txt and *.cmake files
 files=$(find $ROOT_DIR/CMakeLists.txt $ROOT_DIR/nvmolkit $ROOT_DIR/src $ROOT_DIR/tests $ROOT_DIR/cmake $ROOT_DIR/benchmarks -name CMakeLists.txt -o -name '*.cmake' -not -path "*/_deps/*")
