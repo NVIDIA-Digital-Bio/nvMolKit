@@ -32,6 +32,13 @@ struct EnergyForceContribsDevicePtr;
 struct BatchedIndicesDevicePtr;
 }  // namespace MMFF
 
+namespace DistGeom {
+struct Energy3DForceContribsDevicePtr;
+struct BatchedIndices3DDevicePtr;
+struct EnergyForceContribsDevicePtr;
+struct BatchedIndicesDevicePtr;
+}  // namespace DistGeom
+
 //! Compute energies, optionally on an external set of positions. If nullptr, expect to find in internal coordinates.
 using EnergyFunctor = std::function<void(const double*)>;
 //! Compute gradients on internal positions writing to internal buffer.
@@ -83,6 +90,36 @@ struct BfgsBatchMinimizer {
                         const MMFF::BatchedIndicesDevicePtr&      systemIndices,
                         const uint8_t*                            activeThisStage = nullptr);
 
+  //! Run BFGS minimization with ETK interface
+  //! Returns 0 if all systems converged, 1 if some systems did not converge.
+  bool minimizeWithETK(int                                             numIters,
+                       double                                          gradTol,
+                       const std::vector<int>&                         atomStartsHost,
+                       const AsyncDeviceVector<int>&                   atomStarts,
+                       AsyncDeviceVector<double>&                      positions,
+                       AsyncDeviceVector<double>&                      grad,
+                       AsyncDeviceVector<double>&                      energyOuts,
+                       AsyncDeviceVector<double>&                      energyBuffer,
+                       const DistGeom::Energy3DForceContribsDevicePtr& terms,
+                       const DistGeom::BatchedIndices3DDevicePtr&      systemIndices,
+                       const uint8_t*                                  activeThisStage = nullptr);
+
+  //! Run BFGS minimization with DG interface
+  //! Returns 0 if all systems converged, 1 if some systems did not converge.
+  bool minimizeWithDG(int                                           numIters,
+                      double                                        gradTol,
+                      const std::vector<int>&                       atomStartsHost,
+                      const AsyncDeviceVector<int>&                 atomStarts,
+                      AsyncDeviceVector<double>&                    positions,
+                      AsyncDeviceVector<double>&                    grad,
+                      AsyncDeviceVector<double>&                    energyOuts,
+                      AsyncDeviceVector<double>&                    energyBuffer,
+                      const DistGeom::EnergyForceContribsDevicePtr& terms,
+                      const DistGeom::BatchedIndicesDevicePtr&      systemIndices,
+                      double                                        chiralWeight,
+                      double                                        fourthDimWeight,
+                      const uint8_t*                                activeThisStage = nullptr);
+
   // Set up the minimizer for a new system.
   void initialize(const std::vector<int>& atomStartsHost,
                   const int*              atomStarts,
@@ -90,6 +127,8 @@ struct BfgsBatchMinimizer {
                   double*                 grad,
                   double*                 energyOuts,
                   const uint8_t*          activeThisStage = nullptr);
+
+  BfgsBackend backend() const { return backend_; }
 
   //! Set Initial Hessian
   void setHessianToIdentity();

@@ -30,7 +30,9 @@
 #include "etkdg_impl.h"
 #include "etkdg_stage_coordgen.h"
 #include "etkdg_stage_update_conformers.h"
+#include "minimizer/bfgs_minimize.h"
 #include "test_utils.h"
+#include "utils/host_vector.h"
 
 using ::nvMolKit::detail::ETKDGContext;
 using ::nvMolKit::detail::ETKDGDriver;
@@ -94,7 +96,7 @@ TEST(ETKDGDriverEdgeCaseTest, SingleConformer) {
   EXPECT_EQ(driver.iterationsComplete(), 3);
 
   nvMolKit::PinnedHostVector<int16_t> failuresScratch;
-  const auto                          failureCounts = driver.getFailures(failuresScratch);
+  auto                                failureCounts = driver.getFailures(failuresScratch);
   EXPECT_EQ(failureCounts.size(), 2);
   EXPECT_THAT(failureCounts[0], testing::ElementsAre(1));
   EXPECT_THAT(failureCounts[1], testing::ElementsAre(1));
@@ -139,7 +141,7 @@ TEST_F(ETKDGDriverTest, SingleStageAllPassFirstIteration) {
   EXPECT_EQ(driver.iterationsComplete(), 1);
 
   nvMolKit::PinnedHostVector<int16_t> failuresScratch;
-  const auto                          failureCounts = driver.getFailures(failuresScratch);
+  auto                                failureCounts = driver.getFailures(failuresScratch);
   EXPECT_EQ(failureCounts.size(), 1);
   EXPECT_THAT(failureCounts[0], testing::ElementsAre(0, 0, 0, 0));
   auto completed = driver.completedConformers();
@@ -167,7 +169,7 @@ TEST_F(ETKDGDriverTest, SingleStageAllPassSecondIteration) {
   EXPECT_EQ(driver.iterationsComplete(), 2);
 
   nvMolKit::PinnedHostVector<int16_t> failuresScratch;
-  const auto                          failureCounts = driver.getFailures(failuresScratch);
+  auto                                failureCounts = driver.getFailures(failuresScratch);
   EXPECT_EQ(failureCounts.size(), 1);
   EXPECT_THAT(failureCounts[0], testing::ElementsAre(1, 1, 1, 1));
   auto completed = driver.completedConformers();
@@ -197,7 +199,7 @@ TEST_F(ETKDGDriverTest, SingleStageVariablePass) {
   EXPECT_EQ(driver.iterationsComplete(), 4);
 
   nvMolKit::PinnedHostVector<int16_t> failuresScratch;
-  const auto                          failureCounts = driver.getFailures(failuresScratch);
+  auto                                failureCounts = driver.getFailures(failuresScratch);
   EXPECT_EQ(failureCounts.size(), 1);
   EXPECT_THAT(failureCounts[0], testing::ElementsAre(0, 1, 2, 3));
   auto completed = driver.completedConformers();
@@ -227,7 +229,7 @@ TEST_F(ETKDGDriverTest, SingleStageSomeNotPassed) {
   EXPECT_EQ(driver.iterationsComplete(), 5);
 
   nvMolKit::PinnedHostVector<int16_t> failuresScratch;
-  const auto                          failureCounts = driver.getFailures(failuresScratch);
+  auto                                failureCounts = driver.getFailures(failuresScratch);
   EXPECT_EQ(failureCounts.size(), 1);
   EXPECT_THAT(failureCounts[0], testing::ElementsAre(0, 1, 5, 5));
 }
@@ -273,7 +275,7 @@ TEST_F(ETKDGDriverTest, MultiStageAllFail) {
   EXPECT_EQ(driver.iterationsComplete(), 5);
 
   nvMolKit::PinnedHostVector<int16_t> failuresScratch;
-  const auto                          failureCounts = driver.getFailures(failuresScratch);
+  auto                                failureCounts = driver.getFailures(failuresScratch);
   EXPECT_EQ(failureCounts.size(), 3);
   EXPECT_THAT(failureCounts[0], testing::ElementsAre(0, 0, 0, 0));
   EXPECT_THAT(failureCounts[1], testing::ElementsAre(5, 5, 5, 5));
@@ -329,7 +331,7 @@ TEST_F(ETKDGDriverTest, MultiStageMixed) {
   EXPECT_EQ(driver.iterationsComplete(), 5);
 
   nvMolKit::PinnedHostVector<int16_t> failuresScratch;
-  const auto                          failureCounts = driver.getFailures(failuresScratch);
+  auto                                failureCounts = driver.getFailures(failuresScratch);
   EXPECT_EQ(failureCounts.size(), 3);
   EXPECT_THAT(failureCounts[0], testing::ElementsAre(0, 0, 2, 1));
   EXPECT_THAT(failureCounts[1], testing::ElementsAre(5, 0, 2, 2));
@@ -396,12 +398,13 @@ TEST_F(ETKDGPipelineUpdateConformersTestFixture, UpdateConformersStage) {
 
   // Create and execute the stage
   std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<Conformer>>> conformers;
-  nvMolKit::PinnedHostVector<double>                                               positionsScratch(totalAtoms * 3);
-  nvMolKit::PinnedHostVector<uint8_t>                                              activeScratch(mols_.size());
+
+  // Create scratch buffers for the stage
+  nvMolKit::PinnedHostVector<double>  positionsScratch(totalAtoms * 3);
+  nvMolKit::PinnedHostVector<uint8_t> activeScratch(mols_.size());
 
   nvMolKit::detail::ETKDGUpdateConformersStage
     stage(mols_, eargs, conformers, positionsScratch, activeScratch, nullptr, nullptr, -1);
-
   stage.execute(context);
   for (size_t i = 0; i < mols_.size(); ++i) {
     auto it = conformers.find(mols_[i]);
@@ -463,9 +466,10 @@ TEST_F(ETKDGPipelineUpdateConformersTestFixture, UpdateConformersStageWithInacti
   // Create and execute the stage
   auto                                                                             params = DGeomHelpers::ETKDGv3;
   std::unordered_map<const RDKit::ROMol*, std::vector<std::unique_ptr<Conformer>>> conformers;
+
   // Create scratch buffers for the stage
-  nvMolKit::PinnedHostVector<double>                                               positionsScratch(totalAtoms * 3);
-  nvMolKit::PinnedHostVector<uint8_t>                                              activeScratch(mols_.size());
+  nvMolKit::PinnedHostVector<double>  positionsScratch(totalAtoms * 3);
+  nvMolKit::PinnedHostVector<uint8_t> activeScratch(mols_.size());
 
   nvMolKit::detail::ETKDGUpdateConformersStage
     stage(mols_, eargs, conformers, positionsScratch, activeScratch, nullptr, nullptr, -1);
@@ -508,7 +512,8 @@ namespace {
 // Helper function to test energy improvement for molecules
 void testEnergyImprovement(const std::vector<RDKit::ROMol*>&    mols,
                            int                                  confsPerMolecule = 1,
-                           RDKit::DGeomHelpers::EmbedParameters params           = RDKit::DGeomHelpers::ETKDGv3) {
+                           RDKit::DGeomHelpers::EmbedParameters params           = RDKit::DGeomHelpers::ETKDGv3,
+                           nvMolKit::BfgsBackend                backend = nvMolKit::BfgsBackend::PER_MOLECULE) {
   // Store initial energies for each molecule
   std::vector<double> initialEnergies;
   initialEnergies.reserve(mols.size());
@@ -541,7 +546,7 @@ void testEnergyImprovement(const std::vector<RDKit::ROMol*>&    mols,
   hardwareOptions.batchSize            = 100;
   hardwareOptions.batchesPerGpu        = 10;
 
-  nvMolKit::embedMolecules(mols, params, confsPerMolecule, -1, true, nullptr, hardwareOptions);
+  nvMolKit::embedMolecules(mols, params, confsPerMolecule, -1, true, nullptr, hardwareOptions, backend);
 
   // Calculate and verify final energies for each molecule and conformer
   for (size_t i = 0; i < mols.size(); ++i) {
@@ -581,7 +586,8 @@ void testEnergyImprovement(const std::vector<RDKit::ROMol*>&    mols,
 void testConformerEnergyComparison(const std::vector<RDKit::ROMol*>&    mols,
                                    int                                  confsPerMolecule = 1,
                                    RDKit::DGeomHelpers::EmbedParameters params           = RDKit::DGeomHelpers::ETKDGv3,
-                                   nvMolKit::BatchHardwareOptions       hardwareOptions  = {10, 7, 10}) {
+                                   nvMolKit::BatchHardwareOptions       hardwareOptions  = {10, 7, 10},
+                                   nvMolKit::BfgsBackend                backend = nvMolKit::BfgsBackend::PER_MOLECULE) {
   // Create hard copies of input molecules
   std::vector<std::unique_ptr<RDKit::RWMol>> molCopies;
   std::vector<RDKit::ROMol*>                 molCopyPtrs;
@@ -600,7 +606,7 @@ void testConformerEnergyComparison(const std::vector<RDKit::ROMol*>&    mols,
     RDKit::DGeomHelpers::EmbedMultipleConfs(*molCopy, res, confsPerMolecule, params);
   }
 
-  nvMolKit::embedMolecules(mols, params, confsPerMolecule, -1, true, nullptr, hardwareOptions);
+  nvMolKit::embedMolecules(mols, params, confsPerMolecule, -1, true, nullptr, hardwareOptions, backend);
 
   // Compare energies for each pair of molecules
   for (size_t i = 0; i < mols.size(); ++i) {
@@ -643,7 +649,7 @@ void testConformerEnergyComparison(const std::vector<RDKit::ROMol*>&    mols,
 
 }  // anonymous namespace
 
-class ETKDGPipelineEnergyTestFixture : public ::testing::TestWithParam<ETKDGOption> {
+class ETKDGPipelineEnergyTestFixture : public ::testing::TestWithParam<std::tuple<ETKDGOption, nvMolKit::BfgsBackend>> {
  public:
   ETKDGPipelineEnergyTestFixture() { testDataFolderPath_ = getTestDataFolderPath(); }
 
@@ -675,60 +681,70 @@ class ETKDGPipelineEnergyTestFixture : public ::testing::TestWithParam<ETKDGOpti
 };
 
 TEST_P(ETKDGPipelineEnergyTestFixture, SingleMoleculeEnergyImprovement) {
-  auto                       params    = getETKDGOption(GetParam());
+  auto                       params    = getETKDGOption(std::get<0>(GetParam()));
+  auto                       backend   = std::get<1>(GetParam());
   std::vector<RDKit::ROMol*> singleMol = {mols_[0]};
-  testEnergyImprovement(singleMol, 1, params);
+  testEnergyImprovement(singleMol, 1, params, backend);
 }
 
 TEST_P(ETKDGPipelineEnergyTestFixture, MultipleMoleculesEnergyImprovement) {
-  auto params = getETKDGOption(GetParam());
-  testEnergyImprovement(mols_, 1, params);
+  auto params  = getETKDGOption(std::get<0>(GetParam()));
+  auto backend = std::get<1>(GetParam());
+  testEnergyImprovement(mols_, 1, params, backend);
 }
 
 TEST_P(ETKDGPipelineEnergyTestFixture, SingleMoleculeMultipleConformers) {
-  auto                       params    = getETKDGOption(GetParam());
+  auto                       params    = getETKDGOption(std::get<0>(GetParam()));
+  auto                       backend   = std::get<1>(GetParam());
   std::vector<RDKit::ROMol*> singleMol = {mols_[0]};
-  testEnergyImprovement(singleMol, 5, params);
+  testEnergyImprovement(singleMol, 5, params, backend);
 }
 
 TEST_P(ETKDGPipelineEnergyTestFixture, MultipleMoleculesMultipleConformers) {
-  auto params = getETKDGOption(GetParam());
-  testEnergyImprovement(mols_, 3, params);
+  auto params  = getETKDGOption(std::get<0>(GetParam()));
+  auto backend = std::get<1>(GetParam());
+  testEnergyImprovement(mols_, 3, params, backend);
 }
 
 TEST_P(ETKDGPipelineEnergyTestFixture, SingleMoleculeConformerEnergyComparison) {
-  auto                       params    = getETKDGOption(GetParam());
+  auto                       params    = getETKDGOption(std::get<0>(GetParam()));
+  auto                       backend   = std::get<1>(GetParam());
   std::vector<RDKit::ROMol*> singleMol = {mols_[0]};
-  testConformerEnergyComparison(singleMol, 1, params);
+  testConformerEnergyComparison(singleMol, 1, params, {10, 7, 10}, backend);
 }
 
 TEST_P(ETKDGPipelineEnergyTestFixture, MultipleMoleculesConformerEnergyComparison) {
-  auto params = getETKDGOption(GetParam());
-  testConformerEnergyComparison(mols_, 1, params);
+  auto params  = getETKDGOption(std::get<0>(GetParam()));
+  auto backend = std::get<1>(GetParam());
+  testConformerEnergyComparison(mols_, 1, params, {10, 7, 10}, backend);
 }
 
 TEST_P(ETKDGPipelineEnergyTestFixture, SingleMoleculeMultipleConformersEnergyComparison) {
-  auto                       params    = getETKDGOption(GetParam());
+  auto                       params    = getETKDGOption(std::get<0>(GetParam()));
+  auto                       backend   = std::get<1>(GetParam());
   std::vector<RDKit::ROMol*> singleMol = {mols_[0]};
-  testConformerEnergyComparison(singleMol, 10, params);
+  testConformerEnergyComparison(singleMol, 10, params, {10, 7, 10}, backend);
 }
 
 TEST_P(ETKDGPipelineEnergyTestFixture, MultipleMoleculesMultipleConformersEnergyComparison) {
-  auto params = getETKDGOption(GetParam());
-  testConformerEnergyComparison(mols_, 10, params);
+  auto params  = getETKDGOption(std::get<0>(GetParam()));
+  auto backend = std::get<1>(GetParam());
+  testConformerEnergyComparison(mols_, 10, params, {10, 7, 10}, backend);
 }
 
 TEST_P(ETKDGPipelineEnergyTestFixture, DefaultHardwareOptionsOpenMPMaxThreads) {
   // Test using default BatchHardwareOptions which should use omp_get_max_threads()
-  auto                                 params = getETKDGOption(GetParam());
+  auto                                 params  = getETKDGOption(std::get<0>(GetParam()));
+  auto                                 backend = std::get<1>(GetParam());
   const nvMolKit::BatchHardwareOptions defaultOptions;                   // Uses -1 values for automatic detection
   const std::vector<RDKit::ROMol*>     testMols = {mols_[0], mols_[1]};  // Use subset for efficiency
-  testConformerEnergyComparison(testMols, 2, params, defaultOptions);
+  testConformerEnergyComparison(testMols, 2, params, defaultOptions, backend);
 }
 
 TEST_P(ETKDGPipelineEnergyTestFixture, SpecificGpuIds) {
   // Test using GPU ID 0 (should always be available if CUDA is working)
-  auto                           params = getETKDGOption(GetParam());
+  auto                           params  = getETKDGOption(std::get<0>(GetParam()));
+  auto                           backend = std::get<1>(GetParam());
   nvMolKit::BatchHardwareOptions customOptions;
   customOptions.preprocessingThreads = 1;
   customOptions.batchSize            = 5;
@@ -736,7 +752,7 @@ TEST_P(ETKDGPipelineEnergyTestFixture, SpecificGpuIds) {
   customOptions.gpuIds.push_back(0);  // Use GPU 0
 
   const std::vector<RDKit::ROMol*> testMols = {mols_[0]};
-  testConformerEnergyComparison(testMols, 2, params, customOptions);
+  testConformerEnergyComparison(testMols, 2, params, customOptions, backend);
 }
 
 TEST_P(ETKDGPipelineEnergyTestFixture, NonZeroGPUID) {
@@ -746,7 +762,8 @@ TEST_P(ETKDGPipelineEnergyTestFixture, NonZeroGPUID) {
     GTEST_SKIP() << "Test requires multiple GPUs, only " << numDevices << " available";
   }
 
-  auto                           params = getETKDGOption(GetParam());
+  auto                           params  = getETKDGOption(std::get<0>(GetParam()));
+  auto                           backend = std::get<1>(GetParam());
   nvMolKit::BatchHardwareOptions customOptions;
   customOptions.preprocessingThreads = 1;
   customOptions.batchSize            = 5;
@@ -754,7 +771,7 @@ TEST_P(ETKDGPipelineEnergyTestFixture, NonZeroGPUID) {
   customOptions.gpuIds.push_back(1);  // Use GPU 1 (second GPU)
 
   const std::vector<RDKit::ROMol*> testMols = {mols_[0]};
-  testConformerEnergyComparison(testMols, 2, params, customOptions);
+  testConformerEnergyComparison(testMols, 2, params, customOptions, backend);
 }
 
 TEST_P(ETKDGPipelineEnergyTestFixture, MultiGPUSpecificIds) {
@@ -764,7 +781,8 @@ TEST_P(ETKDGPipelineEnergyTestFixture, MultiGPUSpecificIds) {
     GTEST_SKIP() << "Test requires multiple GPUs, only " << numDevices << " available";
   }
 
-  auto                           params = getETKDGOption(GetParam());
+  auto                           params  = getETKDGOption(std::get<0>(GetParam()));
+  auto                           backend = std::get<1>(GetParam());
   nvMolKit::BatchHardwareOptions customOptions;
   customOptions.preprocessingThreads = 1;
   customOptions.batchSize            = 5;
@@ -772,25 +790,31 @@ TEST_P(ETKDGPipelineEnergyTestFixture, MultiGPUSpecificIds) {
   customOptions.gpuIds.push_back(0);
   customOptions.gpuIds.push_back(1);
 
-  testConformerEnergyComparison(mols_, 2, params, customOptions);
+  testConformerEnergyComparison(mols_, 2, params, customOptions, backend);
 }
 
-// Instantiate parameterized tests for different ETKDG variants
+// Instantiate parameterized tests for different ETKDG variants and backends
 INSTANTIATE_TEST_SUITE_P(ETKDGVariants,
                          ETKDGPipelineEnergyTestFixture,
-                         ::testing::Values(ETKDGOption::ETKDG,
-                                           ETKDGOption::ETKDGv2,
-                                           ETKDGOption::srETKDGv3,
-                                           ETKDGOption::ETKDGv3,
-                                           ETKDGOption::KDG,
-                                           ETKDGOption::ETDG,
-                                           ETKDGOption::DG),
-                         [](const ::testing::TestParamInfo<ETKDGOption>& info) {
-                           return getETKDGOptionName(info.param);
+                         ::testing::Combine(::testing::Values(ETKDGOption::ETKDG,
+                                                              ETKDGOption::ETKDGv2,
+                                                              ETKDGOption::srETKDGv3,
+                                                              ETKDGOption::ETKDGv3,
+                                                              ETKDGOption::KDG,
+                                                              ETKDGOption::ETDG,
+                                                              ETKDGOption::DG),
+                                            ::testing::Values(nvMolKit::BfgsBackend::BATCHED,
+                                                              nvMolKit::BfgsBackend::PER_MOLECULE)),
+                         [](const ::testing::TestParamInfo<std::tuple<ETKDGOption, nvMolKit::BfgsBackend>>& info) {
+                           std::string backend_name =
+                             (std::get<1>(info.param) == nvMolKit::BfgsBackend::BATCHED) ? "Batched" : "PerMolecule";
+                           return getETKDGOptionName(std::get<0>(info.param)) + "_" + backend_name;
                          });
 
-TEST(ETKDGAllowsLargeMol, LargeMoleculeSoloEmbeds) {
-  // Small molecules
+class ETKDGBackendTestFixture : public ::testing::TestWithParam<nvMolKit::BfgsBackend> {};
+
+TEST_P(ETKDGBackendTestFixture, LargeMoleculeSoloEmbeds) {
+  auto backend = GetParam();
 
   // Oversized linear hydrocarbon (>256 atoms)
   const std::string bigSmiles(100, 'C');
@@ -806,11 +830,13 @@ TEST(ETKDGAllowsLargeMol, LargeMoleculeSoloEmbeds) {
 
   std::vector<RDKit::ROMol*>        mols = {big.get()};
   std::vector<std::vector<int16_t>> failures;
-  nvMolKit::embedMolecules(mols, params, 1, -1, false, &failures);
+  nvMolKit::embedMolecules(mols, params, 1, -1, false, &failures, {}, backend);
   EXPECT_EQ(big->getNumConformers(), 1);
 }
 
-TEST(ETKDGAllowsLargeMol, LargeMoleculeInterleavedEmbeds) {
+TEST_P(ETKDGBackendTestFixture, LargeMoleculeInterleavedEmbeds) {
+  auto backend = GetParam();
+
   // Small molecules
   auto small1 = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol("CCCCCC"));
   auto small2 = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol("CCC"));
@@ -831,13 +857,15 @@ TEST(ETKDGAllowsLargeMol, LargeMoleculeInterleavedEmbeds) {
 
   std::vector<RDKit::ROMol*>        mols = {small1.get(), big.get(), small2.get()};
   std::vector<std::vector<int16_t>> failures;
-  nvMolKit::embedMolecules(mols, params, 1, -1, false, &failures);
+  nvMolKit::embedMolecules(mols, params, 1, -1, false, &failures, {}, backend);
   EXPECT_EQ(small1->getNumConformers(), 1);
   EXPECT_EQ(small2->getNumConformers(), 1);
   EXPECT_EQ(big->getNumConformers(), 1);
 }
 
-TEST(ETKDGDeduplicationTest, MultipleMoleculesSomeDuplicationLikely) {
+TEST_P(ETKDGBackendTestFixture, MultipleMoleculesSomeDuplicationLikely) {
+  auto backend = GetParam();
+
   const auto benzene = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol("c1ccccc1"));
   ASSERT_NE(benzene, nullptr);
 
@@ -849,9 +877,16 @@ TEST(ETKDGDeduplicationTest, MultipleMoleculesSomeDuplicationLikely) {
   auto                             params = RDKit::DGeomHelpers::ETKDGv3;
   params.useRandomCoords                  = true;
   params.pruneRmsThresh                   = 0.5;
-  nvMolKit::embedMolecules(mols, params, /*confsPerMolecule=*/5);
+  nvMolKit::embedMolecules(mols, params, /*confsPerMolecule=*/5, -1, false, nullptr, {}, backend);
   // Benzene only ever has one conformer
   EXPECT_EQ(benzene->getNumConformers(), 1);
   // Long chain should all be sufficiently sepa
   EXPECT_EQ(longChain->getNumConformers(), 5);
 }
+
+INSTANTIATE_TEST_SUITE_P(BfgsBackends,
+                         ETKDGBackendTestFixture,
+                         ::testing::Values(nvMolKit::BfgsBackend::BATCHED, nvMolKit::BfgsBackend::PER_MOLECULE),
+                         [](const ::testing::TestParamInfo<nvMolKit::BfgsBackend>& info) {
+                           return (info.param == nvMolKit::BfgsBackend::BATCHED) ? "Batched" : "PerMolecule";
+                         });

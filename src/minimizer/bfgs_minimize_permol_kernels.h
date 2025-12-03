@@ -42,6 +42,43 @@ cudaError_t launchBfgsMinimizePerMolKernel(const int*                           
                                            int16_t*                                  statuses = nullptr,
                                            cudaStream_t                              stream   = nullptr);
 
+/// Launch per-molecule BFGS minimization kernel - ETK specialization
+cudaError_t launchBfgsMinimizePerMolKernelETK(const int*                                      binCounts,
+                                              const int**                                     binMolIds,
+                                              const int*                                      atomStarts,
+                                              const int*                                      hessianStarts,
+                                              int                                             numIters,
+                                              double                                          gradTol,
+                                              bool                                            scaleGrads,
+                                              const DistGeom::Energy3DForceContribsDevicePtr& terms,
+                                              const DistGeom::BatchedIndices3DDevicePtr&      systemIndices,
+                                              double*                                         positions,
+                                              double*                                         grad,
+                                              double*                                         inverseHessian,
+                                              double**                                        scratchBuffers,
+                                              double*                                         energyOuts,
+                                              int16_t*                                        statuses = nullptr,
+                                              cudaStream_t                                    stream   = nullptr);
+
+/// Launch per-molecule BFGS minimization kernel - DG  specialization
+cudaError_t launchBfgsMinimizePerMolKernelDG(const int*                                    binCounts,
+                                             const int**                                   binMolIds,
+                                             const int*                                    atomStarts,
+                                             const int*                                    hessianStarts,
+                                             int                                           numIters,
+                                             double                                        gradTol,
+                                             bool                                          scaleGrads,
+                                             const DistGeom::EnergyForceContribsDevicePtr& terms,
+                                             const DistGeom::BatchedIndicesDevicePtr&      systemIndices,
+                                             double*                                       positions,
+                                             double*                                       grad,
+                                             double*                                       inverseHessian,
+                                             double**                                      scratchBuffers,
+                                             double*                                       energyOuts,
+                                             double                                        chiralWeight,
+                                             double                                        fourthDimWeight,
+                                             int16_t*                                      statuses = nullptr,
+                                             cudaStream_t                                  stream   = nullptr);
 }  // namespace nvMolKit
 
 #endif  // NVMOLKIT_BFGS_MINIMIZE_PERMOL_KERNELS_H

@@ -417,6 +417,20 @@ void setupDeviceBuffers3D(BatchedMolecularSystem3DHost&    molSystemHost,
                           const std::vector<double>&       ctxPositionsHost,
                           const int                        numMols);
 
+//! Create pointer struct from device buffers for use in per-molecule kernels (4D DG)
+EnergyForceContribsDevicePtr toEnergyForceContribsDevicePtr(const BatchedMolecularDeviceBuffers& molSystemDevice);
+
+//! Create pointer struct from device buffers for use in per-molecule kernels (4D DG)
+BatchedIndicesDevicePtr toBatchedIndicesDevicePtr(const BatchedMolecularDeviceBuffers& molSystemDevice,
+                                                  const int*                           atomStarts);
+
+//! Create pointer struct from device buffers for use in per-molecule kernels (3D ETK)
+Energy3DForceContribsDevicePtr toEnergy3DForceContribsDevicePtr(const BatchedMolecular3DDeviceBuffers& molSystemDevice);
+
+//! Create pointer struct from device buffers for use in per-molecule kernels (3D ETK)
+BatchedIndices3DDevicePtr toBatchedIndices3DDevicePtr(const BatchedMolecular3DDeviceBuffers& molSystemDevice,
+                                                      const int*                             atomStarts);
+
 //! Allocate intermediate buffers on the device for the batched molecular system.
 //! These include the gradients, energy buffer, and energy outs.
 void allocateIntermediateBuffers(const BatchedMolecularSystemHost& molSystemHost,
@@ -474,6 +488,39 @@ cudaError_t computePlanarEnergy(BatchedMolecular3DDeviceBuffers&           molSy
                                 const double*                              positions = nullptr,
                                 cudaStream_t                               stream    = nullptr);
 
+//! Compute the energy of DG terms using block-per-mol kernels.
+cudaError_t computeEnergyBlockPerMol(BatchedMolecularDeviceBuffers&             molSystemDevice,
+                                     const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
+                                     const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
+                                     double                                     chiralWeight,
+                                     double                                     fourthDimWeight,
+                                     const uint8_t*                             activeThisStage = nullptr,
+                                     const double*                              positions       = nullptr,
+                                     cudaStream_t                               stream          = nullptr);
+
+//! Compute the gradient of DG terms using block-per-mol kernels.
+cudaError_t computeGradBlockPerMol(BatchedMolecularDeviceBuffers&             molSystemDevice,
+                                   const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
+                                   const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
+                                   double                                     chiralWeight,
+                                   double                                     fourthDimWeight,
+                                   const uint8_t*                             activeThisStage = nullptr,
+                                   cudaStream_t                               stream          = nullptr);
+
+//! Compute the energy of ETK terms using block-per-mol kernels.
+cudaError_t computeEnergyBlockPerMolETK(BatchedMolecular3DDeviceBuffers&           molSystemDevice,
+                                        const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
+                                        const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
+                                        const uint8_t*                             activeThisStage = nullptr,
+                                        const double*                              positions       = nullptr,
+                                        cudaStream_t                               stream          = nullptr);
+
+//! Compute the gradients of ETK terms using block-per-mol kernels.
+cudaError_t computeGradBlockPerMolETK(BatchedMolecular3DDeviceBuffers&           molSystemDevice,
+                                      const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
+                                      const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
+                                      const uint8_t*                             activeThisStage = nullptr,
+                                      cudaStream_t                               stream          = nullptr);
 }  // namespace DistGeom
 }  // namespace nvMolKit
 
