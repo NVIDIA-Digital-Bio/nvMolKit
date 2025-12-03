@@ -562,9 +562,6 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
                         stride);
   }
   __syncthreads();
-  if (tid == 0) {
-    // printf("Initial grad[0]=%f, grad[%d]=%f\n", localGrad[0], numTerms-1, localGrad[numTerms-1]);
-  }
 
   // Scale gradients
   if (scaleGrads) {

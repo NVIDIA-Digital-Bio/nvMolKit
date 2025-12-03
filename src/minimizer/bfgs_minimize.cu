@@ -517,25 +517,23 @@ void BfgsBatchMinimizer::initialize(const std::vector<int>& atomStartsHost,
 
   activeSystemIndices_.resize(numSystems_);
   allSystemIndices_.resize(numSystems_);
-  std::vector<int> activeSystemIndicesHost(numSystems_);
-  std::iota(activeSystemIndicesHost.begin(), activeSystemIndicesHost.end(), 0);
-  allSystemIndices_.setFromVector(activeSystemIndicesHost);
-  activeSystemIndices_.setFromVector(activeSystemIndicesHost);
+  systemIndicesHost_.resize(numSystems_);
+  std::iota(systemIndicesHost_.begin(), systemIndicesHost_.end(), 0);
+  allSystemIndices_.setFromVector(systemIndicesHost_);
+  activeSystemIndices_.setFromVector(systemIndicesHost_);
 
-  std::vector<int> hessianStartsHost;
-  hessianStartsHost.reserve(numSystems + 1);
-  hessianStartsHost.push_back(0);
-  std::vector<int> blockIdxToSYstemIdxHost;
-  std::vector<int> blockWithinSysHost;
+  hessianStartsHost_.clear();
+  hessianStartsHost_.reserve(numSystems + 1);
+  hessianStartsHost_.push_back(0);
   for (int i = 0; i < numSystems; ++i) {
     const int numAtoms = atomStartsHost[i + 1] - atomStartsHost[i];
     // Note - hessian starts is total term based, not atom based.
     const int numTerms = (dataDim_ * numAtoms) * (dataDim_ * numAtoms);
-    hessianStartsHost.push_back(hessianStartsHost.back() + numTerms);
+    hessianStartsHost_.push_back(hessianStartsHost_.back() + numTerms);
   }
   hessianStarts_.resize(numSystems + 1);
-  hessianStarts_.setFromVector(hessianStartsHost);
-  inverseHessian_.resize(hessianStartsHost.back());
+  hessianStarts_.setFromVector(hessianStartsHost_);
+  inverseHessian_.resize(hessianStartsHost_.back());
   inverseHessian_.zero();
 
   hessDGrad_.resize(atomStartsHost.back() * dataDim_);
@@ -579,6 +577,7 @@ void BfgsBatchMinimizer::initialize(const std::vector<int>& atomStartsHost,
                              stream_);
 
   if (temp_storage_bytes > countTempStorage_.size()) {
+    countTempStorage_.zero();
     countTempStorage_.resize(temp_storage_bytes);
   }
 }

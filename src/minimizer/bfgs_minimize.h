@@ -222,6 +222,10 @@ struct BfgsBatchMinimizer {
   PinnedHostVector<int16_t> convergenceHost_;  // Changed to int16_t to match statuses_
   PinnedHostVector<double*> scratchBufferPointersHost_;
 
+  // Persistent host vectors for async copies (to avoid stack allocation issues)
+  std::vector<int> systemIndicesHost_;
+  std::vector<int> hessianStartsHost_;
+
   cudaStream_t stream_ = nullptr;
 };
 

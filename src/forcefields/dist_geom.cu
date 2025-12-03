@@ -606,6 +606,8 @@ void sendContribsAndIndicesToDevice3D(const BatchedMolecularSystem3DHost& molSys
   deviceIndices.dist13TermStarts.setFromVector(hostIndices.dist13TermStarts);
   deviceIndices.angle13TermStarts.setFromVector(hostIndices.angle13TermStarts);
   deviceIndices.longRangeDistTermStarts.setFromVector(hostIndices.longRangeDistTermStarts);
+  cudaStreamSynchronize(
+    deviceIndices.longRangeDistTermStarts.stream());  // Sync before isCBoundToOInt goes out of scope
 }
 
 //! Set all DeviceVector streams for the batched molecular device buffers.

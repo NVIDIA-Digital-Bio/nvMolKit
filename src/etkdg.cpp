@@ -230,10 +230,10 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
           batchEargs.push_back(eargs[molId]);
         }
 
-        detail::ETKDGContext context(streamPtr);
-        detail::setStreams(context, streamPtr);
+        auto context = std::make_unique<detail::ETKDGContext>(streamPtr);
+        detail::setStreams(*context, streamPtr);
         // Treat each conformer attempt as an individual molecule (confsPerMolecule = 1)
-        detail::initETKDGContext(batchMolsWithConfs, context, 1);
+        detail::initETKDGContext(batchMolsWithConfs, *context, 1);
 
         ScopedNvtxRange                                  stageSetupRange("Setup ETKDG Stages");
         // Create stages in order
@@ -255,7 +255,7 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
         auto                           firstMinStage    = std::make_unique<detail::DistGeomMinimizeStage>(constMolPtrs,
                                                                              batchEargs,
                                                                              paramsCopy,
-                                                                             context,
+                                                                             *context,
                                                                              *minimizer,
                                                                              1.0,
                                                                              0.1,
@@ -266,13 +266,13 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
                                                                              &dgCache);
         detail::DistGeomMinimizeStage* firstMinStagePtr = firstMinStage.get();
         stages.push_back(std::move(firstMinStage));
-        stages.push_back(std::make_unique<detail::ETKDGTetrahedralCheckStage>(context, batchEargs, dim, streamPtr));
+        stages.push_back(std::make_unique<detail::ETKDGTetrahedralCheckStage>(*context, batchEargs, dim, streamPtr));
 
         // Only add first chiral check if enforceChirality is enabled
         detail::ETKDGFirstChiralCenterCheckStage* chiralStagePtr = nullptr;
         if (paramsCopy.enforceChirality) {
           auto chiralStage =
-            std::make_unique<detail::ETKDGFirstChiralCenterCheckStage>(context, batchEargs, dim, streamPtr);
+            std::make_unique<detail::ETKDGFirstChiralCenterCheckStage>(*context, batchEargs, dim, streamPtr);
           chiralStagePtr = chiralStage.get();
           stages.push_back(std::move(chiralStage));
         }
@@ -289,7 +289,7 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
           stages.push_back(std::make_unique<detail::ETKMinimizationStage>(constMolPtrs,
                                                                           batchEargs,
                                                                           paramsCopy,
-                                                                          context,
+                                                                          *context,
                                                                           *minimizer,
                                                                           streamPtr,
                                                                           &etkCache));
@@ -297,17 +297,17 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
 
         // Final chiral and stereochem checks
         stages.push_back(
-          std::make_unique<detail::ETKDGDoubleBondGeometryCheckStage>(context, batchEargs, dim, streamPtr));
+          std::make_unique<detail::ETKDGDoubleBondGeometryCheckStage>(*context, batchEargs, dim, streamPtr));
 
         if (paramsCopy.enforceChirality) {
           // This is a pass-through, don't need to set the stream
           stages.push_back(std::make_unique<detail::ETKDGFinalChiralCenterCheckStage>(*chiralStagePtr));
           stages.push_back(
-            std::make_unique<detail::ETKDGChiralDistMatrixCheckStage>(context, batchEargs, dim, streamPtr));
+            std::make_unique<detail::ETKDGChiralDistMatrixCheckStage>(*context, batchEargs, dim, streamPtr));
           stages.push_back(
-            std::make_unique<detail::ETKDGChiralCenterVolumeCheckStage>(context, batchEargs, dim, streamPtr));
+            std::make_unique<detail::ETKDGChiralCenterVolumeCheckStage>(*context, batchEargs, dim, streamPtr));
           stages.push_back(
-            std::make_unique<detail::ETKDGDoubleBondStereoCheckStage>(context, batchEargs, dim, streamPtr));
+            std::make_unique<detail::ETKDGDoubleBondStereoCheckStage>(*context, batchEargs, dim, streamPtr));
         }
 
         // Writeback
@@ -321,8 +321,7 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
                                                                               confsPerMolecule));
 
         // Create and run driver
-        auto context_ptr = std::make_unique<detail::ETKDGContext>(std::move(context));
-        driver.reset(std::move(context_ptr), std::move(stages), debugMode, streamPtr, &allFinished);
+        driver.reset(std::move(context), std::move(stages), debugMode, streamPtr, &allFinished);
         stageSetupRange.pop();
 
         ScopedNvtxRange runRange("ETKDG execute");
