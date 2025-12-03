@@ -63,6 +63,8 @@ struct ETKDGSystemDevice {
 
 //! All relevant CPU/GPU data.
 struct ETKDGContext {
+  explicit ETKDGContext(cudaStream_t stream = nullptr) : countFinishedThisIteration(0, stream) {}
+
   //! Host data
   ETKDGSystemHost                         systemHost;
   //! Device data

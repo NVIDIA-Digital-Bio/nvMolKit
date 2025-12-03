@@ -230,7 +230,7 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
           batchEargs.push_back(eargs[molId]);
         }
 
-        detail::ETKDGContext context;
+        detail::ETKDGContext context(streamPtr);
         detail::setStreams(context, streamPtr);
         // Treat each conformer attempt as an individual molecule (confsPerMolecule = 1)
         detail::initETKDGContext(batchMolsWithConfs, context, 1);
