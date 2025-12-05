@@ -25,6 +25,28 @@ from nvmolkit.fingerprints import MorganFingerprintGenerator as nvmolMorganGen
 from nvmolkit.similarity import crossTanimotoSimilarity
 
 
+def check_butina_correctness(hit_mat, clusts, strict):
+    """Verify that butina clustering results are valid."""
+    hit_mat = hit_mat.clone()
+    seen = set()
+    
+    # In relaxed mode, sort clusters by size (descending)
+    if not strict:
+        clusts = sorted(clusts, key=len, reverse=True)
+
+    for clust in clusts:
+        assert len(clust) > 0, "Empty cluster found"
+        clust_size = len(clust)
+        counts = hit_mat.sum(-1)
+        assert clust_size == counts.max(), f"Cluster size {clust_size} doesn't match max available count {counts.max()}"
+        for item in clust:
+            assert item not in seen, f"Point {item} assigned to multiple clusters"
+            seen.add(item)
+            hit_mat[item, :] = False
+            hit_mat[:, item] = False
+    assert len(seen) == hit_mat.shape[0], "Not all points were clustered"
+
+
 def get_distance_matrix(molecules):
     nvmol_gen = nvmolMorganGen(radius=2, fpSize=1024)
     nvmol_fps = nvmol_gen.GetFingerprints(molecules, 10)
@@ -81,34 +103,43 @@ if __name__ == "__main__":
 
     sizes = [1000, 5000, 10000, 20000, 30000, 40000]
     cutoffs = [1e-10, 0.1, 0.2, 1.1]
+    strict_modes = [True, False]
     results = []
 
     try:
         for size in sizes:
             for cutoff in cutoffs:
-                # Don't run large sizes for edge cases.
-                if cutoff in (1e-10, 1.1) and size > 20000:
-                    continue
-                print(f"Running size {size} cutoff {cutoff}")
-                dist_mat = resize_and_fill(dists, size)
-                if do_rdkit:
-                    dist_mat_numpy = dist_mat.cpu().numpy()
-                    rdkit_time, rdk_std = bench_rdkit(dist_mat_numpy, cutoff)
-                else:
-                    rdkit_time = 0.0
-                    rdk_std = 0.0
-                nvmol_time, nvmol_std = time_it(lambda: butina_nvmol(dist_mat, cutoff))
+                for enforce_strict in strict_modes:
+                    # Don't run large sizes for edge cases.
+                    if cutoff in (1e-10, 1.1) and size > 20000:
+                        continue
+                    mode_str = "strict" if enforce_strict else "relaxed"
+                    print(f"Running size {size} cutoff {cutoff} mode {mode_str}")
+                    dist_mat = resize_and_fill(dists, size)
+                    if do_rdkit:
+                        dist_mat_numpy = dist_mat.cpu().numpy()
+                        rdkit_time, rdk_std = bench_rdkit(dist_mat_numpy, cutoff)
+                    else:
+                        rdkit_time = 0.0
+                        rdk_std = 0.0
+                    nvmol_time, nvmol_std = time_it(lambda: butina_nvmol(dist_mat, cutoff, enforce_strict_indexing=enforce_strict))
+                    
+                    # Verify correctness
+                    nvmol_res = butina_nvmol(dist_mat, cutoff, enforce_strict_indexing=enforce_strict).torch()
+                    nvmol_clusts = [tuple(torch.argwhere(nvmol_res == i).flatten().tolist()) for i in range(nvmol_res.max() + 1)]
+                    check_butina_correctness(dist_mat <= cutoff, nvmol_clusts, enforce_strict)
 
-                results.append(
-                    {
-                        "size": size,
-                        "cutoff": cutoff,
-                        "rdkit_time_ms": rdkit_time,
-                        "rdkit_std_ms": rdk_std,
-                        "nvmol_time_ms": nvmol_time,
-                        "nvmol_std_ms": nvmol_std,
-                    }
-                )
+                    results.append(
+                        {
+                            "size": size,
+                            "cutoff": cutoff,
+                            "enforce_strict": enforce_strict,
+                            "rdkit_time_ms": rdkit_time,
+                            "rdkit_std_ms": rdk_std,
+                            "nvmol_time_ms": nvmol_time,
+                            "nvmol_std_ms": nvmol_std,
+                        }
+                    )
     except Exception as e:
         print(f"Got exception: {e}, exiting early")
     df = pd.DataFrame(results)

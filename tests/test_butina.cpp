@@ -56,18 +56,19 @@ std::vector<uint8_t> makeAdjacency(const std::vector<double>& distances, int nPt
 std::vector<int> runButina(const std::vector<double>& distances,
                            const int                  nPts,
                            const double               cutoff,
+                           const bool                 enforceStrictIndexing,
                            cudaStream_t               stream) {
   AsyncDeviceVector<double> distancesDev(distances.size(), stream);
   AsyncDeviceVector<int>    resultDev(nPts, stream);
   distancesDev.copyFromHost(distances);
-  nvMolKit::butinaGpu(toSpan(distancesDev), toSpan(resultDev), cutoff, stream);
+  nvMolKit::butinaGpu(toSpan(distancesDev), toSpan(resultDev), cutoff, enforceStrictIndexing, stream);
   std::vector<int> got(nPts);
   resultDev.copyToHost(got);
   cudaStreamSynchronize(stream);
   return got;
 }
 
-void checkButinaCorrectness(const std::vector<uint8_t>& adjacency, const std::vector<int>& labels) {
+void checkButinaCorrectness(const std::vector<uint8_t>& adjacency, const std::vector<int>& labels, const bool strict) {
   const int nPts = static_cast<int>(labels.size());
   ASSERT_EQ(adjacency.size(), static_cast<size_t>(nPts) * static_cast<size_t>(nPts));
 
@@ -86,22 +87,27 @@ void checkButinaCorrectness(const std::vector<uint8_t>& adjacency, const std::ve
   int               seenCount = 0;
 
   const int maxLabelId = *std::ranges::max_element(labels.begin(), labels.end());
-  for (int label = 0; label <= maxLabelId; ++label) {
-    std::vector<int> cluster;
-    cluster.reserve(nPts);
-    for (int idx = 0; idx < nPts; ++idx) {
-      if (labels[idx] == label) {
-        cluster.push_back(idx);
-      }
-    }
+
+  // Build clusters
+  std::vector<std::vector<int>> clusters(maxLabelId + 1);
+  for (int idx = 0; idx < nPts; ++idx) {
+    clusters[labels[idx]].push_back(idx);
+  }
+
+  // In relaxed mode, sort clusters by size (descending)
+  if (!strict) {
+    std::ranges::sort(clusters, [](const auto& a, const auto& b) { return a.size() > b.size(); });
+  }
+
+  for (const auto& cluster : clusters) {
     const auto clusterSize = static_cast<int>(cluster.size());
-    ASSERT_GT(clusterSize, 0) << "Cluster ID " << label << " has no members";
+    ASSERT_GT(clusterSize, 0) << "Empty cluster found";
 
     const int maxCount = *std::ranges::max_element(counts.begin(), counts.end());
-    ASSERT_EQ(clusterSize, maxCount);
+    ASSERT_EQ(clusterSize, maxCount) << "Cluster size doesn't match max available count";
 
     for (const int member : cluster) {
-      ASSERT_FALSE(seen[member]);
+      ASSERT_FALSE(seen[member]) << "Point " << member << " assigned to multiple clusters";
     }
 
     for (const int member : cluster) {
@@ -139,29 +145,31 @@ TEST(ButinaClusterTest, HandlesSinglePoint) {
   AsyncDeviceVector<int>    resultDev(nPts, stream);
   distancesDev.copyFromHost(std::vector<double>{0.0});
 
-  nvMolKit::butinaGpu(toSpan(distancesDev), toSpan(resultDev), cutoff, stream);
+  nvMolKit::butinaGpu(toSpan(distancesDev), toSpan(resultDev), cutoff, true, stream);
   std::vector<int> got(nPts);
   resultDev.copyToHost(got);
   cudaStreamSynchronize(stream);
   EXPECT_THAT(got, ::testing::ElementsAre(0));
 }
 
-class ButinaClusterTestFixture : public ::testing::TestWithParam<int> {};
+class ButinaClusterTestFixture : public ::testing::TestWithParam<std::tuple<int, bool>> {};
 TEST_P(ButinaClusterTestFixture, ClusteringMatchesReference) {
   nvMolKit::ScopedStream const scopedStream;
   cudaStream_t                 stream = scopedStream.stream();
   std::mt19937                 rng(42);
 
-  const int              nPts      = GetParam();
-  constexpr double       cutoff    = 0.1;
-  const auto             distances = makeSymmetricDifferenceMatrix(nPts, rng);
-  const auto             adjacency = makeAdjacency(distances, nPts, cutoff);
-  const std::vector<int> labels    = runButina(distances, nPts, cutoff, stream);
-  SCOPED_TRACE(::testing::Message() << "nPts=" << nPts);
-  checkButinaCorrectness(adjacency, labels);
+  const auto [nPts, enforceStrictIndexing] = GetParam();
+  constexpr double       cutoff            = 0.1;
+  const auto             distances         = makeSymmetricDifferenceMatrix(nPts, rng);
+  const auto             adjacency         = makeAdjacency(distances, nPts, cutoff);
+  const std::vector<int> labels            = runButina(distances, nPts, cutoff, enforceStrictIndexing, stream);
+  SCOPED_TRACE(::testing::Message() << "nPts=" << nPts << " enforceStrictIndexing=" << enforceStrictIndexing);
+  checkButinaCorrectness(adjacency, labels, enforceStrictIndexing);
 }
 
-INSTANTIATE_TEST_SUITE_P(ButinaClusterTest, ButinaClusterTestFixture, ::testing::Values(1, 10, 100, 1000));
+INSTANTIATE_TEST_SUITE_P(ButinaClusterTest,
+                         ButinaClusterTestFixture,
+                         ::testing::Combine(::testing::Values(1, 10, 100, 1000), ::testing::Bool()));
 
 TEST(ButinaClusterEdgeTest, EdgeOneCluster) {
   constexpr int                nPts   = 10;
@@ -174,7 +182,7 @@ TEST(ButinaClusterEdgeTest, EdgeOneCluster) {
     distances[static_cast<size_t>(i) * nPts + i] = 0.0;
   }
 
-  const std::vector<int> labels = runButina(distances, nPts, cutoff, stream);
+  const std::vector<int> labels = runButina(distances, nPts, cutoff, true, stream);
   EXPECT_THAT(labels, ::testing::Each(0));
 }
 
@@ -189,7 +197,7 @@ TEST(ButinaClusterEdgeTest, EdgeNClusters) {
     distances[static_cast<size_t>(i) * nPts + i] = 0.0;
   }
 
-  const std::vector<int> labels = runButina(distances, nPts, cutoff, stream);
+  const std::vector<int> labels = runButina(distances, nPts, cutoff, true, stream);
   std::vector<int>       sorted = labels;
   std::ranges::sort(sorted);
   std::vector<int> want(nPts);
