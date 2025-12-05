@@ -154,11 +154,12 @@ void triangleSmoothBoundsBatch(DeviceBoundsMatrixBatch& deviceMatrixBatch,
 
   // Device memory for needSmoothing flags
   AsyncDeviceVector<uint8_t> d_needSmoothing(numMatrices, stream);
+  std::vector<uint8_t>       allOnes;  // Keep in scope for async copy
   if (needSmoothing) {
     d_needSmoothing.copyFromHost(*needSmoothing);
   } else {
     // Set all elements to 1 (all molecules need smoothing)
-    std::vector<uint8_t> allOnes(numMatrices, 1);
+    allOnes.resize(numMatrices, 1);
     d_needSmoothing.copyFromHost(allOnes);
   }
 
@@ -281,6 +282,7 @@ DeviceBoundsMatrixBatch::DeviceBoundsMatrixBatch(const std::vector<unsigned int>
 
   molIndices_.resize(hostMolIndices.size());
   molIndices_.setFromVector(hostMolIndices);
+  cudaStreamSynchronize(matrixStarts_.stream());  // Sync before local vectors go out of scope
 }
 
 void DeviceBoundsMatrixBatch::copyFromHost(const std::vector<::DistGeom::BoundsMatPtr>& hostMatrices,
@@ -319,6 +321,7 @@ void DeviceBoundsMatrixBatch::copyFromHost(const std::vector<::DistGeom::BoundsM
 
   // Copy to device
   data_.setFromVector(hostData);
+  cudaStreamSynchronize(data_.stream());  // Sync before local hostData goes out of scope
 }
 
 void DeviceBoundsMatrixBatch::copyToHost(std::vector<::DistGeom::BoundsMatPtr>& hostMatrices,

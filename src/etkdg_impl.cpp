@@ -97,6 +97,7 @@ void ETKDGDriver::initialize() {
   context_->finishedOnIteration.resize(context_->nTotalSystems);
   context_->finishedOnIteration.copyFromHost(copyFrom);
   context_->activeThisStage.resize(context_->nTotalSystems);
+  cudaStreamSynchronize(stream_);  // Sync before copyFrom goes out of scope
 }
 
 void ETKDGDriver::recordStageTiming(const std::string& stageName, double duration) {

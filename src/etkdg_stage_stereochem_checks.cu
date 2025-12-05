@@ -494,6 +494,7 @@ void ETKDGChiralCheckBase::loadChiralDataset(const ETKDGContext&           ctx,
   } else {
     structureFlags.setFromVector(structureFlagsHost);
   }
+  cudaStreamSynchronize(idx0.stream());  // Sync before local vectors go out of scope
 }
 
 void ETKDGChiralCheckBase::setStreams(const cudaStream_t stream) {
@@ -659,6 +660,7 @@ void ETKDGChiralDistMatrixCheckStage::loadDataset(const ETKDGContext& ctx, const
   sysIdx.setFromVector(sysIdxHost);
   matLowerBound.setFromVector(lowerBound);
   matUpperBound.setFromVector(upperBound);
+  cudaStreamSynchronize(idx0.stream());  // Sync before local vectors go out of scope
 }
 
 ETKDGChiralDistMatrixCheckStage::ETKDGChiralDistMatrixCheckStage(const ETKDGContext&           ctx,
@@ -762,6 +764,7 @@ void ETKDGDoubleBondStereoCheckStage::loadDataset(const ETKDGContext& ctx, const
   idx3.setFromVector(idx3Host);
   signs.setFromVector(signsHost);
   sysIdx.setFromVector(sysIdxHost);
+  cudaStreamSynchronize(idx0.stream());  // Sync before local vectors go out of scope
 }
 
 ETKDGDoubleBondGeometryCheckStage::ETKDGDoubleBondGeometryCheckStage(const ETKDGContext&           ctx,
@@ -815,6 +818,7 @@ void ETKDGDoubleBondGeometryCheckStage::loadDataset(const ETKDGContext& ctx, con
   idx1.setFromVector(idx1Host);
   idx2.setFromVector(idx2Host);
   sysIdx.setFromVector(sysIdxHost);
+  cudaStreamSynchronize(idx0.stream());  // Sync before local vectors go out of scope
 }
 
 }  // namespace detail

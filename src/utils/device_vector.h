@@ -71,7 +71,11 @@ template <typename T> class AsyncDeviceVector {
   void         setStream(cudaStream_t stream) noexcept { stream_ = stream; }
   cudaStream_t stream() const noexcept { return stream_; }
 
-  void zero() { cudaCheckError(cudaMemsetAsync(data_, 0, size_ * sizeof(T), stream_)); }
+  void zero() {
+    if (size_ > 0) {
+      cudaCheckError(cudaMemsetAsync(data_, 0, size_ * sizeof(T), stream_));
+    }
+  }
 
   //! Returns pointer to an element within the array.
   T* at(size_t index) const {

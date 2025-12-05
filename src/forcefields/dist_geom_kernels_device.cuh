@@ -1040,9 +1040,10 @@ static __device__ __inline__ double molEnergyETK(const Energy3DForceContribsDevi
   namespace cg            = cooperative_groups;
   constexpr int WARP_SIZE = 32;
   auto          tile32    = cg::tiled_partition<WARP_SIZE>(cg::this_thread_block());
-  const int16_t laneId    = tile32.thread_rank();
-  const int16_t warpId    = mark_warp_uniform(tile32.meta_group_rank());
-  const int16_t numWarps  = mark_warp_uniform(tile32.meta_group_size());
+
+  const int laneId   = tile32.thread_rank();
+  const int warpId   = mark_warp_uniform(tile32.meta_group_rank());
+  const int numWarps = mark_warp_uniform(tile32.meta_group_size());
 
   // Get term ranges
   const int torsionStart  = systemIndices.experimentalTorsionTermStarts[molIdx];
@@ -1077,22 +1078,22 @@ static __device__ __inline__ double molEnergyETK(const Energy3DForceContribsDevi
   constexpr double defaultAngleForceConstant = 1.0;
 
   // Calculate number of warps needed for each term type
-  const int16_t warpsForTorsion  = (numTorsion + WARP_SIZE - 1) / WARP_SIZE;
-  const int16_t warpsForImproper = (numImproper + WARP_SIZE - 1) / WARP_SIZE;
-  const int16_t warpsForDist12   = (numDist12 + WARP_SIZE - 1) / WARP_SIZE;
-  const int16_t warpsForDist13   = (numDist13 + WARP_SIZE - 1) / WARP_SIZE;
-  const int16_t warpsForAngle13  = (numAngle13 + WARP_SIZE - 1) / WARP_SIZE;
-  const int16_t warpsForDistLR   = (numDistLR + WARP_SIZE - 1) / WARP_SIZE;
-  const int16_t totalWarpsNeeded =
+  const int warpsForTorsion  = (numTorsion + WARP_SIZE - 1) / WARP_SIZE;
+  const int warpsForImproper = (numImproper + WARP_SIZE - 1) / WARP_SIZE;
+  const int warpsForDist12   = (numDist12 + WARP_SIZE - 1) / WARP_SIZE;
+  const int warpsForDist13   = (numDist13 + WARP_SIZE - 1) / WARP_SIZE;
+  const int warpsForAngle13  = (numAngle13 + WARP_SIZE - 1) / WARP_SIZE;
+  const int warpsForDistLR   = (numDistLR + WARP_SIZE - 1) / WARP_SIZE;
+  const int totalWarpsNeeded =
     warpsForTorsion + warpsForImproper + warpsForDist12 + warpsForDist13 + warpsForAngle13 + warpsForDistLR;
 
   // Each warp processes chunks in round-robin fashion
-  for (int16_t chunkIdx = warpId; chunkIdx < totalWarpsNeeded; chunkIdx += numWarps) {
+  for (int chunkIdx = warpId; chunkIdx < totalWarpsNeeded; chunkIdx += numWarps) {
     // Determine which term type this chunk belongs to
     if (chunkIdx < warpsForTorsion) {
       // Torsion terms
-      const int16_t baseIdx = chunkIdx * WARP_SIZE;
-      const int16_t termIdx = torsionStart + baseIdx + laneId;
+      const int baseIdx = chunkIdx * WARP_SIZE;
+      const int termIdx = torsionStart + baseIdx + laneId;
       if (baseIdx + laneId < numTorsion) {
         const int localIdx1 = t_idx1s[termIdx] - atomStart;
         const int localIdx2 = t_idx2s[termIdx] - atomStart;
@@ -1108,9 +1109,9 @@ static __device__ __inline__ double molEnergyETK(const Energy3DForceContribsDevi
       }
     } else if (chunkIdx < warpsForTorsion + warpsForImproper) {
       // Improper torsion terms
-      const int16_t warpOffset = chunkIdx - warpsForTorsion;
-      const int16_t baseIdx    = warpOffset * WARP_SIZE;
-      const int16_t termIdx    = improperStart + baseIdx + laneId;
+      const int warpOffset = chunkIdx - warpsForTorsion;
+      const int baseIdx    = warpOffset * WARP_SIZE;
+      const int termIdx    = improperStart + baseIdx + laneId;
       if (baseIdx + laneId < numImproper) {
         const int localIdx1 = i_idx1s[termIdx] - atomStart;
         const int localIdx2 = i_idx2s[termIdx] - atomStart;
@@ -1128,9 +1129,9 @@ static __device__ __inline__ double molEnergyETK(const Energy3DForceContribsDevi
       }
     } else if (chunkIdx < warpsForTorsion + warpsForImproper + warpsForDist12) {
       // 1-2 distance terms
-      const int16_t warpOffset = chunkIdx - warpsForTorsion - warpsForImproper;
-      const int16_t baseIdx    = warpOffset * WARP_SIZE;
-      const int16_t termIdx    = dist12Start + baseIdx + laneId;
+      const int warpOffset = chunkIdx - warpsForTorsion - warpsForImproper;
+      const int baseIdx    = warpOffset * WARP_SIZE;
+      const int termIdx    = dist12Start + baseIdx + laneId;
       if (baseIdx + laneId < numDist12) {
         const int localIdx1 = d12_idx1s[termIdx] - atomStart;
         const int localIdx2 = d12_idx2s[termIdx] - atomStart;
@@ -1143,9 +1144,9 @@ static __device__ __inline__ double molEnergyETK(const Energy3DForceContribsDevi
       }
     } else if (chunkIdx < warpsForTorsion + warpsForImproper + warpsForDist12 + warpsForDist13) {
       // 1-3 distance terms
-      const int16_t warpOffset = chunkIdx - warpsForTorsion - warpsForImproper - warpsForDist12;
-      const int16_t baseIdx    = warpOffset * WARP_SIZE;
-      const int16_t termIdx    = dist13Start + baseIdx + laneId;
+      const int warpOffset = chunkIdx - warpsForTorsion - warpsForImproper - warpsForDist12;
+      const int baseIdx    = warpOffset * WARP_SIZE;
+      const int termIdx    = dist13Start + baseIdx + laneId;
       if (baseIdx + laneId < numDist13) {
         const int localIdx1 = d13_idx1s[termIdx] - atomStart;
         const int localIdx2 = d13_idx2s[termIdx] - atomStart;
@@ -1158,9 +1159,9 @@ static __device__ __inline__ double molEnergyETK(const Energy3DForceContribsDevi
       }
     } else if (chunkIdx < warpsForTorsion + warpsForImproper + warpsForDist12 + warpsForDist13 + warpsForAngle13) {
       // 1-3 angle terms
-      const int16_t warpOffset = chunkIdx - warpsForTorsion - warpsForImproper - warpsForDist12 - warpsForDist13;
-      const int16_t baseIdx    = warpOffset * WARP_SIZE;
-      const int16_t termIdx    = angle13Start + baseIdx + laneId;
+      const int warpOffset = chunkIdx - warpsForTorsion - warpsForImproper - warpsForDist12 - warpsForDist13;
+      const int baseIdx    = warpOffset * WARP_SIZE;
+      const int termIdx    = angle13Start + baseIdx + laneId;
       if (baseIdx + laneId < numAngle13) {
         const int localIdx1 = a13_idx1s[termIdx] - atomStart;
         const int localIdx2 = a13_idx2s[termIdx] - atomStart;
@@ -1205,12 +1206,12 @@ static __device__ __inline__ void molGradETK(const Energy3DForceContribsDevicePt
   const int     atomStart = systemIndices.atomStarts[molIdx];
   const double* molCoords = coords + atomStart * 4;  // ETK uses 4D coordinates
 
-  namespace cg                = cooperative_groups;
-  constexpr int16_t WARP_SIZE = 32;
-  auto              tile32    = cg::tiled_partition<WARP_SIZE>(cg::this_thread_block());
-  const int16_t     laneId    = tile32.thread_rank();
-  const int16_t     warpId    = mark_warp_uniform(tile32.meta_group_rank());
-  const int16_t     numWarps  = mark_warp_uniform(tile32.meta_group_size());
+  namespace cg            = cooperative_groups;
+  constexpr int WARP_SIZE = 32;
+  auto          tile32    = cg::tiled_partition<WARP_SIZE>(cg::this_thread_block());
+  const int     laneId    = tile32.thread_rank();
+  const int     warpId    = mark_warp_uniform(tile32.meta_group_rank());
+  const int     numWarps  = mark_warp_uniform(tile32.meta_group_size());
 
   // Get term ranges
   const int torsionStart  = systemIndices.experimentalTorsionTermStarts[molIdx];
