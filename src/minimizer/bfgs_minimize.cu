@@ -360,7 +360,8 @@ BfgsBatchMinimizer::BfgsBatchMinimizer(const int    dataDim,
                                        DebugLevel   debugLevel,
                                        bool         scaleGrads,
                                        cudaStream_t stream,
-                                       BfgsBackend  backend) {
+                                       BfgsBackend  backend)
+    : countFinished_(0, stream) {
   debugLevel_ = debugLevel;
   dataDim_    = dataDim;
   scaleGrads_ = scaleGrads;
