@@ -38,29 +38,34 @@ def check_butina_correctness(hit_mat, clusts, strict):
             hit_mat[:, item] = False
     assert len(seen) == hit_mat.shape[0]
 
-@pytest.mark.parametrize("size,enforce_strict", [(s, e) for s in (1, 10, 100, 1000) for e in (True, False)])
-def test_butina_clustering(size, enforce_strict):
+@pytest.mark.parametrize("size,enforce_strict,neighborlist_max_size", 
+                         [(s, e, n) for s in (1, 10, 100, 1000) for e in (True, False) for n in (8, 16, 24, 32)])
+def test_butina_clustering(size, enforce_strict, neighborlist_max_size):
     n = size
     cutoff = 0.1
     np.random.seed(42)
     dists = np.random.rand(n, n)
     dists = np.abs(dists - dists.T)
     torch_dists = torch.tensor(dists).to('cuda')
-    nvmol_res = butina(torch_dists, cutoff, enforce_strict_indexing=enforce_strict).torch()
+    nvmol_res = butina(torch_dists, cutoff, enforce_strict_indexing=enforce_strict, 
+                       neighborlist_max_size=neighborlist_max_size).torch()
     nvmol_clusts = [tuple(torch.argwhere(nvmol_res == i).flatten().tolist()) for i in range(nvmol_res.max() + 1)]
 
     check_butina_correctness(torch_dists <= cutoff, nvmol_clusts, enforce_strict)
 
-def test_butina_edge_one_cluster():
+@pytest.mark.parametrize("neighborlist_max_size", [8, 16, 24, 32])
+def test_butina_edge_one_cluster(neighborlist_max_size):
     n = 10
     cutoff = 100.0
     dists = np.random.rand(n, n)
     dists = np.abs(dists - dists.T)
     torch_dists = torch.tensor(dists).to('cuda')
-    nvmol_res = butina(torch_dists, cutoff, enforce_strict_indexing=True).torch()
+    nvmol_res = butina(torch_dists, cutoff, enforce_strict_indexing=True, 
+                       neighborlist_max_size=neighborlist_max_size).torch()
     assert torch.all(nvmol_res == 0)
 
-def test_butina_edge_n_clusters():
+@pytest.mark.parametrize("neighborlist_max_size", [8, 16, 24, 32])
+def test_butina_edge_n_clusters(neighborlist_max_size):
     n = 10
     cutoff = 1e-8
     dists = np.random.rand(n, n)
@@ -68,5 +73,6 @@ def test_butina_edge_n_clusters():
     torch_dists = torch.tensor(dists).to('cuda')
     torch_dists = torch.clip(torch_dists, min=0.01)
     torch_dists.fill_diagonal_(0)
-    nvmol_res = butina(torch_dists, cutoff, enforce_strict_indexing=True).torch()
+    nvmol_res = butina(torch_dists, cutoff, enforce_strict_indexing=True,
+                       neighborlist_max_size=neighborlist_max_size).torch()
     assert torch.all(nvmol_res.sort()[0] == torch.arange(10).to('cuda'))

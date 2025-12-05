@@ -35,12 +35,16 @@ namespace nvMolKit {
  *               considered neighbors.
  * @param enforceStrictIndexing If true, cluster IDs are assigned in strict largest-first order.
  *                              If false, allows parallel assignment for better performance.
+ * @param neighborlistMaxSize Maximum size of the neighborlist used for small cluster optimization.
+ *                            Must be 8, 16, 24, or 32. Larger values allow parallel processing of
+ *                            larger clusters but use more shared memory.
  * @param stream CUDA stream to execute operations on. Defaults to stream 0.
  */
 void butinaGpu(cuda::std::span<const double> distanceMatrix,
                cuda::std::span<int>          clusters,
                double                        cutoff,
                bool                          enforceStrictIndexing = true,
+               int                           neighborlistMaxSize   = 8,
                cudaStream_t                  stream                = nullptr);
 
 /**
@@ -62,11 +66,15 @@ void butinaGpu(cuda::std::span<const double> distanceMatrix,
  *                 that item. Modified in-place.
  * @param enforceStrictIndexing If true, cluster IDs are assigned in strict largest-first order.
  *                              If false, allows parallel assignment for better performance.
+ * @param neighborlistMaxSize Maximum size of the neighborlist used for small cluster optimization.
+ *                            Must be 8, 16, 24, or 32. Larger values allow parallel processing of
+ *                            larger clusters but use more shared memory.
  * @param stream CUDA stream to execute operations on. Defaults to stream 0.
  */
 void butinaGpu(cuda::std::span<const uint8_t> hitMatrix,
                cuda::std::span<int>           clusters,
                bool                           enforceStrictIndexing = true,
+               int                            neighborlistMaxSize   = 8,
                cudaStream_t                   stream                = nullptr);
 }  // namespace nvMolKit
 

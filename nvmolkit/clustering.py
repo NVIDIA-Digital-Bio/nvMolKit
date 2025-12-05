@@ -21,7 +21,7 @@ from nvmolkit import _clustering
 from nvmolkit._arrayHelpers import *  # noqa: F403
 from nvmolkit.types import AsyncGpuResult
 
-def butina(distance_matrix: AsyncGpuResult | torch.Tensor, cutoff: float, enforce_strict_indexing: bool = True) -> AsyncGpuResult:
+def butina(distance_matrix: AsyncGpuResult | torch.Tensor, cutoff: float, enforce_strict_indexing: bool = True, neighborlist_max_size: int = 8) -> AsyncGpuResult:
     """
     Perform Butina clustering on a distance matrix.
     
@@ -43,6 +43,9 @@ def butina(distance_matrix: AsyncGpuResult | torch.Tensor, cutoff: float, enforc
                                 non-deterministic cluster ID ordering). Clusters will be the
                                 same but the cluster IDs will not be in the same order and larger
                                 clusters may have higher IDs.
+        neighborlist_max_size: Maximum size of the neighborlist used for small cluster
+                              optimization. Must be 8, 16, 24, or 32. Larger values allow
+                              parallel processing of larger clusters but use more shared memory.
     
     Returns:
         AsyncGpuResult containing cluster assignments as integers. Each element i
@@ -52,4 +55,4 @@ def butina(distance_matrix: AsyncGpuResult | torch.Tensor, cutoff: float, enforc
     Note:
         The distance matrix should be symmetric and have zeros on the diagonal.
     """
-    return AsyncGpuResult(_clustering.butina(distance_matrix.__cuda_array_interface__, cutoff, enforce_strict_indexing))
+    return AsyncGpuResult(_clustering.butina(distance_matrix.__cuda_array_interface__, cutoff, enforce_strict_indexing, neighborlist_max_size))
