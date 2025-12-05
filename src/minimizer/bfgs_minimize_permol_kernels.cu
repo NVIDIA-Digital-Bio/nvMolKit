@@ -614,12 +614,6 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
       // Perturb positions from saved oldPos (not localPos, which may have been modified)
       lineSearchPerturb(numTerms, oldPos, localDir, lambda, scratchPos);
 
-      // Copy to global for energy calculation
-      for (int i = tid; i < numTerms; i += stride) {
-        globalPos[i] = scratchPos[i];
-      }
-      __syncthreads();
-
       // Compute energy at perturbed position (use scratchPos which has the perturbed coordinates)
       double lsThreadEnergy;
       if constexpr (FFType == ForceFieldType::MMFF) {
@@ -657,8 +651,7 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
 
     // Update positions with final line search result and compute direction
     for (int i = tid; i < numTerms; i += stride) {
-      localPos[i]  = scratchPos[i];
-      globalPos[i] = scratchPos[i];
+      localPos[i] = scratchPos[i];
     }
     __syncthreads();
 
@@ -718,6 +711,14 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
       currIter++;
     }
     __syncthreads();
+  }
+
+  // If in shared mem mode, we've been updating positions in shared memory. Copy back to global memory
+  // If not in shared memory mode, it's already in global memory
+  if constexpr (UseSharedMem) {
+    for (int i = tid; i < numTerms; i += stride) {
+      globalPos[i] = localPos[i];
+    }
   }
 
   // Write final energy and status
