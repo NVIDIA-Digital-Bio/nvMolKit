@@ -518,13 +518,13 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
   // Compute initial energy
   double threadEnergy;
   if constexpr (FFType == ForceFieldType::MMFF) {
-    threadEnergy = MMFF::molEnergy(*terms, *systemIndices, positions, molIdx, tid, stride);
+    threadEnergy = MMFF::molEnergy(*terms, *systemIndices, localPos, molIdx, tid, stride);
   } else if constexpr (FFType == ForceFieldType::ETK) {
-    threadEnergy = DistGeom::molEnergyETK(*terms, *systemIndices, positions, molIdx, tid, stride);
+    threadEnergy = DistGeom::molEnergyETK(*terms, *systemIndices, localPos, molIdx, tid, stride);
   } else {  // DG
     threadEnergy = DistGeom::molEnergyDG(*terms,
                                          *systemIndices,
-                                         positions,
+                                         localPos,
                                          molIdx,
                                          dataDim,
                                          chiralWeight,
@@ -546,13 +546,13 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
   __syncthreads();
 
   if constexpr (FFType == ForceFieldType::MMFF) {
-    MMFF::molGrad(*terms, *systemIndices, positions, localGrad, molIdx, tid, stride);
+    MMFF::molGrad(*terms, *systemIndices, localPos, localGrad, molIdx, tid, stride);
   } else if constexpr (FFType == ForceFieldType::ETK) {
-    DistGeom::molGradETK(*terms, *systemIndices, positions, localGrad, molIdx, tid, stride);
+    DistGeom::molGradETK(*terms, *systemIndices, localPos, localGrad, molIdx, tid, stride);
   } else {  // DG
     DistGeom::molGradDG(*terms,
                         *systemIndices,
-                        positions,
+                        localPos,
                         localGrad,
                         molIdx,
                         dataDim,
@@ -623,13 +623,13 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
       // Compute energy at perturbed position
       double lsThreadEnergy;
       if constexpr (FFType == ForceFieldType::MMFF) {
-        lsThreadEnergy = MMFF::molEnergy(*terms, *systemIndices, positions, molIdx, tid, stride);
+        lsThreadEnergy = MMFF::molEnergy(*terms, *systemIndices, localPos, molIdx, tid, stride);
       } else if constexpr (FFType == ForceFieldType::ETK) {
-        lsThreadEnergy = DistGeom::molEnergyETK(*terms, *systemIndices, positions, molIdx, tid, stride);
+        lsThreadEnergy = DistGeom::molEnergyETK(*terms, *systemIndices, localPos, molIdx, tid, stride);
       } else {  // DG
         lsThreadEnergy = DistGeom::molEnergyDG(*terms,
                                                *systemIndices,
-                                               positions,
+                                               localPos,
                                                molIdx,
                                                dataDim,
                                                chiralWeight,
@@ -681,13 +681,13 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
     __syncthreads();
 
     if constexpr (FFType == ForceFieldType::MMFF) {
-      MMFF::molGrad(*terms, *systemIndices, positions, localGrad, molIdx, tid, stride);
+      MMFF::molGrad(*terms, *systemIndices, localPos, localGrad, molIdx, tid, stride);
     } else if constexpr (FFType == ForceFieldType::ETK) {
-      DistGeom::molGradETK(*terms, *systemIndices, positions, localGrad, molIdx, tid, stride);
+      DistGeom::molGradETK(*terms, *systemIndices, localPos, localGrad, molIdx, tid, stride);
     } else {  // DG
       DistGeom::molGradDG(*terms,
                           *systemIndices,
-                          positions,
+                          localPos,
                           localGrad,
                           molIdx,
                           dataDim,

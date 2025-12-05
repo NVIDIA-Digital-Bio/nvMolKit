@@ -108,6 +108,7 @@ target_include_directories(etkdg_stages PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 add_library(etkdg etkdg.cpp)
 target_link_libraries(
   etkdg
+        PUBLIC bfgs
   PRIVATE ${RDKit_LIBS}
           conformer_pruning
           device_vector
