@@ -18,18 +18,52 @@
 #include <GraphMol/ROMol.h>
 #include <omp.h>
 
+#include <unordered_map>
+
 #include "bfgs_minimize.h"
 #include "device.h"
 #include "ff_utils.h"
+#include "host_vector.h"
 #include "mmff_flattened_builder.h"
+#include "nvtx.h"
 #include "openmp_helpers.h"
 
 namespace nvMolKit::MMFF {
 
+//! Cached molecule-specific preprocessing
+struct CachedMoleculeData {
+  EnergyForceContribsHost ffParams;
+};
+
+//! Thread-local pinned memory buffers for async transfers
+struct ThreadLocalBuffers {
+  PinnedHostVector<double> positions;
+  PinnedHostVector<double> energies;
+  PinnedHostVector<double> initialPositions;
+
+  void ensureCapacity(const size_t positionsSize, const size_t energiesSize) {
+    constexpr double extraCapacityFactor = 1.3;
+    const auto       newSize = static_cast<size_t>(static_cast<double>(positionsSize) * extraCapacityFactor);
+    if (positions.size() < positionsSize) {
+      positions.resize(newSize);
+    }
+    if (energies.size() < energiesSize) {
+      energies.resize(newSize);
+    }
+    if (initialPositions.size() < positionsSize) {
+      initialPositions.resize(newSize);
+    }
+  }
+};
+
 std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKit::ROMol*>& mols,
                                                                 const int                   maxIters,
                                                                 const double                nonBondedThreshold,
-                                                                const BatchHardwareOptions& perfOptions) {
+                                                                const BatchHardwareOptions& perfOptions,
+                                                                const BfgsBackend           backend) {
+  ScopedNvtxRange fullMinimizeRange("BFGS MMFF Optimize Molecules Confs");
+  ScopedNvtxRange setupRange("BFGS MMFF Optimize Molecules Confs");
+
   // Extract values from performance options
   const size_t batchSize = perfOptions.batchSize == -1 ? 500 : perfOptions.batchSize;
 
@@ -93,7 +127,11 @@ std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKi
     streamPool.emplace_back();
     devicesPerThread[i] = gpuId;  // Round-robin assignment of devices
   }
+
+  // Create thread-local pinned memory buffers for async transfers
+  std::vector<ThreadLocalBuffers> threadBuffers(numThreads);
   detail::OpenMPExceptionRegistry exceptionHandler;
+  setupRange.pop();
 #pragma omp parallel for num_threads(numThreads) schedule(dynamic) default(none) shared(allConformers,        \
                                                                                           moleculeEnergies,   \
                                                                                           totalConformers,    \
@@ -102,12 +140,17 @@ std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKi
                                                                                           nonBondedThreshold, \
                                                                                           streamPool,         \
                                                                                           devicesPerThread,   \
+                                                                                          threadBuffers,      \
+                                                                                          backend,            \
                                                                                           exceptionHandler)
   for (size_t batchStart = 0; batchStart < totalConformers; batchStart += effectiveBatchSize) {
     try {
-      const int        threadId = omp_get_thread_num();
-      const WithDevice dev(devicesPerThread[threadId]);
-      const size_t     batchEnd = std::min(batchStart + effectiveBatchSize, totalConformers);
+      std::unordered_map<RDKit::ROMol*, CachedMoleculeData> moleculeCache;
+      ScopedNvtxRange                                       singleBatchRange("OpenMP loop thread");
+      ScopedNvtxRange                                       setupBatchRange("OpenMP loop preprocessing");
+      const int                                             threadId = omp_get_thread_num();
+      const WithDevice                                      dev(devicesPerThread[threadId]);
+      const size_t batchEnd = std::min(batchStart + effectiveBatchSize, totalConformers);
 
       // Create batch subset of conformers
       std::vector<ConformerInfo> batchConformers(allConformers.begin() + batchStart, allConformers.begin() + batchEnd);
@@ -129,8 +172,16 @@ std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKi
         auto*          mol      = confInfo.mol;
         const uint32_t numAtoms = mol->getNumAtoms();
 
-        auto ffParams = constructForcefieldContribs(*mol, nonBondedThreshold);
-
+        // Look up or compute cached forcefield parameters and atom numbers
+        auto it = moleculeCache.find(mol);
+        if (it == moleculeCache.end()) {
+          ScopedNvtxRange    computeCacheRange("Preprocess single molecule");
+          CachedMoleculeData cached;
+          cached.ffParams = constructForcefieldContribs(*mol, nonBondedThreshold);
+          it              = moleculeCache.insert({mol, std::move(cached)}).first;
+        }
+        auto&           ffParams = it->second.ffParams;
+        ScopedNvtxRange addToBatchRange("Add conformer to batch data");
         // Add this conformer to the batch
         conformerAtomStarts.push_back(currentAtomOffset);
         currentAtomOffset += numAtoms;
@@ -143,35 +194,65 @@ std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKi
       nvMolKit::MMFF::sendContribsAndIndicesToDevice(systemHost, systemDevice);
       nvMolKit::MMFF::setStreams(systemDevice, streamPtr);
       nvMolKit::MMFF::allocateIntermediateBuffers(systemHost, systemDevice);
-      systemDevice.positions.setFromVector(systemHost.positions);
+
+      // Get thread-local buffers and ensure they have enough capacity
+      auto& buffers = threadBuffers[threadId];
+      buffers.ensureCapacity(systemHost.positions.size(), batchConformers.size());
+
+      // Copy to pinned memory for async transfer
+      std::copy(systemHost.positions.begin(), systemHost.positions.end(), buffers.initialPositions.begin());
+      systemDevice.positions.resize(systemHost.positions.size());
+      systemDevice.positions.copyFromHost(buffers.initialPositions.data(), systemHost.positions.size());
+
       systemDevice.grad.resize(systemHost.positions.size());
       systemDevice.grad.zero();
 
-      auto eFunc = [&](const double* positions) { nvMolKit::MMFF::computeEnergy(systemDevice, positions, streamPtr); };
-      auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(systemDevice, streamPtr); };
-
-      nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dataDim=*/3, nvMolKit::DebugLevel::NONE, true, streamPtr);
+      nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dataDim=*/3, nvMolKit::DebugLevel::NONE, true, streamPtr, backend);
       constexpr double             gradTol = 1e-4;  // hard-coded in RDKit.
-      bfgsMinimizer.minimize(maxIters,
-                             gradTol,
-                             systemHost.indices.atomStarts,
-                             systemDevice.indices.atomStarts,
-                             systemDevice.positions,
-                             systemDevice.grad,
-                             systemDevice.energyOuts,
-                             systemDevice.energyBuffer,
-                             eFunc,
-                             gFunc);
+      setupBatchRange.pop();
+      if (backend == BfgsBackend::BATCHED) {
+        auto eFunc = [&](const double* positions) {
+          nvMolKit::MMFF::computeEnergy(systemDevice, positions, streamPtr);
+        };
+        auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(systemDevice, streamPtr); };
+        bfgsMinimizer.minimize(maxIters,
+                               gradTol,
+                               systemHost.indices.atomStarts,
+                               systemDevice.indices.atomStarts,
+                               systemDevice.positions,
+                               systemDevice.grad,
+                               systemDevice.energyOuts,
+                               systemDevice.energyBuffer,
+                               eFunc,
+                               gFunc);
+      } else {
+        auto terms         = nvMolKit::MMFF::toEnergyForceContribsDevicePtr(systemDevice);
+        auto systemIndices = nvMolKit::MMFF::toBatchedIndicesDevicePtr(systemDevice);
+        bfgsMinimizer.minimizeWithMMFF(maxIters,
+                                       gradTol,
+                                       systemHost.indices.atomStarts,
+                                       systemDevice.indices.atomStarts,
+                                       systemDevice.positions,
+                                       systemDevice.grad,
+                                       systemDevice.energyOuts,
+                                       systemDevice.energyBuffer,
+                                       terms,
+                                       systemIndices);
+      }
+      ScopedNvtxRange finalizeBatchRange("OpenMP loop finalizing batch");
 
-      std::vector<double> finalPos(systemHost.positions.size());
-      systemDevice.positions.copyToHost(finalPos);
+      // Copy positions using pinned memory for async transfer
+      systemDevice.positions.copyToHost(buffers.positions.data(), systemDevice.positions.size());
 
-      // Compute final energies
-      std::vector<double> gotEnergies(systemDevice.energyOuts.size(), 0.0);
-      systemDevice.energyBuffer.zero();
-      systemDevice.energyOuts.zero();
-      nvMolKit::MMFF::computeEnergy(systemDevice, nullptr, streamPtr);
-      systemDevice.energyOuts.copyToHost(gotEnergies);
+      // Compute final energies. If permol, are already populated.
+      if (backend == BfgsBackend::BATCHED) {
+        buffers.energies.zero();
+        systemDevice.energyBuffer.zero();
+        systemDevice.energyOuts.zero();
+        nvMolKit::MMFF::computeEnergy(systemDevice, nullptr, streamPtr);
+      }
+
+      systemDevice.energyOuts.copyToHost(buffers.energies.data(), systemDevice.energyOuts.size());
       cudaStreamSynchronize(streamPtr);
 
       // Update conformer positions and store energies
@@ -183,13 +264,13 @@ std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKi
         // Update conformer positions
         for (uint32_t j = 0; j < numAtoms; ++j) {
           confInfo.conformer->setAtomPos(j,
-                                         RDGeom::Point3D(finalPos[3 * (atomStartIdx + j) + 0],
-                                                         finalPos[3 * (atomStartIdx + j) + 1],
-                                                         finalPos[3 * (atomStartIdx + j) + 2]));
+                                         RDGeom::Point3D(buffers.positions[3 * (atomStartIdx + j) + 0],
+                                                         buffers.positions[3 * (atomStartIdx + j) + 1],
+                                                         buffers.positions[3 * (atomStartIdx + j) + 2]));
         }
 
         // Store energy result - thread-safe since each thread writes to different indices
-        moleculeEnergies[confInfo.molIdx][confInfo.confIdx] = gotEnergies[i];
+        moleculeEnergies[confInfo.molIdx][confInfo.confIdx] = buffers.energies[i];
       }
     } catch (...) {
       exceptionHandler.store(std::current_exception());

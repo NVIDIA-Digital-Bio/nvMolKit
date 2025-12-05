@@ -1675,6 +1675,99 @@ TEST_F(ETK3DGpuTestFixture, CombinedGradientsMultiMol) {
   }
 }
 
+// Block-per-mol kernel tests
+TEST_F(ETK3DGpuTestFixture, BlockPerMolEnergiesSingleMolecule) {
+  loadSingleMol();
+
+  // Test block-per-mol energy calculation with all 3D terms
+  CHECK_CUDA_RETURN(nvMolKit::DistGeom::computeEnergyBlockPerMolETK(systemDevice, atomStartsDevice, positionsDevice));
+  double gotEnergy;
+  CHECK_CUDA_RETURN(cudaMemcpy(&gotEnergy, systemDevice.energyOuts.data() + 0, sizeof(double), cudaMemcpyDeviceToHost));
+
+  // Calculate reference combined energy by summing individual terms
+  double wantEnergy = 0.0;
+  for (const auto& term : allETK3DTerms) {
+    const double e = getReferenceETK3DEnergyTerm(mol_.get(), term, positionsHost.data());
+    wantEnergy += e;
+  }
+
+  EXPECT_NEAR(gotEnergy, wantEnergy, E_TOL_COMBINED);
+}
+
+TEST_F(ETK3DGpuTestFixture, BlockPerMolEnergiesMultiMolecule) {
+  loadMMFFMols(10);
+
+  // Test block-per-mol energy calculation with all 3D terms
+  CHECK_CUDA_RETURN(nvMolKit::DistGeom::computeEnergyBlockPerMolETK(systemDevice, atomStartsDevice, positionsDevice));
+  std::vector<double> gotEnergy(systemDevice.energyOuts.size(), 0.0);
+  systemDevice.energyOuts.copyToHost(gotEnergy);
+  cudaDeviceSynchronize();
+
+  // Calculate reference combined energies by summing individual terms for each molecule
+  std::vector<double> wantEnergy(molsPtrs_.size(), 0.0);
+  for (const auto& term : allETK3DTerms) {
+    auto termEnergies = getReferenceETK3DEnergyTerms(molsPtrs_, term, positionsHost.data(), atomStartsHost);
+    for (size_t i = 0; i < wantEnergy.size(); ++i) {
+      wantEnergy[i] += termEnergies[i];
+    }
+  }
+
+  for (size_t i = 0; i < wantEnergy.size(); ++i) {
+    EXPECT_NEAR(gotEnergy[i], wantEnergy[i], E_TOL_COMBINED) << "Mismatch at molecule " << i;
+  }
+}
+
+TEST_F(ETK3DGpuTestFixture, BlockPerMolGradientsSingleMolecule) {
+  loadSingleMol();
+
+  // Test block-per-mol gradient calculation with all 3D terms
+  CHECK_CUDA_RETURN(nvMolKit::DistGeom::computeGradBlockPerMolETK(systemDevice, atomStartsDevice, positionsDevice));
+  std::vector<double> gotGrad(systemDevice.grad.size(), 0.0);
+  systemDevice.grad.copyToHost(gotGrad);
+  cudaDeviceSynchronize();
+
+  // Calculate reference combined gradients by summing individual terms
+  std::vector<double> wantGradients(4 * mol_->getNumAtoms(), 0.0);
+  for (const auto& term : allETK3DTerms) {
+    auto termGrad = getReferenceETK3DGradientTerm(mol_.get(), term, positionsHost.data());
+    for (size_t i = 0; i < wantGradients.size(); ++i) {
+      wantGradients[i] += termGrad[i];
+    }
+  }
+
+  EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(G_TOL), wantGradients));
+}
+
+TEST_F(ETK3DGpuTestFixture, BlockPerMolGradientsMultiMolecule) {
+  loadMMFFMols(10);
+
+  // Test block-per-mol gradient calculation with all 3D terms
+  CHECK_CUDA_RETURN(nvMolKit::DistGeom::computeGradBlockPerMolETK(systemDevice, atomStartsDevice, positionsDevice));
+  std::vector<double> gotGrad(systemDevice.grad.size(), 0.0);
+  systemDevice.grad.copyToHost(gotGrad);
+  cudaDeviceSynchronize();
+
+  // Calculate reference combined gradients by summing individual terms for each molecule
+  std::vector<std::vector<double>> wantGradients;
+  for (size_t molIdx = 0; molIdx < molsPtrs_.size(); ++molIdx) {
+    std::vector<double> molGradients(4 * molsPtrs_[molIdx]->getNumAtoms(), 0.0);
+    for (const auto& term : allETK3DTerms) {
+      auto termGrad =
+        getReferenceETK3DGradientTerm(molsPtrs_[molIdx], term, positionsHost.data() + 3 * atomStartsHost[molIdx]);
+      for (size_t i = 0; i < molGradients.size(); ++i) {
+        molGradients[i] += termGrad[i];
+      }
+    }
+    wantGradients.push_back(molGradients);
+  }
+
+  std::vector<std::vector<double>> gotGradSplit = splitCombinedGrads(gotGrad, atomStartsHost);
+  for (size_t i = 0; i < wantGradients.size(); ++i) {
+    EXPECT_THAT(gotGradSplit[i], ::testing::Pointwise(::testing::FloatNear(G_TOL), wantGradients[i]))
+      << "For system " << i;
+  }
+}
+
 TEST_F(ETK3DGpuTestFixture, PlainCombinedEnergiesMultiMol) {
   loadMMFFMols(10, DGeomHelpers::ETDG);  // Use ETDG parameters (useBasicKnowledge=false)
 

@@ -50,6 +50,8 @@ void printHelp(const char* progName) {
   std::cout << "  -w, --do_warmup <bool>              Run warmup before benchmarking [default: true]\n";
   std::cout
     << "  -e, --do_energy_check <bool>        Compare energies between RDKit and nvMolKit results [default: true]\n";
+  std::cout
+    << "  -v, --validate <bool>               Validate nvMolKit energies using RDKit energy calculator (requires -r and -e) [default: true]\n";
   std::cout << "  -B, --num_concurrent_batches <int>  Number of concurrent batches per GPU [default: 10]\n";
   std::cout << "  -b, --batch_size <int>              Batch size for processing [default: 1000]\n";
   std::cout << "  -g, --num_gpus <int>                Number of GPUs to use (IDs 0..n-1). If omitted, use all GPUs.\n";
@@ -57,6 +59,7 @@ void printHelp(const char* progName) {
     << "  -t, --num_threads <int>             RDKit MMFF optimize threads (per-molecule conformer threads) [default: OMP max]\n";
   std::cout
     << "  -p, --perturbation_factor <float>    Random displacement magnitude for starting structures [default: 0.5]\n";
+  std::cout << "  -k, --backend <batched|permol>      BFGS backend: 'batched' or 'permol' [default: batched]\n";
   std::cout << "  -h, --help                          Show this help message\n\n";
   std::cout << "Boolean values can be: true/false, 1/0, yes/no, on/off (case insensitive)\n";
 }
@@ -89,7 +92,8 @@ std::vector<std::vector<double>> runNvMolKit(std::vector<RDKit::ROMol*>& molsPtr
                                              int                         maxIters,
                                              int                         batchSize,
                                              int                         batchesPerGpu,
-                                             int                         numGpus) {
+                                             int                         numGpus,
+                                             nvMolKit::BfgsBackend       backend) {
   nvMolKit::BatchHardwareOptions perfOptions;
   perfOptions.batchesPerGpu = batchesPerGpu;
   perfOptions.batchSize     = batchSize;
@@ -101,30 +105,58 @@ std::vector<std::vector<double>> runNvMolKit(std::vector<RDKit::ROMol*>& molsPtr
     }
   }
   std::vector<std::vector<double>> energies;
-  std::string                      benchName = "nvMolKit MMFF, num_mols=" + std::to_string(molsPtrs.size()) +
+  const char*                      backendStr = (backend == nvMolKit::BfgsBackend::BATCHED) ? "batched" : "permol";
+  std::string                      benchName  = "nvMolKit MMFF, num_mols=" + std::to_string(molsPtrs.size()) +
                           ", batch_size=" + std::to_string(batchSize) +
-                          ", num_concurrent_batches=" + std::to_string(batchesPerGpu);
+                          ", num_concurrent_batches=" + std::to_string(batchesPerGpu) + ", backend=" + backendStr;
   ankerl::nanobench::Bench().epochIterations(1).epochs(1).run(benchName, [&]() {
-    energies = nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molsPtrs, maxIters, 100.0, perfOptions);
+    energies = nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molsPtrs, maxIters, 100.0, perfOptions, backend);
   });
   return energies;
+}
+
+std::vector<std::vector<double>> calculateRDKitEnergies(std::vector<RDKit::ROMol*>& molsPtrs) {
+  std::vector<std::vector<double>> allEnergies;
+  allEnergies.reserve(molsPtrs.size());
+  for (auto* mol : molsPtrs) {
+    std::vector<double> energies;
+    energies.reserve(mol->getNumConformers());
+    try {
+      RDKit::MMFF::MMFFMolProperties mmffProps(*mol);
+      for (auto confIt = mol->beginConformers(); confIt != mol->endConformers(); ++confIt) {
+        const RDKit::Conformer* conf   = &(**confIt);
+        const int               confId = conf->getId();
+        auto                    ff     = RDKit::MMFF::constructForceField(*mol, &mmffProps, 100.0, confId);
+        if (ff) {
+          const double energy = ff->calcEnergy();
+          energies.push_back(energy);
+        }
+      }
+    } catch (const std::exception& e) {
+      std::cerr << "Warning: RDKit energy calculation failed for a molecule: " << e.what() << std::endl;
+    }
+    allEnergies.push_back(std::move(energies));
+  }
+  return allEnergies;
 }
 
 }  // namespace
 
 int main(int argc, char* argv[]) {
-  std::string filePath           = "benchmarks/data/MMFF94_hypervalent.sdf";
-  int         numMols            = 20;
-  int         confsPerMol        = 20;
-  bool        doRdkit            = true;
-  bool        doWarmup           = true;
-  bool        doEnergyCheck      = true;
-  int         batchSize          = 1000;
-  int         batchesPerGpu      = 10;
-  int         maxIters           = 1000;
-  int         numGpus            = -1;  // If <0, use all GPUs
-  float       perturbationFactor = 0.5f;
-  int         rdkitThreads       = -1;  // If <0, use OMP max
+  std::string           filePath           = "benchmarks/data/MMFF94_hypervalent.sdf";
+  int                   numMols            = 20;
+  int                   confsPerMol        = 20;
+  bool                  doRdkit            = true;
+  bool                  doWarmup           = true;
+  bool                  doEnergyCheck      = true;
+  bool                  doValidate         = true;
+  int                   batchSize          = 1000;
+  int                   batchesPerGpu      = 10;
+  int                   maxIters           = 1000;
+  int                   numGpus            = -1;  // If <0, use all GPUs
+  float                 perturbationFactor = 0.5f;
+  int                   rdkitThreads       = -1;  // If <0, use OMP max
+  nvMolKit::BfgsBackend backend            = nvMolKit::BfgsBackend::BATCHED;
 
   static struct option long_options[] = {
     {             "file_path", required_argument, 0, 'f'},
@@ -133,18 +165,20 @@ int main(int argc, char* argv[]) {
     {              "do_rdkit", required_argument, 0, 'r'},
     {             "do_warmup", required_argument, 0, 'w'},
     {       "do_energy_check", required_argument, 0, 'e'},
+    {              "validate", required_argument, 0, 'v'},
     {"num_concurrent_batches", required_argument, 0, 'B'},
     {            "batch_size", required_argument, 0, 'b'},
     {              "num_gpus", required_argument, 0, 'g'},
     {           "num_threads", required_argument, 0, 't'},
     {   "perturbation_factor", required_argument, 0, 'p'},
+    {               "backend", required_argument, 0, 'k'},
     {                  "help",       no_argument, 0, 'h'},
     {                       0,                 0, 0,   0}
   };
 
   int option_index = 0;
   int c;
-  while ((c = getopt_long(argc, argv, "f:n:c:r:w:e:B:b:g:t:p:h", long_options, &option_index)) != -1) {
+  while ((c = getopt_long(argc, argv, "f:n:c:r:w:e:v:B:b:g:t:p:k:h", long_options, &option_index)) != -1) {
     switch (c) {
       case 'f':
         filePath = optarg;
@@ -181,6 +215,9 @@ int main(int argc, char* argv[]) {
         break;
       case 'e':
         doEnergyCheck = parseBoolArg(optarg);
+        break;
+      case 'v':
+        doValidate = parseBoolArg(optarg);
         break;
       case 'B':
         try {
@@ -242,6 +279,19 @@ int main(int argc, char* argv[]) {
           return 1;
         }
         break;
+      case 'k': {
+        std::string backendStr = optarg;
+        std::transform(backendStr.begin(), backendStr.end(), backendStr.begin(), ::tolower);
+        if (backendStr == "batched") {
+          backend = nvMolKit::BfgsBackend::BATCHED;
+        } else if (backendStr == "permol" || backendStr == "per_molecule") {
+          backend = nvMolKit::BfgsBackend::PER_MOLECULE;
+        } else {
+          std::cerr << "Error: Invalid backend. Must be 'batched' or 'permol'\n";
+          return 1;
+        }
+        break;
+      }
       case 'h':
         printHelp(argv[0]);
         return 0;
@@ -275,12 +325,14 @@ int main(int argc, char* argv[]) {
   std::cout << "  Run RDKit comparison: " << (doRdkit ? "yes" : "no") << "\n";
   std::cout << "  Run warmup: " << (doWarmup ? "yes" : "no") << "\n";
   std::cout << "  Compare energies: " << (doEnergyCheck ? "yes" : "no") << "\n";
+  std::cout << "  Validate energies: " << (doValidate ? "yes" : "no") << "\n";
   std::cout << "  Batch size: " << batchSize << "\n";
   std::cout << "  Number of concurrent batches: " << batchesPerGpu << "\n";
   std::cout << "  Number of GPUs: " << (numGpus > 0 ? std::to_string(numGpus) : std::string("all")) << "\n";
   std::cout << "  RDKit MMFF threads: " << (rdkitThreads > 0 ? std::to_string(rdkitThreads) : std::string("OMP max"))
             << "\n";
-  std::cout << "  Perturbation factor: " << perturbationFactor << "\n\n";
+  std::cout << "  Perturbation factor: " << perturbationFactor << "\n";
+  std::cout << "  BFGS backend: " << (backend == nvMolKit::BfgsBackend::BATCHED ? "batched" : "permol") << "\n\n";
 
   const std::string ext          = BenchUtils::getFileExtensionLower(filePath);
   const bool        isSmilesLike = (ext == ".smi" || ext == ".smiles" || ext == ".cxsmiles");
@@ -318,7 +370,7 @@ int main(int argc, char* argv[]) {
 
     BenchUtils::perturbAllConformers(warmupPtrs, perturbationFactor, 123);
 
-    (void)runNvMolKit(warmupPtrs, maxIters, batchSize, batchesPerGpu, numGpus);
+    (void)runNvMolKit(warmupPtrs, maxIters, batchSize, batchesPerGpu, numGpus, backend);
     if (doRdkit) {
       (void)runRDKit(warmupPtrs, maxIters, rdkitThreadsResolved);
     }
@@ -398,29 +450,88 @@ int main(int argc, char* argv[]) {
     nvmolkitPtrs.push_back(m.get());
 
   // Run benchmarks
-  auto                             nvmolkitRes = runNvMolKit(nvmolkitPtrs, maxIters, batchSize, batchesPerGpu, numGpus);
+  auto rdkitCalculatedEnergiesPre  = calculateRDKitEnergies(nvmolkitPtrs);
+  auto nvmolkitRes                 = runNvMolKit(nvmolkitPtrs, maxIters, batchSize, batchesPerGpu, numGpus, backend);
+  auto rdkitCalculatedEnergiesPost = calculateRDKitEnergies(nvmolkitPtrs);
   std::vector<std::vector<double>> rdkitRes;
   if (doRdkit) {
     rdkitRes = runRDKit(rdkitPtrs, maxIters, rdkitThreadsResolved);
   }
+  auto rdkitAfter = calculateRDKitEnergies(rdkitPtrs);
 
   if (doEnergyCheck && doRdkit) {
-    int totalDiffs = 0;
-    int totalConfs = 0;
+    std::vector<double> diffs;
+    int                 totalDiffs = 0;
+    int                 totalConfs = 0;
+    int                 maxIdx     = 0;
+    int                 minIdx     = 0;
     for (size_t i = 0; i < nvmolkitRes.size(); ++i) {
       const auto&  a = nvmolkitRes[i];
       const auto&  b = rdkitRes[i];
       const size_t n = std::min(a.size(), b.size());
       for (size_t j = 0; j < n; ++j) {
         totalConfs++;
-        if (std::abs(a[j] - b[j]) > 1e-2)
+        if (std::abs(a[j] - b[j]) > 1e-2) {
           totalDiffs++;
+        }
+        diffs.push_back(b[j] - a[j]);
+        if (diffs.back() > diffs[maxIdx]) {
+          maxIdx = static_cast<int>(diffs.size()) - 1;
+        }
+        if (diffs.back() < diffs[minIdx]) {
+          minIdx = static_cast<int>(diffs.size()) - 1;
+        }
       }
     }
     if (totalDiffs > 0) {
       std::cout << "Differences found: " << totalDiffs << "/" << totalConfs << " conformers differ" << std::endl;
+      const double averageDiff = std::accumulate(diffs.begin(), diffs.end(), 0.0) / static_cast<double>(diffs.size());
+      std::cout << "Average absolute energy difference (nvmolkit - rdkit): " << averageDiff << " kcal/mol" << std::endl;
+      std::cout << "Max delta: " << diffs[maxIdx] << " kcal/mol at index " << maxIdx << std::endl;
+      std::cout << "Min delta: " << diffs[minIdx] << " kcal/mol at index " << minIdx << std::endl;
+      std::sort(diffs.begin(), diffs.end());
+      std::cout << "Median diff (nvmolkit - rdkit) " << diffs[diffs.size() / 2] << " kcal/mol" << std::endl;
+
     } else {
       std::cout << "Perfect match (" << totalConfs << " conformers)" << std::endl;
+    }
+  }
+
+  if (doValidate && doRdkit && doEnergyCheck) {
+    std::cout << "\nValidating nvMolKit energies using RDKit energy calculator..." << std::endl;
+    auto rdkitCalculatedEnergies = calculateRDKitEnergies(nvmolkitPtrs);
+
+    int    totalValidationConfs  = 0;
+    int    totalValidationFailed = 0;
+    double maxDiff               = 0.0;
+    int    maxDiffIdx            = 0;
+
+    for (size_t i = 0; i < nvmolkitRes.size(); ++i) {
+      const auto&  nvmolkitEnergies   = nvmolkitRes[i];
+      const auto&  calculatedEnergies = rdkitCalculatedEnergies[i];
+      const size_t n                  = std::min(nvmolkitEnergies.size(), calculatedEnergies.size());
+
+      for (size_t j = 0; j < n; ++j) {
+        totalValidationConfs++;
+        const double diff = std::abs(nvmolkitEnergies[j] - calculatedEnergies[j]);
+        if (diff > maxDiff) {
+          maxDiff    = diff;
+          maxDiffIdx = totalValidationConfs - 1;
+        }
+        if (diff > 1e-4) {
+          totalValidationFailed++;
+        }
+      }
+    }
+
+    if (totalValidationFailed > 0) {
+      std::cout << "Validation FAILED: " << totalValidationFailed << "/" << totalValidationConfs
+                << " conformers differ by more than 1e-4 kcal/mol" << std::endl;
+      std::cout << "Maximum difference: " << maxDiff << " kcal/mol at conformer index " << maxDiffIdx << std::endl;
+    } else {
+      std::cout << "Validation PASSED: All " << totalValidationConfs << " conformers match within 1e-4 kcal/mol"
+                << std::endl;
+      std::cout << "Maximum difference: " << maxDiff << " kcal/mol" << std::endl;
     }
   }
 

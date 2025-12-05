@@ -36,6 +36,7 @@
 #include "conformer_checkers.h"
 #include "embedder_utils.h"
 #include "etkdg.h"
+#include "minimizer/bfgs_minimize.h"
 #include "testutils/conformer_checkers.h"
 
 constexpr int maxAtoms = 256;
@@ -158,11 +159,14 @@ void benchNvMolKit(const std::vector<RDKit::ROMol*>& mols,
                    const int                         batchSize,
                    const int                         batchesPerGpu,
                    const int                         maxIterations,
-                   const int                         numGpus) {
-  std::string benchName =
-    "nvMolKit EmbedMultipleConfs, num_mols=" + std::to_string(mols.size()) + ", num_confs=" + std::to_string(numConfs) +
-    ", batch_size=" + std::to_string(batchSize) + ", num_concurrent_batches=" + std::to_string(batchesPerGpu) +
-    ", num_threads=" + std::to_string(numThreads) + ", max_iterations=" + std::to_string(maxIterations);
+                   const int                         numGpus,
+                   const nvMolKit::BfgsBackend       backend) {
+  std::string backendName = (backend == nvMolKit::BfgsBackend::BATCHED) ? "BATCHED" : "PER_MOLECULE";
+  std::string benchName   = "nvMolKit EmbedMultipleConfs, num_mols=" + std::to_string(mols.size()) +
+                          ", num_confs=" + std::to_string(numConfs) + ", batch_size=" + std::to_string(batchSize) +
+                          ", num_concurrent_batches=" + std::to_string(batchesPerGpu) +
+                          ", num_threads=" + std::to_string(numThreads) +
+                          ", max_iterations=" + std::to_string(maxIterations) + ", backend=" + backendName;
 
   // Create copies for nvMolKit benchmark
   std::vector<std::unique_ptr<RDKit::RWMol>> molCopies;
@@ -192,7 +196,7 @@ void benchNvMolKit(const std::vector<RDKit::ROMol*>& mols,
   }
 
   ankerl::nanobench::Bench().epochIterations(1).epochs(1).run(benchName, [&]() {
-    nvMolKit::embedMolecules(molCopyPtrs, params, numConfs, maxIterations, false, &fails, hardwareOptions);
+    nvMolKit::embedMolecules(molCopyPtrs, params, numConfs, maxIterations, false, &fails, hardwareOptions, backend);
   });
 
   for (const auto& fail : fails) {
@@ -304,17 +308,18 @@ void printEnergyDiffs(const std::vector<double>& rdkitEnergies,
 }
 
 // Run benchmarks with different combinations of molecule counts and conformer counts
-void runBench(const std::string& filePath,
-              const int          numMols,
-              const int          confsPerMol,
-              const bool         doRdkit,
-              const bool         doWarmup,
-              const bool         doEnergyCheck,
-              const int          numThreads,
-              const int          batchSize,
-              const int          batchesPerGpu,
-              const int          maxIterations,
-              const int          numGpus) {
+void runBench(const std::string&          filePath,
+              const int                   numMols,
+              const int                   confsPerMol,
+              const bool                  doRdkit,
+              const bool                  doWarmup,
+              const bool                  doEnergyCheck,
+              const int                   numThreads,
+              const int                   batchSize,
+              const int                   batchesPerGpu,
+              const int                   maxIterations,
+              const int                   numGpus,
+              const nvMolKit::BfgsBackend backend) {
   if (doWarmup) {
     printf("Warming up...\n");
     // Warm up with a small test
@@ -334,7 +339,8 @@ void runBench(const std::string& filePath,
                   batchSize,
                   batchesPerGpu,
                   maxIterations,
-                  numGpus);
+                  numGpus,
+                  backend);
     if (doRdkit) {
       benchRDKit(warmupMolsPtrs, 1, dummy, false, failCountsDummy, 1, maxIterations);
     }
@@ -362,7 +368,8 @@ void runBench(const std::string& filePath,
                 batchSize,
                 batchesPerGpu,
                 maxIterations,
-                numGpus);
+                numGpus,
+                backend);
   if (doRdkit) {
     std::vector<double> rdkitEnergies;
     std::vector<int>    failCountsRDKit;
@@ -388,6 +395,18 @@ bool parseBoolArg(const std::string& arg) {
   return (s == "1" || s == "true" || s == "yes" || s == "on");
 }
 
+nvMolKit::BfgsBackend parseBackendArg(const std::string& arg) {
+  std::string s = arg;
+  std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+  if (s == "batched" || s == "0") {
+    return nvMolKit::BfgsBackend::BATCHED;
+  } else if (s == "per_molecule" || s == "per-molecule" || s == "permolecule" || s == "1") {
+    return nvMolKit::BfgsBackend::PER_MOLECULE;
+  } else {
+    throw std::runtime_error("Invalid backend value. Use 'batched' or 'per_molecule'");
+  }
+}
+
 void printHelp(const char* progName) {
   std::cout << "Usage: " << progName << " [options]\n\n";
   std::cout << "Options:\n";
@@ -402,26 +421,28 @@ void printHelp(const char* progName) {
   std::cout << "  -b, --batch_size <int>              Batch size for processing [default: 100]\n";
   std::cout << "  -B, --num_concurrent_batches <int>  Number of concurrent batches [default: 10]\n";
   std::cout << "  -g, --num_gpus <int>                Number of GPUs to use (IDs 0..n-1). If omitted, use all GPUs.\n";
+  std::cout << "  -k, --backend <string>              BFGS backend: batched or per_molecule [default: per_molecule]\n";
   std::cout << "  -h, --help                          Show this help message\n\n";
   std::cout << "Boolean values can be: true/false, 1/0, yes/no, on/off (case insensitive)\n";
   std::cout << "\nExamples:\n";
   std::cout << "  " << progName << " --file_path data.sdf --num_mols 50 --confs_per_mol 10 --do_rdkit true\n";
-  std::cout << "  " << progName << " -f data.sdf -n 50 -c 10 -r false -t 8 -b 50 -B 4 -g 2\n";
+  std::cout << "  " << progName << " -f data.sdf -n 50 -c 10 -r false -t 8 -b 50 -B 4 -g 2 -k batched\n";
 }
 
 int main(int argc, char* argv[]) {
   // Set defaults
-  std::string filePath      = "benchmarks/data/MPCONF196.sdf";
-  int         numMols       = 20;
-  int         confsPerMol   = 20;
-  bool        doRdkit       = true;
-  bool        doWarmup      = true;
-  bool        doEnergyCheck = false;
-  int         numThreads    = 10;
-  int         batchSize     = 100;
-  int         batchesPerGpu = 10;
-  int         maxIterations = 10;
-  int         numGpus       = -1;  // If <0, use all GPUs by default
+  std::string           filePath      = "benchmarks/data/MPCONF196.sdf";
+  int                   numMols       = 20;
+  int                   confsPerMol   = 20;
+  bool                  doRdkit       = true;
+  bool                  doWarmup      = true;
+  bool                  doEnergyCheck = false;
+  int                   numThreads    = 10;
+  int                   batchSize     = 100;
+  int                   batchesPerGpu = 10;
+  int                   maxIterations = 10;
+  int                   numGpus       = -1;  // If <0, use all GPUs by default
+  nvMolKit::BfgsBackend backend       = nvMolKit::BfgsBackend::PER_MOLECULE;
 
   // Define long options for getopt_long
   static struct option long_options[] = {
@@ -436,6 +457,7 @@ int main(int argc, char* argv[]) {
     {"num_concurrent_batches", required_argument, 0, 'B'},
     {        "max_iterations", required_argument, 0, 'i'},
     {              "num_gpus", required_argument, 0, 'g'},
+    {               "backend", required_argument, 0, 'k'},
     {                  "help",       no_argument, 0, 'h'},
     {                       0,                 0, 0,   0}
   };
@@ -444,7 +466,7 @@ int main(int argc, char* argv[]) {
   int c;
 
   // Parse command line arguments using getopt_long
-  while ((c = getopt_long(argc, argv, "f:n:c:r:w:e:t:b:B:i:g:h", long_options, &option_index)) != -1) {
+  while ((c = getopt_long(argc, argv, "f:n:c:r:w:e:t:b:B:i:g:k:h", long_options, &option_index)) != -1) {
     switch (c) {
       case 'f':
         filePath = optarg;
@@ -538,6 +560,14 @@ int main(int argc, char* argv[]) {
           return 1;
         }
         break;
+      case 'k':
+        try {
+          backend = parseBackendArg(optarg);
+        } catch (const std::exception& e) {
+          std::cerr << "Error: " << e.what() << "\n";
+          return 1;
+        }
+        break;
       case 'h':
         printHelp(argv[0]);
         return 0;
@@ -568,6 +598,7 @@ int main(int argc, char* argv[]) {
   }
 
   // Print configuration
+  std::string backendName = (backend == nvMolKit::BfgsBackend::BATCHED) ? "batched" : "per_molecule";
   std::cout << "Configuration:\n";
   std::cout << "  File path: " << filePath << "\n";
   std::cout << "  Number of molecules: " << numMols << "\n";
@@ -578,7 +609,8 @@ int main(int argc, char* argv[]) {
   std::cout << "  Number of threads: " << numThreads << "\n";
   std::cout << "  Batch size: " << batchSize << "\n";
   std::cout << "  Number of concurrent batches: " << batchesPerGpu << "\n";
-  std::cout << "  Number of GPUs: " << (numGpus > 0 ? std::to_string(numGpus) : std::string("all")) << "\n\n";
+  std::cout << "  Number of GPUs: " << (numGpus > 0 ? std::to_string(numGpus) : std::string("all")) << "\n";
+  std::cout << "  BFGS backend: " << backendName << "\n\n";
 
   // Run the benchmark
   runBench(filePath,
@@ -591,6 +623,7 @@ int main(int argc, char* argv[]) {
            batchSize,
            batchesPerGpu,
            maxIterations,
-           numGpus);
+           numGpus,
+           backend);
   return 0;
 }

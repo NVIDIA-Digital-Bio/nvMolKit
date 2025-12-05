@@ -61,7 +61,8 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
                     int                                         maxIterations,
                     bool                                        debugMode,
                     std::vector<std::vector<int16_t>>*          failures,
-                    const BatchHardwareOptions&                 hardwareOptions) {
+                    const BatchHardwareOptions&                 hardwareOptions,
+                    BfgsBackend                                 backend) {
   const ScopedNvtxRange fullRange("EmbedMolecules");
   if (!params.useRandomCoords) {
     throw std::runtime_error("ETKDG requires useRandomCoords to be true. Please set it in the EmbedParameters.");
@@ -192,7 +193,8 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
       auto             minimizer = std::make_unique<BfgsBatchMinimizer>(4,  // dataDim for ETKDG (4D distance geometry)
                                                             DebugLevel::NONE,
                                                             true,  // scaleGrads
-                                                            streamPtr);
+                                                            streamPtr,
+                                                            backend);
       std::unordered_map<const RDKit::ROMol*, nvMolKit::DistGeom::EnergyForceContribsHost>   dgCache;
       std::unordered_map<const RDKit::ROMol*, nvMolKit::DistGeom::Energy3DForceContribsHost> etkCache;
       // Pinned reusable buffers for common copies.
@@ -228,7 +230,7 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
           batchEargs.push_back(eargs[molId]);
         }
 
-        detail::ETKDGContext context;
+        detail::ETKDGContext context(streamPtr);
         detail::setStreams(context, streamPtr);
         // Treat each conformer attempt as an individual molecule (confsPerMolecule = 1)
         detail::initETKDGContext(batchMolsWithConfs, context, 1);

@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "../hardware_options.h"
+#include "bfgs_minimize.h"
 
 namespace RDKit {
 class ROMol;
@@ -31,11 +32,13 @@ namespace nvMolKit::MMFF {
 //! \param maxIters The maximum number of iterations to perform
 //! \param nonBondedThreshold The radius threshold for non-bonded interactions
 //! \param perfOptions Performance tuning options (threading, batching)
+//! \param backend The BFGS backend to use (BATCHED or PER_MOLECULE)
 //! \return A vector of vectors of energies, where each inner vector contains energies for conformers of one molecule
 std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKit::ROMol*>& mols,
                                                                 int                         maxIters           = 200,
                                                                 double                      nonBondedThreshold = 100.0,
-                                                                const BatchHardwareOptions& perfOptions        = {});
+                                                                const BatchHardwareOptions& perfOptions        = {},
+                                                                BfgsBackend backend = BfgsBackend::BATCHED);
 
 }  // namespace nvMolKit::MMFF
 #endif  // NVMOLKIT_BFGS_MMFF_H

@@ -18,6 +18,7 @@
 
 #include <vector>
 
+#include "bfgs_minimize.h"
 #include "etkdg_impl.h"
 #include "hardware_options.h"
 
@@ -37,7 +38,8 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
                     int                                         maxIterations    = -1,
                     bool                                        debugMode        = false,
                     std::vector<std::vector<int16_t>>*          failures         = nullptr,
-                    const BatchHardwareOptions&                 hardwareOptions  = {});
+                    const BatchHardwareOptions&                 hardwareOptions  = {},
+                    BfgsBackend                                 backend          = BfgsBackend::PER_MOLECULE);
 
 }  // namespace nvMolKit
 

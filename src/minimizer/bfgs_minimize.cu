@@ -18,8 +18,12 @@
 
 #include "bfgs_hessian.h"
 #include "bfgs_minimize.h"
+#include "bfgs_minimize_permol_kernels.h"
 #include "cub_helpers.cuh"
 #include "device_vector.h"
+#include "dist_geom_kernels.h"
+#include "mmff.h"
+#include "mmff_kernels.h"
 #include "nvtx.h"
 
 namespace nvMolKit {
@@ -352,12 +356,27 @@ struct EqualsZeroFunctor {
   __host__ __device__ int operator()(const int16_t& x) const { return x == 0; }
 };
 
-BfgsBatchMinimizer::BfgsBatchMinimizer(const int dataDim, DebugLevel debugLevel, bool scaleGrads, cudaStream_t stream) {
+BfgsBatchMinimizer::BfgsBatchMinimizer(const int    dataDim,
+                                       DebugLevel   debugLevel,
+                                       bool         scaleGrads,
+                                       cudaStream_t stream,
+                                       BfgsBackend  backend)
+    : countFinished_(0, stream) {
   debugLevel_ = debugLevel;
   dataDim_    = dataDim;
   scaleGrads_ = scaleGrads;
   stream_     = stream;
-  loopStatusHost_.resize(1);
+  backend_    = backend;
+  if (backend_ == BfgsBackend::BATCHED) {
+    loopStatusHost_.resize(1);
+  }
+
+  constexpr int NUM_SIZE_BINS = 5;  // 32, 64, 128, 256, 2048
+  // Initialize per-molecule binning structures if using that backend
+  if (backend_ == BfgsBackend::PER_MOLECULE) {
+    perMolBinLists_.resize(NUM_SIZE_BINS);
+    perMolBinListsDevice_.resize(NUM_SIZE_BINS);
+  }
 
   if (stream_ != nullptr) {
     activeSystemIndices_.setStream(stream_);
@@ -386,7 +405,14 @@ BfgsBatchMinimizer::BfgsBatchMinimizer(const int dataDim, DebugLevel debugLevel,
     gradScales_.setStream(stream_);
     inverseHessian_.setStream(stream_);
     hessDGrad_.setStream(stream_);
+    scratchBuffersDevice_.setStream(stream_);
+    for (auto& bin : perMolBinListsDevice_) {
+      bin.setStream(stream_);
+    }
   }
+  if (backend_ == BfgsBackend::PER_MOLECULE)
+    // Allocate device array to hold scratch buffer pointers (5 buffers), after stream is set.
+    scratchBuffersDevice_.resize(5);
 }
 BfgsBatchMinimizer::~BfgsBatchMinimizer() = default;
 
@@ -402,6 +428,10 @@ void BfgsBatchMinimizer::initialize(const std::vector<int>& atomStartsHost,
   energyOutsDevice = energyOuts;
 
   const int numSystems = atomStartsHost.size() - 1;
+  activeHost_.resize(numSystems);
+  convergenceHost_.resize(numSystems);
+  scratchBufferPointersHost_.resize(5);
+
   statuses_.resize(numSystems);
   if (activeThisStage) {
     // Copy activeThisStage to statuses_ with type conversion
@@ -417,11 +447,71 @@ void BfgsBatchMinimizer::initialize(const std::vector<int>& atomStartsHost,
   numSystems_     = numSystems;
   numAtomsTotal_  = atomStartsHost.back();
   hasLargeSystem_ = false;
-  for (int i = 0; i < numSystems_; ++i) {
-    const int numAtoms = atomStartsHost[i + 1] - atomStartsHost[i];
-    if (numAtoms > 256) {
-      hasLargeSystem_ = true;
-      break;
+
+  // Bin molecules by size if using per-molecule backend
+  if (backend_ == BfgsBackend::PER_MOLECULE) {
+    constexpr int NUM_SIZE_BINS            = 5;
+    constexpr int SIZE_BINS[NUM_SIZE_BINS] = {32, 64, 128, 256, 2048};
+
+    // Copy activeThisStage to host for CPU-side filtering (using pinned memory)
+    // Default all active
+    std::fill_n(activeHost_.begin(), numSystems, 1);
+    if (activeThisStage) {
+      cudaCheckError(cudaMemcpyAsync(activeHost_.data(),
+                                     activeThisStage,
+                                     numSystems * sizeof(uint8_t),
+                                     cudaMemcpyDeviceToHost,
+                                     stream_));
+      cudaCheckError(cudaStreamSynchronize(stream_));
+    }
+
+    // Clear previous binning
+    for (int i = 0; i < NUM_SIZE_BINS; ++i) {
+      perMolBinLists_[i].clear();
+    }
+
+    // Bin each active molecule
+    for (int i = 0; i < numSystems_; ++i) {
+      // Skip inactive molecules
+      if (activeHost_[i] == 0) {
+        continue;
+      }
+
+      const int numAtoms = atomStartsHost[i + 1] - atomStartsHost[i];
+
+      // Find appropriate bin
+      int binIdx = -1;
+      for (int j = 0; j < NUM_SIZE_BINS; ++j) {
+        if (numAtoms <= SIZE_BINS[j]) {
+          binIdx = j;
+          break;
+        }
+      }
+
+      if (binIdx >= 0) {
+        perMolBinLists_[binIdx].push_back(i);
+      }
+
+      if (numAtoms > 256) {
+        hasLargeSystem_ = true;
+      }
+    }
+
+    // Transfer bin lists to device
+    for (int i = 0; i < NUM_SIZE_BINS; ++i) {
+      if (!perMolBinLists_[i].empty()) {
+        perMolBinListsDevice_[i].resize(perMolBinLists_[i].size());
+        perMolBinListsDevice_[i].setFromVector(perMolBinLists_[i]);
+      }
+    }
+  } else {
+    // Original logic for batched backend
+    for (int i = 0; i < numSystems_; ++i) {
+      const int numAtoms = atomStartsHost[i + 1] - atomStartsHost[i];
+      if (numAtoms > 256) {
+        hasLargeSystem_ = true;
+        break;
+      }
     }
   }
 
@@ -561,6 +651,60 @@ __global__ void copyAndNegate(const int numElements, const double* src, double* 
   if (idx < numElements) {
     dst[idx] = -src[idx];
   }
+}
+
+struct BinningData {
+  int        binCounts[5];
+  const int* binMolIds[5];
+};
+
+void prepareScratchBuffers(AsyncDeviceVector<double>&  grad,
+                           AsyncDeviceVector<double>&  lineSearchDir,
+                           AsyncDeviceVector<double>&  scratchPositions,
+                           AsyncDeviceVector<double>&  hessDGrad,
+                           AsyncDeviceVector<double>&  scratchGrad,
+                           AsyncDeviceVector<double*>& scratchBuffersDevice,
+                           PinnedHostVector<double*>&  scratchBufferPointersHost,
+                           cudaStream_t                stream) {
+  scratchBufferPointersHost[0] = grad.data();
+  scratchBufferPointersHost[1] = lineSearchDir.data();
+  scratchBufferPointersHost[2] = scratchPositions.data();
+  scratchBufferPointersHost[3] = hessDGrad.data();
+  scratchBufferPointersHost[4] = scratchGrad.data();
+
+  cudaCheckError(cudaMemcpyAsync(scratchBuffersDevice.data(),
+                                 scratchBufferPointersHost.data(),
+                                 5 * sizeof(double*),
+                                 cudaMemcpyHostToDevice,
+                                 stream));
+}
+
+BinningData prepareBinningData(const std::vector<std::vector<int>>&       perMolBinLists,
+                               const std::vector<AsyncDeviceVector<int>>& perMolBinListsDevice) {
+  BinningData binData;
+  for (int i = 0; i < 5; ++i) {
+    binData.binCounts[i] = static_cast<int>(perMolBinLists[i].size());
+    binData.binMolIds[i] = perMolBinListsDevice[i].data();
+  }
+  return binData;
+}
+
+bool checkConvergence(const std::vector<std::vector<int>>& perMolBinLists,
+                      AsyncDeviceVector<int16_t>&          statuses,
+                      PinnedHostVector<int16_t>&           convergenceHost,
+                      const int                            numSystems,
+                      cudaStream_t                         stream) {
+  statuses.copyToHost(convergenceHost.data(), numSystems);
+  cudaCheckError(cudaStreamSynchronize(stream));
+
+  for (int bin = 0; bin < 5; ++bin) {
+    for (const int molIdx : perMolBinLists[bin]) {
+      if (convergenceHost[molIdx] != 0) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 }  // namespace
@@ -861,6 +1005,14 @@ bool BfgsBatchMinimizer::minimize(const int                     numIters,
   const int totalNumAtoms = atomStartsHost.back();
   const int numSystems    = atomStartsHost.size() - 1;
 
+  // Note: PER_MOLECULE backend currently only supports MMFF with specific data structures
+  // For generic functors, must use BATCHED backend
+  if (backend_ == BfgsBackend::PER_MOLECULE) {
+    throw std::runtime_error(
+      "PER_MOLECULE backend not yet integrated with generic functor interface. "
+      "Use minimizeWithMMFF() or switch to BATCHED backend.");
+  }
+
   {
     const ScopedNvtxRange bfgsFullInitialize("BfgsBatchMinimizer::fullInitialize");
     initialize(atomStartsHost, atomStarts.data(), positions.data(), grad.data(), energyOuts.data(), activeThisStage);
@@ -872,6 +1024,7 @@ bool BfgsBatchMinimizer::minimize(const int                     numIters,
     eFunc(nullptr);
     gFunc();
     scaleGrad(/*preLoop=*/true);
+
     collectDebugData();
     // Set up xi as negative grad.
     copyAndInvert(grad, lineSearchDir_);
@@ -883,6 +1036,7 @@ bool BfgsBatchMinimizer::minimize(const int                     numIters,
     {
       const ScopedNvtxRange bfgsLineSearch("BfgsBatchMinimizer::lineSearch");
       doLineSearchSetup(energyOuts.data());
+
       int              lineSearchIter         = 0;
       constexpr double MAX_ITER_LINEAR_SEARCH = 1000;
       while (lineSearchIter < MAX_ITER_LINEAR_SEARCH && lineSearchCountFinished() < numSystems) {
@@ -896,13 +1050,11 @@ bool BfgsBatchMinimizer::minimize(const int                     numIters,
         energyBuffer.zero();
         energyOuts.zero();
         eFunc(scratchPositions_.data());
-
         doLineSearchPostEnergy(lineSearchIter);
         lineSearchIter++;
       }
       doLineSearchPostLoop();
     }
-
     setDirection();
 
     {
@@ -920,6 +1072,203 @@ bool BfgsBatchMinimizer::minimize(const int                     numIters,
   }
 
   return compactAndCountConverged() == numSystems ? 0 : 1;
+}
+
+bool BfgsBatchMinimizer::minimizeWithMMFF(const int                                 numIters,
+                                          const double                              gradTol,
+                                          const std::vector<int>&                   atomStartsHost,
+                                          const AsyncDeviceVector<int>&             atomStarts,
+                                          AsyncDeviceVector<double>&                positions,
+                                          AsyncDeviceVector<double>&                grad,
+                                          AsyncDeviceVector<double>&                energyOuts,
+                                          AsyncDeviceVector<double>&                energyBuffer,
+                                          const MMFF::EnergyForceContribsDevicePtr& terms,
+                                          const MMFF::BatchedIndicesDevicePtr&      systemIndices,
+                                          const uint8_t*                            activeThisStage) {
+  const int numSystems = atomStartsHost.size() - 1;
+
+  if (backend_ != BfgsBackend::PER_MOLECULE) {
+    throw std::runtime_error(
+      "minimizeWithMMFF currently only supports PER_MOLECULE backend. "
+      "Use minimize() with MMFF functors for BATCHED backend.");
+  }
+
+  // Initialize buffers and binning if needed
+  initialize(atomStartsHost, atomStarts.data(), positions.data(), grad.data(), energyOuts.data(), activeThisStage);
+
+  // Initialize Hessian to identity
+  setHessianToIdentity();
+
+  const ScopedNvtxRange bfgsPerMolecule("BfgsBatchMinimizer::perMoleculeMinimize");
+
+  prepareScratchBuffers(grad,
+                        lineSearchDir_,
+                        scratchPositions_,
+                        hessDGrad_,
+                        scratchGrad_,
+                        scratchBuffersDevice_,
+                        scratchBufferPointersHost_,
+                        stream_);
+
+  BinningData binData = prepareBinningData(perMolBinLists_, perMolBinListsDevice_);
+
+  cudaError_t err = launchBfgsMinimizePerMolKernel(binData.binCounts,
+                                                   binData.binMolIds,
+                                                   atomStarts.data(),
+                                                   hessianStarts_.data(),
+                                                   numIters,
+                                                   gradTol,
+                                                   scaleGrads_,
+                                                   terms,
+                                                   systemIndices,
+                                                   positions.data(),
+                                                   grad.data(),
+                                                   inverseHessian_.data(),
+                                                   scratchBuffersDevice_.data(),
+                                                   energyOuts.data(),
+                                                   statuses_.data(),
+                                                   stream_);
+
+  if (err != cudaSuccess) {
+    throw std::runtime_error(std::string("Per-molecule BFGS kernel failed: ") + cudaGetErrorString(err));
+  }
+
+  return checkConvergence(perMolBinLists_, statuses_, convergenceHost_, numSystems, stream_);
+}
+
+bool BfgsBatchMinimizer::minimizeWithETK(const int                                       numIters,
+                                         const double                                    gradTol,
+                                         const std::vector<int>&                         atomStartsHost,
+                                         const AsyncDeviceVector<int>&                   atomStarts,
+                                         AsyncDeviceVector<double>&                      positions,
+                                         AsyncDeviceVector<double>&                      grad,
+                                         AsyncDeviceVector<double>&                      energyOuts,
+                                         AsyncDeviceVector<double>&                      energyBuffer,
+                                         const DistGeom::Energy3DForceContribsDevicePtr& terms,
+                                         const DistGeom::BatchedIndices3DDevicePtr&      systemIndices,
+                                         const uint8_t*                                  activeThisStage) {
+  const int numSystems = atomStartsHost.size() - 1;
+
+  if (backend_ != BfgsBackend::PER_MOLECULE) {
+    throw std::runtime_error(
+      "minimizeWithETK currently only supports PER_MOLECULE backend. "
+      "Use minimize() with ETK functors for BATCHED backend.");
+  }
+
+  // Initialize buffers and binning if needed
+  initialize(atomStartsHost, atomStarts.data(), positions.data(), grad.data(), energyOuts.data(), activeThisStage);
+
+  // Initialize Hessian to identity
+  setHessianToIdentity();
+
+  // Use per-molecule kernel with ETK specialization
+  const ScopedNvtxRange bfgsPerMoleculeETK("BfgsBatchMinimizer::perMoleculeMinimizeETK");
+
+  prepareScratchBuffers(grad,
+                        lineSearchDir_,
+                        scratchPositions_,
+                        hessDGrad_,
+                        scratchGrad_,
+                        scratchBuffersDevice_,
+                        scratchBufferPointersHost_,
+                        stream_);
+
+  BinningData binData = prepareBinningData(perMolBinLists_, perMolBinListsDevice_);
+
+  cudaError_t err = launchBfgsMinimizePerMolKernelETK(binData.binCounts,
+                                                      binData.binMolIds,
+                                                      atomStarts.data(),
+                                                      hessianStarts_.data(),
+                                                      numIters,
+                                                      gradTol,
+                                                      scaleGrads_,
+                                                      terms,
+                                                      systemIndices,
+                                                      positions.data(),
+                                                      grad.data(),
+                                                      inverseHessian_.data(),
+                                                      scratchBuffersDevice_.data(),
+                                                      energyOuts.data(),
+                                                      statuses_.data(),
+                                                      stream_);
+
+  if (err != cudaSuccess) {
+    throw std::runtime_error(std::string("Per-molecule BFGS ETK kernel failed: ") + cudaGetErrorString(err));
+  }
+
+  return checkConvergence(perMolBinLists_, statuses_, convergenceHost_, numSystems, stream_);
+}
+
+bool BfgsBatchMinimizer::minimizeWithDG(const int                                     numIters,
+                                        const double                                  gradTol,
+                                        const std::vector<int>&                       atomStartsHost,
+                                        const AsyncDeviceVector<int>&                 atomStarts,
+                                        AsyncDeviceVector<double>&                    positions,
+                                        AsyncDeviceVector<double>&                    grad,
+                                        AsyncDeviceVector<double>&                    energyOuts,
+                                        AsyncDeviceVector<double>&                    energyBuffer,
+                                        const DistGeom::EnergyForceContribsDevicePtr& terms,
+                                        const DistGeom::BatchedIndicesDevicePtr&      systemIndices,
+                                        double                                        chiralWeight,
+                                        double                                        fourthDimWeight,
+                                        const uint8_t*                                activeThisStage) {
+  const int numSystems = atomStartsHost.size() - 1;
+
+  if (backend_ != BfgsBackend::PER_MOLECULE) {
+    throw std::runtime_error(
+      "minimizeWithDG currently only supports PER_MOLECULE backend. "
+      "Use minimize() with DG functors for BATCHED backend.");
+  }
+
+  // Ensure minimizer was constructed with dataDim=4 for DG
+  if (dataDim_ != 4) {
+    throw std::runtime_error("minimizeWithDG requires BfgsBatchMinimizer to be constructed with dataDim=4");
+  }
+
+  // Initialize buffers and binning if needed
+  initialize(atomStartsHost, atomStarts.data(), positions.data(), grad.data(), energyOuts.data(), activeThisStage);
+
+  // Initialize Hessian to identity
+  setHessianToIdentity();
+
+  // Use per-molecule kernel with DG specialization
+  const ScopedNvtxRange bfgsPerMoleculeDG("BfgsBatchMinimizer::perMoleculeMinimizeDG");
+
+  prepareScratchBuffers(grad,
+                        lineSearchDir_,
+                        scratchPositions_,
+                        hessDGrad_,
+                        scratchGrad_,
+                        scratchBuffersDevice_,
+                        scratchBufferPointersHost_,
+                        stream_);
+
+  BinningData binData = prepareBinningData(perMolBinLists_, perMolBinListsDevice_);
+
+  cudaError_t err = launchBfgsMinimizePerMolKernelDG(binData.binCounts,
+                                                     binData.binMolIds,
+                                                     atomStarts.data(),
+                                                     hessianStarts_.data(),
+                                                     numIters,
+                                                     gradTol,
+                                                     scaleGrads_,
+                                                     terms,
+                                                     systemIndices,
+                                                     positions.data(),
+                                                     grad.data(),
+                                                     inverseHessian_.data(),
+                                                     scratchBuffersDevice_.data(),
+                                                     energyOuts.data(),
+                                                     chiralWeight,
+                                                     fourthDimWeight,
+                                                     statuses_.data(),
+                                                     stream_);
+
+  if (err != cudaSuccess) {
+    throw std::runtime_error(std::string("Per-molecule BFGS DG kernel failed: ") + cudaGetErrorString(err));
+  }
+
+  return checkConvergence(perMolBinLists_, statuses_, convergenceHost_, numSystems, stream_);
 }
 
 void copyAndInvert(const AsyncDeviceVector<double>& src, AsyncDeviceVector<double>& dst) {

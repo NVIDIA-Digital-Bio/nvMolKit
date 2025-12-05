@@ -245,6 +245,135 @@ cudaError_t launchReduceEnergiesKernel(int            numBlocks,
                                        double*        outs,
                                        const uint8_t* activeThisStage = nullptr,
                                        cudaStream_t   stream          = 0);
+
+struct DistViolationContribTermsDevicePtr {
+  const int*    idx1;
+  const int*    idx2;
+  const double* ub2;
+  const double* lb2;
+  const double* weight;
+};
+
+struct ChiralViolationContribTermsDevicePtr {
+  const int*    idx1;
+  const int*    idx2;
+  const int*    idx3;
+  const int*    idx4;
+  const double* volUpper;
+  const double* volLower;
+};
+
+struct FourthDimContribTermsDevicePtr {
+  const int* idx;
+};
+
+struct EnergyForceContribsDevicePtr {
+  DistViolationContribTermsDevicePtr   distTerms;
+  ChiralViolationContribTermsDevicePtr chiralTerms;
+  FourthDimContribTermsDevicePtr       fourthTerms;
+};
+
+struct BatchedIndicesDevicePtr {
+  const int* atomStarts;
+  const int* distTermStarts;
+  const int* chiralTermStarts;
+  const int* fourthTermStarts;
+};
+
+struct TorsionAngleContribTermsDevicePtr {
+  const int*    idx1;
+  const int*    idx2;
+  const int*    idx3;
+  const int*    idx4;
+  const double* forceConstants;
+  const int*    signs;
+};
+
+struct InversionContribTermsDevicePtr {
+  const int*     idx1;
+  const int*     idx2;
+  const int*     idx3;
+  const int*     idx4;
+  const int*     at2AtomicNum;
+  const uint8_t* isCBoundToO;
+  const double*  C0;
+  const double*  C1;
+  const double*  C2;
+  const double*  forceConstant;
+};
+
+struct DistanceConstraintContribTermsDevicePtr {
+  const int*    idx1;
+  const int*    idx2;
+  const double* minLen;
+  const double* maxLen;
+  const double* forceConstant;
+};
+
+struct AngleConstraintContribTermsDevicePtr {
+  const int*    idx1;
+  const int*    idx2;
+  const int*    idx3;
+  const double* minAngle;
+  const double* maxAngle;
+};
+
+struct Energy3DForceContribsDevicePtr {
+  TorsionAngleContribTermsDevicePtr       experimentalTorsionTerms;
+  InversionContribTermsDevicePtr          improperTorsionTerms;
+  DistanceConstraintContribTermsDevicePtr dist12Terms;
+  DistanceConstraintContribTermsDevicePtr dist13Terms;
+  AngleConstraintContribTermsDevicePtr    angle13Terms;
+  DistanceConstraintContribTermsDevicePtr longRangeDistTerms;
+};
+
+struct BatchedIndices3DDevicePtr {
+  const int* atomStarts;
+  const int* experimentalTorsionTermStarts;
+  const int* improperTorsionTermStarts;
+  const int* dist12TermStarts;
+  const int* dist13TermStarts;
+  const int* angle13TermStarts;
+  const int* longRangeDistTermStarts;
+};
+
+cudaError_t launchBlockPerMolEnergyKernel(int                                 numMols,
+                                          const EnergyForceContribsDevicePtr& terms,
+                                          const BatchedIndicesDevicePtr&      systemIndices,
+                                          const double*                       coords,
+                                          double*                             energies,
+                                          int                                 dimension,
+                                          double                              chiralWeight,
+                                          double                              fourthDimWeight,
+                                          const uint8_t*                      activeThisStage = nullptr,
+                                          cudaStream_t                        stream          = 0);
+
+cudaError_t launchBlockPerMolGradKernel(int                                 numMols,
+                                        const EnergyForceContribsDevicePtr& terms,
+                                        const BatchedIndicesDevicePtr&      systemIndices,
+                                        const double*                       coords,
+                                        double*                             grad,
+                                        int                                 dimension,
+                                        double                              chiralWeight,
+                                        double                              fourthDimWeight,
+                                        const uint8_t*                      activeThisStage = nullptr,
+                                        cudaStream_t                        stream          = 0);
+
+cudaError_t launchBlockPerMolEnergyKernelETK(int                                   numMols,
+                                             const Energy3DForceContribsDevicePtr& terms,
+                                             const BatchedIndices3DDevicePtr&      systemIndices,
+                                             const double*                         coords,
+                                             double*                               energies,
+                                             const uint8_t*                        activeThisStage = nullptr,
+                                             cudaStream_t                          stream          = 0);
+
+cudaError_t launchBlockPerMolGradKernelETK(int                                   numMols,
+                                           const Energy3DForceContribsDevicePtr& terms,
+                                           const BatchedIndices3DDevicePtr&      systemIndices,
+                                           const double*                         coords,
+                                           double*                               grad,
+                                           const uint8_t*                        activeThisStage = nullptr,
+                                           cudaStream_t                          stream          = 0);
 }  // namespace DistGeom
 }  // namespace nvMolKit
 
