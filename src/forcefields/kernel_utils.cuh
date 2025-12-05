@@ -25,6 +25,12 @@
 namespace nvMolKit {
 namespace FFKernelUtils {
 
+//! Broadcasts the value from lane 0 of the warp to all lanes in the warp.
+//! Helps the compiler understand that all lanes will have the same value after this call.
+__device__ __forceinline__ int mark_warp_uniform(const int input) {
+  return __shfl_sync(0xffffffff, input, 0);
+}
+
 __device__ __forceinline__ double distanceSquared(const double* pos,
                                                   const int     idx1,
                                                   const int     idx2,
