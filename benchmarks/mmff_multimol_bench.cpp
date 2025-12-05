@@ -450,16 +450,15 @@ int main(int argc, char* argv[]) {
     nvmolkitPtrs.push_back(m.get());
 
   // Run benchmarks
-  auto rdkitCalculatedEnergiesPre  = calculateRDKitEnergies(nvmolkitPtrs);
-  auto nvmolkitRes                 = runNvMolKit(nvmolkitPtrs, maxIters, batchSize, batchesPerGpu, numGpus, backend);
-  auto rdkitCalculatedEnergiesPost = calculateRDKitEnergies(nvmolkitPtrs);
+  auto nvmolkitRes = runNvMolKit(nvmolkitPtrs, maxIters, batchSize, batchesPerGpu, numGpus, backend);
   std::vector<std::vector<double>> rdkitRes;
   if (doRdkit) {
     rdkitRes = runRDKit(rdkitPtrs, maxIters, rdkitThreadsResolved);
   }
-  auto rdkitAfter = calculateRDKitEnergies(rdkitPtrs);
 
   if (doEnergyCheck && doRdkit) {
+    auto rdkitAfter = calculateRDKitEnergies(rdkitPtrs);
+
     std::vector<double> diffs;
     int                 totalDiffs = 0;
     int                 totalConfs = 0;

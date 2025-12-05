@@ -25,8 +25,9 @@
 namespace nvMolKit {
 
 /// Launch per-molecule BFGS minimization kernel - MMFF specialization
-cudaError_t launchBfgsMinimizePerMolKernel(const int*                                binCounts,
-                                           const int**                               binMolIds,
+cudaError_t launchBfgsMinimizePerMolKernel(int                                       numMols,
+                                           const int*                                molIds,
+                                           int                                       maxAtoms,
                                            const int*                                atomStarts,
                                            const int*                                hessianStarts,
                                            int                                       numIters,
@@ -43,8 +44,9 @@ cudaError_t launchBfgsMinimizePerMolKernel(const int*                           
                                            cudaStream_t                              stream   = nullptr);
 
 /// Launch per-molecule BFGS minimization kernel - ETK specialization
-cudaError_t launchBfgsMinimizePerMolKernelETK(const int*                                      binCounts,
-                                              const int**                                     binMolIds,
+cudaError_t launchBfgsMinimizePerMolKernelETK(int                                             numMols,
+                                              const int*                                      molIds,
+                                              int                                             maxAtoms,
                                               const int*                                      atomStarts,
                                               const int*                                      hessianStarts,
                                               int                                             numIters,
@@ -61,8 +63,9 @@ cudaError_t launchBfgsMinimizePerMolKernelETK(const int*                        
                                               cudaStream_t                                    stream   = nullptr);
 
 /// Launch per-molecule BFGS minimization kernel - DG  specialization
-cudaError_t launchBfgsMinimizePerMolKernelDG(const int*                                    binCounts,
-                                             const int**                                   binMolIds,
+cudaError_t launchBfgsMinimizePerMolKernelDG(int                                           numMols,
+                                             const int*                                    molIds,
+                                             int                                           maxAtoms,
                                              const int*                                    atomStarts,
                                              const int*                                    hessianStarts,
                                              int                                           numIters,

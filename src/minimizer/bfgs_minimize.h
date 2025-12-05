@@ -210,9 +210,10 @@ struct BfgsBatchMinimizer {
   std::vector<std::vector<int16_t>> stepwiseStatuses;
   std::vector<std::vector<double>>  stepwiseEnergies;
 
-  // Per-molecule kernel binning data (used when backend_ == PER_MOLECULE)
-  std::vector<std::vector<int>>       perMolBinLists_;        // Molecule IDs for each bin
-  std::vector<AsyncDeviceVector<int>> perMolBinListsDevice_;  // Device copies of bin lists
+  // Per-molecule kernel data (used when backend_ == PER_MOLECULE)
+  int                    maxAtomsInBatch_ = 0;  // Largest molecule in batch (for kernel dispatch)
+  std::vector<int>       activeMolIds_;         // Active molecule IDs
+  AsyncDeviceVector<int> activeMolIdsDevice_;   // Device copy of active molecule IDs
 
   // Device-side array of scratch buffer pointers (used by per-molecule kernel)
   AsyncDeviceVector<double*> scratchBuffersDevice_;
