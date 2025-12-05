@@ -41,7 +41,7 @@ void butinaGpu(cuda::std::span<const double> distanceMatrix,
                cuda::std::span<int>          clusters,
                double                        cutoff,
                bool                          enforceStrictIndexing = true,
-               cudaStream_t                  stream = nullptr);
+               cudaStream_t                  stream                = nullptr);
 
 /**
  * @brief Perform Butina clustering on a precomputed hit matrix.
@@ -67,7 +67,7 @@ void butinaGpu(cuda::std::span<const double> distanceMatrix,
 void butinaGpu(cuda::std::span<const uint8_t> hitMatrix,
                cuda::std::span<int>           clusters,
                bool                           enforceStrictIndexing = true,
-               cudaStream_t                   stream = nullptr);
+               cudaStream_t                   stream                = nullptr);
 }  // namespace nvMolKit
 
 #endif  // NVMOLKIT_BUTINA_H

@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include <cooperative_groups.h>
+
 #include <cub/cub.cuh>
 
 #include "butina.h"
@@ -25,9 +26,9 @@
  * TODO: Future optimizations
  * - Keep a live list of active indices and only dispatch counts for those.
  * - Parallelize singlet/doublet assignment (low priority since these only run once)
- * - Use neighborlists instead of hit matrix. This could be implemented in similarity code too.
  * - Use ArgMax from CUB instead of custom kernel. CUB API changed somewhere between 12.5 and 12.9, so we'd need a
  * compatibility layer.
+ * - Use dynamically pruned neighborlist for smaller cluster path, instead of recomputing each loop.
  * - Use CUDA Graphs for inner loop and exit criteria.
  */
 namespace nvMolKit {
@@ -37,14 +38,14 @@ constexpr int blockSizeCount               = 256;
 constexpr int kAssignedAsSingletonSentinel = std::numeric_limits<int>::max() - 1;
 constexpr int kMinLoopSizeForAssignment    = 3;
 
-constexpr int kNeighborlistMaxSize = 8;
+constexpr int kNeighborlistMaxSize            = 8;
 constexpr int kClusterSizeWithMaxNeighborlist = kNeighborlistMaxSize + 1;
 
-__device__ __forceinline__ void sumCountsAndAssignSmallClusters(const int tid,
-                                                     const cuda::std::span<int>           clusters,
-                                                     const int                           pointIdx,
-                                                     const cuda::std::span<int>           clusterSizes,
-                                                                const int                                 localCount) {
+__device__ __forceinline__ void sumCountsAndAssignSmallClusters(const int                  tid,
+                                                                const cuda::std::span<int> clusters,
+                                                                const int                  pointIdx,
+                                                                const cuda::std::span<int> clusterSizes,
+                                                                const int                  localCount) {
   __shared__ cub::BlockReduce<int, blockSizeCount>::TempStorage tempStorage;
   const int totalCount = cub::BlockReduce<int, blockSizeCount>(tempStorage).Sum(localCount);
   if (tid == 0) {
@@ -91,9 +92,9 @@ __global__ void butinaKernelCountClusterSize(const cuda::std::span<const uint8_t
 //! IMPORTANT: This assumes that the maximum cluster size is small enough to fit in the neighborlist, so should only
 //! be called when that is known to be true.
 __global__ void butinaKernelCountClusterSizeWithNeighborlist(const cuda::std::span<const uint8_t> hitMatrix,
-                                             const cuda::std::span<int>           clusters,
-                                             const cuda::std::span<int>           clusterSizes,
-                                             const cuda::std::span<int>     neighborList) {
+                                                             const cuda::std::span<int>           clusters,
+                                                             const cuda::std::span<int>           clusterSizes,
+                                                             const cuda::std::span<int>           neighborList) {
   const auto tid       = static_cast<int>(threadIdx.x);
   const auto pointIdx  = static_cast<int>(blockIdx.x);
   const auto numPoints = static_cast<int>(clusters.size());
@@ -111,20 +112,20 @@ __global__ void butinaKernelCountClusterSizeWithNeighborlist(const cuda::std::sp
 
   const cuda::std::span<const uint8_t> hits       = hitMatrix.subspan(pointIdx * numPoints, numPoints);
   int                                  localCount = 0;
-  __syncthreads(); // for neighborlistIndex init
+  __syncthreads();  // for neighborlistIndex init
   for (int i = tid; i < numPoints; i += blockSizeCount) {
     if (hits[i]) {
       const int cluster = clusters[i];
       if (cluster < 0) {
         localCount++;
-        const int index = atomicAdd(&neighborlistIndex, 1);
+        const int index           = atomicAdd(&neighborlistIndex, 1);
         sharedNeighborlist[index] = i;
       }
     }
   }
 
   // Single coalesced write of neighborlist
-  __syncthreads(); // for sharedNeighborlist final value
+  __syncthreads();  // for sharedNeighborlist final value
   if (tid < kNeighborlistMaxSize) {
     neighborList[pointIdx * kNeighborlistMaxSize + tid] = (tid < neighborlistIndex) ? sharedNeighborlist[tid] : -1;
   }
@@ -134,32 +135,31 @@ __global__ void butinaKernelCountClusterSizeWithNeighborlist(const cuda::std::sp
 
 namespace cg = cooperative_groups;
 
-constexpr int kSubTileSize = 8;
-constexpr int blockSizeAssign = 128;
+constexpr int kSubTileSize         = 8;
+constexpr int blockSizeAssign      = 128;
 constexpr int kTilesPerBlockAssign = blockSizeAssign / kSubTileSize;
 static_assert(kNeighborlistMaxSize % kSubTileSize == 0, "Neighborlist max size must be multiple of sub-tile size");
 
 template <bool StrictIndexing>
-__global__ void attemptAssignClustersFromNeighborlist(
-                                             const cuda::std::span<int>           clusters,
-                                             const cuda::std::span<const int>     clusterSizes,
-                                             const cuda::std::span<const int>     neighborList,
-                                             const int*                           maxClusterSize,
-                                             int*                                 nextClusterIdx,
-                                             int*                                 didAssignFlag) {
-  // Reset flag unconditionally at start of kernel, before any early returns
+__global__ void attemptAssignClustersFromNeighborlist(const cuda::std::span<int>       clusters,
+                                                      const cuda::std::span<const int> clusterSizes,
+                                                      const cuda::std::span<const int> neighborList,
+                                                      const int*                       maxClusterSize,
+                                                      int*                             nextClusterIdx,
+                                                      int*                             didAssignFlag) {
+  // Reset flag unconditionally at start of kernel, before any early returns. We'll mark assigned
+  // if this kernel succeeds so that the fallback option exits early later in the loop.
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     *didAssignFlag = 0;
-    // printf("  Attempting to assign clusters from neighborlist...\n");
   }
-  
-  const auto tile8 = cg::tiled_partition<kSubTileSize>(cg::this_thread_block());
-  const int rankInBlock = tile8.meta_group_rank();
-  const int tid = tile8.thread_rank();
+
+  const auto     tile8       = cg::tiled_partition<kSubTileSize>(cg::this_thread_block());
+  const int      rankInBlock = tile8.meta_group_rank();
+  const int      tid         = tile8.thread_rank();
   __shared__ int candidateNeighborsBlock[kTilesPerBlockAssign][kNeighborlistMaxSize];
   __shared__ int foundIssueBlock[kTilesPerBlockAssign];
 
-  int* sharedFoundIssue = &foundIssueBlock[rankInBlock];
+  int* sharedFoundIssue         = &foundIssueBlock[rankInBlock];
   int* sharedCandidateNeighbors = &candidateNeighborsBlock[rankInBlock][0];
 
   if (tid == 0) {
@@ -168,7 +168,7 @@ __global__ void attemptAssignClustersFromNeighborlist(
 
   // For global tile index across the grid:
   constexpr int tilesPerBlock = blockSizeAssign / kSubTileSize;
-  const int pointIdx = blockIdx.x * tilesPerBlock + rankInBlock;
+  const int     pointIdx      = blockIdx.x * tilesPerBlock + rankInBlock;
   if (pointIdx >= clusters.size()) {
     return;
   }
@@ -188,44 +188,27 @@ __global__ void attemptAssignClustersFromNeighborlist(
   sharedCandidateNeighbors[tid] = neighborList[pointIdx * kNeighborlistMaxSize + tid];
   tile8.sync();
 
-  // if (clusterSize == 3 && tid == 0) {
-  //   printf("    Size 3 candidate cluster at point %d with neighbors %d, %d, %d\n",
-  //          pointIdx,
-  //          sharedCandidateNeighbors[0],
-  //          sharedCandidateNeighbors[1],
-  //          sharedCandidateNeighbors[2]);
-  // }
-
-
   for (int i = 0; i < clusterSize; i++) {
-    const int candidateNeighbor = sharedCandidateNeighbors[i];
+    const int candidateNeighbor            = sharedCandidateNeighbors[i];
     const int candidateNeighborClusterSize = clusterSizes[candidateNeighbor];
-    
+
     // If neighbor has larger cluster, they should be processed instead
     if (candidateNeighborClusterSize > clusterSize) {
-      // if (tid == 0) {
-      //   printf("    Point %d: neighbor %d has larger cluster size %d > %d\n",
-      //          pointIdx, candidateNeighbor, candidateNeighborClusterSize, clusterSize);
-      // }
       return;
     }
-    
+
     // If neighbor has SAME cluster size and lower index, defer to them for consistency
     if (candidateNeighborClusterSize == clusterSize && candidateNeighbor < pointIdx) {
-      if (tid == 0) {
-        // printf("    Point %d: neighbor %d has same size %d and lower index, deferring\n",
-        //        pointIdx, candidateNeighbor, clusterSize);
-      }
       return;
     }
-    
+
     // If neighbor has smaller cluster size, we're the better centroid - continue
 
-    // Now we verify that all of these neighbors have the same neighbors we do. Each thread checks 1 candidate at a time.
-    // This will rule out our neighbors being connected to a larger cluster.
+    // Now we verify that all of these neighbors have the same neighbors we do. Each thread checks 1 candidate at a
+    // time. This will rule out our neighbors being connected to a larger cluster.
     for (int oidx = tid; oidx < candidateNeighborClusterSize; oidx += kSubTileSize) {
       const int otherNeighbor = neighborList[candidateNeighbor * kNeighborlistMaxSize + oidx];
-      bool      foundMatch   = false;
+      bool      foundMatch    = false;
       // One of the neighbors will be ourselves, by definition.
       if (otherNeighbor == pointIdx) {
         foundMatch = true;
@@ -242,14 +225,10 @@ __global__ void attemptAssignClustersFromNeighborlist(
         if (clusterSizes[otherNeighbor] >= clusterSize) {
           atomicExch(sharedFoundIssue, 1);
         }
-
       }
     }
     tile8.sync();
     if (*sharedFoundIssue) {
-      if (tid == 0) {
-        // printf("    Point %d: neighborlist verification failed for neighbor %d\n", pointIdx, candidateNeighbor);
-      }
       return;
     }
   }
@@ -257,8 +236,7 @@ __global__ void attemptAssignClustersFromNeighborlist(
   // At this point, we have a valid cluster. Assign it.
   int clusterVal;
   if (tid == 0) {
-    clusterVal = atomicAdd(nextClusterIdx, 1);
-    // printf("  Assigning cluster %d of size %d via attempt\n", clusterVal, clusterSize);
+    clusterVal         = atomicAdd(nextClusterIdx, 1);
     clusters[pointIdx] = clusterVal;
     atomicExch(didAssignFlag, 1);  // Signal that we assigned something
   }
@@ -268,7 +246,6 @@ __global__ void attemptAssignClustersFromNeighborlist(
     const int assignIdx = sharedCandidateNeighbors[tid];
     clusters[assignIdx] = clusterVal;
   }
-
 }
 
 //! Kernel to write the cluster assignment for the largest cluster found
@@ -278,14 +255,10 @@ __global__ void butinaWriteClusterValue(const cuda::std::span<const uint8_t> hit
                                         const int*                           clusterIdx,
                                         const int*                           maxClusterSize,
                                         int*                                 didAssignFlag) {
-  if (didAssignFlag && *didAssignFlag) {
-    if (threadIdx.x == 0 && blockIdx.x == 0) {
-      // printf("  Skipping write cluster value\n");
-    }
-    return;  // attemptAssign already handled it
+  if (didAssignFlag != nullptr && *didAssignFlag) {
+    return;  // attemptAssign succeeded, do not fallback to legacy assignment this loop round
   }
 
-  
   const auto numPoints = static_cast<int>(clusters.size());
   const auto tid       = static_cast<int>(threadIdx.x + (blockIdx.x * blockDim.x));
   const int  clusterSz = *maxClusterSize;
@@ -296,17 +269,12 @@ __global__ void butinaWriteClusterValue(const cuda::std::span<const uint8_t> hit
   if (pointIdx < 0) {
     return;
   }
-  const int clusterVal = *clusterIdx;
-  if (threadIdx.x == 0 && blockIdx.x == 0) {
-    // printf("  Assigning cluster %d of size %d via largest write\n", clusterVal, clusterSz);
-  }
-  const cuda::std::span<const uint8_t> hits = hitMatrix.subspan(pointIdx * numPoints, numPoints);
+  const int                            clusterVal = *clusterIdx;
+  const cuda::std::span<const uint8_t> hits       = hitMatrix.subspan(pointIdx * numPoints, numPoints);
   if (tid < numPoints) {
     if (hits[tid]) {
       if (clusters[tid] < 0) {
         clusters[tid] = clusterVal;
-        // DON'T set didAssignFlag here - only attemptAssign should set it
-        // because attemptAssign does both assign+bump, while this only assigns
       }
     }
   }
@@ -315,16 +283,12 @@ __global__ void butinaWriteClusterValue(const cuda::std::span<const uint8_t> hit
 //! Kernel to bump the cluster index if the last cluster assigned was large enough. The edge case is for if we hit the <
 //! 3 criteria.
 __global__ void bumpClusterIdxKernel(int* clusterIdx, const int* lastClusterSize, const int* didAssignFlag) {
-  if (didAssignFlag && *didAssignFlag) {
-    if (threadIdx.x == 0 && blockIdx.x == 0) {
-      // printf("  Skipping bump cluster idx\n");
-    }
-    return;  // attemptAssign already incremented clusterIdx
+  if (didAssignFlag != nullptr && *didAssignFlag) {
+    return;  // attemptAssign succeeded, do not fallback to legacy assignment this loop round
   }
-  
+
   if (const auto tid = static_cast<int>(threadIdx.x); tid == 0) {
     if (*lastClusterSize >= kMinLoopSizeForAssignment) {
-      // ClusterIdx is size 1.
       clusterIdx[0] += 1;
     }
   }
@@ -364,7 +328,6 @@ __global__ void assignDoubletIdsKernel(const cuda::std::span<int> clusters, int*
       int otherIdx       = kAssignedAsSingletonSentinel - 1 - clustId;
       clusters[i]        = clusterIdx;
       clusters[otherIdx] = clusterIdx;
-      // printf("  Assigning doublet cluster %d to points %d and %d\n", clusterIdx, i, otherIdx);
       clusterIdx++;
     }
   }
@@ -378,7 +341,6 @@ __global__ void assignSingletonIdsKernel(const cuda::std::span<int> clusters, co
     const int clustId = clusters[i];
     if (clustId < 0 || clustId == kAssignedAsSingletonSentinel) {
       clusters[i] = clusterIdx;
-      // printf("  Assigning singleton cluster %d to point %d\n", clusterIdx, i);
       clusterIdx++;
     }
   }
@@ -449,14 +411,13 @@ void innerButinaLoop(const int                            numPoints,
   cudaCheckError(cudaGetLastError());
   lastArgMax<<<1, argMaxBlockSize, 0, stream>>>(clusterSizesSpan, maxValue.data(), maxIndex.data());
   cudaCheckError(cudaGetLastError());
-  
-  // Large cluster loop doesn't use attemptAssign - pass nullptr for flag
+
   butinaWriteClusterValue<<<numBlocksFlat, blockSizeCount, 0, stream>>>(hitMatrix,
                                                                         clusters,
                                                                         maxIndex.data(),
                                                                         clusterIdx.data(),
                                                                         maxValue.data(),
-                                                                        nullptr);
+                                                                        /*didAssignFlag=*/nullptr);
   cudaCheckError(cudaGetLastError());
   bumpClusterIdxKernel<<<1, 1, 0, stream>>>(clusterIdx.data(), maxValue.data(), nullptr);
   cudaCheckError(cudaGetLastError());
@@ -472,42 +433,46 @@ void innerButinaLoopNeighborlist(const int                            numPoints,
                                  const AsyncDevicePtr<int>&           maxValue,
                                  const AsyncDevicePtr<int>&           clusterIdx,
                                  PinnedHostVector<int>&               maxCluster,
-                                 const cuda::std::span<int>          neighborList,
+                                 const cuda::std::span<int>           neighborList,
                                  const AsyncDevicePtr<int>&           didAssignFlag,
                                  const bool                           enforceStrictIndexing,
                                  cudaStream_t                         stream) {
-  butinaKernelCountClusterSizeWithNeighborlist<<<numPoints, blockSizeCount, 0, stream>>>(hitMatrix, clusters, clusterSizesSpan, neighborList);
+  butinaKernelCountClusterSizeWithNeighborlist<<<numPoints, blockSizeCount, 0, stream>>>(hitMatrix,
+                                                                                         clusters,
+                                                                                         clusterSizesSpan,
+                                                                                         neighborList);
   cudaCheckError(cudaGetLastError());
   lastArgMax<<<1, argMaxBlockSize, 0, stream>>>(clusterSizesSpan, maxValue.data(), maxIndex.data());
   cudaCheckError(cudaGetLastError());
-  
+
   // Check max cluster size AFTER counting to avoid processing size < 3
+  // TODO: This is a second sync in the loop and we can probably handle this better.
   cudaCheckError(cudaMemcpyAsync(maxCluster.data(), maxValue.data(), sizeof(int), cudaMemcpyDefault, stream));
   cudaStreamSynchronize(stream);
-  
+
   if (maxCluster[0] < kMinLoopSizeForAssignment) {
     return;
   }
-  
+
   const int numBlocksAssign = (numPoints + kTilesPerBlockAssign - 1) / kTilesPerBlockAssign;
   if (enforceStrictIndexing) {
     attemptAssignClustersFromNeighborlist<true><<<numBlocksAssign, blockSizeAssign, 0, stream>>>(clusters,
-                                                                                   clusterSizesSpan,
-                                                                                   neighborList,
-                                                                                   maxValue.data(),
-                                                                                   clusterIdx.data(),
-                                                                                   didAssignFlag.data());
+                                                                                                 clusterSizesSpan,
+                                                                                                 neighborList,
+                                                                                                 maxValue.data(),
+                                                                                                 clusterIdx.data(),
+                                                                                                 didAssignFlag.data());
   } else {
     attemptAssignClustersFromNeighborlist<false><<<numBlocksAssign, blockSizeAssign, 0, stream>>>(clusters,
-                                                                                    clusterSizesSpan,
-                                                                                    neighborList,
-                                                                                    maxValue.data(),
-                                                                                    clusterIdx.data(),
-                                                                                    didAssignFlag.data());
+                                                                                                  clusterSizesSpan,
+                                                                                                  neighborList,
+                                                                                                  maxValue.data(),
+                                                                                                  clusterIdx.data(),
+                                                                                                  didAssignFlag.data());
   }
   cudaCheckError(cudaGetLastError());
-  
-  // Guarantee forward progress if attemptAssign didn't handle it
+
+  // Guarantee forward progress if attemptAssign didn't handle it.
   const int numBlocksFlat = ((static_cast<int>(clusterSizesSpan.size()) - 1) / blockSizeCount) + 1;
   butinaWriteClusterValue<<<numBlocksFlat, blockSizeCount, 0, stream>>>(hitMatrix,
                                                                         clusters,
@@ -537,7 +502,7 @@ void butinaGpu(const cuda::std::span<const uint8_t> hitMatrix,
   AsyncDeviceVector<int> clusterSizes(clusters.size(), stream);
   clusterSizes.zero();
   const AsyncDeviceVector<int> neighborList(kNeighborlistMaxSize * numPoints, stream);
-  const auto neighborListSpan = toSpan(neighborList);
+  const auto                   neighborListSpan = toSpan(neighborList);
 
   const AsyncDevicePtr<int> maxIndex(-1, stream);
   const AsyncDevicePtr<int> maxValue(std::numeric_limits<int>::max(), stream);
@@ -550,8 +515,8 @@ void butinaGpu(const cuda::std::span<const uint8_t> hitMatrix,
 
   // If a neighborlist is up to N, then the cluster is up to N+ 1 (including the central point).
   while (maxCluster[0] >= kClusterSizeWithMaxNeighborlist) {
-    ScopedNvtxRange loopRange("Large cluster Butina Loop");
-    // printf("Large cluster Butina Loop\n");
+    const std::string     maxClusterSize = std::to_string(maxCluster[0]);
+    const ScopedNvtxRange loopRange("Large cluster Butina Loop, max cluster: " + maxClusterSize);
     innerButinaLoop(numPoints,
                     hitMatrix,
                     clusters,
@@ -563,25 +528,28 @@ void butinaGpu(const cuda::std::span<const uint8_t> hitMatrix,
                     stream);
   }
   while (maxCluster[0] >= kMinLoopSizeForAssignment) {
-    // printf("Small cluster Butina Loop\n");
-    ScopedNvtxRange loopRange("Small cluster Butina Loop");
+    const std::string     maxClusterSize = std::to_string(maxCluster[0]);
+    const ScopedNvtxRange loopRange("Small cluster Butina Loop with neighborlist, max cluster: " + maxClusterSize);
     innerButinaLoopNeighborlist(numPoints,
-                    hitMatrix,
-                    clusters,
-                    clusterSizesSpan,
-                    maxIndex,
-                    maxValue,
-                    clusterIdx,
-                    maxCluster,
-                    neighborListSpan,
-                    didAssignFlag,
-                    enforceStrictIndexing,
-                    stream);
+                                hitMatrix,
+                                clusters,
+                                clusterSizesSpan,
+                                maxIndex,
+                                maxValue,
+                                clusterIdx,
+                                maxCluster,
+                                neighborListSpan,
+                                didAssignFlag,
+                                enforceStrictIndexing,
+                                stream);
   }
   pairDoubletKernels<<<numPoints, blockSizeCount, 0, stream>>>(hitMatrix, clusters, clusterSizesSpan);
+  cudaCheckError(cudaGetLastError());
   assignDoubletIdsKernel<<<1, 1, 0, stream>>>(clusters, clusterIdx.data());
+  cudaCheckError(cudaGetLastError());
   assignSingletonIdsKernel<<<1, 1, 0, stream>>>(clusters, clusterIdx.data());
-  cudaStreamSynchronize(stream);
+  cudaCheckError(cudaGetLastError());
+  cudaCheckError(cudaStreamSynchronize(stream));
 }
 
 namespace {

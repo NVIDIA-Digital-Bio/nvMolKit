@@ -87,20 +87,18 @@ void checkButinaCorrectness(const std::vector<uint8_t>& adjacency, const std::ve
   int               seenCount = 0;
 
   const int maxLabelId = *std::ranges::max_element(labels.begin(), labels.end());
-  
+
   // Build clusters
   std::vector<std::vector<int>> clusters(maxLabelId + 1);
   for (int idx = 0; idx < nPts; ++idx) {
     clusters[labels[idx]].push_back(idx);
   }
-  
+
   // In relaxed mode, sort clusters by size (descending)
   if (!strict) {
-    std::ranges::sort(clusters, [](const auto& a, const auto& b) {
-      return a.size() > b.size();
-    });
+    std::ranges::sort(clusters, [](const auto& a, const auto& b) { return a.size() > b.size(); });
   }
-  
+
   for (const auto& cluster : clusters) {
     const auto clusterSize = static_cast<int>(cluster.size());
     ASSERT_GT(clusterSize, 0) << "Empty cluster found";
@@ -161,10 +159,10 @@ TEST_P(ButinaClusterTestFixture, ClusteringMatchesReference) {
   std::mt19937                 rng(42);
 
   const auto [nPts, enforceStrictIndexing] = GetParam();
-  constexpr double       cutoff    = 0.1;
-  const auto             distances = makeSymmetricDifferenceMatrix(nPts, rng);
-  const auto             adjacency = makeAdjacency(distances, nPts, cutoff);
-  const std::vector<int> labels    = runButina(distances, nPts, cutoff, enforceStrictIndexing, stream);
+  constexpr double       cutoff            = 0.1;
+  const auto             distances         = makeSymmetricDifferenceMatrix(nPts, rng);
+  const auto             adjacency         = makeAdjacency(distances, nPts, cutoff);
+  const std::vector<int> labels            = runButina(distances, nPts, cutoff, enforceStrictIndexing, stream);
   SCOPED_TRACE(::testing::Message() << "nPts=" << nPts << " enforceStrictIndexing=" << enforceStrictIndexing);
   checkButinaCorrectness(adjacency, labels, enforceStrictIndexing);
 }

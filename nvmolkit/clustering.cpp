@@ -35,6 +35,8 @@ BOOST_PYTHON_MODULE(_clustering) {
 
       return nvMolKit::makePyArray(clusterIds, boost::python::make_tuple(matDim1));
     },
-    (boost::python::arg("distance_matrix"), boost::python::arg("cutoff"), boost::python::arg("enforce_strict_indexing") = true),
+    (boost::python::arg("distance_matrix"),
+     boost::python::arg("cutoff"),
+     boost::python::arg("enforce_strict_indexing") = true),
     boost::python::return_value_policy<boost::python::manage_new_object>());
 };
