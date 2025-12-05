@@ -620,16 +620,16 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
       }
       __syncthreads();
 
-      // Compute energy at perturbed position
+      // Compute energy at perturbed position (use scratchPos which has the perturbed coordinates)
       double lsThreadEnergy;
       if constexpr (FFType == ForceFieldType::MMFF) {
-        lsThreadEnergy = MMFF::molEnergy(*terms, *systemIndices, localPos, molIdx, tid, stride);
+        lsThreadEnergy = MMFF::molEnergy(*terms, *systemIndices, scratchPos, molIdx, tid, stride);
       } else if constexpr (FFType == ForceFieldType::ETK) {
-        lsThreadEnergy = DistGeom::molEnergyETK(*terms, *systemIndices, localPos, molIdx, tid, stride);
+        lsThreadEnergy = DistGeom::molEnergyETK(*terms, *systemIndices, scratchPos, molIdx, tid, stride);
       } else {  // DG
         lsThreadEnergy = DistGeom::molEnergyDG(*terms,
                                                *systemIndices,
-                                               localPos,
+                                               scratchPos,
                                                molIdx,
                                                dataDim,
                                                chiralWeight,
