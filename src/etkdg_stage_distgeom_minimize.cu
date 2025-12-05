@@ -149,96 +149,30 @@ void DistGeomMinimizeStage::executeImpl(ETKDGContext& ctx,
                                ctx.systemHost.positions,
                                static_cast<int>(ctx.systemHost.atomStarts.size() - 1));
 
-  // Allocate energy buffer (not used for DG but required by interface)
-  AsyncDeviceVector<double> energyBuffer(0, stream_);
+  // Use unified minimizeWithDG - backend selection is handled internally
+  bool needsMore = minimizer_.minimizeWithDG(maxIters,
+                                             embedParam_.optimizerForceTol,
+                                             ctx.systemHost.atomStarts,
+                                             ctx.systemDevice.atomStarts,
+                                             ctx.systemDevice.positions,
+                                             molSystemDevice,
+                                             chiralWeight,
+                                             fourthDimWeight,
+                                             ctx.activeThisStage.data());
 
-  // Use shared minimizer with repeat-until-converged
-  if (minimizer_.backend() == BfgsBackend::BATCHED) {
-    // BATCHED backend: use generic minimize() with energy/gradient functors
-    auto eFunc = [&](const double* positions) {
-      DistGeom::computeEnergy(molSystemDevice,
-                              ctx.systemDevice.atomStarts,
-                              ctx.systemDevice.positions,
-
-                              chiralWeight,
-                              fourthDimWeight,
-                              ctx.activeThisStage.data(),
-                              positions,
-                              stream_);
-    };
-
-    auto gFunc = [&]() {
-      DistGeom::computeGradients(molSystemDevice,
-                                 ctx.systemDevice.atomStarts,
-                                 ctx.systemDevice.positions,
-
-                                 chiralWeight,
-                                 fourthDimWeight,
-                                 ctx.activeThisStage.data(),
-                                 stream_);
-    };
-    bool needsMore = minimizer_.minimize(maxIters,
-                                         embedParam_.optimizerForceTol,
-                                         ctx.systemHost.atomStarts,
-                                         ctx.systemDevice.atomStarts,
-                                         ctx.systemDevice.positions,
-                                         molSystemDevice.grad,
-                                         molSystemDevice.energyOuts,
-                                         molSystemDevice.energyBuffer,
-                                         eFunc,
-                                         gFunc,
-                                         ctx.activeThisStage.data());
-
-    // Repeat until converged
-    while (needsMore) {
-      needsMore = minimizer_.minimize(maxIters,
-                                      embedParam_.optimizerForceTol,
-                                      ctx.systemHost.atomStarts,
-                                      ctx.systemDevice.atomStarts,
-                                      ctx.systemDevice.positions,
-                                      molSystemDevice.grad,
-                                      molSystemDevice.energyOuts,
-                                      molSystemDevice.energyBuffer,
-                                      eFunc,
-                                      gFunc,
-                                      ctx.activeThisStage.data());
-    }
-  } else {
-    // PER_MOLECULE backend: use specialized minimizeWithDG()
-    auto terms         = DistGeom::toEnergyForceContribsDevicePtr(molSystemDevice);
-    auto systemIndices = DistGeom::toBatchedIndicesDevicePtr(molSystemDevice, ctx.systemDevice.atomStarts.data());
-
-    bool needsMore = minimizer_.minimizeWithDG(maxIters,
-                                               embedParam_.optimizerForceTol,
-                                               ctx.systemHost.atomStarts,
-                                               ctx.systemDevice.atomStarts,
-                                               ctx.systemDevice.positions,
-                                               molSystemDevice.grad,
-                                               molSystemDevice.energyOuts,
-                                               energyBuffer,
-                                               terms,
-                                               systemIndices,
-                                               chiralWeight,
-                                               fourthDimWeight,
-                                               ctx.activeThisStage.data());
-
-    // Repeat until converged
-    while (needsMore) {
-      needsMore = minimizer_.minimizeWithDG(maxIters,
-                                            embedParam_.optimizerForceTol,
-                                            ctx.systemHost.atomStarts,
-                                            ctx.systemDevice.atomStarts,
-                                            ctx.systemDevice.positions,
-                                            molSystemDevice.grad,
-                                            molSystemDevice.energyOuts,
-                                            energyBuffer,
-                                            terms,
-                                            systemIndices,
-                                            chiralWeight,
-                                            fourthDimWeight,
-                                            ctx.activeThisStage.data());
-    }
+  // Repeat until converged
+  while (needsMore) {
+    needsMore = minimizer_.minimizeWithDG(maxIters,
+                                          embedParam_.optimizerForceTol,
+                                          ctx.systemHost.atomStarts,
+                                          ctx.systemDevice.atomStarts,
+                                          ctx.systemDevice.positions,
+                                          molSystemDevice,
+                                          chiralWeight,
+                                          fourthDimWeight,
+                                          ctx.activeThisStage.data());
   }
+
   // Check energy per atom if requested
   if (checkEnergy) {
     nvMolKit::DistGeom::computeEnergy(molSystemDevice,

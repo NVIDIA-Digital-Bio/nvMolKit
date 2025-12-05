@@ -34,8 +34,12 @@ enum class DebugLevel {
 /// Backend implementation type for BFGS minimization
 enum class BfgsBackend {
   BATCHED      = 0,  //!< Original batched implementation
-  PER_MOLECULE = 1   //!< Per-molecule kernel implementation
+  PER_MOLECULE = 1,  //!< Per-molecule kernel implementation
+  HYBRID       = 2   //!< Auto-select based on max atom count (PER_MOLECULE if <= threshold, else BATCHED)
 };
+
+//! Atom count threshold for HYBRID backend selection (use PER_MOLECULE if max atoms <= this value)
+constexpr int kHybridBackendAtomThreshold = 64;
 
 }  // namespace nvMolKit
 

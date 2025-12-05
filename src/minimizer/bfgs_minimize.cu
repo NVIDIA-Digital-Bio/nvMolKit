@@ -21,6 +21,7 @@
 #include "bfgs_minimize_permol_kernels.h"
 #include "cub_helpers.cuh"
 #include "device_vector.h"
+#include "dist_geom.h"
 #include "dist_geom_kernels.h"
 #include "mmff.h"
 #include "mmff_kernels.h"
@@ -29,6 +30,20 @@
 namespace nvMolKit {
 constexpr double FUNCTOL = 1e-4;  //!< Default tolerance for function convergence in the minimizer
 constexpr double MOVETOL = 1e-7;  //!< Default tolerance for x changes in the minimizer
+
+namespace {
+BfgsBackend resolveBackend(BfgsBackend backend, const std::vector<int>& atomStartsHost) {
+  if (backend != BfgsBackend::HYBRID) {
+    return backend;
+  }
+  for (size_t i = 0; i + 1 < atomStartsHost.size(); ++i) {
+    if (atomStartsHost[i + 1] - atomStartsHost[i] > kHybridBackendAtomThreshold) {
+      return BfgsBackend::BATCHED;
+    }
+  }
+  return BfgsBackend::PER_MOLECULE;
+}
+}  // namespace
 
 // TODO - consolidate this to device vector code. We don't want CUDA in the device vector
 // header so we'll need to specialize for a few types and instantiate them in the cu file.
@@ -367,12 +382,14 @@ BfgsBatchMinimizer::BfgsBatchMinimizer(const int    dataDim,
   scaleGrads_ = scaleGrads;
   stream_     = stream;
   backend_    = backend;
-  if (backend_ == BfgsBackend::BATCHED) {
+
+  // For HYBRID, we need to support both paths, so initialize for both
+  if (backend_ == BfgsBackend::BATCHED || backend_ == BfgsBackend::HYBRID) {
     loopStatusHost_.resize(1);
   }
 
-  // Initialize per-molecule data structures if using that backend
-  if (backend_ == BfgsBackend::PER_MOLECULE) {
+  // Initialize per-molecule data structures if potentially using that backend
+  if (backend_ == BfgsBackend::PER_MOLECULE || backend_ == BfgsBackend::HYBRID) {
     activeMolIdsDevice_.setStream(stream_);
   }
 
@@ -406,9 +423,10 @@ BfgsBatchMinimizer::BfgsBatchMinimizer(const int    dataDim,
     scratchBuffersDevice_.setStream(stream_);
     activeMolIdsDevice_.setStream(stream_);
   }
-  if (backend_ == BfgsBackend::PER_MOLECULE)
-    // Allocate device array to hold scratch buffer pointers (5 buffers), after stream is set.
+  // Allocate device array for per-molecule backend (also needed for HYBRID which might use it)
+  if (backend_ == BfgsBackend::PER_MOLECULE || backend_ == BfgsBackend::HYBRID) {
     scratchBuffersDevice_.resize(5);
+  }
 }
 BfgsBatchMinimizer::~BfgsBatchMinimizer() = default;
 
@@ -417,6 +435,7 @@ void BfgsBatchMinimizer::initialize(const std::vector<int>& atomStartsHost,
                                     double*                 positions,
                                     double*                 grad,
                                     double*                 energyOuts,
+                                    BfgsBackend             effectiveBackend,
                                     const uint8_t*          activeThisStage) {
   atomStartsDevice = atomStarts;
   positionsDevice  = positions;
@@ -444,8 +463,7 @@ void BfgsBatchMinimizer::initialize(const std::vector<int>& atomStartsHost,
   numAtomsTotal_  = atomStartsHost.back();
   hasLargeSystem_ = false;
 
-  // Track max atoms and build active molecule list if using per-molecule backend
-  if (backend_ == BfgsBackend::PER_MOLECULE) {
+  if (effectiveBackend == BfgsBackend::PER_MOLECULE) {
     // Copy activeThisStage to host for CPU-side filtering (using pinned memory)
     std::fill_n(activeHost_.begin(), numSystems, 1);
     if (activeThisStage) {
@@ -974,7 +992,13 @@ bool BfgsBatchMinimizer::minimize(const int                     numIters,
 
   {
     const ScopedNvtxRange bfgsFullInitialize("BfgsBatchMinimizer::fullInitialize");
-    initialize(atomStartsHost, atomStarts.data(), positions.data(), grad.data(), energyOuts.data(), activeThisStage);
+    initialize(atomStartsHost,
+               atomStarts.data(),
+               positions.data(),
+               grad.data(),
+               energyOuts.data(),
+               BfgsBackend::BATCHED,
+               activeThisStage);
 
     // Set up Hessian. Offsets are n X n, where atomstarts were n.
     setHessianToIdentity();
@@ -1033,34 +1057,50 @@ bool BfgsBatchMinimizer::minimize(const int                     numIters,
   return compactAndCountConverged() == numSystems ? 0 : 1;
 }
 
-bool BfgsBatchMinimizer::minimizeWithMMFF(const int                                 numIters,
-                                          const double                              gradTol,
-                                          const std::vector<int>&                   atomStartsHost,
-                                          const AsyncDeviceVector<int>&             atomStarts,
-                                          AsyncDeviceVector<double>&                positions,
-                                          AsyncDeviceVector<double>&                grad,
-                                          AsyncDeviceVector<double>&                energyOuts,
-                                          AsyncDeviceVector<double>&                energyBuffer,
-                                          const MMFF::EnergyForceContribsDevicePtr& terms,
-                                          const MMFF::BatchedIndicesDevicePtr&      systemIndices,
-                                          const uint8_t*                            activeThisStage) {
-  const int numSystems = atomStartsHost.size() - 1;
+bool BfgsBatchMinimizer::minimizeWithMMFF(const int                            numIters,
+                                          const double                         gradTol,
+                                          const std::vector<int>&              atomStartsHost,
+                                          MMFF::BatchedMolecularDeviceBuffers& systemDevice,
+                                          const uint8_t*                       activeThisStage) {
+  const int         numSystems       = atomStartsHost.size() - 1;
+  const BfgsBackend effectiveBackend = resolveBackend(backend_, atomStartsHost);
 
-  if (backend_ != BfgsBackend::PER_MOLECULE) {
-    throw std::runtime_error(
-      "minimizeWithMMFF currently only supports PER_MOLECULE backend. "
-      "Use minimize() with MMFF functors for BATCHED backend.");
+  if (effectiveBackend == BfgsBackend::BATCHED) {
+    auto eFunc = [&](const double* positions) { MMFF::computeEnergy(systemDevice, positions, stream_); };
+    auto gFunc = [&]() { MMFF::computeGradients(systemDevice, stream_); };
+
+    bool result = minimize(numIters,
+                           gradTol,
+                           atomStartsHost,
+                           systemDevice.indices.atomStarts,
+                           systemDevice.positions,
+                           systemDevice.grad,
+                           systemDevice.energyOuts,
+                           systemDevice.energyBuffer,
+                           eFunc,
+                           gFunc,
+                           activeThisStage);
+
+    systemDevice.energyBuffer.zero();
+    systemDevice.energyOuts.zero();
+    MMFF::computeEnergy(systemDevice, nullptr, stream_);
+
+    return result;
   }
 
-  // Initialize buffers and binning if needed
-  initialize(atomStartsHost, atomStarts.data(), positions.data(), grad.data(), energyOuts.data(), activeThisStage);
+  initialize(atomStartsHost,
+             systemDevice.indices.atomStarts.data(),
+             systemDevice.positions.data(),
+             systemDevice.grad.data(),
+             systemDevice.energyOuts.data(),
+             effectiveBackend,
+             activeThisStage);
 
-  // Initialize Hessian to identity
   setHessianToIdentity();
 
   const ScopedNvtxRange bfgsPerMolecule("BfgsBatchMinimizer::perMoleculeMinimize");
 
-  prepareScratchBuffers(grad,
+  prepareScratchBuffers(systemDevice.grad,
                         lineSearchDir_,
                         scratchPositions_,
                         hessDGrad_,
@@ -1069,21 +1109,24 @@ bool BfgsBatchMinimizer::minimizeWithMMFF(const int                             
                         scratchBufferPointersHost_,
                         stream_);
 
+  auto terms         = MMFF::toEnergyForceContribsDevicePtr(systemDevice);
+  auto systemIndices = MMFF::toBatchedIndicesDevicePtr(systemDevice);
+
   cudaError_t err = launchBfgsMinimizePerMolKernel(static_cast<int>(activeMolIds_.size()),
                                                    activeMolIdsDevice_.data(),
                                                    maxAtomsInBatch_,
-                                                   atomStarts.data(),
+                                                   systemDevice.indices.atomStarts.data(),
                                                    hessianStarts_.data(),
                                                    numIters,
                                                    gradTol,
                                                    scaleGrads_,
                                                    terms,
                                                    systemIndices,
-                                                   positions.data(),
-                                                   grad.data(),
+                                                   systemDevice.positions.data(),
+                                                   systemDevice.grad.data(),
                                                    inverseHessian_.data(),
                                                    scratchBuffersDevice_.data(),
-                                                   energyOuts.data(),
+                                                   systemDevice.energyOuts.data(),
                                                    statuses_.data(),
                                                    stream_);
 
@@ -1094,35 +1137,52 @@ bool BfgsBatchMinimizer::minimizeWithMMFF(const int                             
   return checkConvergence(activeMolIds_, statuses_, convergenceHost_, numSystems, stream_);
 }
 
-bool BfgsBatchMinimizer::minimizeWithETK(const int                                       numIters,
-                                         const double                                    gradTol,
-                                         const std::vector<int>&                         atomStartsHost,
-                                         const AsyncDeviceVector<int>&                   atomStarts,
-                                         AsyncDeviceVector<double>&                      positions,
-                                         AsyncDeviceVector<double>&                      grad,
-                                         AsyncDeviceVector<double>&                      energyOuts,
-                                         AsyncDeviceVector<double>&                      energyBuffer,
-                                         const DistGeom::Energy3DForceContribsDevicePtr& terms,
-                                         const DistGeom::BatchedIndices3DDevicePtr&      systemIndices,
-                                         const uint8_t*                                  activeThisStage) {
-  const int numSystems = atomStartsHost.size() - 1;
+bool BfgsBatchMinimizer::minimizeWithETK(const int                                  numIters,
+                                         const double                               gradTol,
+                                         const std::vector<int>&                    atomStartsHost,
+                                         const AsyncDeviceVector<int>&              atomStarts,
+                                         AsyncDeviceVector<double>&                 positions,
+                                         DistGeom::BatchedMolecular3DDeviceBuffers& systemDevice,
+                                         bool                                       useBasicKnowledge,
+                                         const uint8_t*                             activeThisStage) {
+  const int         numSystems       = atomStartsHost.size() - 1;
+  const auto        etkTerm          = useBasicKnowledge ? DistGeom::ETKTerm::ALL : DistGeom::ETKTerm::PLAIN;
+  const BfgsBackend effectiveBackend = resolveBackend(backend_, atomStartsHost);
 
-  if (backend_ != BfgsBackend::PER_MOLECULE) {
-    throw std::runtime_error(
-      "minimizeWithETK currently only supports PER_MOLECULE backend. "
-      "Use minimize() with ETK functors for BATCHED backend.");
+  if (effectiveBackend == BfgsBackend::BATCHED) {
+    auto eFunc = [&](const double* pos) {
+      DistGeom::computeEnergyETK(systemDevice, atomStarts, positions, activeThisStage, pos, etkTerm, stream_);
+    };
+    auto gFunc = [&]() {
+      DistGeom::computeGradientsETK(systemDevice, atomStarts, positions, activeThisStage, etkTerm, stream_);
+    };
+
+    return minimize(numIters,
+                    gradTol,
+                    atomStartsHost,
+                    atomStarts,
+                    positions,
+                    systemDevice.grad,
+                    systemDevice.energyOuts,
+                    systemDevice.energyBuffer,
+                    eFunc,
+                    gFunc,
+                    activeThisStage);
   }
 
-  // Initialize buffers and binning if needed
-  initialize(atomStartsHost, atomStarts.data(), positions.data(), grad.data(), energyOuts.data(), activeThisStage);
+  initialize(atomStartsHost,
+             atomStarts.data(),
+             positions.data(),
+             systemDevice.grad.data(),
+             systemDevice.energyOuts.data(),
+             effectiveBackend,
+             activeThisStage);
 
-  // Initialize Hessian to identity
   setHessianToIdentity();
 
-  // Use per-molecule kernel with ETK specialization
   const ScopedNvtxRange bfgsPerMoleculeETK("BfgsBatchMinimizer::perMoleculeMinimizeETK");
 
-  prepareScratchBuffers(grad,
+  prepareScratchBuffers(systemDevice.grad,
                         lineSearchDir_,
                         scratchPositions_,
                         hessDGrad_,
@@ -1130,6 +1190,9 @@ bool BfgsBatchMinimizer::minimizeWithETK(const int                              
                         scratchBuffersDevice_,
                         scratchBufferPointersHost_,
                         stream_);
+
+  auto terms         = DistGeom::toEnergy3DForceContribsDevicePtr(systemDevice);
+  auto systemIndices = DistGeom::toBatchedIndices3DDevicePtr(systemDevice, atomStarts.data());
 
   cudaError_t err = launchBfgsMinimizePerMolKernelETK(static_cast<int>(activeMolIds_.size()),
                                                       activeMolIdsDevice_.data(),
@@ -1142,10 +1205,10 @@ bool BfgsBatchMinimizer::minimizeWithETK(const int                              
                                                       terms,
                                                       systemIndices,
                                                       positions.data(),
-                                                      grad.data(),
+                                                      systemDevice.grad.data(),
                                                       inverseHessian_.data(),
                                                       scratchBuffersDevice_.data(),
-                                                      energyOuts.data(),
+                                                      systemDevice.energyOuts.data(),
                                                       statuses_.data(),
                                                       stream_);
 
@@ -1156,42 +1219,70 @@ bool BfgsBatchMinimizer::minimizeWithETK(const int                              
   return checkConvergence(activeMolIds_, statuses_, convergenceHost_, numSystems, stream_);
 }
 
-bool BfgsBatchMinimizer::minimizeWithDG(const int                                     numIters,
-                                        const double                                  gradTol,
-                                        const std::vector<int>&                       atomStartsHost,
-                                        const AsyncDeviceVector<int>&                 atomStarts,
-                                        AsyncDeviceVector<double>&                    positions,
-                                        AsyncDeviceVector<double>&                    grad,
-                                        AsyncDeviceVector<double>&                    energyOuts,
-                                        AsyncDeviceVector<double>&                    energyBuffer,
-                                        const DistGeom::EnergyForceContribsDevicePtr& terms,
-                                        const DistGeom::BatchedIndicesDevicePtr&      systemIndices,
-                                        double                                        chiralWeight,
-                                        double                                        fourthDimWeight,
-                                        const uint8_t*                                activeThisStage) {
+bool BfgsBatchMinimizer::minimizeWithDG(const int                                numIters,
+                                        const double                             gradTol,
+                                        const std::vector<int>&                  atomStartsHost,
+                                        const AsyncDeviceVector<int>&            atomStarts,
+                                        AsyncDeviceVector<double>&               positions,
+                                        DistGeom::BatchedMolecularDeviceBuffers& systemDevice,
+                                        double                                   chiralWeight,
+                                        double                                   fourthDimWeight,
+                                        const uint8_t*                           activeThisStage) {
   const int numSystems = atomStartsHost.size() - 1;
 
-  if (backend_ != BfgsBackend::PER_MOLECULE) {
-    throw std::runtime_error(
-      "minimizeWithDG currently only supports PER_MOLECULE backend. "
-      "Use minimize() with DG functors for BATCHED backend.");
-  }
-
-  // Ensure minimizer was constructed with dataDim=4 for DG
   if (dataDim_ != 4) {
     throw std::runtime_error("minimizeWithDG requires BfgsBatchMinimizer to be constructed with dataDim=4");
   }
 
-  // Initialize buffers and binning if needed
-  initialize(atomStartsHost, atomStarts.data(), positions.data(), grad.data(), energyOuts.data(), activeThisStage);
+  const BfgsBackend effectiveBackend = resolveBackend(backend_, atomStartsHost);
 
-  // Initialize Hessian to identity
+  if (effectiveBackend == BfgsBackend::BATCHED) {
+    auto eFunc = [&](const double* pos) {
+      DistGeom::computeEnergy(systemDevice,
+                              atomStarts,
+                              positions,
+                              chiralWeight,
+                              fourthDimWeight,
+                              activeThisStage,
+                              pos,
+                              stream_);
+    };
+    auto gFunc = [&]() {
+      DistGeom::computeGradients(systemDevice,
+                                 atomStarts,
+                                 positions,
+                                 chiralWeight,
+                                 fourthDimWeight,
+                                 activeThisStage,
+                                 stream_);
+    };
+
+    return minimize(numIters,
+                    gradTol,
+                    atomStartsHost,
+                    atomStarts,
+                    positions,
+                    systemDevice.grad,
+                    systemDevice.energyOuts,
+                    systemDevice.energyBuffer,
+                    eFunc,
+                    gFunc,
+                    activeThisStage);
+  }
+
+  initialize(atomStartsHost,
+             atomStarts.data(),
+             positions.data(),
+             systemDevice.grad.data(),
+             systemDevice.energyOuts.data(),
+             effectiveBackend,
+             activeThisStage);
+
   setHessianToIdentity();
 
-  // Use per-molecule kernel with DG specialization
   const ScopedNvtxRange bfgsPerMoleculeDG("BfgsBatchMinimizer::perMoleculeMinimizeDG");
 
-  prepareScratchBuffers(grad,
+  prepareScratchBuffers(systemDevice.grad,
                         lineSearchDir_,
                         scratchPositions_,
                         hessDGrad_,
@@ -1199,6 +1290,9 @@ bool BfgsBatchMinimizer::minimizeWithDG(const int                               
                         scratchBuffersDevice_,
                         scratchBufferPointersHost_,
                         stream_);
+
+  auto terms         = DistGeom::toEnergyForceContribsDevicePtr(systemDevice);
+  auto systemIndices = DistGeom::toBatchedIndicesDevicePtr(systemDevice, atomStarts.data());
 
   cudaError_t err = launchBfgsMinimizePerMolKernelDG(static_cast<int>(activeMolIds_.size()),
                                                      activeMolIdsDevice_.data(),
@@ -1211,10 +1305,10 @@ bool BfgsBatchMinimizer::minimizeWithDG(const int                               
                                                      terms,
                                                      systemIndices,
                                                      positions.data(),
-                                                     grad.data(),
+                                                     systemDevice.grad.data(),
                                                      inverseHessian_.data(),
                                                      scratchBuffersDevice_.data(),
-                                                     energyOuts.data(),
+                                                     systemDevice.energyOuts.data(),
                                                      chiralWeight,
                                                      fourthDimWeight,
                                                      statuses_.data(),

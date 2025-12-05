@@ -13,15 +13,19 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-add_library(bfgs bfgs_minimize.cu bfgs_hessian.cu bfgs_minimize_permol_kernels.cu)
-target_link_libraries(bfgs PUBLIC host_vector device_vector PRIVATE ${RDKit_LIBS} rdkit_mmff_flattened
-        cub_helpers  cccl_interface)
+add_library(bfgs bfgs_minimize.cu bfgs_hessian.cu
+                 bfgs_minimize_permol_kernels.cu)
+target_link_libraries(
+  bfgs
+  PUBLIC host_vector device_vector
+  PRIVATE ${RDKit_LIBS} rdkit_mmff_flattened dist_geom cub_helpers
+          cccl_interface)
 target_include_directories(bfgs PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(bfgs_mmff bfgs_mmff.cpp)
 target_link_libraries(
   bfgs_mmff
-PUBLIC bfgs
+  PUBLIC bfgs
   PRIVATE ${RDKit_LIBS}
           rdkit_mmff_flattened
           device
