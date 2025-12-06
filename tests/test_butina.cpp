@@ -159,7 +159,7 @@ TEST_P(ButinaSinglePointFixture, HandlesSinglePoint) {
   cudaStreamSynchronize(stream);
   EXPECT_THAT(got, ::testing::ElementsAre(0));
 }
-INSTANTIATE_TEST_SUITE_P(ButinaClusterTest, ButinaSinglePointFixture, ::testing::Values(8, 16, 24, 32));
+INSTANTIATE_TEST_SUITE_P(ButinaClusterTest, ButinaSinglePointFixture, ::testing::Values(8, 16, 24, 32, 64, 128));
 
 class ButinaClusterTestFixture : public ::testing::TestWithParam<std::tuple<int, bool, int>> {};
 TEST_P(ButinaClusterTestFixture, ClusteringMatchesReference) {
@@ -182,7 +182,7 @@ INSTANTIATE_TEST_SUITE_P(ButinaClusterTest,
                          ButinaClusterTestFixture,
                          ::testing::Combine(::testing::Values(1, 10, 100, 1000),
                                             ::testing::Bool(),
-                                            ::testing::Values(8, 16, 24, 32)));
+                                            ::testing::Values(8, 16, 24, 32, 64, 128)));
 
 class ButinaEdgeTestFixture : public ::testing::TestWithParam<int> {};
 TEST_P(ButinaEdgeTestFixture, EdgeOneCluster) {
@@ -221,4 +221,4 @@ TEST_P(ButinaEdgeTestFixture, EdgeNClusters) {
   EXPECT_THAT(sorted, ::testing::ElementsAreArray(want));
 }
 
-INSTANTIATE_TEST_SUITE_P(ButinaClusterEdgeTest, ButinaEdgeTestFixture, ::testing::Values(8, 16, 24, 32));
+INSTANTIATE_TEST_SUITE_P(ButinaClusterEdgeTest, ButinaEdgeTestFixture, ::testing::Values(8, 16, 24, 32, 64, 128));

@@ -34,7 +34,7 @@ constexpr int kMinLoopSizeForAssignment    = 3;
  * compacted to the front of the neighborlist using ballot and shuffle operations.
  * clusterSizes is updated to reflect the new count.
  *
- * @tparam NeighborlistMaxSize Maximum neighbors per point (must be <= 32 and multiple of 8)
+ * @tparam NeighborlistMaxSize Maximum neighbors per point (must be <= 128 and multiple of 8)
  * @param clusters Cluster assignments (-1 = unassigned, >= 0 = assigned)
  * @param clusterSizes Current neighbor counts per point
  * @param neighborList Neighborlist storage (NeighborlistMaxSize entries per point)
@@ -96,8 +96,8 @@ void launchArgMaxKernel(cuda::std::span<const int> values, int* outVal, int* out
  * @param enforceStrictIndexing If true, cluster IDs are assigned in strict largest-first order.
  *                              If false, allows parallel assignment for better performance.
  * @param neighborlistMaxSize Maximum size of the neighborlist used for small cluster optimization.
- *                            Must be 8, 16, 24, or 32. Larger values allow parallel processing of
- *                            larger clusters but use more shared memory.
+ *                            Must be 8, 16, 24, 32, 64, or 128. Larger values allow parallel
+ *                            processing of larger clusters but use more shared memory.
  * @param stream CUDA stream to execute operations on. Defaults to stream 0.
  */
 void butinaGpu(cuda::std::span<const double> distanceMatrix,
@@ -127,8 +127,8 @@ void butinaGpu(cuda::std::span<const double> distanceMatrix,
  * @param enforceStrictIndexing If true, cluster IDs are assigned in strict largest-first order.
  *                              If false, allows parallel assignment for better performance.
  * @param neighborlistMaxSize Maximum size of the neighborlist used for small cluster optimization.
- *                            Must be 8, 16, 24, or 32. Larger values allow parallel processing of
- *                            larger clusters but use more shared memory.
+ *                            Must be 8, 16, 24, 32, 64, or 128. Larger values allow parallel
+ *                            processing of larger clusters but use more shared memory.
  * @param stream CUDA stream to execute operations on. Defaults to stream 0.
  */
 void butinaGpu(cuda::std::span<const uint8_t> hitMatrix,

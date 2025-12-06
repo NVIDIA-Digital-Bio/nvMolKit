@@ -39,7 +39,7 @@ def check_butina_correctness(hit_mat, clusts, strict):
     assert len(seen) == hit_mat.shape[0]
 
 @pytest.mark.parametrize("size,enforce_strict,neighborlist_max_size", 
-                         [(s, e, n) for s in (1, 10, 100, 1000) for e in (True, False) for n in (8, 16, 24, 32)])
+                         [(s, e, n) for s in (1, 10, 100, 1000) for e in (True, False) for n in (8, 16, 24, 32, 64, 128)])
 def test_butina_clustering(size, enforce_strict, neighborlist_max_size):
     n = size
     cutoff = 0.1
@@ -53,7 +53,7 @@ def test_butina_clustering(size, enforce_strict, neighborlist_max_size):
 
     check_butina_correctness(torch_dists <= cutoff, nvmol_clusts, enforce_strict)
 
-@pytest.mark.parametrize("neighborlist_max_size", [8, 16, 24, 32])
+@pytest.mark.parametrize("neighborlist_max_size", [8, 16, 24, 32, 64, 128])
 def test_butina_edge_one_cluster(neighborlist_max_size):
     n = 10
     cutoff = 100.0
@@ -64,7 +64,7 @@ def test_butina_edge_one_cluster(neighborlist_max_size):
                        neighborlist_max_size=neighborlist_max_size).torch()
     assert torch.all(nvmol_res == 0)
 
-@pytest.mark.parametrize("neighborlist_max_size", [8, 16, 24, 32])
+@pytest.mark.parametrize("neighborlist_max_size", [8, 16, 24, 32, 64, 128])
 def test_butina_edge_n_clusters(neighborlist_max_size):
     n = 10
     cutoff = 1e-8

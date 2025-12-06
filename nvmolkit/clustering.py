@@ -44,8 +44,9 @@ def butina(distance_matrix: AsyncGpuResult | torch.Tensor, cutoff: float, enforc
                                 same but the cluster IDs will not be in the same order and larger
                                 clusters may have higher IDs.
         neighborlist_max_size: Maximum size of the neighborlist used for small cluster
-                              optimization. Must be 8, 16, 24, or 32. Larger values allow
-                              parallel processing of larger clusters but use more shared memory.
+                              optimization. Must be 8, 16, 24, 32, 64, or 128. Larger values
+                              allow parallel processing of larger clusters but use more
+                              shared memory.
     
     Returns:
         AsyncGpuResult containing cluster assignments as integers. Each element i

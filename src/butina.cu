@@ -358,7 +358,7 @@ __global__ void assignSingletonIdsKernel(const cuda::std::span<int> clusters, co
     const int clustId = clusters[i];
     if (clustId < 0 || clustId == kAssignedAsSingletonSentinel) {
       clusters[i] = clusterIdx;
-        printf("Assigning singleton cluster %d to point %d\n", clusterIdx, i);
+      // printf("Assigning singleton cluster %d to point %d\n", clusterIdx, i);
       clusterIdx++;
     }
   }
@@ -370,23 +370,22 @@ constexpr int argMaxBlockSize = 512;
 
 /**
  * @brief Prune neighborlists by removing assigned neighbors, using CUB WarpMergeSort.
- *
- * Uses full 32-thread warps with CUB WarpMergeSort. Valid neighbors (clusters[neighbor] < 0)
- * are sorted to the front by assigning sort keys (0=valid, 1=invalid) and sorting ascending.
- * clusterSizes is updated to reflect the new count.
  */
 template <int NeighborlistMaxSize>
 __global__ void pruneNeighborlistKernel(const cuda::std::span<int> clusters,
                                         const cuda::std::span<int> clusterSizes,
                                         const cuda::std::span<int> neighborList) {
-  constexpr int kWarpSize = 32;
-  static_assert(NeighborlistMaxSize <= kWarpSize, "NeighborlistMaxSize must be <= 32");
-  
-  // Use full 32-thread warp, each thread holds 1 item
-  using WarpMergeSort = cub::WarpMergeSort<int, 1, kWarpSize, int>;
-  
+  constexpr int kWarpSize       = 32;
+  constexpr int kItemsPerThread = (NeighborlistMaxSize + kWarpSize - 1) / kWarpSize;
+  static_assert(NeighborlistMaxSize <= 128, "NeighborlistMaxSize must be <= 128");
+  static_assert(NeighborlistMaxSize % 8 == 0, "NeighborlistMaxSize must be multiple of 8");
+
+  using WarpMergeSort = cub::WarpMergeSort<int, kItemsPerThread, kWarpSize, int>;
+  using WarpReduce    = cub::WarpReduce<int>;
+
   constexpr int kWarpsPerBlock = 4;
-  __shared__ typename WarpMergeSort::TempStorage tempStorage[kWarpsPerBlock];
+  __shared__ typename WarpMergeSort::TempStorage sortStorage[kWarpsPerBlock];
+  __shared__ typename WarpReduce::TempStorage    reduceStorage[kWarpsPerBlock];
 
   const auto tile     = cg::tiled_partition<kWarpSize>(cg::this_thread_block());
   const int  tid      = tile.thread_rank();
@@ -405,26 +404,37 @@ __global__ void pruneNeighborlistKernel(const cuda::std::span<int> clusters,
   const int currentSize = clusterSizes[pointIdx];
   const int baseOffset  = pointIdx * NeighborlistMaxSize;
 
-  // Each thread loads one neighbor (threads >= NeighborlistMaxSize get invalid data)
-  int keys[1];
-  int values[1];
-  
-  if (tid < NeighborlistMaxSize) {
-    values[0] = neighborList[baseOffset + tid];
-    const bool valid = (tid < currentSize) && (values[0] >= 0) && (clusters[values[0]] < 0);
-    keys[0] = valid ? 0 : 1;  // 0 = valid (sort first), 1 = invalid (sort last)
-  } else {
-    values[0] = -1;
-    keys[0] = 1;  // Invalid, sorts to end
+  // Each thread loads kItemsPerThread neighbors in blocked arrangement
+  int keys[kItemsPerThread];
+  int values[kItemsPerThread];
+
+  for (int item = 0; item < kItemsPerThread; ++item) {
+    const int globalIdx = tid * kItemsPerThread + item;
+    if (globalIdx < NeighborlistMaxSize) {
+      values[item]     = neighborList[baseOffset + globalIdx];
+      const bool valid = (globalIdx < currentSize) && (values[item] >= 0) && (clusters[values[item]] < 0);
+      keys[item]       = valid ? 0 : 1;  // 0 = valid (sort first), 1 = invalid (sort last)
+    } else {
+      values[item] = -1;
+      keys[item]   = 1;
+    }
   }
 
   // Sort by key ascending: valid neighbors (key=0) come first
-  WarpMergeSort(tempStorage[warpId]).Sort(keys, values, cubLess{});
+  WarpMergeSort(sortStorage[warpId]).Sort(keys, values, cubLess{});
 
-  // Count valid entries (those with key=0) - only count within NeighborlistMaxSize
-  const bool isValidResult = (tid < NeighborlistMaxSize) && (keys[0] == 0);
-  const unsigned validMask = tile.ballot(isValidResult);
-  const int      newCount  = __popc(validMask);
+  // Count valid entries across all items in this thread
+  int localValidCount = 0;
+  for (int item = 0; item < kItemsPerThread; ++item) {
+    const int globalIdx = tid * kItemsPerThread + item;
+    if (globalIdx < NeighborlistMaxSize && keys[item] == 0) {
+      ++localValidCount;
+    }
+  }
+
+  // Reduce across warp using CUB (result only valid in lane 0, broadcast to all)
+  int newCount = WarpReduce(reduceStorage[warpId]).Sum(localValidCount);
+  newCount     = tile.shfl(newCount, 0);
 
   // Handle small clusters (mark singletons)
   if (newCount < detail::kMinLoopSizeForAssignment) {
@@ -438,9 +448,12 @@ __global__ void pruneNeighborlistKernel(const cuda::std::span<int> clusters,
     clusterSizes[pointIdx] = newCount;
   }
 
-  // Write sorted neighborlist back (only first NeighborlistMaxSize positions)
-  if (tid < NeighborlistMaxSize) {
-    neighborList[baseOffset + tid] = (tid < newCount) ? values[0] : -1;
+  // Write sorted neighborlist back in blocked arrangement
+  for (int item = 0; item < kItemsPerThread; ++item) {
+    const int globalIdx = tid * kItemsPerThread + item;
+    if (globalIdx < NeighborlistMaxSize) {
+      neighborList[baseOffset + globalIdx] = (globalIdx < newCount) ? values[item] : -1;
+    }
   }
 }
 
@@ -715,8 +728,14 @@ void butinaGpu(const cuda::std::span<const uint8_t> hitMatrix,
     case 32:
       butinaGpuImpl<32>(hitMatrix, clusters, enforceStrictIndexing, stream);
       break;
+    case 64:
+      butinaGpuImpl<64>(hitMatrix, clusters, enforceStrictIndexing, stream);
+      break;
+    case 128:
+      butinaGpuImpl<128>(hitMatrix, clusters, enforceStrictIndexing, stream);
+      break;
     default:
-      throw std::invalid_argument("neighborlistMaxSize must be 8, 16, 24, or 32. Got: " +
+      throw std::invalid_argument("neighborlistMaxSize must be 8, 16, 24, 32, 64, or 128. Got: " +
                                   std::to_string(neighborlistMaxSize));
   }
 }
@@ -801,6 +820,16 @@ template void launchPruneNeighborlistKernel<32>(cuda::std::span<int>,
                                                 cuda::std::span<int>,
                                                 int,
                                                 cudaStream_t);
+template void launchPruneNeighborlistKernel<64>(cuda::std::span<int>,
+                                                cuda::std::span<int>,
+                                                cuda::std::span<int>,
+                                                int,
+                                                cudaStream_t);
+template void launchPruneNeighborlistKernel<128>(cuda::std::span<int>,
+                                                 cuda::std::span<int>,
+                                                 cuda::std::span<int>,
+                                                 int,
+                                                 cudaStream_t);
 
 template <int NeighborlistMaxSize>
 void launchBuildNeighborlistKernel(cuda::std::span<const uint8_t> hitMatrix,
@@ -838,6 +867,18 @@ template void launchBuildNeighborlistKernel<32>(cuda::std::span<const uint8_t>,
                                                 cuda::std::span<int>,
                                                 int,
                                                 cudaStream_t);
+template void launchBuildNeighborlistKernel<64>(cuda::std::span<const uint8_t>,
+                                                cuda::std::span<int>,
+                                                cuda::std::span<int>,
+                                                cuda::std::span<int>,
+                                                int,
+                                                cudaStream_t);
+template void launchBuildNeighborlistKernel<128>(cuda::std::span<const uint8_t>,
+                                                 cuda::std::span<int>,
+                                                 cuda::std::span<int>,
+                                                 cuda::std::span<int>,
+                                                 int,
+                                                 cudaStream_t);
 
 void launchArgMaxKernel(cuda::std::span<const int> values, int* outVal, int* outIdx, cudaStream_t stream) {
   lastArgMax<<<1, argMaxBlockSize, 0, stream>>>(values, outVal, outIdx);

@@ -18,6 +18,8 @@
 
 #include <algorithm>
 #include <numeric>
+#include <set>
+#include <type_traits>
 #include <vector>
 
 #include "butina.h"
@@ -29,23 +31,34 @@ using nvMolKit::AsyncDeviceVector;
 using nvMolKit::detail::kAssignedAsSingletonSentinel;
 using nvMolKit::detail::kMinLoopSizeForAssignment;
 
-class ButinaPruneFixture : public ::testing::TestWithParam<int> {
+template <int N>
+struct NeighborlistSize : std::integral_constant<int, N> {};
+
+using NeighborlistSizes =
+  ::testing::Types<NeighborlistSize<8>, NeighborlistSize<16>, NeighborlistSize<24>, NeighborlistSize<32>,
+                   NeighborlistSize<64>, NeighborlistSize<128>>;
+
+template <typename T>
+class ButinaPruneFixture : public ::testing::Test {
  protected:
+  static constexpr int   kNeighborlistMaxSize = T::value;
   nvMolKit::ScopedStream scopedStream_;
   cudaStream_t           stream() { return scopedStream_.stream(); }
 };
 
+TYPED_TEST_SUITE(ButinaPruneFixture, NeighborlistSizes);
+
 // Test that prune kernel correctly removes assigned neighbors and compacts
-TEST_P(ButinaPruneFixture, PruneRemovesAssignedNeighbors) {
-  constexpr int neighborlistMaxSize = 8;
+TYPED_TEST(ButinaPruneFixture, PruneRemovesAssignedNeighbors) {
+  constexpr int neighborlistMaxSize = TestFixture::kNeighborlistMaxSize;
   constexpr int numPoints           = 10;
 
   // Setup: Point 0 has neighbors [1, 2, 3, 4, 5] (count=6 including self)
   // After assigning point 2 to a cluster, prune should produce [1, 3, 4, 5] (count=5)
 
-  AsyncDeviceVector<int> clusters(numPoints, stream());
-  AsyncDeviceVector<int> clusterSizes(numPoints, stream());
-  AsyncDeviceVector<int> neighborList(neighborlistMaxSize * numPoints, stream());
+  AsyncDeviceVector<int> clusters(numPoints, this->stream());
+  AsyncDeviceVector<int> clusterSizes(numPoints, this->stream());
+  AsyncDeviceVector<int> neighborList(neighborlistMaxSize * numPoints, this->stream());
 
   // Initialize all as unassigned
   std::vector<int> clustersHost(numPoints, -1);
@@ -73,21 +86,21 @@ TEST_P(ButinaPruneFixture, PruneRemovesAssignedNeighbors) {
   clusters.copyFromHost(clustersHost);
   clusterSizes.copyFromHost(clusterSizesHost);
   neighborList.copyFromHost(neighborListHost);
-  cudaStreamSynchronize(stream());
+  cudaStreamSynchronize(this->stream());
 
   // Run prune kernel
   nvMolKit::detail::launchPruneNeighborlistKernel<neighborlistMaxSize>(toSpan(clusters),
                                                                        toSpan(clusterSizes),
                                                                        toSpan(neighborList),
                                                                        numPoints,
-                                                                       stream());
-  cudaStreamSynchronize(stream());
+                                                                       this->stream());
+  cudaStreamSynchronize(this->stream());
 
   // Check results
   clusterSizes.copyToHost(clusterSizesHost);
   neighborList.copyToHost(neighborListHost);
   clusters.copyToHost(clustersHost);
-  cudaStreamSynchronize(stream());
+  cudaStreamSynchronize(this->stream());
 
   // Point 0: was 6, point 2 removed, should be 5
   EXPECT_EQ(clusterSizesHost[0], 5) << "Point 0 count should decrease by 1";
@@ -96,8 +109,7 @@ TEST_P(ButinaPruneFixture, PruneRemovesAssignedNeighbors) {
   // Actually count=2 means doublet, not singleton. Let's check the value.
   EXPECT_EQ(clusterSizesHost[1], 2) << "Point 1 count should decrease by 1";
 
-  // Check compaction for point 0: neighbors should be [0, 1, 3, 4, 5, -1, -1, -1]
-  std::vector<int> expectedPoint0 = {0, 1, 3, 4, 5, -1, -1, -1};
+  // Check compaction for point 0: first 5 entries should be valid, rest should be -1
   for (int i = 0; i < neighborlistMaxSize; i++) {
     if (i < 5) {
       EXPECT_GE(neighborListHost[i], 0) << "First 5 entries should be valid neighbors";
@@ -113,13 +125,13 @@ TEST_P(ButinaPruneFixture, PruneRemovesAssignedNeighbors) {
 }
 
 // Test that prune kernel marks singletons correctly
-TEST_P(ButinaPruneFixture, PruneMarksSingletons) {
-  constexpr int neighborlistMaxSize = 8;
+TYPED_TEST(ButinaPruneFixture, PruneMarksSingletons) {
+  constexpr int neighborlistMaxSize = TestFixture::kNeighborlistMaxSize;
   const int     numPoints           = 5;
 
-  AsyncDeviceVector<int> clusters(numPoints, stream());
-  AsyncDeviceVector<int> clusterSizes(numPoints, stream());
-  AsyncDeviceVector<int> neighborList(neighborlistMaxSize * numPoints, stream());
+  AsyncDeviceVector<int> clusters(numPoints, this->stream());
+  AsyncDeviceVector<int> clusterSizes(numPoints, this->stream());
+  AsyncDeviceVector<int> neighborList(neighborlistMaxSize * numPoints, this->stream());
 
   std::vector<int> clustersHost(numPoints, -1);
   std::vector<int> clusterSizesHost(numPoints, 0);
@@ -136,18 +148,18 @@ TEST_P(ButinaPruneFixture, PruneMarksSingletons) {
   clusters.copyFromHost(clustersHost);
   clusterSizes.copyFromHost(clusterSizesHost);
   neighborList.copyFromHost(neighborListHost);
-  cudaStreamSynchronize(stream());
+  cudaStreamSynchronize(this->stream());
 
   nvMolKit::detail::launchPruneNeighborlistKernel<neighborlistMaxSize>(toSpan(clusters),
                                                                        toSpan(clusterSizes),
                                                                        toSpan(neighborList),
                                                                        numPoints,
-                                                                       stream());
-  cudaStreamSynchronize(stream());
+                                                                       this->stream());
+  cudaStreamSynchronize(this->stream());
 
   clusterSizes.copyToHost(clusterSizesHost);
   clusters.copyToHost(clustersHost);
-  cudaStreamSynchronize(stream());
+  cudaStreamSynchronize(this->stream());
 
   // Point 0 should now have count=1 and be marked as singleton
   EXPECT_EQ(clusterSizesHost[0], 1) << "Point 0 should have count=1";
@@ -155,8 +167,8 @@ TEST_P(ButinaPruneFixture, PruneMarksSingletons) {
 }
 
 // Test that build kernel produces correct neighborlists
-TEST_P(ButinaPruneFixture, BuildNeighborlistProducesCorrectCounts) {
-  constexpr int neighborlistMaxSize = 8;
+TYPED_TEST(ButinaPruneFixture, BuildNeighborlistProducesCorrectCounts) {
+  constexpr int neighborlistMaxSize = TestFixture::kNeighborlistMaxSize;
   const int     numPoints           = 5;
 
   // Create a simple hit matrix where:
@@ -181,30 +193,30 @@ TEST_P(ButinaPruneFixture, BuildNeighborlistProducesCorrectCounts) {
   setHit(0, 2);
   setHit(1, 3);
 
-  AsyncDeviceVector<uint8_t> hitMatrix(numPoints * numPoints, stream());
-  AsyncDeviceVector<int>     clusters(numPoints, stream());
-  AsyncDeviceVector<int>     clusterSizes(numPoints, stream());
-  AsyncDeviceVector<int>     neighborList(neighborlistMaxSize * numPoints, stream());
+  AsyncDeviceVector<uint8_t> hitMatrix(numPoints * numPoints, this->stream());
+  AsyncDeviceVector<int>     clusters(numPoints, this->stream());
+  AsyncDeviceVector<int>     clusterSizes(numPoints, this->stream());
+  AsyncDeviceVector<int>     neighborList(neighborlistMaxSize * numPoints, this->stream());
 
   std::vector<int> clustersHost(numPoints, -1);
   hitMatrix.copyFromHost(hitMatrixHost);
   clusters.copyFromHost(clustersHost);
   clusterSizes.zero();
   neighborList.zero();
-  cudaStreamSynchronize(stream());
+  cudaStreamSynchronize(this->stream());
 
   nvMolKit::detail::launchBuildNeighborlistKernel<neighborlistMaxSize>(toSpan(hitMatrix),
                                                                        toSpan(clusters),
                                                                        toSpan(clusterSizes),
                                                                        toSpan(neighborList),
                                                                        numPoints,
-                                                                       stream());
-  cudaStreamSynchronize(stream());
+                                                                       this->stream());
+  cudaStreamSynchronize(this->stream());
 
   std::vector<int> clusterSizesHost(numPoints);
   clusterSizes.copyToHost(clusterSizesHost);
   clusters.copyToHost(clustersHost);
-  cudaStreamSynchronize(stream());
+  cudaStreamSynchronize(this->stream());
 
   EXPECT_EQ(clusterSizesHost[0], 3) << "Point 0 should have 3 neighbors";
   EXPECT_EQ(clusterSizesHost[1], 3) << "Point 1 should have 3 neighbors";
@@ -217,19 +229,19 @@ TEST_P(ButinaPruneFixture, BuildNeighborlistProducesCorrectCounts) {
 }
 
 // Test argmax kernel
-TEST_P(ButinaPruneFixture, ArgMaxFindsMaximum) {
+TYPED_TEST(ButinaPruneFixture, ArgMaxFindsMaximum) {
   const int numPoints = 10;
 
-  AsyncDeviceVector<int>        values(numPoints, stream());
-  nvMolKit::AsyncDevicePtr<int> outVal(0, stream());
-  nvMolKit::AsyncDevicePtr<int> outIdx(-1, stream());
+  AsyncDeviceVector<int>        values(numPoints, this->stream());
+  nvMolKit::AsyncDevicePtr<int> outVal(0, this->stream());
+  nvMolKit::AsyncDevicePtr<int> outIdx(-1, this->stream());
 
   std::vector<int> valuesHost = {3, 7, 2, 9, 5, 1, 8, 4, 6, 0};
   values.copyFromHost(valuesHost);
-  cudaStreamSynchronize(stream());
+  cudaStreamSynchronize(this->stream());
 
-  nvMolKit::detail::launchArgMaxKernel(toSpan(values), outVal.data(), outIdx.data(), stream());
-  cudaStreamSynchronize(stream());
+  nvMolKit::detail::launchArgMaxKernel(toSpan(values), outVal.data(), outIdx.data(), this->stream());
+  cudaStreamSynchronize(this->stream());
 
   int maxVal, maxIdx;
   cudaMemcpy(&maxVal, outVal.data(), sizeof(int), cudaMemcpyDeviceToHost);
@@ -240,8 +252,8 @@ TEST_P(ButinaPruneFixture, ArgMaxFindsMaximum) {
 }
 
 // Test prune + build consistency: build, assign some, prune, compare with fresh build
-TEST_P(ButinaPruneFixture, PruneMatchesFreshBuild) {
-  constexpr int neighborlistMaxSize = 8;
+TYPED_TEST(ButinaPruneFixture, PruneMatchesFreshBuild) {
+  constexpr int neighborlistMaxSize = TestFixture::kNeighborlistMaxSize;
   constexpr int numPoints           = 20;
   constexpr int neighborlistSize    = neighborlistMaxSize * numPoints;
 
@@ -257,13 +269,13 @@ TEST_P(ButinaPruneFixture, PruneMatchesFreshBuild) {
     }
   }
 
-  AsyncDeviceVector<uint8_t> hitMatrix(numPoints * numPoints, stream());
-  AsyncDeviceVector<int>     clusters1(numPoints, stream());
-  AsyncDeviceVector<int>     clusterSizes1(numPoints, stream());
-  AsyncDeviceVector<int>     neighborList1(neighborlistSize, stream());
-  AsyncDeviceVector<int>     clusters2(numPoints, stream());
-  AsyncDeviceVector<int>     clusterSizes2(numPoints, stream());
-  AsyncDeviceVector<int>     neighborList2(neighborlistSize, stream());
+  AsyncDeviceVector<uint8_t> hitMatrix(numPoints * numPoints, this->stream());
+  AsyncDeviceVector<int>     clusters1(numPoints, this->stream());
+  AsyncDeviceVector<int>     clusterSizes1(numPoints, this->stream());
+  AsyncDeviceVector<int>     neighborList1(neighborlistSize, this->stream());
+  AsyncDeviceVector<int>     clusters2(numPoints, this->stream());
+  AsyncDeviceVector<int>     clusterSizes2(numPoints, this->stream());
+  AsyncDeviceVector<int>     neighborList2(neighborlistSize, this->stream());
 
   std::vector<int> clustersHost(numPoints, -1);
   hitMatrix.copyFromHost(hitMatrixHost);
@@ -272,20 +284,20 @@ TEST_P(ButinaPruneFixture, PruneMatchesFreshBuild) {
   clusters1.copyFromHost(clustersHost);
   clusterSizes1.zero();
   neighborList1.zero();
-  cudaStreamSynchronize(stream());
+  cudaStreamSynchronize(this->stream());
 
   nvMolKit::detail::launchBuildNeighborlistKernel<neighborlistMaxSize>(toSpan(hitMatrix),
                                                                        toSpan(clusters1),
                                                                        toSpan(clusterSizes1),
                                                                        toSpan(neighborList1),
                                                                        numPoints,
-                                                                       stream());
-  cudaStreamSynchronize(stream());
+                                                                       this->stream());
+  cudaStreamSynchronize(this->stream());
 
   // Assign cluster 0 to point 0 and all its hit neighbors
   std::vector<int> clusters1Host(numPoints);
   clusters1.copyToHost(clusters1Host);
-  cudaStreamSynchronize(stream());
+  cudaStreamSynchronize(this->stream());
 
   for (int i = 0; i < numPoints; i++) {
     if (hitMatrixHost[0 * numPoints + i]) {
@@ -293,36 +305,36 @@ TEST_P(ButinaPruneFixture, PruneMatchesFreshBuild) {
     }
   }
   clusters1.copyFromHost(clusters1Host);
-  cudaStreamSynchronize(stream());
+  cudaStreamSynchronize(this->stream());
 
   // Prune
   nvMolKit::detail::launchPruneNeighborlistKernel<neighborlistMaxSize>(toSpan(clusters1),
                                                                        toSpan(clusterSizes1),
                                                                        toSpan(neighborList1),
                                                                        numPoints,
-                                                                       stream());
-  cudaStreamSynchronize(stream());
+                                                                       this->stream());
+  cudaStreamSynchronize(this->stream());
 
   // Path 2: Build fresh with same assignments
   clusters2.copyFromHost(clusters1Host);
   clusterSizes2.zero();
   neighborList2.zero();
-  cudaStreamSynchronize(stream());
+  cudaStreamSynchronize(this->stream());
 
   nvMolKit::detail::launchBuildNeighborlistKernel<neighborlistMaxSize>(toSpan(hitMatrix),
                                                                        toSpan(clusters2),
                                                                        toSpan(clusterSizes2),
                                                                        toSpan(neighborList2),
                                                                        numPoints,
-                                                                       stream());
-  cudaStreamSynchronize(stream());
+                                                                       this->stream());
+  cudaStreamSynchronize(this->stream());
 
   // Compare clusterSizes - they should match
   std::vector<int> clusterSizes1Host(numPoints);
   std::vector<int> clusterSizes2Host(numPoints);
   clusterSizes1.copyToHost(clusterSizes1Host);
   clusterSizes2.copyToHost(clusterSizes2Host);
-  cudaStreamSynchronize(stream());
+  cudaStreamSynchronize(this->stream());
 
   for (int i = 0; i < numPoints; i++) {
     EXPECT_EQ(clusterSizes1Host[i], clusterSizes2Host[i])
@@ -330,4 +342,139 @@ TEST_P(ButinaPruneFixture, PruneMatchesFreshBuild) {
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(ButinaPruneTest, ButinaPruneFixture, ::testing::Values(8, 16, 24, 32));
+// Test with many neighbors - uses numPoints neighbors to stress larger sizes
+using LargeNeighborlistSizes = ::testing::Types<NeighborlistSize<64>, NeighborlistSize<128>>;
+
+template <typename T>
+class ButinaPruneLargeFixture : public ::testing::Test {
+ protected:
+  static constexpr int   kNeighborlistMaxSize = T::value;
+  nvMolKit::ScopedStream scopedStream_;
+  cudaStream_t           stream() { return scopedStream_.stream(); }
+};
+
+TYPED_TEST_SUITE(ButinaPruneLargeFixture, LargeNeighborlistSizes);
+
+TYPED_TEST(ButinaPruneLargeFixture, PruneLargeNeighborlist) {
+  constexpr int neighborlistMaxSize = TestFixture::kNeighborlistMaxSize;
+  const int     numPoints           = 100;
+
+  AsyncDeviceVector<int> clusters(numPoints, this->stream());
+  AsyncDeviceVector<int> clusterSizes(numPoints, this->stream());
+  AsyncDeviceVector<int> neighborList(neighborlistMaxSize * numPoints, this->stream());
+
+  std::vector<int> clustersHost(numPoints, -1);
+  std::vector<int> clusterSizesHost(numPoints, 0);
+  std::vector<int> neighborListHost(neighborlistMaxSize * numPoints, -1);
+
+  // Point 0 has many neighbors (up to neighborlistMaxSize or numPoints, whichever is smaller)
+  const int numNeighbors = std::min(neighborlistMaxSize, numPoints);
+  clusterSizesHost[0]    = numNeighbors;
+  neighborListHost[0]    = 0;  // self
+  for (int i = 1; i < numNeighbors; i++) {
+    neighborListHost[i] = i;
+  }
+
+  // Assign half of them to a cluster (even indices except 0)
+  for (int i = 2; i < numNeighbors; i += 2) {
+    clustersHost[i] = 0;
+  }
+
+  clusters.copyFromHost(clustersHost);
+  clusterSizes.copyFromHost(clusterSizesHost);
+  neighborList.copyFromHost(neighborListHost);
+  cudaStreamSynchronize(this->stream());
+
+  nvMolKit::detail::launchPruneNeighborlistKernel<neighborlistMaxSize>(toSpan(clusters),
+                                                                       toSpan(clusterSizes),
+                                                                       toSpan(neighborList),
+                                                                       numPoints,
+                                                                       this->stream());
+  cudaStreamSynchronize(this->stream());
+
+  clusterSizes.copyToHost(clusterSizesHost);
+  neighborList.copyToHost(neighborListHost);
+  clusters.copyToHost(clustersHost);
+  cudaStreamSynchronize(this->stream());
+
+  // Count expected remaining neighbors (odd indices + 0)
+  int expectedCount = 0;
+  for (int i = 0; i < numNeighbors; i++) {
+    if (i == 0 || i % 2 == 1) {
+      expectedCount++;
+    }
+  }
+
+  EXPECT_EQ(clusterSizesHost[0], expectedCount) << "Point 0 count should match expected after pruning";
+
+  // Verify all remaining neighbors are valid (not assigned to a real cluster)
+  // Note: neighbors may be marked as singletons (kAssignedAsSingletonSentinel) if they have no
+  // neighborlist set up, which is fine - we just check they're not assigned to a real cluster
+  for (int i = 0; i < clusterSizesHost[0]; i++) {
+    const int  neighbor   = neighborListHost[i];
+    const int  clusterVal = clustersHost[neighbor];
+    const bool unassigned = (clusterVal < 0) || (clusterVal == kAssignedAsSingletonSentinel);
+    EXPECT_GE(neighbor, 0) << "Valid neighbor slot should have valid index";
+    EXPECT_TRUE(unassigned) << "Remaining neighbor " << neighbor << " should be unassigned or singleton, got "
+                            << clusterVal;
+  }
+
+  // Verify pruned slots are -1
+  for (int i = clusterSizesHost[0]; i < neighborlistMaxSize; i++) {
+    EXPECT_EQ(neighborListHost[i], -1) << "Pruned slots should be -1";
+  }
+}
+
+TYPED_TEST(ButinaPruneLargeFixture, BuildLargeNeighborlist) {
+  constexpr int neighborlistMaxSize = TestFixture::kNeighborlistMaxSize;
+  const int     numPoints           = 100;
+
+  // Create a hit matrix where point 0 is connected to many others
+  std::vector<uint8_t> hitMatrixHost(numPoints * numPoints, 0);
+  for (int i = 0; i < numPoints; i++) {
+    hitMatrixHost[i * numPoints + i] = 1;  // diagonal
+  }
+
+  // Point 0 connected to points 1 through min(neighborlistMaxSize-1, numPoints-1)
+  const int numNeighbors = std::min(neighborlistMaxSize, numPoints);
+  for (int i = 1; i < numNeighbors; i++) {
+    hitMatrixHost[0 * numPoints + i] = 1;
+    hitMatrixHost[i * numPoints + 0] = 1;
+  }
+
+  AsyncDeviceVector<uint8_t> hitMatrix(numPoints * numPoints, this->stream());
+  AsyncDeviceVector<int>     clusters(numPoints, this->stream());
+  AsyncDeviceVector<int>     clusterSizes(numPoints, this->stream());
+  AsyncDeviceVector<int>     neighborList(neighborlistMaxSize * numPoints, this->stream());
+
+  std::vector<int> clustersHost(numPoints, -1);
+  hitMatrix.copyFromHost(hitMatrixHost);
+  clusters.copyFromHost(clustersHost);
+  clusterSizes.zero();
+  neighborList.zero();
+  cudaStreamSynchronize(this->stream());
+
+  nvMolKit::detail::launchBuildNeighborlistKernel<neighborlistMaxSize>(toSpan(hitMatrix),
+                                                                       toSpan(clusters),
+                                                                       toSpan(clusterSizes),
+                                                                       toSpan(neighborList),
+                                                                       numPoints,
+                                                                       this->stream());
+  cudaStreamSynchronize(this->stream());
+
+  std::vector<int> clusterSizesHost(numPoints);
+  std::vector<int> neighborListHost(neighborlistMaxSize * numPoints);
+  clusterSizes.copyToHost(clusterSizesHost);
+  neighborList.copyToHost(neighborListHost);
+  cudaStreamSynchronize(this->stream());
+
+  EXPECT_EQ(clusterSizesHost[0], numNeighbors) << "Point 0 should have " << numNeighbors << " neighbors";
+
+  // Verify neighborlist contains expected neighbors
+  std::set<int> foundNeighbors;
+  for (int i = 0; i < clusterSizesHost[0]; i++) {
+    foundNeighbors.insert(neighborListHost[i]);
+  }
+  EXPECT_EQ(foundNeighbors.size(), static_cast<size_t>(numNeighbors));
+  EXPECT_TRUE(foundNeighbors.count(0) > 0) << "Point 0 should include itself";
+}

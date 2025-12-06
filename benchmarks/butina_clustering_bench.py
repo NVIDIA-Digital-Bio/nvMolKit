@@ -102,44 +102,46 @@ if __name__ == "__main__":
     dists = get_distance_matrix(mols)
 
     sizes = [1000, 5000, 10000, 20000, 30000, 40000]
-    cutoffs = [1e-10, 0.1, 0.2, 1.1]
+    cutoffs = [1e-10, 0.1, 0.2, 0.35, 1.1]
     strict_modes = [True, False]
+    max_nl_sizes = [8, 16, 32, 64, 128]
     results = []
 
     try:
         for size in sizes:
             for cutoff in cutoffs:
                 for enforce_strict in strict_modes:
-                    # Don't run large sizes for edge cases.
-                    if cutoff in (1e-10, 1.1) and size > 20000:
-                        continue
-                    mode_str = "strict" if enforce_strict else "relaxed"
-                    print(f"Running size {size} cutoff {cutoff} mode {mode_str}")
-                    dist_mat = resize_and_fill(dists, size)
-                    if do_rdkit:
-                        dist_mat_numpy = dist_mat.cpu().numpy()
-                        rdkit_time, rdk_std = bench_rdkit(dist_mat_numpy, cutoff)
-                    else:
-                        rdkit_time = 0.0
-                        rdk_std = 0.0
-                    nvmol_time, nvmol_std = time_it(lambda: butina_nvmol(dist_mat, cutoff, enforce_strict_indexing=enforce_strict))
-                    
-                    # Verify correctness
-                    nvmol_res = butina_nvmol(dist_mat, cutoff, enforce_strict_indexing=enforce_strict).torch()
-                    nvmol_clusts = [tuple(torch.argwhere(nvmol_res == i).flatten().tolist()) for i in range(nvmol_res.max() + 1)]
-                    check_butina_correctness(dist_mat <= cutoff, nvmol_clusts, enforce_strict)
+                    for max_nl in max_nl_sizes:
+                        # Don't run large sizes for edge cases.
+                        if cutoff in (1e-10, 1.1) and size > 20000:
+                            continue
+                        mode_str = "strict" if enforce_strict else "relaxed"
+                        print(f"Running size {size} cutoff {cutoff} mode {mode_str}")
+                        dist_mat = resize_and_fill(dists, size)
+                        if do_rdkit:
+                            dist_mat_numpy = dist_mat.cpu().numpy()
+                            rdkit_time, rdk_std = bench_rdkit(dist_mat_numpy, cutoff)
+                        else:
+                            rdkit_time = 0.0
+                            rdk_std = 0.0
+                        nvmol_time, nvmol_std = time_it(lambda: butina_nvmol(dist_mat, cutoff, enforce_strict_indexing=enforce_strict))
 
-                    results.append(
-                        {
-                            "size": size,
-                            "cutoff": cutoff,
-                            "enforce_strict": enforce_strict,
-                            "rdkit_time_ms": rdkit_time,
-                            "rdkit_std_ms": rdk_std,
-                            "nvmol_time_ms": nvmol_time,
-                            "nvmol_std_ms": nvmol_std,
-                        }
-                    )
+                        # Verify correctness
+                        nvmol_res = butina_nvmol(dist_mat, cutoff, enforce_strict_indexing=enforce_strict, neighborlist_max_size=max_nl).torch()
+                        nvmol_clusts = [tuple(torch.argwhere(nvmol_res == i).flatten().tolist()) for i in range(nvmol_res.max() + 1)]
+                        check_butina_correctness(dist_mat <= cutoff, nvmol_clusts, enforce_strict)
+
+                        results.append(
+                            {
+                                "size": size,
+                                "cutoff": cutoff,
+                                "enforce_strict": enforce_strict,
+                                "rdkit_time_ms": rdkit_time,
+                                "rdkit_std_ms": rdk_std,
+                                "nvmol_time_ms": nvmol_time,
+                                "nvmol_std_ms": nvmol_std,
+                            }
+                        )
     except Exception as e:
         print(f"Got exception: {e}, exiting early")
     df = pd.DataFrame(results)

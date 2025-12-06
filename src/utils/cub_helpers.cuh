@@ -18,6 +18,8 @@
 
 #include <cub/cub.cuh>
 
+/// Binary comparator for less-than comparison, usable on device
+
 #if defined(NVMOLKIT_HAS_CCCL_GE_3) || CUDART_VERSION >= 12090
 // CCCL >= 3.0.0 provides modern C++ functional operators
 using cubMax = cuda::maximum<>;
@@ -32,7 +34,13 @@ using cubLess = cuda::std::less<>;
 using cubMax = cub::Max;
 using cubMin = cub::Min;
 using cubSum = cub::Sum;
-using cubLess = cub::Less;
+struct cubLess {
+    template <typename T>
+    __host__ __device__ __forceinline__ bool operator()(const T& a, const T& b) const {
+      return a < b;
+    }
+  };
+  
 #pragma GCC diagnostic pop
 #endif  // NVMOLKIT_HAS_CCCL_GE_3
 #endif  // NVMOLKIT_CUB_HELPERS_H
