@@ -720,15 +720,15 @@ void butinaGpu(const cuda::std::span<const uint8_t> hitMatrix,
 
 namespace {
 
-//! CUB Op to threshold a distance matrix into a hit matrix
-struct ThresholdOp {
-  const double* matrix;
-  uint8_t*      hits;
-  double        cutoff;
-  ThresholdOp(const double* m, uint8_t* h, double c) : matrix(m), hits(h), cutoff(c) {}
-
-  __device__ void operator()(const std::size_t idx) const { hits[idx] = (matrix[idx] <= cutoff); }
-};
+__global__ void thresholdDistanceMatrixKernel(const double* __restrict__ matrix,
+                                              uint8_t* __restrict__ hits,
+                                              const double   cutoff,
+                                              const size_t   numElements) {
+  const size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < numElements) {
+    hits[idx] = (matrix[idx] <= cutoff);
+  }
+}
 
 }  // namespace
 
@@ -739,23 +739,15 @@ void butinaGpu(const cuda::std::span<const double> distanceMatrix,
                const int                           neighborlistMaxSize,
                cudaStream_t                        stream) {
   AsyncDeviceVector<uint8_t> hitMatrix(distanceMatrix.size(), stream);
-  std::size_t                tempStorageBytes = 0;
-  AsyncDeviceVector<uint8_t> tempStorage(0, stream);
 
-  ThresholdOp op{distanceMatrix.data(), hitMatrix.data(), cutoff};
-  cub::DeviceFor::Bulk(nullptr,
-                       tempStorageBytes,
+  constexpr int blockSize  = 256;
+  const size_t  numBlocks  = (distanceMatrix.size() + blockSize - 1) / blockSize;
+  thresholdDistanceMatrixKernel<<<numBlocks, blockSize, 0, stream>>>(distanceMatrix.data(),
+                                                                     hitMatrix.data(),
+                                                                     cutoff,
+                                                                     distanceMatrix.size());
+  cudaCheckError(cudaGetLastError());
 
-                       distanceMatrix.size(),
-                       op,
-                       stream);
-  tempStorage.resize(tempStorageBytes);
-  cub::DeviceFor::Bulk(tempStorage.data(),
-                       tempStorageBytes,
-
-                       distanceMatrix.size(),
-                       op,
-                       stream);
   butinaGpu(toSpan(hitMatrix), clusters, enforceStrictIndexing, neighborlistMaxSize, stream);
 }
 
