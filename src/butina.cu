@@ -33,11 +33,12 @@
 namespace nvMolKit {
 
 namespace {
-constexpr int blockSizeCount               = 256;
-constexpr int kAssignedAsSingletonSentinel = std::numeric_limits<int>::max() - 1;
-constexpr int kMinLoopSizeForAssignment    = 3;
+constexpr int blockSizeCount = 256;
+constexpr int kSubTileSize   = 8;
+constexpr int kWarpSize      = 32;
 
-constexpr int kSubTileSize = 8;
+using detail::kAssignedAsSingletonSentinel;
+using detail::kMinLoopSizeForAssignment;
 
 __device__ __forceinline__ void sumCountsAndAssignSmallClusters(const int                  tid,
                                                                 const cuda::std::span<int> clusters,
@@ -349,7 +350,8 @@ __global__ void assignSingletonIdsKernel(const cuda::std::span<int> clusters, co
   }
 }
 
-constexpr int kWarpSize       = 32;
+}  // namespace
+
 constexpr int argMaxBlockSize = 512;
 
 /**
@@ -363,6 +365,8 @@ template <int NeighborlistMaxSize>
 __global__ void pruneNeighborlistKernel(const cuda::std::span<int> clusters,
                                         const cuda::std::span<int> clusterSizes,
                                         const cuda::std::span<int> neighborList) {
+  constexpr int kWarpSize    = 32;
+  constexpr int kSubTileSize = 8;
   static_assert(NeighborlistMaxSize <= kWarpSize, "NeighborlistMaxSize must be <= 32 for warp-based pruning");
   static_assert(NeighborlistMaxSize % kSubTileSize == 0, "NeighborlistMaxSize must be multiple of kSubTileSize");
 
@@ -379,23 +383,19 @@ __global__ void pruneNeighborlistKernel(const cuda::std::span<int> clusters,
     return;
   }
 
-  const int currentSize = clusterSizes[pointIdx];
-  if (currentSize < kMinLoopSizeForAssignment) {
-    return;
-  }
-
-  const int  baseOffset = pointIdx * NeighborlistMaxSize;
-  const int  neighbor   = (tid < NeighborlistMaxSize) ? neighborList[baseOffset + tid] : -1;
-  const bool valid      = (tid < currentSize) && (neighbor >= 0) && (clusters[neighbor] < 0);
+  const int  currentSize = clusterSizes[pointIdx];
+  const int  baseOffset  = pointIdx * NeighborlistMaxSize;
+  const int  neighbor    = (tid < NeighborlistMaxSize) ? neighborList[baseOffset + tid] : -1;
+  const bool valid       = (tid < currentSize) && (neighbor >= 0) && (clusters[neighbor] < 0);
 
   const unsigned validMask = tile.ballot(valid);
   const int      newCount  = __popc(validMask);
 
-  if (newCount < kMinLoopSizeForAssignment) {
+  if (newCount < detail::kMinLoopSizeForAssignment) {
     if (tid == 0) {
       clusterSizes[pointIdx] = newCount;
       if (newCount < 2) {
-        clusters[pointIdx] = kAssignedAsSingletonSentinel;
+        clusters[pointIdx] = detail::kAssignedAsSingletonSentinel;
       }
     }
     return;
@@ -450,6 +450,8 @@ __global__ void lastArgMax(const cuda::std::span<const int> values, int* outVal,
     }
   }
 }
+
+namespace {
 
 // TODO - consolidate this to device vector code.
 template <typename T> __global__ void setAllKernel(const size_t numElements, T value, T* dst) {
@@ -514,7 +516,7 @@ void buildInitialNeighborlist(const int                            numPoints,
                               cudaStream_t                         stream) {
   const ScopedNvtxRange range("Build initial neighborlist");
   butinaKernelCountClusterSizeWithNeighborlist<NeighborlistMaxSize>
-      <<<numPoints, blockSizeCount, 0, stream>>>(hitMatrix, clusters, clusterSizesSpan, neighborList);
+    <<<numPoints, blockSizeCount, 0, stream>>>(hitMatrix, clusters, clusterSizesSpan, neighborList);
   cudaCheckError(cudaGetLastError());
   cudaCheckError(cudaStreamSynchronize(stream));
 }
@@ -551,20 +553,20 @@ void innerButinaLoopWithPruning(const int                            numPoints,
   const int numBlocksAssign = (numPoints + kTilesPerBlockAssign - 1) / kTilesPerBlockAssign;
   if (enforceStrictIndexing) {
     attemptAssignClustersFromNeighborlist<NeighborlistMaxSize, true>
-        <<<numBlocksAssign, blockSizeAssign, 0, stream>>>(clusters,
-                                                          clusterSizesSpan,
-                                                          neighborList,
-                                                          maxValue.data(),
-                                                          clusterIdx.data(),
-                                                          didAssignFlag.data());
+      <<<numBlocksAssign, blockSizeAssign, 0, stream>>>(clusters,
+                                                        clusterSizesSpan,
+                                                        neighborList,
+                                                        maxValue.data(),
+                                                        clusterIdx.data(),
+                                                        didAssignFlag.data());
   } else {
     attemptAssignClustersFromNeighborlist<NeighborlistMaxSize, false>
-        <<<numBlocksAssign, blockSizeAssign, 0, stream>>>(clusters,
-                                                          clusterSizesSpan,
-                                                          neighborList,
-                                                          maxValue.data(),
-                                                          clusterIdx.data(),
-                                                          didAssignFlag.data());
+      <<<numBlocksAssign, blockSizeAssign, 0, stream>>>(clusters,
+                                                        clusterSizesSpan,
+                                                        neighborList,
+                                                        maxValue.data(),
+                                                        clusterIdx.data(),
+                                                        didAssignFlag.data());
   }
   cudaCheckError(cudaGetLastError());
 
@@ -581,11 +583,11 @@ void innerButinaLoopWithPruning(const int                            numPoints,
   cudaCheckError(cudaGetLastError());
 
   // Prune assigned neighbors from all neighborlists and update counts
-  constexpr int warpsPerBlock   = 4;
-  constexpr int pruneBlockSize  = warpsPerBlock * kWarpSize;
-  const int     numBlocksPrune  = (numPoints + warpsPerBlock - 1) / warpsPerBlock;
+  constexpr int warpsPerBlock  = 4;
+  constexpr int pruneBlockSize = warpsPerBlock * kWarpSize;
+  const int     numBlocksPrune = (numPoints + warpsPerBlock - 1) / warpsPerBlock;
   pruneNeighborlistKernel<NeighborlistMaxSize>
-      <<<numBlocksPrune, pruneBlockSize, 0, stream>>>(clusters, clusterSizesSpan, neighborList);
+    <<<numBlocksPrune, pruneBlockSize, 0, stream>>>(clusters, clusterSizesSpan, neighborList);
   cudaCheckError(cudaGetLastError());
 
   cudaStreamSynchronize(stream);
@@ -678,10 +680,18 @@ void butinaGpu(const cuda::std::span<const uint8_t> hitMatrix,
                const int                            neighborlistMaxSize,
                cudaStream_t                         stream) {
   switch (neighborlistMaxSize) {
-    case 8: butinaGpuImpl<8>(hitMatrix, clusters, enforceStrictIndexing, stream); break;
-    case 16: butinaGpuImpl<16>(hitMatrix, clusters, enforceStrictIndexing, stream); break;
-    case 24: butinaGpuImpl<24>(hitMatrix, clusters, enforceStrictIndexing, stream); break;
-    case 32: butinaGpuImpl<32>(hitMatrix, clusters, enforceStrictIndexing, stream); break;
+    case 8:
+      butinaGpuImpl<8>(hitMatrix, clusters, enforceStrictIndexing, stream);
+      break;
+    case 16:
+      butinaGpuImpl<16>(hitMatrix, clusters, enforceStrictIndexing, stream);
+      break;
+    case 24:
+      butinaGpuImpl<24>(hitMatrix, clusters, enforceStrictIndexing, stream);
+      break;
+    case 32:
+      butinaGpuImpl<32>(hitMatrix, clusters, enforceStrictIndexing, stream);
+      break;
     default:
       throw std::invalid_argument("neighborlistMaxSize must be 8, 16, 24, or 32. Got: " +
                                   std::to_string(neighborlistMaxSize));
@@ -728,5 +738,90 @@ void butinaGpu(const cuda::std::span<const double> distanceMatrix,
                        stream);
   butinaGpu(toSpan(hitMatrix), clusters, enforceStrictIndexing, neighborlistMaxSize, stream);
 }
+
+namespace detail {
+
+constexpr int kWarpSize       = 32;
+constexpr int kBlockSizeCount = 256;
+constexpr int argMaxBlockSize = 512;
+
+template <int NeighborlistMaxSize>
+void launchPruneNeighborlistKernel(cuda::std::span<int> clusters,
+                                   cuda::std::span<int> clusterSizes,
+                                   cuda::std::span<int> neighborList,
+                                   const int            numPoints,
+                                   cudaStream_t         stream) {
+  constexpr int warpsPerBlock  = 4;
+  constexpr int pruneBlockSize = warpsPerBlock * kWarpSize;
+  const int     numBlocks      = (numPoints + warpsPerBlock - 1) / warpsPerBlock;
+  pruneNeighborlistKernel<NeighborlistMaxSize>
+    <<<numBlocks, pruneBlockSize, 0, stream>>>(clusters, clusterSizes, neighborList);
+  cudaCheckError(cudaGetLastError());
+}
+
+template void launchPruneNeighborlistKernel<8>(cuda::std::span<int>,
+                                               cuda::std::span<int>,
+                                               cuda::std::span<int>,
+                                               int,
+                                               cudaStream_t);
+template void launchPruneNeighborlistKernel<16>(cuda::std::span<int>,
+                                                cuda::std::span<int>,
+                                                cuda::std::span<int>,
+                                                int,
+                                                cudaStream_t);
+template void launchPruneNeighborlistKernel<24>(cuda::std::span<int>,
+                                                cuda::std::span<int>,
+                                                cuda::std::span<int>,
+                                                int,
+                                                cudaStream_t);
+template void launchPruneNeighborlistKernel<32>(cuda::std::span<int>,
+                                                cuda::std::span<int>,
+                                                cuda::std::span<int>,
+                                                int,
+                                                cudaStream_t);
+
+template <int NeighborlistMaxSize>
+void launchBuildNeighborlistKernel(cuda::std::span<const uint8_t> hitMatrix,
+                                   cuda::std::span<int>           clusters,
+                                   cuda::std::span<int>           clusterSizes,
+                                   cuda::std::span<int>           neighborList,
+                                   const int                      numPoints,
+                                   cudaStream_t                   stream) {
+  butinaKernelCountClusterSizeWithNeighborlist<NeighborlistMaxSize>
+    <<<numPoints, kBlockSizeCount, 0, stream>>>(hitMatrix, clusters, clusterSizes, neighborList);
+  cudaCheckError(cudaGetLastError());
+}
+
+template void launchBuildNeighborlistKernel<8>(cuda::std::span<const uint8_t>,
+                                               cuda::std::span<int>,
+                                               cuda::std::span<int>,
+                                               cuda::std::span<int>,
+                                               int,
+                                               cudaStream_t);
+template void launchBuildNeighborlistKernel<16>(cuda::std::span<const uint8_t>,
+                                                cuda::std::span<int>,
+                                                cuda::std::span<int>,
+                                                cuda::std::span<int>,
+                                                int,
+                                                cudaStream_t);
+template void launchBuildNeighborlistKernel<24>(cuda::std::span<const uint8_t>,
+                                                cuda::std::span<int>,
+                                                cuda::std::span<int>,
+                                                cuda::std::span<int>,
+                                                int,
+                                                cudaStream_t);
+template void launchBuildNeighborlistKernel<32>(cuda::std::span<const uint8_t>,
+                                                cuda::std::span<int>,
+                                                cuda::std::span<int>,
+                                                cuda::std::span<int>,
+                                                int,
+                                                cudaStream_t);
+
+void launchArgMaxKernel(cuda::std::span<const int> values, int* outVal, int* outIdx, cudaStream_t stream) {
+  lastArgMax<<<1, argMaxBlockSize, 0, stream>>>(values, outVal, outIdx);
+  cudaCheckError(cudaGetLastError());
+}
+
+}  // namespace detail
 
 }  // namespace nvMolKit

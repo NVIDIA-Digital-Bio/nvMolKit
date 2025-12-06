@@ -62,7 +62,12 @@ std::vector<int> runButina(const std::vector<double>& distances,
   AsyncDeviceVector<double> distancesDev(distances.size(), stream);
   AsyncDeviceVector<int>    resultDev(nPts, stream);
   distancesDev.copyFromHost(distances);
-  nvMolKit::butinaGpu(toSpan(distancesDev), toSpan(resultDev), cutoff, enforceStrictIndexing, neighborlistMaxSize, stream);
+  nvMolKit::butinaGpu(toSpan(distancesDev),
+                      toSpan(resultDev),
+                      cutoff,
+                      enforceStrictIndexing,
+                      neighborlistMaxSize,
+                      stream);
   std::vector<int> got(nPts);
   resultDev.copyToHost(got);
   cudaStreamSynchronize(stream);
@@ -154,9 +159,7 @@ TEST_P(ButinaSinglePointFixture, HandlesSinglePoint) {
   cudaStreamSynchronize(stream);
   EXPECT_THAT(got, ::testing::ElementsAre(0));
 }
-INSTANTIATE_TEST_SUITE_P(ButinaClusterTest,
-                         ButinaSinglePointFixture,
-                         ::testing::Values(8, 16, 24, 32));
+INSTANTIATE_TEST_SUITE_P(ButinaClusterTest, ButinaSinglePointFixture, ::testing::Values(8, 16, 24, 32));
 
 class ButinaClusterTestFixture : public ::testing::TestWithParam<std::tuple<int, bool, int>> {};
 TEST_P(ButinaClusterTestFixture, ClusteringMatchesReference) {
@@ -168,7 +171,8 @@ TEST_P(ButinaClusterTestFixture, ClusteringMatchesReference) {
   constexpr double       cutoff                                 = 0.1;
   const auto             distances                              = makeSymmetricDifferenceMatrix(nPts, rng);
   const auto             adjacency                              = makeAdjacency(distances, nPts, cutoff);
-  const std::vector<int> labels = runButina(distances, nPts, cutoff, enforceStrictIndexing, neighborlistMaxSize, stream);
+  const std::vector<int> labels =
+    runButina(distances, nPts, cutoff, enforceStrictIndexing, neighborlistMaxSize, stream);
   SCOPED_TRACE(::testing::Message() << "nPts=" << nPts << " enforceStrictIndexing=" << enforceStrictIndexing
                                     << " neighborlistMaxSize=" << neighborlistMaxSize);
   checkButinaCorrectness(adjacency, labels, enforceStrictIndexing);
@@ -217,6 +221,4 @@ TEST_P(ButinaEdgeTestFixture, EdgeNClusters) {
   EXPECT_THAT(sorted, ::testing::ElementsAreArray(want));
 }
 
-INSTANTIATE_TEST_SUITE_P(ButinaClusterEdgeTest,
-                         ButinaEdgeTestFixture,
-                         ::testing::Values(8, 16, 24, 32));
+INSTANTIATE_TEST_SUITE_P(ButinaClusterEdgeTest, ButinaEdgeTestFixture, ::testing::Values(8, 16, 24, 32));
