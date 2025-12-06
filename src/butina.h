@@ -30,14 +30,16 @@ namespace nvMolKit {
  * The Butina algorithm is a deterministic clustering method that iteratively selects
  * the item with the most unclustered neighbors and forms clusters.
  *
+ * Cluster IDs are assigned in descending order by cluster size: cluster 0 is the largest,
+ * cluster 1 is the second largest, and so on. Ties are broken by assigning the lower ID
+ * to the cluster that was formed first.
+ *
  * @param distanceMatrix Square distance matrix of size NxN where distanceMatrix[i*N+j]
  *                       contains the distance between items i and j.
  * @param clusters Output array of size N. Each element will contain the cluster ID for
  *                 that item. Modified in-place.
  * @param cutoff Distance threshold for clustering. Items with distance < cutoff are
  *               considered neighbors.
- * @param enforceStrictIndexing If true, cluster IDs are assigned in strict largest-first order.
- *                              If false, allows parallel assignment for better performance.
  * @param neighborlistMaxSize Maximum size of the neighborlist used for small cluster optimization.
  *                            Must be 8, 16, 24, 32, 64, or 128. Larger values allow parallel
  *                            processing of larger clusters but use more shared memory.
@@ -46,9 +48,8 @@ namespace nvMolKit {
 void butinaGpu(cuda::std::span<const double> distanceMatrix,
                cuda::std::span<int>          clusters,
                double                        cutoff,
-               bool                          enforceStrictIndexing = true,
-               int                           neighborlistMaxSize   = 8,
-               cudaStream_t                  stream                = nullptr);
+               int                           neighborlistMaxSize = 8,
+               cudaStream_t                  stream              = nullptr);
 
 /**
  * @brief Perform Butina clustering on a precomputed hit matrix.
@@ -56,12 +57,14 @@ void butinaGpu(cuda::std::span<const double> distanceMatrix,
  * This is the core GPU implementation of the Butina clustering algorithm. It takes
  * a binary hit matrix where element (i,j) indicates whether items i and j are neighbors.
  *
+ * Cluster IDs are assigned in descending order by cluster size: cluster 0 is the largest,
+ * cluster 1 is the second largest, and so on. Ties are broken by assigning the lower ID
+ * to the cluster that was formed first.
+ *
  * @param hitMatrix Binary matrix of size NxN where hitMatrix[i*N+j] = 1 if items i and j
  *                  are neighbors (distance < cutoff), 0 otherwise.
  * @param clusters Output array of size N. Each element will contain the cluster ID for
  *                 that item. Modified in-place.
- * @param enforceStrictIndexing If true, cluster IDs are assigned in strict largest-first order.
- *                              If false, allows parallel assignment for better performance.
  * @param neighborlistMaxSize Maximum size of the neighborlist used for small cluster optimization.
  *                            Must be 8, 16, 24, 32, 64, or 128. Larger values allow parallel
  *                            processing of larger clusters but use more shared memory.
@@ -69,9 +72,8 @@ void butinaGpu(cuda::std::span<const double> distanceMatrix,
  */
 void butinaGpu(cuda::std::span<const uint8_t> hitMatrix,
                cuda::std::span<int>           clusters,
-               bool                           enforceStrictIndexing = true,
-               int                            neighborlistMaxSize   = 8,
-               cudaStream_t                   stream                = nullptr);
+               int                            neighborlistMaxSize = 8,
+               cudaStream_t                   stream              = nullptr);
 }  // namespace nvMolKit
 
 #endif  // NVMOLKIT_BUTINA_H

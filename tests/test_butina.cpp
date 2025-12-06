@@ -56,38 +56,21 @@ std::vector<uint8_t> makeAdjacency(const std::vector<double>& distances, int nPt
 std::vector<int> runButina(const std::vector<double>& distances,
                            const int                  nPts,
                            const double               cutoff,
-                           const bool                 enforceStrictIndexing,
                            const int                  neighborlistMaxSize,
                            cudaStream_t               stream) {
   AsyncDeviceVector<double> distancesDev(distances.size(), stream);
   AsyncDeviceVector<int>    resultDev(nPts, stream);
   distancesDev.copyFromHost(distances);
-  nvMolKit::butinaGpu(toSpan(distancesDev),
-                      toSpan(resultDev),
-                      cutoff,
-                      enforceStrictIndexing,
-                      neighborlistMaxSize,
-                      stream);
+  nvMolKit::butinaGpu(toSpan(distancesDev), toSpan(resultDev), cutoff, neighborlistMaxSize, stream);
   std::vector<int> got(nPts);
   resultDev.copyToHost(got);
   cudaStreamSynchronize(stream);
   return got;
 }
 
-void checkButinaCorrectness(const std::vector<uint8_t>& adjacency, const std::vector<int>& labels, const bool strict) {
+void checkButinaCorrectness(const std::vector<uint8_t>& adjacency, const std::vector<int>& labels) {
   const int nPts = static_cast<int>(labels.size());
   ASSERT_EQ(adjacency.size(), static_cast<size_t>(nPts) * static_cast<size_t>(nPts));
-
-  std::vector<uint8_t> working = adjacency;
-  std::vector<int>     counts(nPts, 0);
-  for (int row = 0; row < nPts; ++row) {
-    const size_t base = static_cast<size_t>(row) * nPts;
-    for (int col = 0; col < nPts; ++col) {
-      if (working[base + col] != 0U) {
-        ++counts[row];
-      }
-    }
-  }
 
   std::vector<bool> seen(nPts, false);
   int               seenCount = 0;
@@ -100,39 +83,44 @@ void checkButinaCorrectness(const std::vector<uint8_t>& adjacency, const std::ve
     clusters[labels[idx]].push_back(idx);
   }
 
-  // In relaxed mode, sort clusters by size (descending)
-  if (!strict) {
-    std::ranges::sort(clusters, [](const auto& a, const auto& b) { return a.size() > b.size(); });
+  // Verify clusters are ordered by size (descending) - cluster 0 should be largest
+  for (size_t i = 1; i < clusters.size(); ++i) {
+    ASSERT_GE(clusters[i - 1].size(), clusters[i].size())
+      << "Clusters not in descending size order: cluster " << (i - 1) << " has size " << clusters[i - 1].size()
+      << " but cluster " << i << " has size " << clusters[i].size();
   }
 
-  for (const auto& cluster : clusters) {
-    const auto clusterSize = static_cast<int>(cluster.size());
+  for (size_t clustIdx = 0; clustIdx < clusters.size(); ++clustIdx) {
+    const auto& cluster     = clusters[clustIdx];
+    const auto  clusterSize = static_cast<int>(cluster.size());
     ASSERT_GT(clusterSize, 0) << "Empty cluster found";
 
-    const int maxCount = *std::ranges::max_element(counts.begin(), counts.end());
-    ASSERT_EQ(clusterSize, maxCount) << "Cluster size doesn't match max available count";
-
+    // Verify no point is assigned to multiple clusters
     for (const int member : cluster) {
       ASSERT_FALSE(seen[member]) << "Point " << member << " assigned to multiple clusters";
+      seen[member] = true;
     }
 
-    for (const int member : cluster) {
-      seen[member]         = true;
-      const size_t rowBase = static_cast<size_t>(member) * nPts;
-      for (int col = 0; col < nPts; ++col) {
-        const size_t idx       = rowBase + col;
-        const size_t mirrorIdx = static_cast<size_t>(col) * nPts + member;
-        if (working[idx] != 0U) {
-          working[idx] = 0U;
-          --counts[member];
-        }
-        if (working[mirrorIdx] != 0U) {
-          working[mirrorIdx] = 0U;
-          --counts[col];
+    // Verify valid Butina cluster: there exists a centroid that is neighbor of all other members
+    bool validCluster = false;
+    for (const int centroid : cluster) {
+      bool allNeighbors = true;
+      for (const int member : cluster) {
+        if (member != centroid) {
+          const size_t idx = static_cast<size_t>(centroid) * nPts + member;
+          if (adjacency[idx] != 1U) {
+            allNeighbors = false;
+            break;
+          }
         }
       }
-      counts[member] = 0;
+      if (allNeighbors) {
+        validCluster = true;
+        break;
+      }
     }
+    ASSERT_TRUE(validCluster) << "Cluster " << clustIdx << " has no valid centroid";
+
     seenCount += clusterSize;
   }
 
@@ -153,7 +141,7 @@ TEST_P(ButinaSinglePointFixture, HandlesSinglePoint) {
   AsyncDeviceVector<int>    resultDev(nPts, stream);
   distancesDev.copyFromHost(std::vector<double>{0.0});
 
-  nvMolKit::butinaGpu(toSpan(distancesDev), toSpan(resultDev), cutoff, true, neighborlistMaxSize, stream);
+  nvMolKit::butinaGpu(toSpan(distancesDev), toSpan(resultDev), cutoff, neighborlistMaxSize, stream);
   std::vector<int> got(nPts);
   resultDev.copyToHost(got);
   cudaStreamSynchronize(stream);
@@ -161,27 +149,24 @@ TEST_P(ButinaSinglePointFixture, HandlesSinglePoint) {
 }
 INSTANTIATE_TEST_SUITE_P(ButinaClusterTest, ButinaSinglePointFixture, ::testing::Values(8, 16, 24, 32, 64, 128));
 
-class ButinaClusterTestFixture : public ::testing::TestWithParam<std::tuple<int, bool, int>> {};
+class ButinaClusterTestFixture : public ::testing::TestWithParam<std::tuple<int, int>> {};
 TEST_P(ButinaClusterTestFixture, ClusteringMatchesReference) {
   nvMolKit::ScopedStream const scopedStream;
   cudaStream_t                 stream = scopedStream.stream();
   std::mt19937                 rng(42);
 
-  const auto [nPts, enforceStrictIndexing, neighborlistMaxSize] = GetParam();
-  constexpr double       cutoff                                 = 0.1;
-  const auto             distances                              = makeSymmetricDifferenceMatrix(nPts, rng);
-  const auto             adjacency                              = makeAdjacency(distances, nPts, cutoff);
-  const std::vector<int> labels =
-    runButina(distances, nPts, cutoff, enforceStrictIndexing, neighborlistMaxSize, stream);
-  SCOPED_TRACE(::testing::Message() << "nPts=" << nPts << " enforceStrictIndexing=" << enforceStrictIndexing
-                                    << " neighborlistMaxSize=" << neighborlistMaxSize);
-  checkButinaCorrectness(adjacency, labels, enforceStrictIndexing);
+  const auto [nPts, neighborlistMaxSize] = GetParam();
+  constexpr double       cutoff          = 0.1;
+  const auto             distances       = makeSymmetricDifferenceMatrix(nPts, rng);
+  const auto             adjacency       = makeAdjacency(distances, nPts, cutoff);
+  const std::vector<int> labels          = runButina(distances, nPts, cutoff, neighborlistMaxSize, stream);
+  SCOPED_TRACE(::testing::Message() << "nPts=" << nPts << " neighborlistMaxSize=" << neighborlistMaxSize);
+  checkButinaCorrectness(adjacency, labels);
 }
 
 INSTANTIATE_TEST_SUITE_P(ButinaClusterTest,
                          ButinaClusterTestFixture,
                          ::testing::Combine(::testing::Values(1, 10, 100, 1000),
-                                            ::testing::Bool(),
                                             ::testing::Values(8, 16, 24, 32, 64, 128)));
 
 class ButinaEdgeTestFixture : public ::testing::TestWithParam<int> {};
@@ -197,7 +182,7 @@ TEST_P(ButinaEdgeTestFixture, EdgeOneCluster) {
     distances[static_cast<size_t>(i) * nPts + i] = 0.0;
   }
 
-  const std::vector<int> labels = runButina(distances, nPts, cutoff, true, neighborlistMaxSize, stream);
+  const std::vector<int> labels = runButina(distances, nPts, cutoff, neighborlistMaxSize, stream);
   EXPECT_THAT(labels, ::testing::Each(0));
 }
 
@@ -213,7 +198,7 @@ TEST_P(ButinaEdgeTestFixture, EdgeNClusters) {
     distances[static_cast<size_t>(i) * nPts + i] = 0.0;
   }
 
-  const std::vector<int> labels = runButina(distances, nPts, cutoff, true, neighborlistMaxSize, stream);
+  const std::vector<int> labels = runButina(distances, nPts, cutoff, neighborlistMaxSize, stream);
   std::vector<int>       sorted = labels;
   std::ranges::sort(sorted);
   std::vector<int> want(nPts);
