@@ -31,15 +31,16 @@ using nvMolKit::AsyncDeviceVector;
 using nvMolKit::detail::kAssignedAsSingletonSentinel;
 using nvMolKit::detail::kMinLoopSizeForAssignment;
 
-template <int N>
-struct NeighborlistSize : std::integral_constant<int, N> {};
+template <int N> struct NeighborlistSize : std::integral_constant<int, N> {};
 
-using NeighborlistSizes =
-  ::testing::Types<NeighborlistSize<8>, NeighborlistSize<16>, NeighborlistSize<24>, NeighborlistSize<32>,
-                   NeighborlistSize<64>, NeighborlistSize<128>>;
+using NeighborlistSizes = ::testing::Types<NeighborlistSize<8>,
+                                           NeighborlistSize<16>,
+                                           NeighborlistSize<24>,
+                                           NeighborlistSize<32>,
+                                           NeighborlistSize<64>,
+                                           NeighborlistSize<128>>;
 
-template <typename T>
-class ButinaPruneFixture : public ::testing::Test {
+template <typename T> class ButinaPruneFixture : public ::testing::Test {
  protected:
   static constexpr int   kNeighborlistMaxSize = T::value;
   nvMolKit::ScopedStream scopedStream_;
@@ -345,8 +346,7 @@ TYPED_TEST(ButinaPruneFixture, PruneMatchesFreshBuild) {
 // Test with many neighbors - uses numPoints neighbors to stress larger sizes
 using LargeNeighborlistSizes = ::testing::Types<NeighborlistSize<64>, NeighborlistSize<128>>;
 
-template <typename T>
-class ButinaPruneLargeFixture : public ::testing::Test {
+template <typename T> class ButinaPruneLargeFixture : public ::testing::Test {
  protected:
   static constexpr int   kNeighborlistMaxSize = T::value;
   nvMolKit::ScopedStream scopedStream_;
