@@ -35,7 +35,6 @@ namespace nvMolKit {
 namespace {
 constexpr int blockSizeCount = 256;
 constexpr int kSubTileSize   = 8;
-constexpr int kWarpSize      = 32;
 
 using detail::kAssignedAsSingletonSentinel;
 using detail::kMinLoopSizeForAssignment;
@@ -567,16 +566,7 @@ void innerButinaLoopWithPruning(const int                  numPoints,
                                 const cuda::std::span<int> neighborList,
                                 const bool                 enforceStrictIndexing,
                                 cudaStream_t               stream) {
-  lastArgMax<<<1, argMaxBlockSize, 0, stream>>>(clusterSizesSpan, maxValue.data(), maxIndex.data());
-  cudaCheckError(cudaGetLastError());
-
-  cudaCheckError(cudaMemcpyAsync(maxCluster.data(), maxValue.data(), sizeof(int), cudaMemcpyDefault, stream));
-  cudaStreamSynchronize(stream);
-
-  if (maxCluster[0] < kMinLoopSizeForAssignment) {
-    return;
-  }
-
+  // Uses maxValue/maxIndex from previous iteration's argmax (or initial argmax before loop)
   const int numBlocksAssign = (numPoints + kTilesPerBlockAssign - 1) / kTilesPerBlockAssign;
   if (enforceStrictIndexing) {
     attemptAssignClustersFromNeighborlist<NeighborlistMaxSize, true>
@@ -604,6 +594,11 @@ void innerButinaLoopWithPruning(const int                  numPoints,
   pruneNeighborlistKernel<NeighborlistMaxSize>
     <<<numBlocksPrune, kPruneBlockSize, 0, stream>>>(clusters, clusterSizesSpan, neighborList);
   cudaCheckError(cudaGetLastError());
+
+  // Compute argmax for next iteration, copy to host before sync
+  lastArgMax<<<1, argMaxBlockSize, 0, stream>>>(clusterSizesSpan, maxValue.data(), maxIndex.data());
+  cudaCheckError(cudaGetLastError());
+  cudaCheckError(cudaMemcpyAsync(maxCluster.data(), maxValue.data(), sizeof(int), cudaMemcpyDefault, stream));
 
   cudaStreamSynchronize(stream);
 }
@@ -659,6 +654,13 @@ void butinaGpuImpl(const cuda::std::span<const uint8_t> hitMatrix,
                                                   maxValue,
                                                   maxCluster,
                                                   stream);
+
+    // Initial argmax to prime the loop (buildInitialNeighborlist already synced)
+    lastArgMax<<<1, argMaxBlockSize, 0, stream>>>(clusterSizesSpan, maxValue.data(), maxIndex.data());
+    cudaCheckError(cudaGetLastError());
+    cudaCheckError(cudaMemcpyAsync(maxCluster.data(), maxValue.data(), sizeof(int), cudaMemcpyDefault, stream));
+    cudaStreamSynchronize(stream);
+
     while (maxCluster[0] >= kMinLoopSizeForAssignment) {
       const std::string     maxClusterSize = std::to_string(maxCluster[0]);
       const ScopedNvtxRange loopRange("Small cluster Butina Loop with pruning, max cluster: " + maxClusterSize);
