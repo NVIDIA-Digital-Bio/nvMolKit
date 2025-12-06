@@ -28,7 +28,6 @@
  * - Parallelize singlet/doublet assignment (low priority since these only run once)
  * - Use ArgMax from CUB instead of custom kernel. CUB API changed somewhere between 12.5 and 12.9, so we'd need a
  * compatibility layer.
- * - Use dynamically pruned neighborlist for smaller cluster path, instead of recomputing each loop.
  * - Use CUDA Graphs for inner loop and exit criteria.
  */
 namespace nvMolKit {
@@ -350,7 +349,77 @@ __global__ void assignSingletonIdsKernel(const cuda::std::span<int> clusters, co
   }
 }
 
+constexpr int kWarpSize       = 32;
 constexpr int argMaxBlockSize = 512;
+
+/**
+ * @brief Prune neighborlists by removing assigned neighbors, using warp-shuffle compaction.
+ *
+ * Each warp handles one point. Valid neighbors (those with clusters[neighbor] < 0) are
+ * compacted to the front of the neighborlist using ballot and shuffle operations.
+ * clusterSizes is updated to reflect the new count.
+ */
+template <int NeighborlistMaxSize>
+__global__ void pruneNeighborlistKernel(const cuda::std::span<int> clusters,
+                                        const cuda::std::span<int> clusterSizes,
+                                        const cuda::std::span<int> neighborList) {
+  static_assert(NeighborlistMaxSize <= kWarpSize, "NeighborlistMaxSize must be <= 32 for warp-based pruning");
+  static_assert(NeighborlistMaxSize % kSubTileSize == 0, "NeighborlistMaxSize must be multiple of kSubTileSize");
+
+  const auto tile     = cg::tiled_partition<kWarpSize>(cg::this_thread_block());
+  const int  tid      = tile.thread_rank();
+  const int  pointIdx = blockIdx.x * (blockDim.x / kWarpSize) + tile.meta_group_rank();
+
+  if (pointIdx >= static_cast<int>(clusters.size())) {
+    return;
+  }
+
+  if (clusters[pointIdx] >= 0) {
+    clusterSizes[pointIdx] = 0;
+    return;
+  }
+
+  const int currentSize = clusterSizes[pointIdx];
+  if (currentSize < kMinLoopSizeForAssignment) {
+    return;
+  }
+
+  const int  baseOffset = pointIdx * NeighborlistMaxSize;
+  const int  neighbor   = (tid < NeighborlistMaxSize) ? neighborList[baseOffset + tid] : -1;
+  const bool valid      = (tid < currentSize) && (neighbor >= 0) && (clusters[neighbor] < 0);
+
+  const unsigned validMask = tile.ballot(valid);
+  const int      newCount  = __popc(validMask);
+
+  if (newCount < kMinLoopSizeForAssignment) {
+    if (tid == 0) {
+      clusterSizes[pointIdx] = newCount;
+      if (newCount < 2) {
+        clusters[pointIdx] = kAssignedAsSingletonSentinel;
+      }
+    }
+    return;
+  }
+
+  int compacted = -1;
+  if (tid < newCount) {
+    unsigned mask   = validMask;
+    int      srcIdx = 0;
+    for (int i = 0; i <= tid; i++) {
+      srcIdx = __ffs(mask) - 1;
+      mask &= ~(1u << srcIdx);
+    }
+    compacted = tile.shfl(neighbor, srcIdx);
+  }
+
+  if (tid < NeighborlistMaxSize) {
+    neighborList[baseOffset + tid] = compacted;
+  }
+
+  if (tid == 0) {
+    clusterSizes[pointIdx] = newCount;
+  }
+}
 
 //! Custom ArgMax kernel that returns the largest value and index.
 __global__ void lastArgMax(const cuda::std::span<const int> values, int* outVal, int* outIdx) {
@@ -429,27 +498,49 @@ void innerButinaLoop(const int                            numPoints,
   cudaStreamSynchronize(stream);
 }
 
+/**
+ * @brief Build the initial neighborlist and cluster sizes from the hit matrix.
+ *
+ * This is called once before entering the pruning loop.
+ */
 template <int NeighborlistMaxSize>
-void innerButinaLoopNeighborlist(const int                            numPoints,
-                                 const cuda::std::span<const uint8_t> hitMatrix,
-                                 const cuda::std::span<int>           clusters,
-                                 const cuda::std::span<int>           clusterSizesSpan,
-                                 const AsyncDevicePtr<int>&           maxIndex,
-                                 const AsyncDevicePtr<int>&           maxValue,
-                                 const AsyncDevicePtr<int>&           clusterIdx,
-                                 PinnedHostVector<int>&               maxCluster,
-                                 const cuda::std::span<int>           neighborList,
-                                 const AsyncDevicePtr<int>&           didAssignFlag,
-                                 const bool                           enforceStrictIndexing,
-                                 cudaStream_t                         stream) {
+void buildInitialNeighborlist(const int                            numPoints,
+                              const cuda::std::span<const uint8_t> hitMatrix,
+                              const cuda::std::span<int>           clusters,
+                              const cuda::std::span<int>           clusterSizesSpan,
+                              const cuda::std::span<int>           neighborList,
+                              const AsyncDevicePtr<int>&           maxValue,
+                              PinnedHostVector<int>&               maxCluster,
+                              cudaStream_t                         stream) {
+  const ScopedNvtxRange range("Build initial neighborlist");
   butinaKernelCountClusterSizeWithNeighborlist<NeighborlistMaxSize>
       <<<numPoints, blockSizeCount, 0, stream>>>(hitMatrix, clusters, clusterSizesSpan, neighborList);
   cudaCheckError(cudaGetLastError());
+  cudaCheckError(cudaStreamSynchronize(stream));
+}
+
+/**
+ * @brief Inner loop iteration that attempts assignment then prunes neighborlists.
+ *
+ * Unlike the rebuild approach, this modifies neighborlists in-place by removing
+ * assigned neighbors and compacting valid ones to the front.
+ */
+template <int NeighborlistMaxSize>
+void innerButinaLoopWithPruning(const int                            numPoints,
+                                const cuda::std::span<const uint8_t> hitMatrix,
+                                const cuda::std::span<int>           clusters,
+                                const cuda::std::span<int>           clusterSizesSpan,
+                                const AsyncDevicePtr<int>&           maxIndex,
+                                const AsyncDevicePtr<int>&           maxValue,
+                                const AsyncDevicePtr<int>&           clusterIdx,
+                                PinnedHostVector<int>&               maxCluster,
+                                const cuda::std::span<int>           neighborList,
+                                const AsyncDevicePtr<int>&           didAssignFlag,
+                                const bool                           enforceStrictIndexing,
+                                cudaStream_t                         stream) {
   lastArgMax<<<1, argMaxBlockSize, 0, stream>>>(clusterSizesSpan, maxValue.data(), maxIndex.data());
   cudaCheckError(cudaGetLastError());
 
-  // Check max cluster size AFTER counting to avoid processing size < 3
-  // TODO: This is a second sync in the loop and we can probably handle this better.
   cudaCheckError(cudaMemcpyAsync(maxCluster.data(), maxValue.data(), sizeof(int), cudaMemcpyDefault, stream));
   cudaStreamSynchronize(stream);
 
@@ -488,6 +579,15 @@ void innerButinaLoopNeighborlist(const int                            numPoints,
   cudaCheckError(cudaGetLastError());
   bumpClusterIdxKernel<<<1, 1, 0, stream>>>(clusterIdx.data(), maxValue.data(), didAssignFlag.data());
   cudaCheckError(cudaGetLastError());
+
+  // Prune assigned neighbors from all neighborlists and update counts
+  constexpr int warpsPerBlock   = 4;
+  constexpr int pruneBlockSize  = warpsPerBlock * kWarpSize;
+  const int     numBlocksPrune  = (numPoints + warpsPerBlock - 1) / warpsPerBlock;
+  pruneNeighborlistKernel<NeighborlistMaxSize>
+      <<<numBlocksPrune, pruneBlockSize, 0, stream>>>(clusters, clusterSizesSpan, neighborList);
+  cudaCheckError(cudaGetLastError());
+
   cudaStreamSynchronize(stream);
 }
 
@@ -505,8 +605,8 @@ void butinaGpuImpl(const cuda::std::span<const uint8_t> hitMatrix,
   }
   AsyncDeviceVector<int> clusterSizes(clusters.size(), stream);
   clusterSizes.zero();
-  const AsyncDeviceVector<int> neighborList(NeighborlistMaxSize * numPoints, stream);
-  const auto                   neighborListSpan = toSpan(neighborList);
+  AsyncDeviceVector<int> neighborList(NeighborlistMaxSize * numPoints, stream);
+  const auto             neighborListSpan = toSpan(neighborList);
 
   const AsyncDevicePtr<int> maxIndex(-1, stream);
   const AsyncDevicePtr<int> maxValue(std::numeric_limits<int>::max(), stream);
@@ -532,22 +632,35 @@ void butinaGpuImpl(const cuda::std::span<const uint8_t> hitMatrix,
                     maxCluster,
                     stream);
   }
-  while (maxCluster[0] >= kMinLoopSizeForAssignment) {
-    const std::string     maxClusterSize = std::to_string(maxCluster[0]);
-    const ScopedNvtxRange loopRange("Small cluster Butina Loop with neighborlist, max cluster: " + maxClusterSize);
-    innerButinaLoopNeighborlist<NeighborlistMaxSize>(numPoints,
-                                                     hitMatrix,
-                                                     clusters,
-                                                     clusterSizesSpan,
-                                                     maxIndex,
-                                                     maxValue,
-                                                     clusterIdx,
-                                                     maxCluster,
-                                                     neighborListSpan,
-                                                     didAssignFlag,
-                                                     enforceStrictIndexing,
-                                                     stream);
+
+  // Build neighborlist once, then prune dynamically instead of rebuilding each iteration
+  if (maxCluster[0] >= kMinLoopSizeForAssignment) {
+    buildInitialNeighborlist<NeighborlistMaxSize>(numPoints,
+                                                  hitMatrix,
+                                                  clusters,
+                                                  clusterSizesSpan,
+                                                  neighborListSpan,
+                                                  maxValue,
+                                                  maxCluster,
+                                                  stream);
+    while (maxCluster[0] >= kMinLoopSizeForAssignment) {
+      const std::string     maxClusterSize = std::to_string(maxCluster[0]);
+      const ScopedNvtxRange loopRange("Small cluster Butina Loop with pruning, max cluster: " + maxClusterSize);
+      innerButinaLoopWithPruning<NeighborlistMaxSize>(numPoints,
+                                                      hitMatrix,
+                                                      clusters,
+                                                      clusterSizesSpan,
+                                                      maxIndex,
+                                                      maxValue,
+                                                      clusterIdx,
+                                                      maxCluster,
+                                                      neighborListSpan,
+                                                      didAssignFlag,
+                                                      enforceStrictIndexing,
+                                                      stream);
+    }
   }
+
   pairDoubletKernels<<<numPoints, blockSizeCount, 0, stream>>>(hitMatrix, clusters, clusterSizesSpan);
   cudaCheckError(cudaGetLastError());
   assignDoubletIdsKernel<<<1, 1, 0, stream>>>(clusters, clusterIdx.data());
