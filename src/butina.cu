@@ -242,13 +242,21 @@ __global__ void attemptAssignClustersFromNeighborlist(const cuda::std::span<int>
     clusterVal         = atomicAdd(nextClusterIdx, 1);
     clusters[pointIdx] = clusterVal;
     atomicExch(didAssignFlag, 1);  // Signal that we assigned something
+    // if (tid == 0) {
+    //   printf("Assigning NL cluster %d of size %d around point %d\n  Neighbors: %d %d %d %d %d %d %d %d\n", clusterVal, clusterSize, pointIdx, sharedCandidateNeighbors[0], sharedCandidateNeighbors[1], sharedCandidateNeighbors[2], sharedCandidateNeighbors[3], sharedCandidateNeighbors[4], sharedCandidateNeighbors[5], sharedCandidateNeighbors[6], sharedCandidateNeighbors[7]);
+    // }
   }
   tile8.sync();
   clusterVal = tile8.shfl(clusterVal, 0);
   // Assign neighbors using loop for variable sizes
   for (int i = tid; i < clusterSize; i += kSubTileSize) {
     const int assignIdx = sharedCandidateNeighbors[i];
-    clusters[assignIdx] = clusterVal;
+    if (clusters[assignIdx] < 0) {
+      clusters[assignIdx] = clusterVal;
+     }// else {
+    //   printf("GUARD: Skipping point %d (already cluster %d) for NL cluster %d\n",
+    //          assignIdx, clusters[assignIdx], clusterVal);
+    // }
   }
 }
 
@@ -273,11 +281,15 @@ __global__ void butinaWriteClusterValue(const cuda::std::span<const uint8_t> hit
   if (pointIdx < 0) {
     return;
   }
+  // if (tid == 0) {
+  //   printf("Assigning hit cluster %d of size %d around point %d\n", *clusterIdx, clusterSz, pointIdx);
+  // }
   const int                            clusterVal = *clusterIdx;
   const cuda::std::span<const uint8_t> hits       = hitMatrix.subspan(pointIdx * numPoints, numPoints);
   if (tid < numPoints) {
     if (hits[tid]) {
       if (clusters[tid] < 0) {
+        // printf("Assigning hit cluster %d to point %d\n", clusterVal, tid);
         clusters[tid] = clusterVal;
       }
     }
@@ -332,6 +344,7 @@ __global__ void assignDoubletIdsKernel(const cuda::std::span<int> clusters, int*
       int otherIdx       = kAssignedAsSingletonSentinel - 1 - clustId;
       clusters[i]        = clusterIdx;
       clusters[otherIdx] = clusterIdx;
+      // printf("Assigning doublet cluster %d to points %d and %d\n", clusterIdx, i, otherIdx);
       clusterIdx++;
     }
   }
@@ -345,6 +358,7 @@ __global__ void assignSingletonIdsKernel(const cuda::std::span<int> clusters, co
     const int clustId = clusters[i];
     if (clustId < 0 || clustId == kAssignedAsSingletonSentinel) {
       clusters[i] = clusterIdx;
+        printf("Assigning singleton cluster %d to point %d\n", clusterIdx, i);
       clusterIdx++;
     }
   }
@@ -355,24 +369,29 @@ __global__ void assignSingletonIdsKernel(const cuda::std::span<int> clusters, co
 constexpr int argMaxBlockSize = 512;
 
 /**
- * @brief Prune neighborlists by removing assigned neighbors, using warp-shuffle compaction.
+ * @brief Prune neighborlists by removing assigned neighbors, using CUB WarpMergeSort.
  *
- * Each warp handles one point. Valid neighbors (those with clusters[neighbor] < 0) are
- * compacted to the front of the neighborlist using ballot and shuffle operations.
+ * Uses full 32-thread warps with CUB WarpMergeSort. Valid neighbors (clusters[neighbor] < 0)
+ * are sorted to the front by assigning sort keys (0=valid, 1=invalid) and sorting ascending.
  * clusterSizes is updated to reflect the new count.
  */
 template <int NeighborlistMaxSize>
 __global__ void pruneNeighborlistKernel(const cuda::std::span<int> clusters,
                                         const cuda::std::span<int> clusterSizes,
                                         const cuda::std::span<int> neighborList) {
-  constexpr int kWarpSize    = 32;
-  constexpr int kSubTileSize = 8;
-  static_assert(NeighborlistMaxSize <= kWarpSize, "NeighborlistMaxSize must be <= 32 for warp-based pruning");
-  static_assert(NeighborlistMaxSize % kSubTileSize == 0, "NeighborlistMaxSize must be multiple of kSubTileSize");
+  constexpr int kWarpSize = 32;
+  static_assert(NeighborlistMaxSize <= kWarpSize, "NeighborlistMaxSize must be <= 32");
+  
+  // Use full 32-thread warp, each thread holds 1 item
+  using WarpMergeSort = cub::WarpMergeSort<int, 1, kWarpSize, int>;
+  
+  constexpr int kWarpsPerBlock = 4;
+  __shared__ typename WarpMergeSort::TempStorage tempStorage[kWarpsPerBlock];
 
   const auto tile     = cg::tiled_partition<kWarpSize>(cg::this_thread_block());
   const int  tid      = tile.thread_rank();
-  const int  pointIdx = blockIdx.x * (blockDim.x / kWarpSize) + tile.meta_group_rank();
+  const int  warpId   = tile.meta_group_rank();
+  const int  pointIdx = blockIdx.x * kWarpsPerBlock + warpId;
 
   if (pointIdx >= static_cast<int>(clusters.size())) {
     return;
@@ -383,14 +402,31 @@ __global__ void pruneNeighborlistKernel(const cuda::std::span<int> clusters,
     return;
   }
 
-  const int  currentSize = clusterSizes[pointIdx];
-  const int  baseOffset  = pointIdx * NeighborlistMaxSize;
-  const int  neighbor    = (tid < NeighborlistMaxSize) ? neighborList[baseOffset + tid] : -1;
-  const bool valid       = (tid < currentSize) && (neighbor >= 0) && (clusters[neighbor] < 0);
+  const int currentSize = clusterSizes[pointIdx];
+  const int baseOffset  = pointIdx * NeighborlistMaxSize;
 
-  const unsigned validMask = tile.ballot(valid);
+  // Each thread loads one neighbor (threads >= NeighborlistMaxSize get invalid data)
+  int keys[1];
+  int values[1];
+  
+  if (tid < NeighborlistMaxSize) {
+    values[0] = neighborList[baseOffset + tid];
+    const bool valid = (tid < currentSize) && (values[0] >= 0) && (clusters[values[0]] < 0);
+    keys[0] = valid ? 0 : 1;  // 0 = valid (sort first), 1 = invalid (sort last)
+  } else {
+    values[0] = -1;
+    keys[0] = 1;  // Invalid, sorts to end
+  }
+
+  // Sort by key ascending: valid neighbors (key=0) come first
+  WarpMergeSort(tempStorage[warpId]).Sort(keys, values, cubLess{});
+
+  // Count valid entries (those with key=0) - only count within NeighborlistMaxSize
+  const bool isValidResult = (tid < NeighborlistMaxSize) && (keys[0] == 0);
+  const unsigned validMask = tile.ballot(isValidResult);
   const int      newCount  = __popc(validMask);
 
+  // Handle small clusters (mark singletons)
   if (newCount < detail::kMinLoopSizeForAssignment) {
     if (tid == 0) {
       clusterSizes[pointIdx] = newCount;
@@ -398,26 +434,13 @@ __global__ void pruneNeighborlistKernel(const cuda::std::span<int> clusters,
         clusters[pointIdx] = detail::kAssignedAsSingletonSentinel;
       }
     }
-    return;
-  }
-
-  int compacted = -1;
-  if (tid < newCount) {
-    unsigned mask   = validMask;
-    int      srcIdx = 0;
-    for (int i = 0; i <= tid; i++) {
-      srcIdx = __ffs(mask) - 1;
-      mask &= ~(1u << srcIdx);
-    }
-    compacted = tile.shfl(neighbor, srcIdx);
-  }
-
-  if (tid < NeighborlistMaxSize) {
-    neighborList[baseOffset + tid] = compacted;
-  }
-
-  if (tid == 0) {
+  } else if (tid == 0) {
     clusterSizes[pointIdx] = newCount;
+  }
+
+  // Write sorted neighborlist back (only first NeighborlistMaxSize positions)
+  if (tid < NeighborlistMaxSize) {
+    neighborList[baseOffset + tid] = (tid < newCount) ? values[0] : -1;
   }
 }
 
@@ -583,11 +606,11 @@ void innerButinaLoopWithPruning(const int                            numPoints,
   cudaCheckError(cudaGetLastError());
 
   // Prune assigned neighbors from all neighborlists and update counts
-  constexpr int warpsPerBlock  = 4;
-  constexpr int pruneBlockSize = warpsPerBlock * kWarpSize;
-  const int     numBlocksPrune = (numPoints + warpsPerBlock - 1) / warpsPerBlock;
+  constexpr int kWarpsPerBlock   = 4;
+  constexpr int kPruneBlockSize  = kWarpsPerBlock * 32;
+  const int     numBlocksPrune   = (numPoints + kWarpsPerBlock - 1) / kWarpsPerBlock;
   pruneNeighborlistKernel<NeighborlistMaxSize>
-    <<<numBlocksPrune, pruneBlockSize, 0, stream>>>(clusters, clusterSizesSpan, neighborList);
+    <<<numBlocksPrune, kPruneBlockSize, 0, stream>>>(clusters, clusterSizesSpan, neighborList);
   cudaCheckError(cudaGetLastError());
 
   cudaStreamSynchronize(stream);
@@ -741,7 +764,6 @@ void butinaGpu(const cuda::std::span<const double> distanceMatrix,
 
 namespace detail {
 
-constexpr int kWarpSize       = 32;
 constexpr int kBlockSizeCount = 256;
 constexpr int argMaxBlockSize = 512;
 
@@ -751,11 +773,11 @@ void launchPruneNeighborlistKernel(cuda::std::span<int> clusters,
                                    cuda::std::span<int> neighborList,
                                    const int            numPoints,
                                    cudaStream_t         stream) {
-  constexpr int warpsPerBlock  = 4;
-  constexpr int pruneBlockSize = warpsPerBlock * kWarpSize;
-  const int     numBlocks      = (numPoints + warpsPerBlock - 1) / warpsPerBlock;
+  constexpr int kWarpsPerBlock  = 4;
+  constexpr int kPruneBlockSize = kWarpsPerBlock * 32;
+  const int     numBlocks       = (numPoints + kWarpsPerBlock - 1) / kWarpsPerBlock;
   pruneNeighborlistKernel<NeighborlistMaxSize>
-    <<<numBlocks, pruneBlockSize, 0, stream>>>(clusters, clusterSizes, neighborList);
+    <<<numBlocks, kPruneBlockSize, 0, stream>>>(clusters, clusterSizes, neighborList);
   cudaCheckError(cudaGetLastError());
 }
 
