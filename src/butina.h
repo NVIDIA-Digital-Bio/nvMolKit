@@ -24,8 +24,7 @@ namespace nvMolKit {
 
 namespace detail {
 
-constexpr int kAssignedAsSingletonSentinel = std::numeric_limits<int>::max() - 1;
-constexpr int kMinLoopSizeForAssignment    = 3;
+constexpr int kMinLoopSizeForAssignment = 2;
 
 /**
  * @brief Prune neighborlists by removing assigned neighbors, using warp-shuffle compaction.
@@ -116,9 +115,8 @@ void butinaGpu(cuda::std::span<const double> distanceMatrix,
  * 1. Counts cluster sizes for each unclustered item
  * 2. Selects the item with the largest cluster
  * 3. Assigns all neighbors to that cluster
- * 4. Repeats until clusters are too small (< 3 items)
- * 5. Pairs doublets (2-item clusters)
- * 6. Assigns singleton clusters
+ * 4. Repeats until all clusters of size >= 2 are assigned
+ * 5. Assigns singleton clusters to remaining unassigned items
  *
  * @param hitMatrix Binary matrix of size NxN where hitMatrix[i*N+j] = 1 if items i and j
  *                  are neighbors (distance < cutoff), 0 otherwise.

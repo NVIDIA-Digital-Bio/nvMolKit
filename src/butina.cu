@@ -36,24 +36,16 @@ namespace {
 constexpr int blockSizeCount = 256;
 constexpr int kSubTileSize   = 8;
 
-using detail::kAssignedAsSingletonSentinel;
 using detail::kMinLoopSizeForAssignment;
 
-__device__ __forceinline__ void sumCountsAndAssignSmallClusters(const int                  tid,
-                                                                const cuda::std::span<int> clusters,
-                                                                const int                  pointIdx,
-                                                                const cuda::std::span<int> clusterSizes,
-                                                                const int                  localCount) {
+__device__ __forceinline__ void sumCountsAndStoreClusterSize(const int                  tid,
+                                                             const int                  pointIdx,
+                                                             const cuda::std::span<int> clusterSizes,
+                                                             const int                  localCount) {
   __shared__ cub::BlockReduce<int, blockSizeCount>::TempStorage tempStorage;
   const int totalCount = cub::BlockReduce<int, blockSizeCount>(tempStorage).Sum(localCount);
   if (tid == 0) {
     clusterSizes[pointIdx] = totalCount;
-    if (totalCount < 2) {
-      // Note that this would be a data race between writing this cluster[] and another thread reading it[]. However,
-      // the hit check should preclude any singleton entry from being read by anything other than its own
-      // thread.
-      clusters[pointIdx] = kAssignedAsSingletonSentinel;
-    }
   }
 }
 
@@ -83,7 +75,7 @@ __global__ void butinaKernelCountClusterSize(const cuda::std::span<const uint8_t
     }
   }
 
-  sumCountsAndAssignSmallClusters(tid, clusters, pointIdx, clusterSizes, localCount);
+  sumCountsAndStoreClusterSize(tid, pointIdx, clusterSizes, localCount);
 }
 
 //! Kernel to count the size of each cluster around each point, assigning a neighborlist for later use.
@@ -130,7 +122,7 @@ __global__ void butinaKernelCountClusterSizeWithNeighborlist(const cuda::std::sp
     neighborList[pointIdx * NeighborlistMaxSize + i] = (i < neighborlistIndex) ? sharedNeighborlist[i] : -1;
   }
 
-  sumCountsAndAssignSmallClusters(tid, clusters, pointIdx, clusterSizes, localCount);
+  sumCountsAndStoreClusterSize(tid, pointIdx, clusterSizes, localCount);
 }
 
 namespace cg = cooperative_groups;
@@ -303,56 +295,23 @@ __global__ void bumpClusterIdxKernel(int* clusterIdx, const int* lastClusterSize
   }
 }
 
-//! Identify all pairs that must be in a cluster together at the end of the Butina Loop.
-//! Mark them with a sentinel value to be assigned in a secondary pass.
-__global__ void pairDoubletKernels(const cuda::std::span<const uint8_t> hitMatrix,
-                                   const cuda::std::span<int>           clusters,
-                                   const cuda::std::span<const int>     clusterSizes) {
-  const auto tid       = static_cast<int>(threadIdx.x);
-  const auto pointIdx  = static_cast<int>(blockIdx.x);
-  const auto numPoints = static_cast<int>(clusters.size());
+constexpr int kSingletonBlockSize = 512;
 
-  if (clusterSizes[pointIdx] != 2) {
-    return;
+//! Assign all remaining unassigned points their own singleton cluster IDs.
+__global__ void assignSingletonIdsKernel(const cuda::std::span<int> clusters, int* nextClusterIdx) {
+  __shared__ int sharedClusterIdx;
+  const int      tid       = threadIdx.x;
+  const int      numPoints = static_cast<int>(clusters.size());
+
+  if (tid == 0) {
+    sharedClusterIdx = *nextClusterIdx;
   }
+  __syncthreads();
 
-  const cuda::std::span<const uint8_t> hits = hitMatrix.subspan(pointIdx * numPoints, numPoints);
-  // Loop up to point IDX so that only one of the pairs does the write. The followup kernel will set both values
-  for (int i = tid; i < pointIdx; i += blockSizeCount) {
-    const bool isNeighbor = hits[i];
-    if (i != pointIdx && isNeighbor && clusterSizes[i] == 2) {
-      clusters[pointIdx] = kAssignedAsSingletonSentinel - 1 - i;  // Mark as paired with i
-      break;
-    }
-  }
-}
-
-//! Assign cluster IDs to doublets marked in the previous kernel
-__global__ void assignDoubletIdsKernel(const cuda::std::span<int> clusters, int* nextClusterIdx) {
-  int       clusterIdx           = *nextClusterIdx;
-  const int expectedDoubletRange = kAssignedAsSingletonSentinel - clusters.size();
-  for (int i = static_cast<int>(clusters.size()) - 1; i >= 0; i--) {
-    const int clustId = clusters[i];
-    if (clustId >= expectedDoubletRange && clustId < kAssignedAsSingletonSentinel) {
-      int otherIdx       = kAssignedAsSingletonSentinel - 1 - clustId;
-      clusters[i]        = clusterIdx;
-      clusters[otherIdx] = clusterIdx;
-      // printf("Assigning doublet cluster %d to points %d and %d\n", clusterIdx, i, otherIdx);
-      clusterIdx++;
-    }
-  }
-  *nextClusterIdx = clusterIdx;
-}
-
-//! Assign all remaining singleton clusters their own cluster IDs. These were identified in the counts kernel.
-__global__ void assignSingletonIdsKernel(const cuda::std::span<int> clusters, const int* nextClusterIdx) {
-  int clusterIdx = *nextClusterIdx;
-  for (int i = static_cast<int>(clusters.size()) - 1; i >= 0; i--) {
-    const int clustId = clusters[i];
-    if (clustId < 0 || clustId == kAssignedAsSingletonSentinel) {
-      clusters[i] = clusterIdx;
-      // printf("Assigning singleton cluster %d to point %d\n", clusterIdx, i);
-      clusterIdx++;
+  for (int i = tid; i < numPoints; i += kSingletonBlockSize) {
+    if (clusters[i] < 0) {
+      const int myClusterIdx = atomicAdd(&sharedClusterIdx, 1);
+      clusters[i]            = myClusterIdx;
     }
   }
 }
@@ -429,15 +388,7 @@ __global__ void pruneNeighborlistKernel(const cuda::std::span<int> clusters,
   int newCount = WarpReduce(reduceStorage[warpId]).Sum(localValidCount);
   newCount     = tile.shfl(newCount, 0);
 
-  // Handle small clusters (mark singletons)
-  if (newCount < detail::kMinLoopSizeForAssignment) {
-    if (tid == 0) {
-      clusterSizes[pointIdx] = newCount;
-      if (newCount < 2) {
-        clusters[pointIdx] = detail::kAssignedAsSingletonSentinel;
-      }
-    }
-  } else if (tid == 0) {
+  if (tid == 0) {
     clusterSizes[pointIdx] = newCount;
   }
 
@@ -677,11 +628,7 @@ void butinaGpuImpl(const cuda::std::span<const uint8_t> hitMatrix,
     }
   }
 
-  pairDoubletKernels<<<numPoints, blockSizeCount, 0, stream>>>(hitMatrix, clusters, clusterSizesSpan);
-  cudaCheckError(cudaGetLastError());
-  assignDoubletIdsKernel<<<1, 1, 0, stream>>>(clusters, clusterIdx.data());
-  cudaCheckError(cudaGetLastError());
-  assignSingletonIdsKernel<<<1, 1, 0, stream>>>(clusters, clusterIdx.data());
+  assignSingletonIdsKernel<<<1, kSingletonBlockSize, 0, stream>>>(clusters, clusterIdx.data());
   cudaCheckError(cudaGetLastError());
   cudaCheckError(cudaStreamSynchronize(stream));
 }
@@ -722,8 +669,8 @@ namespace {
 
 __global__ void thresholdDistanceMatrixKernel(const double* __restrict__ matrix,
                                               uint8_t* __restrict__ hits,
-                                              const double   cutoff,
-                                              const size_t   numElements) {
+                                              const double cutoff,
+                                              const size_t numElements) {
   const size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < numElements) {
     hits[idx] = (matrix[idx] <= cutoff);
@@ -740,8 +687,8 @@ void butinaGpu(const cuda::std::span<const double> distanceMatrix,
                cudaStream_t                        stream) {
   AsyncDeviceVector<uint8_t> hitMatrix(distanceMatrix.size(), stream);
 
-  constexpr int blockSize  = 256;
-  const size_t  numBlocks  = (distanceMatrix.size() + blockSize - 1) / blockSize;
+  constexpr int blockSize = 256;
+  const size_t  numBlocks = (distanceMatrix.size() + blockSize - 1) / blockSize;
   thresholdDistanceMatrixKernel<<<numBlocks, blockSize, 0, stream>>>(distanceMatrix.data(),
                                                                      hitMatrix.data(),
                                                                      cutoff,

@@ -28,7 +28,6 @@
 #include "host_vector.h"
 
 using nvMolKit::AsyncDeviceVector;
-using nvMolKit::detail::kAssignedAsSingletonSentinel;
 using nvMolKit::detail::kMinLoopSizeForAssignment;
 
 template <int N> struct NeighborlistSize : std::integral_constant<int, N> {};
@@ -125,8 +124,8 @@ TYPED_TEST(ButinaPruneFixture, PruneRemovesAssignedNeighbors) {
   }
 }
 
-// Test that prune kernel marks singletons correctly
-TYPED_TEST(ButinaPruneFixture, PruneMarksSingletons) {
+// Test that prune kernel correctly handles points that become singletons
+TYPED_TEST(ButinaPruneFixture, PruneHandlesSingletons) {
   constexpr int neighborlistMaxSize = TestFixture::kNeighborlistMaxSize;
   const int     numPoints           = 5;
 
@@ -162,9 +161,9 @@ TYPED_TEST(ButinaPruneFixture, PruneMarksSingletons) {
   clusters.copyToHost(clustersHost);
   cudaStreamSynchronize(this->stream());
 
-  // Point 0 should now have count=1 and be marked as singleton
+  // Point 0 should now have count=1 and remain unassigned (will be handled as singleton later)
   EXPECT_EQ(clusterSizesHost[0], 1) << "Point 0 should have count=1";
-  EXPECT_EQ(clustersHost[0], kAssignedAsSingletonSentinel) << "Point 0 should be marked as singleton";
+  EXPECT_EQ(clustersHost[0], -1) << "Point 0 should remain unassigned";
 }
 
 // Test that build kernel produces correct neighborlists
@@ -225,8 +224,8 @@ TYPED_TEST(ButinaPruneFixture, BuildNeighborlistProducesCorrectCounts) {
   EXPECT_EQ(clusterSizesHost[3], 2) << "Point 3 should have 2 neighbors";
   EXPECT_EQ(clusterSizesHost[4], 1) << "Point 4 should have 1 neighbor (singleton)";
 
-  // Point 4 should be marked as singleton
-  EXPECT_EQ(clustersHost[4], kAssignedAsSingletonSentinel) << "Point 4 should be marked as singleton";
+  // Point 4 remains unassigned (will be handled as singleton by final pass)
+  EXPECT_EQ(clustersHost[4], -1) << "Point 4 should remain unassigned";
 }
 
 // Test argmax kernel
@@ -407,16 +406,12 @@ TYPED_TEST(ButinaPruneLargeFixture, PruneLargeNeighborlist) {
 
   EXPECT_EQ(clusterSizesHost[0], expectedCount) << "Point 0 count should match expected after pruning";
 
-  // Verify all remaining neighbors are valid (not assigned to a real cluster)
-  // Note: neighbors may be marked as singletons (kAssignedAsSingletonSentinel) if they have no
-  // neighborlist set up, which is fine - we just check they're not assigned to a real cluster
+  // Verify all remaining neighbors are valid (not assigned to a cluster)
   for (int i = 0; i < clusterSizesHost[0]; i++) {
-    const int  neighbor   = neighborListHost[i];
-    const int  clusterVal = clustersHost[neighbor];
-    const bool unassigned = (clusterVal < 0) || (clusterVal == kAssignedAsSingletonSentinel);
+    const int neighbor   = neighborListHost[i];
+    const int clusterVal = clustersHost[neighbor];
     EXPECT_GE(neighbor, 0) << "Valid neighbor slot should have valid index";
-    EXPECT_TRUE(unassigned) << "Remaining neighbor " << neighbor << " should be unassigned or singleton, got "
-                            << clusterVal;
+    EXPECT_LT(clusterVal, 0) << "Remaining neighbor " << neighbor << " should be unassigned, got " << clusterVal;
   }
 
   // Verify pruned slots are -1
