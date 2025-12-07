@@ -47,7 +47,8 @@ add_executable(test_work_splitting test_work_splitting.cpp)
 target_link_libraries(test_work_splitting PRIVATE work_splitting)
 
 add_executable(test_openmp_helpers test_openmp_helpers.cpp)
-target_link_libraries(test_openmp_helpers PRIVATE openmp_helpers OpenMP::OpenMP_CXX)
+target_link_libraries(test_openmp_helpers PRIVATE openmp_helpers
+                                                  OpenMP::OpenMP_CXX)
 
 add_library(test_utils test_utils.cpp)
 target_link_libraries(
@@ -176,12 +177,8 @@ target_link_libraries(test_etkdg_result_tracker PRIVATE etkdg_impl)
 add_executable(test_butina test_butina.cpp)
 target_link_libraries(test_butina PRIVATE butina device)
 
-add_executable(test_butina_prune test_butina_prune.cu)
-target_link_libraries(test_butina_prune PRIVATE butina device device_vector host_vector)
-
 set(TEST_LIST
     test_butina
-    test_butina_prune
     test_bfgs_hessian
     test_openmp_helpers
     test_conformer_checkers

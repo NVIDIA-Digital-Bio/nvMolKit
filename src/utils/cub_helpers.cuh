@@ -18,8 +18,6 @@
 
 #include <cub/cub.cuh>
 
-/// Binary comparator for less-than comparison, usable on device
-
 #if defined(NVMOLKIT_HAS_CCCL_GE_3) || CUDART_VERSION >= 12090
 // CCCL >= 3.0.0 provides modern C++ functional operators
 using cubMax  = cuda::maximum<>;

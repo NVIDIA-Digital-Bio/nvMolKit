@@ -33,10 +33,9 @@
 namespace nvMolKit {
 
 namespace {
-constexpr int blockSizeCount = 256;
-constexpr int kSubTileSize   = 8;
-
-using detail::kMinLoopSizeForAssignment;
+constexpr int blockSizeCount            = 256;
+constexpr int kSubTileSize              = 8;
+constexpr int kMinLoopSizeForAssignment = 2;
 
 __device__ __forceinline__ void sumCountsAndStoreClusterSize(const int                  tid,
                                                              const int                  pointIdx,
@@ -197,8 +196,8 @@ __global__ void attemptAssignClustersFromNeighborlist(const cuda::std::span<int>
 
     // If neighbor has smaller cluster size, we're the better centroid - continue
 
-    // Now we verify that all of these neighbors have the same neighbors we do. Each thread checks 1 candidate at a
-    // time. This will rule out our neighbors being connected to a larger cluster.
+    // Now we verify that all of these neighbors have the same or fewer neighbors we do. Each thread checks 1 candidate
+    // at a time. This will rule out our neighbors being connected to a larger cluster.
     for (int oidx = tid; oidx < candidateNeighborClusterSize; oidx += kSubTileSize) {
       const int otherNeighbor = neighborList[candidateNeighbor * NeighborlistMaxSize + oidx];
       bool      foundMatch    = false;
@@ -233,12 +232,6 @@ __global__ void attemptAssignClustersFromNeighborlist(const cuda::std::span<int>
   if (tid == 0) {
     clusterVal         = atomicAdd(nextClusterIdx, 1);
     clusters[pointIdx] = clusterVal;
-    // if (tid == 0) {
-    //   printf("Assigning NL cluster %d of size %d around point %d\n  Neighbors: %d %d %d %d %d %d %d %d\n",
-    //   clusterVal, clusterSize, pointIdx, sharedCandidateNeighbors[0], sharedCandidateNeighbors[1],
-    //   sharedCandidateNeighbors[2], sharedCandidateNeighbors[3], sharedCandidateNeighbors[4],
-    //   sharedCandidateNeighbors[5], sharedCandidateNeighbors[6], sharedCandidateNeighbors[7]);
-    // }
   }
   tile8.sync();
   clusterVal = tile8.shfl(clusterVal, 0);
@@ -247,10 +240,7 @@ __global__ void attemptAssignClustersFromNeighborlist(const cuda::std::span<int>
     const int assignIdx = sharedCandidateNeighbors[i];
     if (clusters[assignIdx] < 0) {
       clusters[assignIdx] = clusterVal;
-    }  // else {
-    //   printf("GUARD: Skipping point %d (already cluster %d) for NL cluster %d\n",
-    //          assignIdx, clusters[assignIdx], clusterVal);
-    // }
+    }
   }
 }
 
@@ -270,15 +260,11 @@ __global__ void butinaWriteClusterValue(const cuda::std::span<const uint8_t> hit
   if (pointIdx < 0) {
     return;
   }
-  // if (tid == 0) {
-  //   printf("Assigning hit cluster %d of size %d around point %d\n", *clusterIdx, clusterSz, pointIdx);
-  // }
   const int                            clusterVal = *clusterIdx;
   const cuda::std::span<const uint8_t> hits       = hitMatrix.subspan(pointIdx * numPoints, numPoints);
   if (tid < numPoints) {
     if (hits[tid]) {
       if (clusters[tid] < 0) {
-        // printf("Assigning hit cluster %d to point %d\n", clusterVal, tid);
         clusters[tid] = clusterVal;
       }
     }
@@ -517,7 +503,6 @@ void innerButinaLoopWithPruning(const int                  numPoints,
                                 const cuda::std::span<int> neighborList,
                                 const bool                 enforceStrictIndexing,
                                 cudaStream_t               stream) {
-  // Uses maxValue/maxIndex from previous iteration's argmax (or initial argmax before loop)
   const int numBlocksAssign = (numPoints + kTilesPerBlockAssign - 1) / kTilesPerBlockAssign;
   if (enforceStrictIndexing) {
     attemptAssignClustersFromNeighborlist<NeighborlistMaxSize, true>
@@ -697,111 +682,5 @@ void butinaGpu(const cuda::std::span<const double> distanceMatrix,
 
   butinaGpu(toSpan(hitMatrix), clusters, enforceStrictIndexing, neighborlistMaxSize, stream);
 }
-
-namespace detail {
-
-constexpr int kBlockSizeCount = 256;
-constexpr int argMaxBlockSize = 512;
-
-template <int NeighborlistMaxSize>
-void launchPruneNeighborlistKernel(cuda::std::span<int> clusters,
-                                   cuda::std::span<int> clusterSizes,
-                                   cuda::std::span<int> neighborList,
-                                   const int            numPoints,
-                                   cudaStream_t         stream) {
-  constexpr int kWarpsPerBlock  = 4;
-  constexpr int kPruneBlockSize = kWarpsPerBlock * 32;
-  const int     numBlocks       = (numPoints + kWarpsPerBlock - 1) / kWarpsPerBlock;
-  pruneNeighborlistKernel<NeighborlistMaxSize>
-    <<<numBlocks, kPruneBlockSize, 0, stream>>>(clusters, clusterSizes, neighborList);
-  cudaCheckError(cudaGetLastError());
-}
-
-template void launchPruneNeighborlistKernel<8>(cuda::std::span<int>,
-                                               cuda::std::span<int>,
-                                               cuda::std::span<int>,
-                                               int,
-                                               cudaStream_t);
-template void launchPruneNeighborlistKernel<16>(cuda::std::span<int>,
-                                                cuda::std::span<int>,
-                                                cuda::std::span<int>,
-                                                int,
-                                                cudaStream_t);
-template void launchPruneNeighborlistKernel<24>(cuda::std::span<int>,
-                                                cuda::std::span<int>,
-                                                cuda::std::span<int>,
-                                                int,
-                                                cudaStream_t);
-template void launchPruneNeighborlistKernel<32>(cuda::std::span<int>,
-                                                cuda::std::span<int>,
-                                                cuda::std::span<int>,
-                                                int,
-                                                cudaStream_t);
-template void launchPruneNeighborlistKernel<64>(cuda::std::span<int>,
-                                                cuda::std::span<int>,
-                                                cuda::std::span<int>,
-                                                int,
-                                                cudaStream_t);
-template void launchPruneNeighborlistKernel<128>(cuda::std::span<int>,
-                                                 cuda::std::span<int>,
-                                                 cuda::std::span<int>,
-                                                 int,
-                                                 cudaStream_t);
-
-template <int NeighborlistMaxSize>
-void launchBuildNeighborlistKernel(cuda::std::span<const uint8_t> hitMatrix,
-                                   cuda::std::span<int>           clusters,
-                                   cuda::std::span<int>           clusterSizes,
-                                   cuda::std::span<int>           neighborList,
-                                   const int                      numPoints,
-                                   cudaStream_t                   stream) {
-  butinaKernelCountClusterSizeWithNeighborlist<NeighborlistMaxSize>
-    <<<numPoints, kBlockSizeCount, 0, stream>>>(hitMatrix, clusters, clusterSizes, neighborList);
-  cudaCheckError(cudaGetLastError());
-}
-
-template void launchBuildNeighborlistKernel<8>(cuda::std::span<const uint8_t>,
-                                               cuda::std::span<int>,
-                                               cuda::std::span<int>,
-                                               cuda::std::span<int>,
-                                               int,
-                                               cudaStream_t);
-template void launchBuildNeighborlistKernel<16>(cuda::std::span<const uint8_t>,
-                                                cuda::std::span<int>,
-                                                cuda::std::span<int>,
-                                                cuda::std::span<int>,
-                                                int,
-                                                cudaStream_t);
-template void launchBuildNeighborlistKernel<24>(cuda::std::span<const uint8_t>,
-                                                cuda::std::span<int>,
-                                                cuda::std::span<int>,
-                                                cuda::std::span<int>,
-                                                int,
-                                                cudaStream_t);
-template void launchBuildNeighborlistKernel<32>(cuda::std::span<const uint8_t>,
-                                                cuda::std::span<int>,
-                                                cuda::std::span<int>,
-                                                cuda::std::span<int>,
-                                                int,
-                                                cudaStream_t);
-template void launchBuildNeighborlistKernel<64>(cuda::std::span<const uint8_t>,
-                                                cuda::std::span<int>,
-                                                cuda::std::span<int>,
-                                                cuda::std::span<int>,
-                                                int,
-                                                cudaStream_t);
-template void launchBuildNeighborlistKernel<128>(cuda::std::span<const uint8_t>,
-                                                 cuda::std::span<int>,
-                                                 cuda::std::span<int>,
-                                                 cuda::std::span<int>,
-                                                 int,
-                                                 cudaStream_t);
-
-void launchArgMaxKernel(cuda::std::span<const int> values, int* outVal, int* outIdx, cudaStream_t stream) {
-  lastArgMax<<<1, argMaxBlockSize, 0, stream>>>(values, outVal, outIdx);
-  cudaCheckError(cudaGetLastError());
-}
-
-}  // namespace detail
 
 }  // namespace nvMolKit

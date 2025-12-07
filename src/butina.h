@@ -22,62 +22,6 @@
 
 namespace nvMolKit {
 
-namespace detail {
-
-constexpr int kMinLoopSizeForAssignment = 2;
-
-/**
- * @brief Prune neighborlists by removing assigned neighbors, using warp-shuffle compaction.
- *
- * Each warp handles one point. Valid neighbors (those with clusters[neighbor] < 0) are
- * compacted to the front of the neighborlist using ballot and shuffle operations.
- * clusterSizes is updated to reflect the new count.
- *
- * @tparam NeighborlistMaxSize Maximum neighbors per point (must be <= 128 and multiple of 8)
- * @param clusters Cluster assignments (-1 = unassigned, >= 0 = assigned)
- * @param clusterSizes Current neighbor counts per point
- * @param neighborList Neighborlist storage (NeighborlistMaxSize entries per point)
- * @param numPoints Number of points
- * @param stream CUDA stream
- */
-template <int NeighborlistMaxSize>
-void launchPruneNeighborlistKernel(cuda::std::span<int> clusters,
-                                   cuda::std::span<int> clusterSizes,
-                                   cuda::std::span<int> neighborList,
-                                   int                  numPoints,
-                                   cudaStream_t         stream);
-
-/**
- * @brief Build initial neighborlist and cluster sizes from hit matrix.
- *
- * @tparam NeighborlistMaxSize Maximum neighbors per point
- * @param hitMatrix Binary adjacency matrix (NxN)
- * @param clusters Cluster assignments (should be all -1 for unassigned points)
- * @param clusterSizes Output neighbor counts
- * @param neighborList Output neighborlist
- * @param numPoints Number of points
- * @param stream CUDA stream
- */
-template <int NeighborlistMaxSize>
-void launchBuildNeighborlistKernel(cuda::std::span<const uint8_t> hitMatrix,
-                                   cuda::std::span<int>           clusters,
-                                   cuda::std::span<int>           clusterSizes,
-                                   cuda::std::span<int>           neighborList,
-                                   int                            numPoints,
-                                   cudaStream_t                   stream);
-
-/**
- * @brief Find the maximum value and its index in an array.
- *
- * @param values Input array
- * @param outVal Output: maximum value
- * @param outIdx Output: index of maximum value
- * @param stream CUDA stream
- */
-void launchArgMaxKernel(cuda::std::span<const int> values, int* outVal, int* outIdx, cudaStream_t stream);
-
-}  // namespace detail
-
 /**
  * @brief Perform Butina clustering on a distance matrix with automatic thresholding.
  *
@@ -111,12 +55,6 @@ void butinaGpu(cuda::std::span<const double> distanceMatrix,
  *
  * This is the core GPU implementation of the Butina clustering algorithm. It takes
  * a binary hit matrix where element (i,j) indicates whether items i and j are neighbors.
- * The algorithm iteratively:
- * 1. Counts cluster sizes for each unclustered item
- * 2. Selects the item with the largest cluster
- * 3. Assigns all neighbors to that cluster
- * 4. Repeats until all clusters of size >= 2 are assigned
- * 5. Assigns singleton clusters to remaining unassigned items
  *
  * @param hitMatrix Binary matrix of size NxN where hitMatrix[i*N+j] = 1 if items i and j
  *                  are neighbors (distance < cutoff), 0 otherwise.
