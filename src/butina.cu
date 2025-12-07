@@ -25,7 +25,6 @@
 /**
  * TODO: Future optimizations
  * - Keep a live list of active indices and only dispatch counts for those.
- * - Parallelize singlet/doublet assignment (low priority since these only run once)
  * - Use ArgMax from CUB instead of custom kernel. CUB API changed somewhere between 12.5 and 12.9, so we'd need a
  * compatibility layer.
  * - Use CUDA Graphs for inner loop and exit criteria.
@@ -248,7 +247,7 @@ __global__ void attemptAssignClustersFromNeighborlist(const cuda::std::span<int>
 __global__ void butinaWriteClusterValue(const cuda::std::span<const uint8_t> hitMatrix,
                                         const cuda::std::span<int>           clusters,
                                         const int*                           centralIdx,
-                                        const int*                           clusterIdx,
+                                        int*                                 clusterIdx,
                                         const int*                           maxClusterSize) {
   const auto numPoints = static_cast<int>(clusters.size());
   const auto tid       = static_cast<int>(threadIdx.x + (blockIdx.x * blockDim.x));
@@ -260,8 +259,9 @@ __global__ void butinaWriteClusterValue(const cuda::std::span<const uint8_t> hit
   if (pointIdx < 0) {
     return;
   }
-  const int                            clusterVal = *clusterIdx;
-  const cuda::std::span<const uint8_t> hits       = hitMatrix.subspan(pointIdx * numPoints, numPoints);
+  const int clusterVal                      = *clusterIdx;
+  *clusterIdx                               = clusterVal + 1;
+  const cuda::std::span<const uint8_t> hits = hitMatrix.subspan(pointIdx * numPoints, numPoints);
   if (tid < numPoints) {
     if (hits[tid]) {
       if (clusters[tid] < 0) {
@@ -271,20 +271,10 @@ __global__ void butinaWriteClusterValue(const cuda::std::span<const uint8_t> hit
   }
 }
 
-//! Kernel to bump the cluster index if the last cluster assigned was large enough. The edge case is for if we hit the <
-//! 3 criteria.
-__global__ void bumpClusterIdxKernel(int* clusterIdx, const int* lastClusterSize) {
-  if (const auto tid = static_cast<int>(threadIdx.x); tid == 0) {
-    if (*lastClusterSize >= kMinLoopSizeForAssignment) {
-      clusterIdx[0] += 1;
-    }
-  }
-}
-
 constexpr int kSingletonBlockSize = 512;
 
 //! Assign all remaining unassigned points their own singleton cluster IDs.
-__global__ void assignSingletonIdsKernel(const cuda::std::span<int> clusters, int* nextClusterIdx) {
+__global__ void assignSingletonIdsKernel(const cuda::std::span<int> clusters, const int* nextClusterIdx) {
   __shared__ int sharedClusterIdx;
   const int      tid       = threadIdx.x;
   const int      numPoints = static_cast<int>(clusters.size());
@@ -301,8 +291,6 @@ __global__ void assignSingletonIdsKernel(const cuda::std::span<int> clusters, in
     }
   }
 }
-
-}  // namespace
 
 constexpr int argMaxBlockSize = 512;
 
@@ -323,7 +311,7 @@ __global__ void pruneNeighborlistKernel(const cuda::std::span<int> clusters,
 
   constexpr int                                  kWarpsPerBlock = 4;
   __shared__ typename WarpMergeSort::TempStorage sortStorage[kWarpsPerBlock];
-  __shared__ typename WarpReduce::TempStorage    reduceStorage[kWarpsPerBlock];
+  __shared__ WarpReduce::TempStorage reduceStorage[kWarpsPerBlock];
 
   const auto tile     = cg::tiled_partition<kWarpSize>(cg::this_thread_block());
   const int  tid      = tile.thread_rank();
@@ -417,8 +405,6 @@ __global__ void lastArgMax(const cuda::std::span<const int> values, int* outVal,
   }
 }
 
-namespace {
-
 // TODO - consolidate this to device vector code.
 template <typename T> __global__ void setAllKernel(const size_t numElements, T value, T* dst) {
   const size_t idx = (blockIdx.x * blockDim.x) + threadIdx.x;
@@ -458,8 +444,6 @@ void innerButinaLoop(const int                            numPoints,
                                                                         maxIndex.data(),
                                                                         clusterIdx.data(),
                                                                         maxValue.data());
-  cudaCheckError(cudaGetLastError());
-  bumpClusterIdxKernel<<<1, 1, 0, stream>>>(clusterIdx.data(), maxValue.data());
   cudaCheckError(cudaGetLastError());
   cudaCheckError(cudaMemcpyAsync(maxCluster.data(), maxValue.data(), sizeof(int), cudaMemcpyDefault, stream));
   cudaStreamSynchronize(stream);
