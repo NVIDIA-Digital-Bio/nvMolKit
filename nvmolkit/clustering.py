@@ -21,7 +21,7 @@ from nvmolkit import _clustering
 from nvmolkit._arrayHelpers import *  # noqa: F403
 from nvmolkit.types import AsyncGpuResult
 
-def butina(distance_matrix: AsyncGpuResult | torch.Tensor, cutoff: float) -> AsyncGpuResult:
+def butina(distance_matrix: AsyncGpuResult | torch.Tensor, cutoff: float, enforce_strict_indexing: bool = True) -> AsyncGpuResult:
     """
     Perform Butina clustering on a distance matrix.
     
@@ -37,6 +37,12 @@ def butina(distance_matrix: AsyncGpuResult | torch.Tensor, cutoff: float) -> Asy
                         of items. Can be an AsyncGpuResult or torch.Tensor on GPU.
         cutoff: Distance threshold for clustering. Items are neighbors if their
                 distance is less than this cutoff.
+        enforce_strict_indexing: If True, cluster IDs are assigned in strict largest-first
+                                order (slower but deterministic ordering). If False, allows
+                                parallel assignment for better performance (faster but
+                                non-deterministic cluster ID ordering). Clusters will be the
+                                same but the cluster IDs will not be in the same order and larger
+                                clusters may have higher IDs.
     
     Returns:
         AsyncGpuResult containing cluster assignments as integers. Each element i
@@ -46,4 +52,4 @@ def butina(distance_matrix: AsyncGpuResult | torch.Tensor, cutoff: float) -> Asy
     Note:
         The distance matrix should be symmetric and have zeros on the diagonal.
     """
-    return AsyncGpuResult(_clustering.butina(distance_matrix.__cuda_array_interface__, cutoff))
+    return AsyncGpuResult(_clustering.butina(distance_matrix.__cuda_array_interface__, cutoff, enforce_strict_indexing))

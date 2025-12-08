@@ -388,11 +388,6 @@ BfgsBatchMinimizer::BfgsBatchMinimizer(const int    dataDim,
     loopStatusHost_.resize(1);
   }
 
-  // Initialize per-molecule data structures if potentially using that backend
-  if (backend_ == BfgsBackend::PER_MOLECULE || backend_ == BfgsBackend::HYBRID) {
-    activeMolIdsDevice_.setStream(stream_);
-  }
-
   if (stream_ != nullptr) {
     activeSystemIndices_.setStream(stream_);
     allSystemIndices_.setStream(stream_);
@@ -978,9 +973,8 @@ bool BfgsBatchMinimizer::minimize(const int                     numIters,
                                   EnergyFunctor                 eFunc,
                                   GradFunctor                   gFunc,
                                   const uint8_t*                activeThisStage) {
-  gradTol_                = gradTol;
-  const int totalNumAtoms = atomStartsHost.back();
-  const int numSystems    = atomStartsHost.size() - 1;
+  gradTol_             = gradTol;
+  const int numSystems = atomStartsHost.size() - 1;
 
   // Note: PER_MOLECULE backend currently only supports MMFF with specific data structures
   // For generic functors, must use BATCHED backend

@@ -660,14 +660,16 @@ __global__ void combinedEnergiesKernel(const EnergyForceContribsDevicePtr* terms
                                        const BatchedIndicesDevicePtr*      systemIndices,
                                        const double*                       coords,
                                        double*                             energies) {
-  const int molIdx  = blockIdx.x;
-  const int tid     = threadIdx.x;
-  const int stride  = blockDim.x;
+  const int molIdx = blockIdx.x;
+  const int tid    = threadIdx.x;
+
   using BlockReduce = cub::BlockReduce<double, blockSizePerMol>;
   __shared__ typename BlockReduce::TempStorage tempStorage;
 
-  const double threadEnergy = molEnergy(*terms, *systemIndices, coords, molIdx, tid, stride);
-  const double blockEnergy  = BlockReduce(tempStorage).Sum(threadEnergy);
+  const int     atomStart    = systemIndices->atomStarts[molIdx];
+  const double* molCoords    = coords + atomStart * 3;
+  const double  threadEnergy = molEnergy<blockSizePerMol>(*terms, *systemIndices, molCoords, molIdx, tid);
+  const double  blockEnergy  = BlockReduce(tempStorage).Sum(threadEnergy);
 
   if (tid == 0) {
     energies[molIdx] = blockEnergy;
@@ -680,7 +682,6 @@ __global__ void combinedGradKernel(const EnergyForceContribsDevicePtr* terms,
                                    double*                             grad) {
   const int molIdx = blockIdx.x;
   const int tid    = threadIdx.x;
-  const int stride = blockDim.x;
 
   const int atomStart = systemIndices->atomStarts[molIdx];
   const int atomEnd   = systemIndices->atomStarts[molIdx + 1];
@@ -692,17 +693,18 @@ __global__ void combinedGradKernel(const EnergyForceContribsDevicePtr* terms,
   const bool useSharedMem = numAtoms <= maxAtomSize;
   double*    molGradBase  = useSharedMem ? accumGrad : grad + atomStart * 3;
 
-  for (int i = tid; i < numAtoms * 3; i += stride) {
+  for (int i = tid; i < numAtoms * 3; i += blockSizePerMol) {
     molGradBase[i] = 0.0;
   }
   __syncthreads();
 
-  molGrad(*terms, *systemIndices, coords, molGradBase, molIdx, tid, stride);
+  const double* molCoords = coords + atomStart * 3;
+  molGrad<blockSizePerMol>(*terms, *systemIndices, molCoords, molGradBase, molIdx, tid);
   __syncthreads();
 
   if (useSharedMem) {
     double* globalGrad = grad + (atomStart * 3);
-    for (int i = tid; i < numAtoms * 3; i += stride) {
+    for (int i = tid; i < numAtoms * 3; i += blockSizePerMol) {
       globalGrad[i] = molGradBase[i];
     }
   }

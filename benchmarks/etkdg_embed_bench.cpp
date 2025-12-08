@@ -161,7 +161,9 @@ void benchNvMolKit(const std::vector<RDKit::ROMol*>& mols,
                    const int                         maxIterations,
                    const int                         numGpus,
                    const nvMolKit::BfgsBackend       backend) {
-  std::string backendName = (backend == nvMolKit::BfgsBackend::BATCHED) ? "BATCHED" : "PER_MOLECULE";
+  std::string backendName = (backend == nvMolKit::BfgsBackend::BATCHED) ? "BATCHED" :
+                            (backend == nvMolKit::BfgsBackend::HYBRID)  ? "HYBRID" :
+                                                                          "PER_MOLECULE";
   std::string benchName   = "nvMolKit EmbedMultipleConfs, num_mols=" + std::to_string(mols.size()) +
                           ", num_confs=" + std::to_string(numConfs) + ", batch_size=" + std::to_string(batchSize) +
                           ", num_concurrent_batches=" + std::to_string(batchesPerGpu) +
@@ -402,8 +404,10 @@ nvMolKit::BfgsBackend parseBackendArg(const std::string& arg) {
     return nvMolKit::BfgsBackend::BATCHED;
   } else if (s == "per_molecule" || s == "per-molecule" || s == "permolecule" || s == "1") {
     return nvMolKit::BfgsBackend::PER_MOLECULE;
+  } else if (s == "hybrid" || s == "2") {
+    return nvMolKit::BfgsBackend::HYBRID;
   } else {
-    throw std::runtime_error("Invalid backend value. Use 'batched' or 'per_molecule'");
+    throw std::runtime_error("Invalid backend value. Use 'batched', 'per_molecule', or 'hybrid'");
   }
 }
 
@@ -421,7 +425,8 @@ void printHelp(const char* progName) {
   std::cout << "  -b, --batch_size <int>              Batch size for processing [default: 100]\n";
   std::cout << "  -B, --num_concurrent_batches <int>  Number of concurrent batches [default: 10]\n";
   std::cout << "  -g, --num_gpus <int>                Number of GPUs to use (IDs 0..n-1). If omitted, use all GPUs.\n";
-  std::cout << "  -k, --backend <string>              BFGS backend: batched or per_molecule [default: per_molecule]\n";
+  std::cout
+    << "  -k, --backend <string>              BFGS backend: batched, per_molecule, or hybrid [default: hybrid]\n";
   std::cout << "  -h, --help                          Show this help message\n\n";
   std::cout << "Boolean values can be: true/false, 1/0, yes/no, on/off (case insensitive)\n";
   std::cout << "\nExamples:\n";
@@ -442,7 +447,7 @@ int main(int argc, char* argv[]) {
   int                   batchesPerGpu = 10;
   int                   maxIterations = 10;
   int                   numGpus       = -1;  // If <0, use all GPUs by default
-  nvMolKit::BfgsBackend backend       = nvMolKit::BfgsBackend::PER_MOLECULE;
+  nvMolKit::BfgsBackend backend       = nvMolKit::BfgsBackend::HYBRID;
 
   // Define long options for getopt_long
   static struct option long_options[] = {
@@ -598,7 +603,9 @@ int main(int argc, char* argv[]) {
   }
 
   // Print configuration
-  std::string backendName = (backend == nvMolKit::BfgsBackend::BATCHED) ? "batched" : "per_molecule";
+  std::string backendName = (backend == nvMolKit::BfgsBackend::BATCHED) ? "batched" :
+                            (backend == nvMolKit::BfgsBackend::HYBRID)  ? "hybrid" :
+                                                                          "per_molecule";
   std::cout << "Configuration:\n";
   std::cout << "  File path: " << filePath << "\n";
   std::cout << "  Number of molecules: " << numMols << "\n";

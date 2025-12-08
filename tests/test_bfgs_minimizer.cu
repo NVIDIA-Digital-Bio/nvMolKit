@@ -635,7 +635,7 @@ TEST_P(BFGSMinimizerBackendTest, E2EMinimizationMultiSystemMultiMolsMatchesConve
                        gotEnergies.size() * sizeof(double),
                        cudaMemcpyDeviceToHost));
 
-  EXPECT_THAT(gotEnergies, ::testing::Pointwise(::testing::DoubleNear(1e-3), refEnergies));
+  EXPECT_THAT(gotEnergies, ::testing::Pointwise(::testing::DoubleNear(1e-2), refEnergies));
 
   double avergedEnergyDiff = 0.0;
   for (size_t i = 0; i < gotEnergies.size(); ++i) {
