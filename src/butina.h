@@ -16,8 +16,6 @@
 #ifndef NVMOLKIT_BUTINA_H
 #define NVMOLKIT_BUTINA_H
 
-#include <limits>
-
 #include "device_vector.h"
 
 namespace nvMolKit {
@@ -40,7 +38,7 @@ namespace nvMolKit {
  *                              If false, allows parallel assignment for better performance.
  * @param neighborlistMaxSize Maximum size of the neighborlist used for small cluster optimization.
  *                            Must be 8, 16, 24, 32, 64, or 128. Larger values allow parallel
- *                            processing of larger clusters but use more shared memory.
+ *                            processing of larger clusters but use more memory.
  * @param stream CUDA stream to execute operations on. Defaults to stream 0.
  */
 void butinaGpu(cuda::std::span<const double> distanceMatrix,
@@ -64,7 +62,7 @@ void butinaGpu(cuda::std::span<const double> distanceMatrix,
  *                              If false, allows parallel assignment for better performance.
  * @param neighborlistMaxSize Maximum size of the neighborlist used for small cluster optimization.
  *                            Must be 8, 16, 24, 32, 64, or 128. Larger values allow parallel
- *                            processing of larger clusters but use more shared memory.
+ *                            processing of larger clusters but use more memory.
  * @param stream CUDA stream to execute operations on. Defaults to stream 0.
  */
 void butinaGpu(cuda::std::span<const uint8_t> hitMatrix,

@@ -295,7 +295,7 @@ __global__ void assignSingletonIdsKernel(const cuda::std::span<int> clusters, co
 constexpr int argMaxBlockSize = 512;
 
 /**
- * @brief Prune neighborlists by removing assigned neighbors, using CUB WarpMergeSort.
+ * @brief Prune neighborlists by removing assigned neighbors and reordering.
  */
 template <int NeighborlistMaxSize>
 __global__ void pruneNeighborlistKernel(const cuda::std::span<int> clusters,
@@ -358,7 +358,6 @@ __global__ void pruneNeighborlistKernel(const cuda::std::span<int> clusters,
     }
   }
 
-  // Reduce across warp using CUB (result only valid in lane 0, broadcast to all)
   int newCount = WarpReduce(reduceStorage[warpId]).Sum(localValidCount);
   newCount     = tile.shfl(newCount, 0);
 
@@ -366,7 +365,6 @@ __global__ void pruneNeighborlistKernel(const cuda::std::span<int> clusters,
     clusterSizes[pointIdx] = newCount;
   }
 
-  // Write sorted neighborlist back in blocked arrangement
   for (int item = 0; item < kItemsPerThread; ++item) {
     const int globalIdx = tid * kItemsPerThread + item;
     if (globalIdx < NeighborlistMaxSize) {
@@ -472,9 +470,6 @@ void buildInitialNeighborlist(const int                            numPoints,
 
 /**
  * @brief Inner loop iteration that attempts assignment then prunes neighborlists.
- *
- * Unlike the rebuild approach, this modifies neighborlists in-place by removing
- * assigned neighbors and compacting valid ones to the front.
  */
 template <int NeighborlistMaxSize>
 void innerButinaLoopWithPruning(const int                  numPoints,
