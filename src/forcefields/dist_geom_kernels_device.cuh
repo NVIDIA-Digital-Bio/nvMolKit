@@ -831,7 +831,7 @@ static __device__ __forceinline__ void angleConstraintGrad(const double* pos,
   atomicAdd(&grad[posIdx3 + 2], dedp3z);
 }
 
-template <int dimension, int stride>
+template <int dimension>
 static __device__ __inline__ double molEnergyDG(const EnergyForceContribsDevicePtr& terms,
                                                 const BatchedIndicesDevicePtr&      systemIndices,
                                                 const double*                       molCoords,
@@ -925,7 +925,7 @@ static __device__ __inline__ double molEnergyDG(const EnergyForceContribsDeviceP
 }
 
 // Consolidated per-molecule gradient calculation
-template <int dimension, int stride>
+template <int dimension>
 static __device__ __inline__ void molGradDG(const EnergyForceContribsDevicePtr& terms,
                                             const BatchedIndicesDevicePtr&      systemIndices,
                                             const double*                       molCoords,
@@ -1017,7 +1017,6 @@ static __device__ __inline__ void molGradDG(const EnergyForceContribsDevicePtr& 
   }
 }
 
-template <int stride>
 static __device__ __inline__ double molEnergyETK(const Energy3DForceContribsDevicePtr& terms,
                                                  const BatchedIndices3DDevicePtr&      systemIndices,
                                                  const double*                         molCoords,
@@ -1186,7 +1185,6 @@ static __device__ __inline__ double molEnergyETK(const Energy3DForceContribsDevi
   return energy;
 }
 
-template <int stride>
 static __device__ __inline__ void molGradETK(const Energy3DForceContribsDevicePtr& terms,
                                              const BatchedIndices3DDevicePtr&      systemIndices,
                                              const double*                         molCoords,

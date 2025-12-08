@@ -1071,7 +1071,7 @@ __global__ void combinedEnergiesKernel(const EnergyForceContribsDevicePtr* terms
   const int     atomStart = systemIndices->atomStarts[molIdx];
   const double* molCoords = coords + atomStart * dimension;
   const double  threadEnergy =
-    molEnergyDG<dimension, blockSizePerMol>(*terms, *systemIndices, molCoords, molIdx, chiralWeight, fourthDimWeight, tid);
+    molEnergyDG<dimension>(*terms, *systemIndices, molCoords, molIdx, chiralWeight, fourthDimWeight, tid);
   const double blockEnergy = BlockReduce(tempStorage).Sum(threadEnergy);
 
   if (tid == 0) {
@@ -1110,14 +1110,14 @@ __global__ void combinedGradKernel(const EnergyForceContribsDevicePtr* terms,
   __syncthreads();
 
   const double* molCoords = coords + atomStart * dimension;
-  molGradDG<dimension, blockSizePerMol>(*terms,
-                                        *systemIndices,
-                                        molCoords,
-                                        molGradBase,
-                                        molIdx,
-                                        chiralWeight,
-                                        fourthDimWeight,
-                                        tid);
+  molGradDG<dimension>(*terms,
+                       *systemIndices,
+                       molCoords,
+                       molGradBase,
+                       molIdx,
+                       chiralWeight,
+                       fourthDimWeight,
+                       tid);
   __syncthreads();
 
   if (useSharedMem) {
@@ -1213,7 +1213,7 @@ __global__ void combinedEnergiesKernelETK(const Energy3DForceContribsDevicePtr* 
 
   const int     atomStart    = systemIndices->atomStarts[molIdx];
   const double* molCoords    = coords + atomStart * 4;  // ETK uses 4D
-  const double  threadEnergy = molEnergyETK<blockSizePerMol>(*terms, *systemIndices, molCoords, molIdx, tid);
+  const double  threadEnergy = molEnergyETK(*terms, *systemIndices, molCoords, molIdx, tid);
   const double  blockEnergy  = BlockReduce(tempStorage).Sum(threadEnergy);
 
   if (tid == 0) {
@@ -1255,7 +1255,7 @@ __global__ void combinedGradKernelETK(const Energy3DForceContribsDevicePtr* term
   const double* molCoords = coords + atomStart * 4;  // ETK uses 4D
   double*       molGrad   = grad + atomStart * 4;    // Offset to molecule start for ETK (4D)
 
-  molGradETK<blockSizePerMol>(*terms, *systemIndices, molCoords, molGrad, molIdx, tid);
+  molGradETK(*terms, *systemIndices, molCoords, molGrad, molIdx, tid);
 }
 
 cudaError_t launchBlockPerMolGradKernelETK(int                                   numMols,
