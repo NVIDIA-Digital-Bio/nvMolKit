@@ -21,7 +21,7 @@ __device__ void setMaxStep(const double*                                        
                            float*                                                      maxStepOutSquared,
                            typename cub::BlockReduce<double, BLOCK_SIZE>::TempStorage& tempStorage) {
   float sumSquaredPos = 0.0;
-  for (int i = threadIdx.x; i < numTerms; i += BLOCK_SIZE) {
+  for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
     float dx2 = pos[i] * pos[i];
     sumSquaredPos += dx2;
   }
@@ -51,7 +51,7 @@ __device__ void lineSearchSetup(const int                                       
   //  Scale direction vector if needed
   // ---------------------------------
   float sumSquaredLocal = 0.0;
-  for (int i = idxInSys; i < numTerms; i += BLOCK_SIZE) {
+  for (int i = idxInSys; i < numTerms; i += blockDim.x) {
     float dx2 = dirStart[i] * dirStart[i];
     sumSquaredLocal += dx2;
   }
@@ -63,7 +63,7 @@ __device__ void lineSearchSetup(const int                                       
   if (dirSumSquared > maxStepSquared) {
     const float inverseScaleSquared = dirSumSquared / maxStepSquared;
     const float scale               = rsqrtf(inverseScaleSquared);
-    for (int i = idxInSys; i < numTerms; i += BLOCK_SIZE) {
+    for (int i = idxInSys; i < numTerms; i += blockDim.x) {
       dirStart[i] *= scale;
     }
   }
@@ -76,7 +76,7 @@ __device__ void lineSearchSetup(const int                                       
   float localGradSum = 0.0;
   float localDirSum  = 0.0;
   // Each thread computes its partial sum
-  for (int i = idxInSys; i < numTerms; i += BLOCK_SIZE) {
+  for (int i = idxInSys; i < numTerms; i += blockDim.x) {
     localSum += dirStart[i] * gradStart[i];
     localGradSum += gradStart[i] * gradStart[i];
     localDirSum += dirStart[i] * dirStart[i];
@@ -97,7 +97,7 @@ __device__ void lineSearchSetup(const int                                       
   float localMax_numerator   = 0.0;
   float localMax_denominator = 1.0;
   // Each thread computes its local maximum
-  for (int i = idxInSys; i < numTerms; i += BLOCK_SIZE) {
+  for (int i = idxInSys; i < numTerms; i += blockDim.x) {
     float temp_numerator   = fabs(dirStart[i]);
     float temp_denominator = fmax(fabs(posStart[i]), 1.0);
     // temp_numerator / temp_denominator > localMax_numerator / localMax_denominator
@@ -124,7 +124,7 @@ __device__ void lineSearchPerturb(const int     numTerms,
                                   const double* dirStart,
                                   const float   lambda,
                                   double*       scratchPos) {
-  for (int i = threadIdx.x; i < numTerms; i += BLOCK_SIZE) {
+  for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
     scratchPos[i] = refPos[i] + lambda * dirStart[i];
   }
   __syncthreads();
@@ -189,7 +189,7 @@ __device__ void setDirection(const int                                          
                              typename cub::BlockReduce<double, BLOCK_SIZE>::TempStorage& tempStorage) {
   float localMax_numerator   = 0.0;
   float localMax_denominator = 1.0;
-  for (int i = threadIdx.x; i < numTerms; i += BLOCK_SIZE) {
+  for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
     xi[i]    = posFromLineSearch[i] - pos[i];
     dGrad[i] = grad[i];
 
@@ -221,7 +221,7 @@ __device__ void scaleGrad(const int                                             
   gradScale = scaleGrads ? 0.1 : 1.0;
 
   double maxGrad = -1e8;
-  for (int i = threadIdx.x; i < numTerms; i += BLOCK_SIZE) {
+  for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
     if constexpr (scaleGrads) {
       grad[i] *= gradScale;
     }
@@ -244,7 +244,7 @@ __device__ void scaleGrad(const int                                             
     while (maxGrad * gradScale > 10.0) {
       gradScale *= 0.5;
     }
-    for (int i = threadIdx.x; i < numTerms; i += BLOCK_SIZE) {
+    for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
       grad[i] *= gradScale;
     }
   }
@@ -261,7 +261,7 @@ __device__ void updateDGrad(const int                                           
                             bool&                                                       converged,
                             typename cub::BlockReduce<double, BLOCK_SIZE>::TempStorage& tempStorage) {
   double localMax = 0.0;
-  for (int i = threadIdx.x; i < numTerms; i += BLOCK_SIZE) {
+  for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
     dGrad[i]    = grad[i] - dGrad[i];
     double temp = fabs(grad[i]) * fmax(fabs(pos[i]), 1.0);
     if (temp > localMax) {
@@ -291,10 +291,10 @@ __device__ void updateInverseHessian(const int                                  
   using BlockReduce = cub::BlockReduce<double, BLOCK_SIZE>;
 
   // Compute hessDGrad = invHessian * dGrad
-  for (int row = threadIdx.x; row < numTerms; row += BLOCK_SIZE) {
+  for (int row = threadIdx.x; row < numTerms; row += blockDim.x) {
     double dotProduct = 0.0;
     for (int col = 0; col < numTerms; col++) {
-      dotProduct += invHessian[row * numTerms + col] * dGrad[col];
+      dotProduct += invHessian[col * numTerms + row] * dGrad[col];
     }
     hessDGrad[row] = dotProduct;
   }
@@ -305,7 +305,7 @@ __device__ void updateInverseHessian(const int                                  
   __shared__ bool   needUpdate;
 
   double sumFac = 0.0;
-  for (int i = threadIdx.x; i < numTerms; i += BLOCK_SIZE) {
+  for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
     sumFac += dGrad[i] * xi[i];
   }
   double facReduced = BlockReduce(tempStorage).Sum(sumFac);
@@ -314,7 +314,7 @@ __device__ void updateInverseHessian(const int                                  
   __syncthreads();
 
   double sumFae = 0.0;
-  for (int i = threadIdx.x; i < numTerms; i += BLOCK_SIZE) {
+  for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
     sumFae += dGrad[i] * hessDGrad[i];
   }
   double faeReduced = BlockReduce(tempStorage).Sum(sumFae);
@@ -323,7 +323,7 @@ __device__ void updateInverseHessian(const int                                  
   __syncthreads();
 
   double sumDGradSq = 0.0;
-  for (int i = threadIdx.x; i < numTerms; i += BLOCK_SIZE) {
+  for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
     sumDGradSq += dGrad[i] * dGrad[i];
   }
   double sumDGradReduced = BlockReduce(tempStorage).Sum(sumDGradSq);
@@ -332,7 +332,7 @@ __device__ void updateInverseHessian(const int                                  
   __syncthreads();
 
   double sumXiSq = 0.0;
-  for (int i = threadIdx.x; i < numTerms; i += BLOCK_SIZE) {
+  for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
     sumXiSq += xi[i] * xi[i];
   }
   double sumXiReduced = BlockReduce(tempStorage).Sum(sumXiSq);
@@ -353,13 +353,13 @@ __device__ void updateInverseHessian(const int                                  
 
   if (needUpdate) {
     // Update dGrad for Hessian update
-    for (int i = threadIdx.x; i < numTerms; i += BLOCK_SIZE) {
+    for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
       dGrad[i] = fac * xi[i] - fad * hessDGrad[i];
     }
     __syncthreads();
 
-    // Update inverse Hessian and compute new direction
-    for (int row = threadIdx.x; row < numTerms; row += BLOCK_SIZE) {
+    // Update inverse Hessian
+    for (int row = threadIdx.x; row < numTerms; row += blockDim.x) {
       double pxi  = fac * xi[row];
       double hdgi = fad * hessDGrad[row];
       double dgi  = fae * dGrad[row];
@@ -369,17 +369,17 @@ __device__ void updateInverseHessian(const int                                  
         double hdgj   = hessDGrad[col];
         double dgj    = dGrad[col];
         double update = pxi * pxj - hdgi * hdgj + dgi * dgj;
-        invHessian[row * numTerms + col] += update;
+        invHessian[col * numTerms + row] += update;
       }
     }
     __syncthreads();
   }
 
   // Update xi = -invHessian * grad
-  for (int row = threadIdx.x; row < numTerms; row += BLOCK_SIZE) {
+  for (int row = threadIdx.x; row < numTerms; row += blockDim.x) {
     double dotProduct = 0.0;
     for (int col = 0; col < numTerms; col++) {
-      dotProduct += invHessian[row * numTerms + col] * grad[col];
+      dotProduct += invHessian[col * numTerms + row] * grad[col];
     }
     xi[row] = -dotProduct;
   }
@@ -489,7 +489,7 @@ __launch_bounds__(BLOCK_SIZE, 12) __global__ void bfgsMinimizeKernel(const int  
   // For shared memory case, copy to local shared buffer
   // For non-shared case, localPos already points to globalPos, so no copy needed
   if constexpr (UseSharedMem) {
-    for (int16_t i = tid; i < numTerms; i += BLOCK_SIZE) {
+    for (int i = tid; i < numTerms; i += blockDim.x) {
       localPos[i] = globalPos[i];
     }
     __syncthreads();
@@ -497,11 +497,11 @@ __launch_bounds__(BLOCK_SIZE, 12) __global__ void bfgsMinimizeKernel(const int  
 
   // Initialize inverse Hessian to identity
   const int hessianSize = numTerms * numTerms;
-  for (int i = tid; i < hessianSize; i += BLOCK_SIZE) {
+  for (int i = tid; i < hessianSize; i += blockDim.x) {
     invHessian[i] = 0.0;
   }
   __syncthreads();
-  for (int i = tid; i < numTerms; i += BLOCK_SIZE) {
+  for (int i = tid; i < numTerms; i += blockDim.x) {
     invHessian[i * numTerms + i] = 1.0;
   }
 
@@ -532,7 +532,7 @@ __launch_bounds__(BLOCK_SIZE, 12) __global__ void bfgsMinimizeKernel(const int  
   }
   __syncthreads();
 
-  for (int16_t i = tid; i < numTerms; i += BLOCK_SIZE) {
+  for (int i = tid; i < numTerms; i += blockDim.x) {
     localGrad[i] = 0.0;
   }
   __syncthreads();
@@ -560,7 +560,7 @@ __launch_bounds__(BLOCK_SIZE, 12) __global__ void bfgsMinimizeKernel(const int  
     scaleGrad<false>(numTerms, localGrad, gradScale, tempStorage);
   }
   // Set initial direction as negative gradient
-  for (int i = tid; i < numTerms; i += BLOCK_SIZE) {
+  for (int i = tid; i < numTerms; i += blockDim.x) {
     localDir[i] = -localGrad[i];
   }
   __syncthreads();
@@ -578,7 +578,7 @@ __launch_bounds__(BLOCK_SIZE, 12) __global__ void bfgsMinimizeKernel(const int  
 
   while (!converged && currIter < numIters) {
     // Save current position before line search
-    for (int16_t i = tid; i < numTerms; i += BLOCK_SIZE) {
+    for (int i = tid; i < numTerms; i += blockDim.x) {
       oldPos[i] = localPos[i];
     }
     __syncthreads();
@@ -638,7 +638,7 @@ __launch_bounds__(BLOCK_SIZE, 12) __global__ void bfgsMinimizeKernel(const int  
     }
 
     // Update positions with final line search result and compute direction
-    for (int i = tid; i < numTerms; i += BLOCK_SIZE) {
+    for (int i = tid; i < numTerms; i += blockDim.x) {
       localPos[i] = scratchPos[i];
     }
     __syncthreads();
@@ -656,7 +656,7 @@ __launch_bounds__(BLOCK_SIZE, 12) __global__ void bfgsMinimizeKernel(const int  
     __syncthreads();
 
     // Compute gradients at new position
-    for (int16_t i = tid; i < numTerms; i += BLOCK_SIZE) {
+    for (int i = tid; i < numTerms; i += blockDim.x) {
       localGrad[i] = 0.0;
     }
     __syncthreads();
@@ -702,7 +702,7 @@ __launch_bounds__(BLOCK_SIZE, 12) __global__ void bfgsMinimizeKernel(const int  
   // If in shared mem mode, we've been updating positions in shared memory. Copy back to global memory
   // If not in shared memory mode, it's already in global memory
   if constexpr (UseSharedMem) {
-    for (int i = tid; i < numTerms; i += BLOCK_SIZE) {
+    for (int i = tid; i < numTerms; i += blockDim.x) {
       globalPos[i] = localPos[i];
     }
   }
