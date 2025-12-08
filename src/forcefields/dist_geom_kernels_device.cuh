@@ -833,15 +833,14 @@ static __device__ __forceinline__ void angleConstraintGrad(const double* pos,
 
 static __device__ __inline__ double molEnergyDG(const EnergyForceContribsDevicePtr& terms,
                                                 const BatchedIndicesDevicePtr&      systemIndices,
-                                                const double*                       coords,
+                                                const double*                       molCoords,
                                                 const int                           molIdx,
                                                 const int                           dimension,
                                                 const double                        chiralWeight,
                                                 const double                        fourthDimWeight,
                                                 const int                           tid,
                                                 const int                           stride) {
-  const int     atomStart = systemIndices.atomStarts[molIdx];
-  const double* molCoords = coords + atomStart * dimension;
+  const int atomStart = systemIndices.atomStarts[molIdx];
 
   double energy = 0.0;
 
@@ -931,17 +930,15 @@ static __device__ __inline__ double molEnergyDG(const EnergyForceContribsDeviceP
 // Consolidated per-molecule gradient calculation
 static __device__ __inline__ void molGradDG(const EnergyForceContribsDevicePtr& terms,
                                             const BatchedIndicesDevicePtr&      systemIndices,
-                                            const double*                       coords,
-                                            double*                             grad,
+                                            const double*                       molCoords,
+                                            double*                             molGrad,
                                             const int                           molIdx,
                                             const int                           dimension,
                                             const double                        chiralWeight,
                                             const double                        fourthDimWeight,
                                             const int                           tid,
                                             const int                           stride) {
-  const int     atomStart = systemIndices.atomStarts[molIdx];
-  const double* molCoords = coords + atomStart * dimension;
-  double*       molGrad   = grad;  // grad is already offset by caller (see combinedGradKernel)
+  const int atomStart = systemIndices.atomStarts[molIdx];
 
   namespace cg            = cooperative_groups;
   constexpr int WARP_SIZE = 32;
@@ -1028,12 +1025,11 @@ static __device__ __inline__ void molGradDG(const EnergyForceContribsDevicePtr& 
 
 static __device__ __inline__ double molEnergyETK(const Energy3DForceContribsDevicePtr& terms,
                                                  const BatchedIndices3DDevicePtr&      systemIndices,
-                                                 const double*                         coords,
+                                                 const double*                         molCoords,
                                                  const int                             molIdx,
                                                  const int                             tid,
                                                  const int                             stride) {
-  const int     atomStart = systemIndices.atomStarts[molIdx];
-  const double* molCoords = coords + atomStart * 4;  // ETK uses 4D coordinates
+  const int atomStart = systemIndices.atomStarts[molIdx];
 
   double energy = 0.0;
 
@@ -1198,13 +1194,12 @@ static __device__ __inline__ double molEnergyETK(const Energy3DForceContribsDevi
 
 static __device__ __inline__ void molGradETK(const Energy3DForceContribsDevicePtr& terms,
                                              const BatchedIndices3DDevicePtr&      systemIndices,
-                                             const double*                         coords,
+                                             const double*                         molCoords,
                                              double*                               grad,
                                              const int                             molIdx,
                                              const int                             tid,
                                              const int                             stride) {
-  const int     atomStart = systemIndices.atomStarts[molIdx];
-  const double* molCoords = coords + atomStart * 4;  // ETK uses 4D coordinates
+  const int atomStart = systemIndices.atomStarts[molIdx];
 
   namespace cg            = cooperative_groups;
   constexpr int WARP_SIZE = 32;

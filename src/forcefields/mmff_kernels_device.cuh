@@ -663,12 +663,11 @@ namespace MMFF {
 
 static __device__ __inline__ double molEnergy(const EnergyForceContribsDevicePtr& terms,
                                               const BatchedIndicesDevicePtr&      systemIndices,
-                                              const double*                       coords,
+                                              const double*                       molCoords,
                                               const int                           molIdx,
                                               const int                           tid,
                                               const int                           stride) {
-  const int     atomStart = systemIndices.atomStarts[molIdx];
-  const double* molCoords = coords + atomStart * 3;
+  const int atomStart = systemIndices.atomStarts[molIdx];
 
   double energy = 0.0;
 
@@ -765,13 +764,12 @@ static __device__ __inline__ double molEnergy(const EnergyForceContribsDevicePtr
 
 static __device__ __inline__ void molGrad(const EnergyForceContribsDevicePtr& terms,
                                           const BatchedIndicesDevicePtr&      systemIndices,
-                                          const double*                       coords,
+                                          const double*                       molCoords,
                                           double*                             grad,
                                           const int                           molIdx,
                                           const int                           tid,
                                           const int                           stride) {
-  const int     atomStart = systemIndices.atomStarts[molIdx];
-  const double* molCoords = coords + atomStart * 3;
+  const int atomStart = systemIndices.atomStarts[molIdx];
 
   const auto& [idx1s, idx2s, r0s, kbs] = terms.bondTerms;
   const int bondStart                  = systemIndices.bondTermStarts[molIdx];

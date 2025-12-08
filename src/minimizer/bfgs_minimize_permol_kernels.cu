@@ -518,13 +518,13 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
   // Compute initial energy
   double threadEnergy;
   if constexpr (FFType == ForceFieldType::MMFF) {
-    threadEnergy = MMFF::molEnergy(*terms, *systemIndices, positions, molIdx, tid, stride);
+    threadEnergy = MMFF::molEnergy(*terms, *systemIndices, localPos, molIdx, tid, stride);
   } else if constexpr (FFType == ForceFieldType::ETK) {
-    threadEnergy = DistGeom::molEnergyETK(*terms, *systemIndices, positions, molIdx, tid, stride);
+    threadEnergy = DistGeom::molEnergyETK(*terms, *systemIndices, localPos, molIdx, tid, stride);
   } else {  // DG
     threadEnergy = DistGeom::molEnergyDG(*terms,
                                          *systemIndices,
-                                         positions,
+                                         localPos,
                                          molIdx,
                                          dataDim,
                                          chiralWeight,
@@ -546,13 +546,13 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
   __syncthreads();
 
   if constexpr (FFType == ForceFieldType::MMFF) {
-    MMFF::molGrad(*terms, *systemIndices, positions, localGrad, molIdx, tid, stride);
+    MMFF::molGrad(*terms, *systemIndices, localPos, localGrad, molIdx, tid, stride);
   } else if constexpr (FFType == ForceFieldType::ETK) {
-    DistGeom::molGradETK(*terms, *systemIndices, positions, localGrad, molIdx, tid, stride);
+    DistGeom::molGradETK(*terms, *systemIndices, localPos, localGrad, molIdx, tid, stride);
   } else {  // DG
     DistGeom::molGradDG(*terms,
                         *systemIndices,
-                        positions,
+                        localPos,
                         localGrad,
                         molIdx,
                         dataDim,
@@ -614,22 +614,16 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
       // Perturb positions from saved oldPos (not localPos, which may have been modified)
       lineSearchPerturb(numTerms, oldPos, localDir, lambda, scratchPos);
 
-      // Copy to global for energy calculation
-      for (int i = tid; i < numTerms; i += stride) {
-        globalPos[i] = scratchPos[i];
-      }
-      __syncthreads();
-
-      // Compute energy at perturbed position
+      // Compute energy at perturbed position (use scratchPos which has the perturbed coordinates)
       double lsThreadEnergy;
       if constexpr (FFType == ForceFieldType::MMFF) {
-        lsThreadEnergy = MMFF::molEnergy(*terms, *systemIndices, positions, molIdx, tid, stride);
+        lsThreadEnergy = MMFF::molEnergy(*terms, *systemIndices, scratchPos, molIdx, tid, stride);
       } else if constexpr (FFType == ForceFieldType::ETK) {
-        lsThreadEnergy = DistGeom::molEnergyETK(*terms, *systemIndices, positions, molIdx, tid, stride);
+        lsThreadEnergy = DistGeom::molEnergyETK(*terms, *systemIndices, scratchPos, molIdx, tid, stride);
       } else {  // DG
         lsThreadEnergy = DistGeom::molEnergyDG(*terms,
                                                *systemIndices,
-                                               positions,
+                                               scratchPos,
                                                molIdx,
                                                dataDim,
                                                chiralWeight,
@@ -657,8 +651,7 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
 
     // Update positions with final line search result and compute direction
     for (int i = tid; i < numTerms; i += stride) {
-      localPos[i]  = scratchPos[i];
-      globalPos[i] = scratchPos[i];
+      localPos[i] = scratchPos[i];
     }
     __syncthreads();
 
@@ -681,13 +674,13 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
     __syncthreads();
 
     if constexpr (FFType == ForceFieldType::MMFF) {
-      MMFF::molGrad(*terms, *systemIndices, positions, localGrad, molIdx, tid, stride);
+      MMFF::molGrad(*terms, *systemIndices, localPos, localGrad, molIdx, tid, stride);
     } else if constexpr (FFType == ForceFieldType::ETK) {
-      DistGeom::molGradETK(*terms, *systemIndices, positions, localGrad, molIdx, tid, stride);
+      DistGeom::molGradETK(*terms, *systemIndices, localPos, localGrad, molIdx, tid, stride);
     } else {  // DG
       DistGeom::molGradDG(*terms,
                           *systemIndices,
-                          positions,
+                          localPos,
                           localGrad,
                           molIdx,
                           dataDim,
@@ -718,6 +711,14 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
       currIter++;
     }
     __syncthreads();
+  }
+
+  // If in shared mem mode, we've been updating positions in shared memory. Copy back to global memory
+  // If not in shared memory mode, it's already in global memory
+  if constexpr (UseSharedMem) {
+    for (int i = tid; i < numTerms; i += stride) {
+      globalPos[i] = localPos[i];
+    }
   }
 
   // Write final energy and status

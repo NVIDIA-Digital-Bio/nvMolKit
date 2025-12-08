@@ -666,8 +666,10 @@ __global__ void combinedEnergiesKernel(const EnergyForceContribsDevicePtr* terms
   using BlockReduce = cub::BlockReduce<double, blockSizePerMol>;
   __shared__ typename BlockReduce::TempStorage tempStorage;
 
-  const double threadEnergy = molEnergy(*terms, *systemIndices, coords, molIdx, tid, stride);
-  const double blockEnergy  = BlockReduce(tempStorage).Sum(threadEnergy);
+  const int     atomStart    = systemIndices->atomStarts[molIdx];
+  const double* molCoords    = coords + atomStart * 3;
+  const double  threadEnergy = molEnergy(*terms, *systemIndices, molCoords, molIdx, tid, stride);
+  const double  blockEnergy  = BlockReduce(tempStorage).Sum(threadEnergy);
 
   if (tid == 0) {
     energies[molIdx] = blockEnergy;
@@ -697,7 +699,8 @@ __global__ void combinedGradKernel(const EnergyForceContribsDevicePtr* terms,
   }
   __syncthreads();
 
-  molGrad(*terms, *systemIndices, coords, molGradBase, molIdx, tid, stride);
+  const double* molCoords = coords + atomStart * 3;
+  molGrad(*terms, *systemIndices, molCoords, molGradBase, molIdx, tid, stride);
   __syncthreads();
 
   if (useSharedMem) {
