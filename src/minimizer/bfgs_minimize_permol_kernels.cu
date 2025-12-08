@@ -489,7 +489,7 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
   // For shared memory case, copy to local shared buffer
   // For non-shared case, localPos already points to globalPos, so no copy needed
   if constexpr (UseSharedMem) {
-    for (int16_t i = tid; i < numTerms; i += blockDim.x) {
+    for (int i = tid; i < numTerms; i += blockDim.x) {
       localPos[i] = globalPos[i];
     }
     __syncthreads();
@@ -537,7 +537,7 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
   }
   __syncthreads();
 
-  for (int16_t i = tid; i < numTerms; i += blockDim.x) {
+  for (int i = tid; i < numTerms; i += blockDim.x) {
     localGrad[i] = 0.0;
   }
   __syncthreads();
@@ -583,7 +583,7 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
 
   while (!converged && currIter < numIters) {
     // Save current position before line search
-    for (int16_t i = tid; i < numTerms; i += blockDim.x) {
+    for (int i = tid; i < numTerms; i += blockDim.x) {
       oldPos[i] = localPos[i];
     }
     __syncthreads();
@@ -661,7 +661,7 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
     __syncthreads();
 
     // Compute gradients at new position
-    for (int16_t i = tid; i < numTerms; i += blockDim.x) {
+    for (int i = tid; i < numTerms; i += blockDim.x) {
       localGrad[i] = 0.0;
     }
     __syncthreads();
