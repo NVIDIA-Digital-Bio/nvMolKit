@@ -416,7 +416,9 @@ __global__ void pruneNeighborlistKernel(const cuda::std::span<int> clusters,
   }
 }
 
+#if !NVMOLKIT_HAS_NEW_ARGMAX_API
 //! Custom ArgMax kernel that returns the largest value and index.
+//! Only used when CUB's new ArgMax API is not available (CCCL < 2.8.0)
 __global__ void lastArgMax(const cuda::std::span<const int> values, int* outVal, int* outIdx) {
   int            maxVal = cuda::std::numeric_limits<int>::min();
   int            maxID  = -1;
@@ -445,6 +447,7 @@ __global__ void lastArgMax(const cuda::std::span<const int> values, int* outVal,
     }
   }
 }
+#endif  // !NVMOLKIT_HAS_NEW_ARGMAX_API
 
 // TODO - consolidate this to device vector code.
 template <typename T> __global__ void setAllKernel(const size_t numElements, T value, T* dst) {
