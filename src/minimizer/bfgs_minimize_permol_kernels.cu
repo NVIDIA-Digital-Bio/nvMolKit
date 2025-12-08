@@ -518,19 +518,18 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
   // Compute initial energy
   double threadEnergy;
   if constexpr (FFType == ForceFieldType::MMFF) {
-    threadEnergy = MMFF::molEnergy(*terms, *systemIndices, localPos, molIdx, tid, stride);
+    threadEnergy = MMFF::molEnergy<BLOCK_SIZE>(*terms, *systemIndices, localPos, molIdx, tid);
   } else if constexpr (FFType == ForceFieldType::ETK) {
-    threadEnergy = DistGeom::molEnergyETK(*terms, *systemIndices, localPos, molIdx, tid, stride);
+    threadEnergy = DistGeom::molEnergyETK<BLOCK_SIZE>(*terms, *systemIndices, localPos, molIdx, tid);
   } else {  // DG
-    threadEnergy = DistGeom::molEnergyDG(*terms,
-                                         *systemIndices,
-                                         localPos,
-                                         molIdx,
-                                         dataDim,
-                                         chiralWeight,
-                                         fourthDimWeight,
-                                         tid,
-                                         stride);
+    threadEnergy = DistGeom::molEnergyDG<BLOCK_SIZE>(*terms,
+                                                     *systemIndices,
+                                                     localPos,
+                                                     molIdx,
+                                                     dataDim,
+                                                     chiralWeight,
+                                                     fourthDimWeight,
+                                                     tid);
   }
   const double blockEnergy = BlockReduce(tempStorage).Sum(threadEnergy);
 
@@ -617,19 +616,18 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
       // Compute energy at perturbed position (use scratchPos which has the perturbed coordinates)
       double lsThreadEnergy;
       if constexpr (FFType == ForceFieldType::MMFF) {
-        lsThreadEnergy = MMFF::molEnergy(*terms, *systemIndices, scratchPos, molIdx, tid, stride);
+        lsThreadEnergy = MMFF::molEnergy<BLOCK_SIZE>(*terms, *systemIndices, scratchPos, molIdx, tid);
       } else if constexpr (FFType == ForceFieldType::ETK) {
-        lsThreadEnergy = DistGeom::molEnergyETK(*terms, *systemIndices, scratchPos, molIdx, tid, stride);
+        lsThreadEnergy = DistGeom::molEnergyETK<BLOCK_SIZE>(*terms, *systemIndices, scratchPos, molIdx, tid);
       } else {  // DG
-        lsThreadEnergy = DistGeom::molEnergyDG(*terms,
-                                               *systemIndices,
-                                               scratchPos,
-                                               molIdx,
-                                               dataDim,
-                                               chiralWeight,
-                                               fourthDimWeight,
-                                               tid,
-                                               stride);
+        lsThreadEnergy = DistGeom::molEnergyDG<BLOCK_SIZE>(*terms,
+                                                           *systemIndices,
+                                                           scratchPos,
+                                                           molIdx,
+                                                           dataDim,
+                                                           chiralWeight,
+                                                           fourthDimWeight,
+                                                           tid);
       }
       const double lsBlockEnergy = BlockReduce(tempStorage).Sum(lsThreadEnergy);
 

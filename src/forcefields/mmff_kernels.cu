@@ -662,13 +662,13 @@ __global__ void combinedEnergiesKernel(const EnergyForceContribsDevicePtr* terms
                                        double*                             energies) {
   const int molIdx  = blockIdx.x;
   const int tid     = threadIdx.x;
-  const int stride  = blockDim.x;
+  const int stride  = blockSizePerMol;
   using BlockReduce = cub::BlockReduce<double, blockSizePerMol>;
   __shared__ typename BlockReduce::TempStorage tempStorage;
 
   const int     atomStart    = systemIndices->atomStarts[molIdx];
   const double* molCoords    = coords + atomStart * 3;
-  const double  threadEnergy = molEnergy(*terms, *systemIndices, molCoords, molIdx, tid, stride);
+  const double  threadEnergy = molEnergy<blockSizePerMol>(*terms, *systemIndices, molCoords, molIdx, tid);
   const double  blockEnergy  = BlockReduce(tempStorage).Sum(threadEnergy);
 
   if (tid == 0) {

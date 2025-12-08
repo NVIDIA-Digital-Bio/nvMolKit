@@ -831,6 +831,7 @@ static __device__ __forceinline__ void angleConstraintGrad(const double* pos,
   atomicAdd(&grad[posIdx3 + 2], dedp3z);
 }
 
+template <int stride>
 static __device__ __inline__ double molEnergyDG(const EnergyForceContribsDevicePtr& terms,
                                                 const BatchedIndicesDevicePtr&      systemIndices,
                                                 const double*                       molCoords,
@@ -838,8 +839,7 @@ static __device__ __inline__ double molEnergyDG(const EnergyForceContribsDeviceP
                                                 const int                           dimension,
                                                 const double                        chiralWeight,
                                                 const double                        fourthDimWeight,
-                                                const int                           tid,
-                                                const int                           stride) {
+                                                const int                           tid) {
   const int atomStart = systemIndices.atomStarts[molIdx];
 
   double energy = 0.0;
@@ -1023,12 +1023,12 @@ static __device__ __inline__ void molGradDG(const EnergyForceContribsDevicePtr& 
   }
 }
 
+template <int stride>
 static __device__ __inline__ double molEnergyETK(const Energy3DForceContribsDevicePtr& terms,
                                                  const BatchedIndices3DDevicePtr&      systemIndices,
                                                  const double*                         molCoords,
                                                  const int                             molIdx,
-                                                 const int                             tid,
-                                                 const int                             stride) {
+                                                 const int                             tid) {
   const int atomStart = systemIndices.atomStarts[molIdx];
 
   double energy = 0.0;
