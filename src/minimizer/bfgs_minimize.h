@@ -74,8 +74,6 @@ struct BfgsBatchMinimizer {
                 const uint8_t*                activeThisStage = nullptr);
 
   //! Run BFGS minimization with MMFF forcefield.
-  //! Dynamically selects between BATCHED and PER_MOLECULE based on backend setting.
-  //! Energies are always computed and available in systemDevice.energyOuts after return.
   //! Returns 0 if all systems converged, 1 if some systems did not converge.
   bool minimizeWithMMFF(int                                  numIters,
                         double                               gradTol,
@@ -83,8 +81,7 @@ struct BfgsBatchMinimizer {
                         MMFF::BatchedMolecularDeviceBuffers& systemDevice,
                         const uint8_t*                       activeThisStage = nullptr);
 
-  //! Run BFGS minimization with ETK (3D distance geometry) forcefield.
-  //! Dynamically selects between BATCHED and PER_MOLECULE based on backend setting.
+  //! Run BFGS minimization with ETK forcefield.
   //! \param useBasicKnowledge If true, uses ALL ETK terms; if false, uses PLAIN mode.
   //! Returns 0 if all systems converged, 1 if some systems did not converge.
   bool minimizeWithETK(int                                        numIters,
@@ -96,8 +93,7 @@ struct BfgsBatchMinimizer {
                        bool                                       useBasicKnowledge,
                        const uint8_t*                             activeThisStage = nullptr);
 
-  //! Run BFGS minimization with DG (4D distance geometry) forcefield.
-  //! Dynamically selects between BATCHED and PER_MOLECULE based on backend setting.
+  //! Run BFGS minimization with DG forcefield.
   //! Returns 0 if all systems converged, 1 if some systems did not converge.
   bool minimizeWithDG(int                                      numIters,
                       double                                   gradTol,
