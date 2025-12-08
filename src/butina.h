@@ -28,7 +28,6 @@ namespace nvMolKit {
  * The Butina algorithm is a deterministic clustering method that iteratively selects
  * the item with the most unclustered neighbors and forms clusters.
  *
- *
  * @param distanceMatrix Square distance matrix of size NxN where distanceMatrix[i*N+j]
  *                       contains the distance between items i and j.
  * @param clusters Output array of size N. Each element will contain the cluster ID for
