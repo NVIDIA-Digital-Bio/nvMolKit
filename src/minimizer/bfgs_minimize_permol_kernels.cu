@@ -21,7 +21,7 @@ __device__ void setMaxStep(const double*                                        
                            float*                                                      maxStepOutSquared,
                            typename cub::BlockReduce<double, BLOCK_SIZE>::TempStorage& tempStorage) {
   float sumSquaredPos = 0.0;
-  for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
+  for (int i = threadIdx.x; i < numTerms; i += BLOCK_SIZE) {
     float dx2 = pos[i] * pos[i];
     sumSquaredPos += dx2;
   }
@@ -51,7 +51,7 @@ __device__ void lineSearchSetup(const int                                       
   //  Scale direction vector if needed
   // ---------------------------------
   float sumSquaredLocal = 0.0;
-  for (int i = idxInSys; i < numTerms; i += blockDim.x) {
+  for (int i = idxInSys; i < numTerms; i += BLOCK_SIZE) {
     float dx2 = dirStart[i] * dirStart[i];
     sumSquaredLocal += dx2;
   }
@@ -63,7 +63,7 @@ __device__ void lineSearchSetup(const int                                       
   if (dirSumSquared > maxStepSquared) {
     const float inverseScaleSquared = dirSumSquared / maxStepSquared;
     const float scale               = rsqrtf(inverseScaleSquared);
-    for (int i = idxInSys; i < numTerms; i += blockDim.x) {
+    for (int i = idxInSys; i < numTerms; i += BLOCK_SIZE) {
       dirStart[i] *= scale;
     }
   }
@@ -76,7 +76,7 @@ __device__ void lineSearchSetup(const int                                       
   float localGradSum = 0.0;
   float localDirSum  = 0.0;
   // Each thread computes its partial sum
-  for (int i = idxInSys; i < numTerms; i += blockDim.x) {
+  for (int i = idxInSys; i < numTerms; i += BLOCK_SIZE) {
     localSum += dirStart[i] * gradStart[i];
     localGradSum += gradStart[i] * gradStart[i];
     localDirSum += dirStart[i] * dirStart[i];
@@ -97,7 +97,7 @@ __device__ void lineSearchSetup(const int                                       
   float localMax_numerator   = 0.0;
   float localMax_denominator = 1.0;
   // Each thread computes its local maximum
-  for (int i = idxInSys; i < numTerms; i += blockDim.x) {
+  for (int i = idxInSys; i < numTerms; i += BLOCK_SIZE) {
     float temp_numerator   = fabs(dirStart[i]);
     float temp_denominator = fmax(fabs(posStart[i]), 1.0);
     // temp_numerator / temp_denominator > localMax_numerator / localMax_denominator
@@ -124,7 +124,7 @@ __device__ void lineSearchPerturb(const int     numTerms,
                                   const double* dirStart,
                                   const float   lambda,
                                   double*       scratchPos) {
-  for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
+  for (int i = threadIdx.x; i < numTerms; i += BLOCK_SIZE) {
     scratchPos[i] = refPos[i] + lambda * dirStart[i];
   }
   __syncthreads();
@@ -189,7 +189,7 @@ __device__ void setDirection(const int                                          
                              typename cub::BlockReduce<double, BLOCK_SIZE>::TempStorage& tempStorage) {
   float localMax_numerator   = 0.0;
   float localMax_denominator = 1.0;
-  for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
+  for (int i = threadIdx.x; i < numTerms; i += BLOCK_SIZE) {
     xi[i]    = posFromLineSearch[i] - pos[i];
     dGrad[i] = grad[i];
 
@@ -221,7 +221,7 @@ __device__ void scaleGrad(const int                                             
   gradScale = scaleGrads ? 0.1 : 1.0;
 
   double maxGrad = -1e8;
-  for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
+  for (int i = threadIdx.x; i < numTerms; i += BLOCK_SIZE) {
     if constexpr (scaleGrads) {
       grad[i] *= gradScale;
     }
@@ -244,7 +244,7 @@ __device__ void scaleGrad(const int                                             
     while (maxGrad * gradScale > 10.0) {
       gradScale *= 0.5;
     }
-    for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
+    for (int i = threadIdx.x; i < numTerms; i += BLOCK_SIZE) {
       grad[i] *= gradScale;
     }
   }
@@ -261,7 +261,7 @@ __device__ void updateDGrad(const int                                           
                             bool&                                                       converged,
                             typename cub::BlockReduce<double, BLOCK_SIZE>::TempStorage& tempStorage) {
   double localMax = 0.0;
-  for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
+  for (int i = threadIdx.x; i < numTerms; i += BLOCK_SIZE) {
     dGrad[i]    = grad[i] - dGrad[i];
     double temp = fabs(grad[i]) * fmax(fabs(pos[i]), 1.0);
     if (temp > localMax) {
@@ -291,7 +291,7 @@ __device__ void updateInverseHessian(const int                                  
   using BlockReduce = cub::BlockReduce<double, BLOCK_SIZE>;
 
   // Compute hessDGrad = invHessian * dGrad
-  for (int row = threadIdx.x; row < numTerms; row += blockDim.x) {
+  for (int row = threadIdx.x; row < numTerms; row += BLOCK_SIZE) {
     double dotProduct = 0.0;
     for (int col = 0; col < numTerms; col++) {
       dotProduct += invHessian[row * numTerms + col] * dGrad[col];
@@ -305,7 +305,7 @@ __device__ void updateInverseHessian(const int                                  
   __shared__ bool   needUpdate;
 
   double sumFac = 0.0;
-  for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
+  for (int i = threadIdx.x; i < numTerms; i += BLOCK_SIZE) {
     sumFac += dGrad[i] * xi[i];
   }
   double facReduced = BlockReduce(tempStorage).Sum(sumFac);
@@ -314,7 +314,7 @@ __device__ void updateInverseHessian(const int                                  
   __syncthreads();
 
   double sumFae = 0.0;
-  for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
+  for (int i = threadIdx.x; i < numTerms; i += BLOCK_SIZE) {
     sumFae += dGrad[i] * hessDGrad[i];
   }
   double faeReduced = BlockReduce(tempStorage).Sum(sumFae);
@@ -323,7 +323,7 @@ __device__ void updateInverseHessian(const int                                  
   __syncthreads();
 
   double sumDGradSq = 0.0;
-  for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
+  for (int i = threadIdx.x; i < numTerms; i += BLOCK_SIZE) {
     sumDGradSq += dGrad[i] * dGrad[i];
   }
   double sumDGradReduced = BlockReduce(tempStorage).Sum(sumDGradSq);
@@ -332,7 +332,7 @@ __device__ void updateInverseHessian(const int                                  
   __syncthreads();
 
   double sumXiSq = 0.0;
-  for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
+  for (int i = threadIdx.x; i < numTerms; i += BLOCK_SIZE) {
     sumXiSq += xi[i] * xi[i];
   }
   double sumXiReduced = BlockReduce(tempStorage).Sum(sumXiSq);
@@ -353,13 +353,13 @@ __device__ void updateInverseHessian(const int                                  
 
   if (needUpdate) {
     // Update dGrad for Hessian update
-    for (int i = threadIdx.x; i < numTerms; i += blockDim.x) {
+    for (int i = threadIdx.x; i < numTerms; i += BLOCK_SIZE) {
       dGrad[i] = fac * xi[i] - fad * hessDGrad[i];
     }
     __syncthreads();
 
     // Update inverse Hessian and compute new direction
-    for (int row = threadIdx.x; row < numTerms; row += blockDim.x) {
+    for (int row = threadIdx.x; row < numTerms; row += BLOCK_SIZE) {
       double pxi  = fac * xi[row];
       double hdgi = fad * hessDGrad[row];
       double dgi  = fae * dGrad[row];
@@ -376,7 +376,7 @@ __device__ void updateInverseHessian(const int                                  
   }
 
   // Update xi = -invHessian * grad
-  for (int row = threadIdx.x; row < numTerms; row += blockDim.x) {
+  for (int row = threadIdx.x; row < numTerms; row += BLOCK_SIZE) {
     double dotProduct = 0.0;
     for (int col = 0; col < numTerms; col++) {
       dotProduct += invHessian[row * numTerms + col] * grad[col];
@@ -404,25 +404,24 @@ template <> struct DataDimTraits<ForceFieldType::DG> {
 }  // namespace
 
 template <int MaxAtoms, bool UseSharedMem, ForceFieldType FFType, typename TermsType, typename IndicesType>
-__global__ void bfgsMinimizeKernel(const int               numIters,
-                                   const double            gradTol,
-                                   const bool              scaleGrads,
-                                   const TermsType*        terms,
-                                   const IndicesType*      systemIndices,
-                                   const int*              molIdList,
-                                   const int*              atomStarts,
-                                   const int*              hessianStarts,
-                                   double*                 positions,
-                                   double*                 grad,
-                                   double*                 inverseHessian,
-                                   double**                scratchBuffers,
-                                   double*                 energyOuts,
-                                   int16_t*                statuses,
-                                   [[maybe_unused]] double chiralWeight,
-                                   [[maybe_unused]] double fourthDimWeight) {
+__launch_bounds__(BLOCK_SIZE, 12) __global__ void bfgsMinimizeKernel(const int               numIters,
+                                                                     const double            gradTol,
+                                                                     const bool              scaleGrads,
+                                                                     const TermsType*        terms,
+                                                                     const IndicesType*      systemIndices,
+                                                                     const int*              molIdList,
+                                                                     const int*              atomStarts,
+                                                                     const int*              hessianStarts,
+                                                                     double*                 positions,
+                                                                     double*                 grad,
+                                                                     double*                 inverseHessian,
+                                                                     double**                scratchBuffers,
+                                                                     double*                 energyOuts,
+                                                                     int16_t*                statuses,
+                                                                     [[maybe_unused]] double chiralWeight,
+                                                                     [[maybe_unused]] double fourthDimWeight) {
   const int     molIdx = molIdList[blockIdx.x];
   const int16_t tid    = threadIdx.x;
-  const int     stride = blockDim.x;
 
   const int     atomStart = atomStarts[molIdx];
   const int     atomEnd   = atomStarts[molIdx + 1];
@@ -490,7 +489,7 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
   // For shared memory case, copy to local shared buffer
   // For non-shared case, localPos already points to globalPos, so no copy needed
   if constexpr (UseSharedMem) {
-    for (int16_t i = tid; i < numTerms; i += stride) {
+    for (int16_t i = tid; i < numTerms; i += BLOCK_SIZE) {
       localPos[i] = globalPos[i];
     }
     __syncthreads();
@@ -498,11 +497,11 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
 
   // Initialize inverse Hessian to identity
   const int hessianSize = numTerms * numTerms;
-  for (int i = tid; i < hessianSize; i += stride) {
+  for (int i = tid; i < hessianSize; i += BLOCK_SIZE) {
     invHessian[i] = 0.0;
   }
   __syncthreads();
-  for (int i = tid; i < numTerms; i += stride) {
+  for (int i = tid; i < numTerms; i += BLOCK_SIZE) {
     invHessian[i * numTerms + i] = 1.0;
   }
 
@@ -518,19 +517,12 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
   // Compute initial energy
   double threadEnergy;
   if constexpr (FFType == ForceFieldType::MMFF) {
-    threadEnergy = MMFF::molEnergy(*terms, *systemIndices, positions, molIdx, tid, stride);
+    threadEnergy = MMFF::molEnergy<BLOCK_SIZE>(*terms, *systemIndices, localPos, molIdx, tid);
   } else if constexpr (FFType == ForceFieldType::ETK) {
-    threadEnergy = DistGeom::molEnergyETK(*terms, *systemIndices, positions, molIdx, tid, stride);
+    threadEnergy = DistGeom::molEnergyETK(*terms, *systemIndices, localPos, molIdx, tid);
   } else {  // DG
-    threadEnergy = DistGeom::molEnergyDG(*terms,
-                                         *systemIndices,
-                                         positions,
-                                         molIdx,
-                                         dataDim,
-                                         chiralWeight,
-                                         fourthDimWeight,
-                                         tid,
-                                         stride);
+    threadEnergy =
+      DistGeom::molEnergyDG<dataDim>(*terms, *systemIndices, localPos, molIdx, chiralWeight, fourthDimWeight, tid);
   }
   const double blockEnergy = BlockReduce(tempStorage).Sum(threadEnergy);
 
@@ -540,26 +532,24 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
   }
   __syncthreads();
 
-  for (int16_t i = tid; i < numTerms; i += stride) {
+  for (int16_t i = tid; i < numTerms; i += BLOCK_SIZE) {
     localGrad[i] = 0.0;
   }
   __syncthreads();
 
   if constexpr (FFType == ForceFieldType::MMFF) {
-    MMFF::molGrad(*terms, *systemIndices, positions, localGrad, molIdx, tid, stride);
+    MMFF::molGrad<BLOCK_SIZE>(*terms, *systemIndices, localPos, localGrad, molIdx, tid);
   } else if constexpr (FFType == ForceFieldType::ETK) {
-    DistGeom::molGradETK(*terms, *systemIndices, positions, localGrad, molIdx, tid, stride);
+    DistGeom::molGradETK(*terms, *systemIndices, localPos, localGrad, molIdx, tid);
   } else {  // DG
-    DistGeom::molGradDG(*terms,
-                        *systemIndices,
-                        positions,
-                        localGrad,
-                        molIdx,
-                        dataDim,
-                        chiralWeight,
-                        fourthDimWeight,
-                        tid,
-                        stride);
+    DistGeom::molGradDG<dataDim>(*terms,
+                                 *systemIndices,
+                                 localPos,
+                                 localGrad,
+                                 molIdx,
+                                 chiralWeight,
+                                 fourthDimWeight,
+                                 tid);
   }
   __syncthreads();
 
@@ -570,7 +560,7 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
     scaleGrad<false>(numTerms, localGrad, gradScale, tempStorage);
   }
   // Set initial direction as negative gradient
-  for (int i = tid; i < numTerms; i += stride) {
+  for (int i = tid; i < numTerms; i += BLOCK_SIZE) {
     localDir[i] = -localGrad[i];
   }
   __syncthreads();
@@ -588,7 +578,7 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
 
   while (!converged && currIter < numIters) {
     // Save current position before line search
-    for (int16_t i = tid; i < numTerms; i += stride) {
+    for (int16_t i = tid; i < numTerms; i += BLOCK_SIZE) {
       oldPos[i] = localPos[i];
     }
     __syncthreads();
@@ -614,28 +604,20 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
       // Perturb positions from saved oldPos (not localPos, which may have been modified)
       lineSearchPerturb(numTerms, oldPos, localDir, lambda, scratchPos);
 
-      // Copy to global for energy calculation
-      for (int i = tid; i < numTerms; i += stride) {
-        globalPos[i] = scratchPos[i];
-      }
-      __syncthreads();
-
-      // Compute energy at perturbed position
+      // Compute energy at perturbed position (use scratchPos which has the perturbed coordinates)
       double lsThreadEnergy;
       if constexpr (FFType == ForceFieldType::MMFF) {
-        lsThreadEnergy = MMFF::molEnergy(*terms, *systemIndices, positions, molIdx, tid, stride);
+        lsThreadEnergy = MMFF::molEnergy<BLOCK_SIZE>(*terms, *systemIndices, scratchPos, molIdx, tid);
       } else if constexpr (FFType == ForceFieldType::ETK) {
-        lsThreadEnergy = DistGeom::molEnergyETK(*terms, *systemIndices, positions, molIdx, tid, stride);
+        lsThreadEnergy = DistGeom::molEnergyETK(*terms, *systemIndices, scratchPos, molIdx, tid);
       } else {  // DG
-        lsThreadEnergy = DistGeom::molEnergyDG(*terms,
-                                               *systemIndices,
-                                               positions,
-                                               molIdx,
-                                               dataDim,
-                                               chiralWeight,
-                                               fourthDimWeight,
-                                               tid,
-                                               stride);
+        lsThreadEnergy = DistGeom::molEnergyDG<dataDim>(*terms,
+                                                        *systemIndices,
+                                                        scratchPos,
+                                                        molIdx,
+                                                        chiralWeight,
+                                                        fourthDimWeight,
+                                                        tid);
       }
       const double lsBlockEnergy = BlockReduce(tempStorage).Sum(lsThreadEnergy);
 
@@ -656,9 +638,8 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
     }
 
     // Update positions with final line search result and compute direction
-    for (int i = tid; i < numTerms; i += stride) {
-      localPos[i]  = scratchPos[i];
-      globalPos[i] = scratchPos[i];
+    for (int i = tid; i < numTerms; i += BLOCK_SIZE) {
+      localPos[i] = scratchPos[i];
     }
     __syncthreads();
 
@@ -675,26 +656,24 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
     __syncthreads();
 
     // Compute gradients at new position
-    for (int16_t i = tid; i < numTerms; i += stride) {
+    for (int16_t i = tid; i < numTerms; i += BLOCK_SIZE) {
       localGrad[i] = 0.0;
     }
     __syncthreads();
 
     if constexpr (FFType == ForceFieldType::MMFF) {
-      MMFF::molGrad(*terms, *systemIndices, positions, localGrad, molIdx, tid, stride);
+      MMFF::molGrad<BLOCK_SIZE>(*terms, *systemIndices, localPos, localGrad, molIdx, tid);
     } else if constexpr (FFType == ForceFieldType::ETK) {
-      DistGeom::molGradETK(*terms, *systemIndices, positions, localGrad, molIdx, tid, stride);
+      DistGeom::molGradETK(*terms, *systemIndices, localPos, localGrad, molIdx, tid);
     } else {  // DG
-      DistGeom::molGradDG(*terms,
-                          *systemIndices,
-                          positions,
-                          localGrad,
-                          molIdx,
-                          dataDim,
-                          chiralWeight,
-                          fourthDimWeight,
-                          tid,
-                          stride);
+      DistGeom::molGradDG<dataDim>(*terms,
+                                   *systemIndices,
+                                   localPos,
+                                   localGrad,
+                                   molIdx,
+                                   chiralWeight,
+                                   fourthDimWeight,
+                                   tid);
     }
     __syncthreads();
 
@@ -720,6 +699,14 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
     __syncthreads();
   }
 
+  // If in shared mem mode, we've been updating positions in shared memory. Copy back to global memory
+  // If not in shared memory mode, it's already in global memory
+  if constexpr (UseSharedMem) {
+    for (int i = tid; i < numTerms; i += BLOCK_SIZE) {
+      globalPos[i] = localPos[i];
+    }
+  }
+
   // Write final energy and status
   if (tid == 0) {
     energyOuts[molIdx] = prevE;
@@ -733,53 +720,54 @@ __global__ void bfgsMinimizeKernel(const int               numIters,
 namespace {
 
 template <int MaxAtoms, bool UseSharedMem, ForceFieldType FFType, typename TermsType, typename IndicesType>
-cudaError_t launchBinnedKernel(int                numMolsInBin,
-                               const int*         molIdList,
-                               int                numIters,
-                               double             gradTol,
-                               bool               scaleGrads,
-                               const TermsType*   devTerms,
-                               const IndicesType* devSysIdx,
-                               const int*         atomStarts,
-                               const int*         hessianStarts,
-                               double*            positions,
-                               double*            grad,
-                               double*            inverseHessian,
-                               double**           scratchBuffers,
-                               double*            energyOuts,
-                               int16_t*           statuses,
-                               cudaStream_t       stream,
-                               double             chiralWeight,
-                               double             fourthDimWeight) {
-  if (numMolsInBin == 0) {
+cudaError_t launchKernelForSize(int                numMols,
+                                const int*         molIdList,
+                                int                numIters,
+                                double             gradTol,
+                                bool               scaleGrads,
+                                const TermsType*   devTerms,
+                                const IndicesType* devSysIdx,
+                                const int*         atomStarts,
+                                const int*         hessianStarts,
+                                double*            positions,
+                                double*            grad,
+                                double*            inverseHessian,
+                                double**           scratchBuffers,
+                                double*            energyOuts,
+                                int16_t*           statuses,
+                                cudaStream_t       stream,
+                                double             chiralWeight,
+                                double             fourthDimWeight) {
+  if (numMols == 0) {
     return cudaSuccess;
   }
 
   bfgsMinimizeKernel<MaxAtoms, UseSharedMem, FFType, TermsType, IndicesType>
-    <<<numMolsInBin, BLOCK_SIZE, 0, stream>>>(numIters,
-                                              gradTol,
-                                              scaleGrads,
-                                              devTerms,
-                                              devSysIdx,
-                                              molIdList,
-                                              atomStarts,
-                                              hessianStarts,
-                                              positions,
-                                              grad,
-                                              inverseHessian,
-                                              scratchBuffers,
-                                              energyOuts,
-                                              statuses,
-                                              chiralWeight,
-                                              fourthDimWeight);
+    <<<numMols, BLOCK_SIZE, 0, stream>>>(numIters,
+                                         gradTol,
+                                         scaleGrads,
+                                         devTerms,
+                                         devSysIdx,
+                                         molIdList,
+                                         atomStarts,
+                                         hessianStarts,
+                                         positions,
+                                         grad,
+                                         inverseHessian,
+                                         scratchBuffers,
+                                         energyOuts,
+                                         statuses,
+                                         chiralWeight,
+                                         fourthDimWeight);
 
   return cudaGetLastError();
 }
 
 }  // namespace
 
-cudaError_t launchBfgsMinimizePerMolKernel(const int*                                binCounts,
-                                           const int**                               binMolIds,
+cudaError_t launchBfgsMinimizePerMolKernel(int                                       numMols,
+                                           const int*                                molIds,
+                                           int                                       maxAtoms,
                                            const int*                                atomStarts,
                                            const int*                                hessianStarts,
                                            int                                       numIters,
@@ -794,105 +782,160 @@ cudaError_t launchBfgsMinimizePerMolKernel(const int*                           
                                            double*                                   energyOuts,
                                            int16_t*                                  statuses,
                                            cudaStream_t                              stream) {
-  // Prepare device pointers for terms and indices
+  if (numMols == 0) {
+    return cudaSuccess;
+  }
+
   const AsyncDevicePtr<MMFF::EnergyForceContribsDevicePtr> devTerms(terms, stream);
   const AsyncDevicePtr<MMFF::BatchedIndicesDevicePtr>      devSysIdx(systemIndices, stream);
 
-  cudaError_t err = cudaSuccess;
-  // TODO: Run these concurrently, large to small?
+  // Dispatch to appropriate kernel based on max molecule size
+  // Use shared memory for <=128 atoms (in increments of 32), global memory for larger
+  if (maxAtoms <= 32) {
+    return launchKernelForSize<32, true, ForceFieldType::MMFF>(numMols,
+                                                               molIds,
+                                                               numIters,
+                                                               gradTol,
+                                                               scaleGrads,
+                                                               devTerms.data(),
+                                                               devSysIdx.data(),
+                                                               atomStarts,
+                                                               hessianStarts,
+                                                               positions,
+                                                               grad,
+                                                               inverseHessian,
+                                                               scratchBuffers,
+                                                               energyOuts,
+                                                               statuses,
+                                                               stream,
+                                                               1.0,
+                                                               1.0);
+  } else if (maxAtoms <= 64) {
+    return launchKernelForSize<64, true, ForceFieldType::MMFF>(numMols,
+                                                               molIds,
+                                                               numIters,
+                                                               gradTol,
+                                                               scaleGrads,
+                                                               devTerms.data(),
+                                                               devSysIdx.data(),
+                                                               atomStarts,
+                                                               hessianStarts,
+                                                               positions,
+                                                               grad,
+                                                               inverseHessian,
+                                                               scratchBuffers,
+                                                               energyOuts,
+                                                               statuses,
+                                                               stream,
+                                                               1.0,
+                                                               1.0);
+  } else if (maxAtoms <= 96) {
+    return launchKernelForSize<96, true, ForceFieldType::MMFF>(numMols,
+                                                               molIds,
+                                                               numIters,
+                                                               gradTol,
+                                                               scaleGrads,
+                                                               devTerms.data(),
+                                                               devSysIdx.data(),
+                                                               atomStarts,
+                                                               hessianStarts,
+                                                               positions,
+                                                               grad,
+                                                               inverseHessian,
+                                                               scratchBuffers,
+                                                               energyOuts,
+                                                               statuses,
+                                                               stream,
+                                                               1.0,
+                                                               1.0);
+  } else if (maxAtoms <= 128) {
+    return launchKernelForSize<128, true, ForceFieldType::MMFF>(numMols,
+                                                                molIds,
+                                                                numIters,
+                                                                gradTol,
+                                                                scaleGrads,
+                                                                devTerms.data(),
+                                                                devSysIdx.data(),
+                                                                atomStarts,
+                                                                hessianStarts,
+                                                                positions,
+                                                                grad,
+                                                                inverseHessian,
+                                                                scratchBuffers,
+                                                                energyOuts,
+                                                                statuses,
+                                                                stream,
+                                                                1.0,
+                                                                1.0);
+  } else if (maxAtoms <= 256) {
+    return launchKernelForSize<256, false, ForceFieldType::MMFF>(numMols,
+                                                                 molIds,
+                                                                 numIters,
+                                                                 gradTol,
+                                                                 scaleGrads,
+                                                                 devTerms.data(),
+                                                                 devSysIdx.data(),
+                                                                 atomStarts,
+                                                                 hessianStarts,
+                                                                 positions,
+                                                                 grad,
+                                                                 inverseHessian,
+                                                                 scratchBuffers,
+                                                                 energyOuts,
+                                                                 statuses,
+                                                                 stream,
+                                                                 1.0,
+                                                                 1.0);
+  } else {
+    return launchKernelForSize<2048, false, ForceFieldType::MMFF>(numMols,
+                                                                  molIds,
+                                                                  numIters,
+                                                                  gradTol,
+                                                                  scaleGrads,
+                                                                  devTerms.data(),
+                                                                  devSysIdx.data(),
+                                                                  atomStarts,
+                                                                  hessianStarts,
+                                                                  positions,
+                                                                  grad,
+                                                                  inverseHessian,
+                                                                  scratchBuffers,
+                                                                  energyOuts,
+                                                                  statuses,
+                                                                  stream,
+                                                                  1.0,
+                                                                  1.0);
+  }
+}
+cudaError_t launchBfgsMinimizePerMolKernelETK(int                                             numMols,
+                                              const int*                                      molIds,
+                                              int                                             maxAtoms,
+                                              const int*                                      atomStarts,
+                                              const int*                                      hessianStarts,
+                                              int                                             numIters,
+                                              double                                          gradTol,
+                                              bool                                            scaleGrads,
+                                              const DistGeom::Energy3DForceContribsDevicePtr& terms,
+                                              const DistGeom::BatchedIndices3DDevicePtr&      systemIndices,
+                                              double*                                         positions,
+                                              double*                                         grad,
+                                              double*                                         inverseHessian,
+                                              double**                                        scratchBuffers,
+                                              double*                                         energyOuts,
+                                              int16_t*                                        statuses,
+                                              cudaStream_t                                    stream) {
+  if (numMols == 0) {
+    return cudaSuccess;
+  }
 
-  // Launch kernels for each size bin
-  // Bin 0: 32 atoms, use shared memory
-  err = launchBinnedKernel<32, true, ForceFieldType::MMFF>(binCounts[0],
-                                                           binMolIds[0],
-                                                           numIters,
-                                                           gradTol,
-                                                           scaleGrads,
-                                                           devTerms.data(),
-                                                           devSysIdx.data(),
-                                                           atomStarts,
-                                                           hessianStarts,
-                                                           positions,
-                                                           grad,
-                                                           inverseHessian,
-                                                           scratchBuffers,
-                                                           energyOuts,
-                                                           statuses,
-                                                           stream,
-                                                           1.0,
-                                                           1.0);
-  if (err != cudaSuccess)
-    return err;
+  const AsyncDevicePtr<DistGeom::Energy3DForceContribsDevicePtr> devTerms(terms, stream);
+  const AsyncDevicePtr<DistGeom::BatchedIndices3DDevicePtr>      devSysIdx(systemIndices, stream);
 
-  // Bin 1: 64 atoms, use shared memory
-  err = launchBinnedKernel<64, true, ForceFieldType::MMFF>(binCounts[1],
-                                                           binMolIds[1],
-                                                           numIters,
-                                                           gradTol,
-                                                           scaleGrads,
-                                                           devTerms.data(),
-                                                           devSysIdx.data(),
-                                                           atomStarts,
-                                                           hessianStarts,
-                                                           positions,
-                                                           grad,
-                                                           inverseHessian,
-                                                           scratchBuffers,
-                                                           energyOuts,
-                                                           statuses,
-                                                           stream,
-                                                           1.0,
-                                                           1.0);
-  if (err != cudaSuccess)
-    return err;
-
-  // Bin 2: 128 atoms, use global memory
-  err = launchBinnedKernel<128, false, ForceFieldType::MMFF>(binCounts[2],
-                                                             binMolIds[2],
-                                                             numIters,
-                                                             gradTol,
-                                                             scaleGrads,
-                                                             devTerms.data(),
-                                                             devSysIdx.data(),
-                                                             atomStarts,
-                                                             hessianStarts,
-                                                             positions,
-                                                             grad,
-                                                             inverseHessian,
-                                                             scratchBuffers,
-                                                             energyOuts,
-                                                             statuses,
-                                                             stream,
-                                                             1.0,
-                                                             1.0);
-  if (err != cudaSuccess)
-    return err;
-
-  // Bin 3: 256 atoms, use global memory
-  err = launchBinnedKernel<256, false, ForceFieldType::MMFF>(binCounts[3],
-                                                             binMolIds[3],
-                                                             numIters,
-                                                             gradTol,
-                                                             scaleGrads,
-                                                             devTerms.data(),
-                                                             devSysIdx.data(),
-                                                             atomStarts,
-                                                             hessianStarts,
-                                                             positions,
-                                                             grad,
-                                                             inverseHessian,
-                                                             scratchBuffers,
-                                                             energyOuts,
-                                                             statuses,
-                                                             stream,
-                                                             1.0,
-                                                             1.0);
-  if (err != cudaSuccess)
-    return err;
-
-  // Bin 4: 2048 atoms, use global memory
-  err = launchBinnedKernel<2048, false, ForceFieldType::MMFF>(binCounts[4],
-                                                              binMolIds[4],
+  // Dispatch to appropriate kernel based on max molecule size
+  // Use shared memory for <=128 atoms (in increments of 32), global memory for larger
+  if (maxAtoms <= 32) {
+    return launchKernelForSize<32, true, ForceFieldType::ETK>(numMols,
+                                                              molIds,
                                                               numIters,
                                                               gradTol,
                                                               scaleGrads,
@@ -909,145 +952,107 @@ cudaError_t launchBfgsMinimizePerMolKernel(const int*                           
                                                               stream,
                                                               1.0,
                                                               1.0);
-
-  return err;
-}
-cudaError_t launchBfgsMinimizePerMolKernelETK(const int*                                      binCounts,
-                                              const int**                                     binMolIds,
-                                              const int*                                      atomStarts,
-                                              const int*                                      hessianStarts,
-                                              int                                             numIters,
-                                              double                                          gradTol,
-                                              bool                                            scaleGrads,
-                                              const DistGeom::Energy3DForceContribsDevicePtr& terms,
-                                              const DistGeom::BatchedIndices3DDevicePtr&      systemIndices,
-                                              double*                                         positions,
-                                              double*                                         grad,
-                                              double*                                         inverseHessian,
-                                              double**                                        scratchBuffers,
-                                              double*                                         energyOuts,
-                                              int16_t*                                        statuses,
-                                              cudaStream_t                                    stream) {
-  // Prepare device pointers for terms and indices
-  const AsyncDevicePtr<DistGeom::Energy3DForceContribsDevicePtr> devTerms(terms, stream);
-  const AsyncDevicePtr<DistGeom::BatchedIndices3DDevicePtr>      devSysIdx(systemIndices, stream);
-
-  cudaError_t err = cudaSuccess;
-
-  // Launch kernels for each size bin
-  // Bin 0: 32 atoms, use shared memory
-  err = launchBinnedKernel<32, true, ForceFieldType::ETK>(binCounts[0],
-                                                          binMolIds[0],
-                                                          numIters,
-                                                          gradTol,
-                                                          scaleGrads,
-                                                          devTerms.data(),
-                                                          devSysIdx.data(),
-                                                          atomStarts,
-                                                          hessianStarts,
-                                                          positions,
-                                                          grad,
-                                                          inverseHessian,
-                                                          scratchBuffers,
-                                                          energyOuts,
-                                                          statuses,
-                                                          stream,
-                                                          1.0,
-                                                          1.0);
-  if (err != cudaSuccess)
-    return err;
-
-  // Bin 1: 64 atoms, use shared memory
-  err = launchBinnedKernel<64, true, ForceFieldType::ETK>(binCounts[1],
-                                                          binMolIds[1],
-                                                          numIters,
-                                                          gradTol,
-                                                          scaleGrads,
-                                                          devTerms.data(),
-                                                          devSysIdx.data(),
-                                                          atomStarts,
-                                                          hessianStarts,
-                                                          positions,
-                                                          grad,
-                                                          inverseHessian,
-                                                          scratchBuffers,
-                                                          energyOuts,
-                                                          statuses,
-                                                          stream,
-                                                          1.0,
-                                                          1.0);
-  if (err != cudaSuccess)
-    return err;
-
-  // Bin 2: 128 atoms, use global memory
-  err = launchBinnedKernel<128, false, ForceFieldType::ETK>(binCounts[2],
-                                                            binMolIds[2],
-                                                            numIters,
-                                                            gradTol,
-                                                            scaleGrads,
-                                                            devTerms.data(),
-                                                            devSysIdx.data(),
-                                                            atomStarts,
-                                                            hessianStarts,
-                                                            positions,
-                                                            grad,
-                                                            inverseHessian,
-                                                            scratchBuffers,
-                                                            energyOuts,
-                                                            statuses,
-                                                            stream,
-                                                            1.0,
-                                                            1.0);
-  if (err != cudaSuccess)
-    return err;
-
-  // Bin 3: 256 atoms, use global memory
-  err = launchBinnedKernel<256, false, ForceFieldType::ETK>(binCounts[3],
-                                                            binMolIds[3],
-                                                            numIters,
-                                                            gradTol,
-                                                            scaleGrads,
-                                                            devTerms.data(),
-                                                            devSysIdx.data(),
-                                                            atomStarts,
-                                                            hessianStarts,
-                                                            positions,
-                                                            grad,
-                                                            inverseHessian,
-                                                            scratchBuffers,
-                                                            energyOuts,
-                                                            statuses,
-                                                            stream,
-                                                            1.0,
-                                                            1.0);
-  if (err != cudaSuccess)
-    return err;
-
-  // Bin 4: 2048 atoms, use global memory
-  err = launchBinnedKernel<2048, false, ForceFieldType::ETK>(binCounts[4],
-                                                             binMolIds[4],
-                                                             numIters,
-                                                             gradTol,
-                                                             scaleGrads,
-                                                             devTerms.data(),
-                                                             devSysIdx.data(),
-                                                             atomStarts,
-                                                             hessianStarts,
-                                                             positions,
-                                                             grad,
-                                                             inverseHessian,
-                                                             scratchBuffers,
-                                                             energyOuts,
-                                                             statuses,
-                                                             stream,
-                                                             1.0,
-                                                             1.0);
-
-  return err;
+  } else if (maxAtoms <= 64) {
+    return launchKernelForSize<64, true, ForceFieldType::ETK>(numMols,
+                                                              molIds,
+                                                              numIters,
+                                                              gradTol,
+                                                              scaleGrads,
+                                                              devTerms.data(),
+                                                              devSysIdx.data(),
+                                                              atomStarts,
+                                                              hessianStarts,
+                                                              positions,
+                                                              grad,
+                                                              inverseHessian,
+                                                              scratchBuffers,
+                                                              energyOuts,
+                                                              statuses,
+                                                              stream,
+                                                              1.0,
+                                                              1.0);
+  } else if (maxAtoms <= 96) {
+    return launchKernelForSize<96, true, ForceFieldType::ETK>(numMols,
+                                                              molIds,
+                                                              numIters,
+                                                              gradTol,
+                                                              scaleGrads,
+                                                              devTerms.data(),
+                                                              devSysIdx.data(),
+                                                              atomStarts,
+                                                              hessianStarts,
+                                                              positions,
+                                                              grad,
+                                                              inverseHessian,
+                                                              scratchBuffers,
+                                                              energyOuts,
+                                                              statuses,
+                                                              stream,
+                                                              1.0,
+                                                              1.0);
+  } else if (maxAtoms <= 128) {
+    return launchKernelForSize<128, true, ForceFieldType::ETK>(numMols,
+                                                               molIds,
+                                                               numIters,
+                                                               gradTol,
+                                                               scaleGrads,
+                                                               devTerms.data(),
+                                                               devSysIdx.data(),
+                                                               atomStarts,
+                                                               hessianStarts,
+                                                               positions,
+                                                               grad,
+                                                               inverseHessian,
+                                                               scratchBuffers,
+                                                               energyOuts,
+                                                               statuses,
+                                                               stream,
+                                                               1.0,
+                                                               1.0);
+  } else if (maxAtoms <= 256) {
+    return launchKernelForSize<256, false, ForceFieldType::ETK>(numMols,
+                                                                molIds,
+                                                                numIters,
+                                                                gradTol,
+                                                                scaleGrads,
+                                                                devTerms.data(),
+                                                                devSysIdx.data(),
+                                                                atomStarts,
+                                                                hessianStarts,
+                                                                positions,
+                                                                grad,
+                                                                inverseHessian,
+                                                                scratchBuffers,
+                                                                energyOuts,
+                                                                statuses,
+                                                                stream,
+                                                                1.0,
+                                                                1.0);
+  } else {
+    return launchKernelForSize<2048, false, ForceFieldType::ETK>(numMols,
+                                                                 molIds,
+                                                                 numIters,
+                                                                 gradTol,
+                                                                 scaleGrads,
+                                                                 devTerms.data(),
+                                                                 devSysIdx.data(),
+                                                                 atomStarts,
+                                                                 hessianStarts,
+                                                                 positions,
+                                                                 grad,
+                                                                 inverseHessian,
+                                                                 scratchBuffers,
+                                                                 energyOuts,
+                                                                 statuses,
+                                                                 stream,
+                                                                 1.0,
+                                                                 1.0);
+  }
 }
 
-cudaError_t launchBfgsMinimizePerMolKernelDG(const int*                                    binCounts,
-                                             const int**                                   binMolIds,
+cudaError_t launchBfgsMinimizePerMolKernelDG(int                                           numMols,
+                                             const int*                                    molIds,
+                                             int                                           maxAtoms,
                                              const int*                                    atomStarts,
                                              const int*                                    hessianStarts,
                                              int                                           numIters,
@@ -1064,122 +1069,130 @@ cudaError_t launchBfgsMinimizePerMolKernelDG(const int*                         
                                              double                                        fourthDimWeight,
                                              int16_t*                                      statuses,
                                              cudaStream_t                                  stream) {
-  // Prepare device pointers for terms and indices
+  if (numMols == 0) {
+    return cudaSuccess;
+  }
+
   const AsyncDevicePtr<DistGeom::EnergyForceContribsDevicePtr> devTerms(terms, stream);
   const AsyncDevicePtr<DistGeom::BatchedIndicesDevicePtr>      devSysIdx(systemIndices, stream);
 
-  cudaError_t err = cudaSuccess;
-
-  // Launch kernels for each size bin
-  // Bin 0: 32 atoms, use shared memory
-  err = launchBinnedKernel<32, true, ForceFieldType::DG>(binCounts[0],
-                                                         binMolIds[0],
-                                                         numIters,
-                                                         gradTol,
-                                                         scaleGrads,
-                                                         devTerms.data(),
-                                                         devSysIdx.data(),
-                                                         atomStarts,
-                                                         hessianStarts,
-                                                         positions,
-                                                         grad,
-                                                         inverseHessian,
-                                                         scratchBuffers,
-                                                         energyOuts,
-                                                         statuses,
-                                                         stream,
-                                                         chiralWeight,
-                                                         fourthDimWeight);
-  if (err != cudaSuccess)
-    return err;
-
-  // Bin 1: 64 atoms, use shared memory
-  err = launchBinnedKernel<64, true, ForceFieldType::DG>(binCounts[1],
-                                                         binMolIds[1],
-                                                         numIters,
-                                                         gradTol,
-                                                         scaleGrads,
-                                                         devTerms.data(),
-                                                         devSysIdx.data(),
-                                                         atomStarts,
-                                                         hessianStarts,
-                                                         positions,
-                                                         grad,
-                                                         inverseHessian,
-                                                         scratchBuffers,
-                                                         energyOuts,
-                                                         statuses,
-                                                         stream,
-                                                         chiralWeight,
-                                                         fourthDimWeight);
-  if (err != cudaSuccess)
-    return err;
-
-  // Bin 2: 128 atoms, use global memory
-  err = launchBinnedKernel<128, false, ForceFieldType::DG>(binCounts[2],
-                                                           binMolIds[2],
-                                                           numIters,
-                                                           gradTol,
-                                                           scaleGrads,
-                                                           devTerms.data(),
-                                                           devSysIdx.data(),
-                                                           atomStarts,
-                                                           hessianStarts,
-                                                           positions,
-                                                           grad,
-                                                           inverseHessian,
-                                                           scratchBuffers,
-                                                           energyOuts,
-                                                           statuses,
-                                                           stream,
-                                                           chiralWeight,
-                                                           fourthDimWeight);
-  if (err != cudaSuccess)
-    return err;
-
-  // Bin 3: 256 atoms, use global memory
-  err = launchBinnedKernel<256, false, ForceFieldType::DG>(binCounts[3],
-                                                           binMolIds[3],
-                                                           numIters,
-                                                           gradTol,
-                                                           scaleGrads,
-                                                           devTerms.data(),
-                                                           devSysIdx.data(),
-                                                           atomStarts,
-                                                           hessianStarts,
-                                                           positions,
-                                                           grad,
-                                                           inverseHessian,
-                                                           scratchBuffers,
-                                                           energyOuts,
-                                                           statuses,
-                                                           stream,
-                                                           chiralWeight,
-                                                           fourthDimWeight);
-  if (err != cudaSuccess)
-    return err;
-
-  // Bin 4: 2048 atoms, use global memory
-  err = launchBinnedKernel<2048, false, ForceFieldType::DG>(binCounts[4],
-                                                            binMolIds[4],
-                                                            numIters,
-                                                            gradTol,
-                                                            scaleGrads,
-                                                            devTerms.data(),
-                                                            devSysIdx.data(),
-                                                            atomStarts,
-                                                            hessianStarts,
-                                                            positions,
-                                                            grad,
-                                                            inverseHessian,
-                                                            scratchBuffers,
-                                                            energyOuts,
-                                                            statuses,
-                                                            stream,
-                                                            chiralWeight,
-                                                            fourthDimWeight);
-
-  return err;
+  // Dispatch to appropriate kernel based on max molecule size
+  // Use shared memory for <=128 atoms (in increments of 32), global memory for larger
+  if (maxAtoms <= 32) {
+    return launchKernelForSize<32, true, ForceFieldType::DG>(numMols,
+                                                             molIds,
+                                                             numIters,
+                                                             gradTol,
+                                                             scaleGrads,
+                                                             devTerms.data(),
+                                                             devSysIdx.data(),
+                                                             atomStarts,
+                                                             hessianStarts,
+                                                             positions,
+                                                             grad,
+                                                             inverseHessian,
+                                                             scratchBuffers,
+                                                             energyOuts,
+                                                             statuses,
+                                                             stream,
+                                                             chiralWeight,
+                                                             fourthDimWeight);
+  } else if (maxAtoms <= 64) {
+    return launchKernelForSize<64, true, ForceFieldType::DG>(numMols,
+                                                             molIds,
+                                                             numIters,
+                                                             gradTol,
+                                                             scaleGrads,
+                                                             devTerms.data(),
+                                                             devSysIdx.data(),
+                                                             atomStarts,
+                                                             hessianStarts,
+                                                             positions,
+                                                             grad,
+                                                             inverseHessian,
+                                                             scratchBuffers,
+                                                             energyOuts,
+                                                             statuses,
+                                                             stream,
+                                                             chiralWeight,
+                                                             fourthDimWeight);
+  } else if (maxAtoms <= 96) {
+    return launchKernelForSize<96, true, ForceFieldType::DG>(numMols,
+                                                             molIds,
+                                                             numIters,
+                                                             gradTol,
+                                                             scaleGrads,
+                                                             devTerms.data(),
+                                                             devSysIdx.data(),
+                                                             atomStarts,
+                                                             hessianStarts,
+                                                             positions,
+                                                             grad,
+                                                             inverseHessian,
+                                                             scratchBuffers,
+                                                             energyOuts,
+                                                             statuses,
+                                                             stream,
+                                                             chiralWeight,
+                                                             fourthDimWeight);
+  } else if (maxAtoms <= 128) {
+    return launchKernelForSize<128, true, ForceFieldType::DG>(numMols,
+                                                              molIds,
+                                                              numIters,
+                                                              gradTol,
+                                                              scaleGrads,
+                                                              devTerms.data(),
+                                                              devSysIdx.data(),
+                                                              atomStarts,
+                                                              hessianStarts,
+                                                              positions,
+                                                              grad,
+                                                              inverseHessian,
+                                                              scratchBuffers,
+                                                              energyOuts,
+                                                              statuses,
+                                                              stream,
+                                                              chiralWeight,
+                                                              fourthDimWeight);
+  } else if (maxAtoms <= 256) {
+    return launchKernelForSize<256, false, ForceFieldType::DG>(numMols,
+                                                               molIds,
+                                                               numIters,
+                                                               gradTol,
+                                                               scaleGrads,
+                                                               devTerms.data(),
+                                                               devSysIdx.data(),
+                                                               atomStarts,
+                                                               hessianStarts,
+                                                               positions,
+                                                               grad,
+                                                               inverseHessian,
+                                                               scratchBuffers,
+                                                               energyOuts,
+                                                               statuses,
+                                                               stream,
+                                                               chiralWeight,
+                                                               fourthDimWeight);
+  } else {
+    return launchKernelForSize<2048, false, ForceFieldType::DG>(numMols,
+                                                                molIds,
+                                                                numIters,
+                                                                gradTol,
+                                                                scaleGrads,
+                                                                devTerms.data(),
+                                                                devSysIdx.data(),
+                                                                atomStarts,
+                                                                hessianStarts,
+                                                                positions,
+                                                                grad,
+                                                                inverseHessian,
+                                                                scratchBuffers,
+                                                                energyOuts,
+                                                                statuses,
+                                                                stream,
+                                                                chiralWeight,
+                                                                fourthDimWeight);
+  }
 }
 
 }  // namespace nvMolKit

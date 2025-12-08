@@ -34,16 +34,16 @@ namespace DistGeom {
 // DG terms
 // --------------
 
+template <int dimension>
 static __device__ __forceinline__ double distViolationEnergy(const double* pos,
                                                              const int     idx1,
                                                              const int     idx2,
                                                              const double  lb2,
                                                              const double  ub2,
-                                                             const double  weight,
-                                                             const int     dimension) {
+                                                             const double  weight) {
   const int    posIdx1   = idx1 * dimension;
   const int    posIdx2   = idx2 * dimension;
-  const double distance2 = distanceSquaredPosIdx(pos, posIdx1, posIdx2, dimension);
+  const double distance2 = distanceSquaredPosIdx<dimension>(pos, posIdx1, posIdx2);
   double       val       = 0.0;
   if (distance2 > ub2) {
     val = (distance2 / ub2) - 1.0;
@@ -56,17 +56,17 @@ static __device__ __forceinline__ double distViolationEnergy(const double* pos,
   return 0.0;
 }
 
+template <int dimension>
 static __device__ __forceinline__ void distViolationGrad(const double* pos,
                                                          const int     idx1,
                                                          const int     idx2,
                                                          const double  lb2,
                                                          const double  ub2,
                                                          const double  weight,
-                                                         const int     dimension,
                                                          double*       grad) {
   const int   posIdx1   = idx1 * dimension;
   const int   posIdx2   = idx2 * dimension;
-  const float distance2 = distanceSquaredPosIdx(pos, posIdx1, posIdx2, dimension);
+  const float distance2 = distanceSquaredPosIdx<dimension>(pos, posIdx1, posIdx2);
   float       preFactor = 0.0;
   if (distance2 > ub2) {
     preFactor = 4.f * ((distance2 / ub2) - 1.0f) / ub2;
@@ -87,7 +87,7 @@ static __device__ __forceinline__ void distViolationGrad(const double* pos,
   atomicAdd(&grad[posIdx2 + 1], -dGrady);
   atomicAdd(&grad[posIdx2 + 2], -dGradz);
 
-  if (dimension == 4) {
+  if constexpr (dimension == 4) {
     const float dGradw = weight * preFactor * (pos[posIdx1 + 3] - pos[posIdx2 + 3]);
     atomicAdd(&grad[posIdx1 + 3], dGradw);
     atomicAdd(&grad[posIdx2 + 3], -dGradw);
@@ -127,6 +127,7 @@ static __device__ __forceinline__ T calcChiralVolume(const int&    posIdx1,
   return vol;
 }
 
+template <int dimension>
 static __device__ __forceinline__ double chiralViolationEnergy(const double* pos,
                                                                const int     idx1,
                                                                const int     idx2,
@@ -134,8 +135,7 @@ static __device__ __forceinline__ double chiralViolationEnergy(const double* pos
                                                                const int     idx4,
                                                                const double  lb,
                                                                const double  ub,
-                                                               const double  weight,
-                                                               const int     dimension) {
+                                                               const double  weight) {
   const int posIdx1 = idx1 * dimension;
   const int posIdx2 = idx2 * dimension;
   const int posIdx3 = idx3 * dimension;
@@ -154,6 +154,7 @@ static __device__ __forceinline__ double chiralViolationEnergy(const double* pos
   return 0.0;
 }
 
+template <int dimension>
 static __device__ __forceinline__ void chiralViolationGrad(const double* pos,
                                                            const int     idx1,
                                                            const int     idx2,
@@ -162,7 +163,6 @@ static __device__ __forceinline__ void chiralViolationGrad(const double* pos,
                                                            const double  lb,
                                                            const double  ub,
                                                            const double  weight,
-                                                           const int     dimension,
                                                            double*       grad) {
   const int posIdx1 = idx1 * dimension;
   const int posIdx2 = idx2 * dimension;
@@ -207,11 +207,9 @@ static __device__ __forceinline__ void chiralViolationGrad(const double* pos,
   }
 }
 
-static __device__ __forceinline__ double fourthDimEnergy(const double* pos,
-                                                         const int     idx,
-                                                         const double  weight,
-                                                         const int     dimension) {
-  if (dimension != 4) {
+template <int dimension>
+static __device__ __forceinline__ double fourthDimEnergy(const double* pos, const int idx, const double weight) {
+  if constexpr (dimension != 4) {
     return 0.0;
   }
   const int    posIdx    = idx * dimension;
@@ -219,12 +217,12 @@ static __device__ __forceinline__ double fourthDimEnergy(const double* pos,
   return weight * fourthVal * fourthVal;
 }
 
+template <int dimension>
 static __device__ __forceinline__ void fourthDimGrad(const double* pos,
                                                      const int     idx,
                                                      const double  weight,
-                                                     const int     dimension,
                                                      double*       grad) {
-  if (dimension != 4) {
+  if constexpr (dimension != 4) {
     return;
   }
   const int    posIdx    = idx * dimension;
@@ -831,17 +829,15 @@ static __device__ __forceinline__ void angleConstraintGrad(const double* pos,
   atomicAdd(&grad[posIdx3 + 2], dedp3z);
 }
 
+template <int dimension>
 static __device__ __inline__ double molEnergyDG(const EnergyForceContribsDevicePtr& terms,
                                                 const BatchedIndicesDevicePtr&      systemIndices,
-                                                const double*                       coords,
+                                                const double*                       molCoords,
                                                 const int                           molIdx,
-                                                const int                           dimension,
                                                 const double                        chiralWeight,
                                                 const double                        fourthDimWeight,
-                                                const int                           tid,
-                                                const int                           stride) {
-  const int     atomStart = systemIndices.atomStarts[molIdx];
-  const double* molCoords = coords + atomStart * dimension;
+                                                const int                           tid) {
+  const int atomStart = systemIndices.atomStarts[molIdx];
 
   double energy = 0.0;
 
@@ -885,13 +881,12 @@ static __device__ __inline__ double molEnergyDG(const EnergyForceContribsDeviceP
       if (baseIdx + laneId < numDist) {
         const int localIdx1 = d_idx1s[termIdx] - atomStart;
         const int localIdx2 = d_idx2s[termIdx] - atomStart;
-        energy += distViolationEnergy(molCoords,
-                                      localIdx1,
-                                      localIdx2,
-                                      d_lb2s[termIdx],
-                                      d_ub2s[termIdx],
-                                      d_weights[termIdx],
-                                      dimension);
+        energy += distViolationEnergy<dimension>(molCoords,
+                                                 localIdx1,
+                                                 localIdx2,
+                                                 d_lb2s[termIdx],
+                                                 d_ub2s[termIdx],
+                                                 d_weights[termIdx]);
       }
     } else if (chunkIdx < warpsForDist + warpsForChiral) {
       // Chiral terms
@@ -903,15 +898,14 @@ static __device__ __inline__ double molEnergyDG(const EnergyForceContribsDeviceP
         const int localIdx2 = c_idx2s[termIdx] - atomStart;
         const int localIdx3 = c_idx3s[termIdx] - atomStart;
         const int localIdx4 = c_idx4s[termIdx] - atomStart;
-        energy += chiralViolationEnergy(molCoords,
-                                        localIdx1,
-                                        localIdx2,
-                                        localIdx3,
-                                        localIdx4,
-                                        c_volLowers[termIdx],
-                                        c_volUppers[termIdx],
-                                        chiralWeight,
-                                        dimension);
+        energy += chiralViolationEnergy<dimension>(molCoords,
+                                                   localIdx1,
+                                                   localIdx2,
+                                                   localIdx3,
+                                                   localIdx4,
+                                                   c_volLowers[termIdx],
+                                                   c_volUppers[termIdx],
+                                                   chiralWeight);
       }
     } else {
       // Fourth dimension terms
@@ -920,7 +914,7 @@ static __device__ __inline__ double molEnergyDG(const EnergyForceContribsDeviceP
       const int termIdx    = fourthStart + baseIdx + laneId;
       if (baseIdx + laneId < numFourth) {
         const int localIdx = f_idxs[termIdx] - atomStart;
-        energy += fourthDimEnergy(molCoords, localIdx, fourthDimWeight, dimension);
+        energy += fourthDimEnergy<dimension>(molCoords, localIdx, fourthDimWeight);
       }
     }
   }
@@ -929,19 +923,16 @@ static __device__ __inline__ double molEnergyDG(const EnergyForceContribsDeviceP
 }
 
 // Consolidated per-molecule gradient calculation
+template <int dimension>
 static __device__ __inline__ void molGradDG(const EnergyForceContribsDevicePtr& terms,
                                             const BatchedIndicesDevicePtr&      systemIndices,
-                                            const double*                       coords,
-                                            double*                             grad,
+                                            const double*                       molCoords,
+                                            double*                             molGrad,
                                             const int                           molIdx,
-                                            const int                           dimension,
                                             const double                        chiralWeight,
                                             const double                        fourthDimWeight,
-                                            const int                           tid,
-                                            const int                           stride) {
-  const int     atomStart = systemIndices.atomStarts[molIdx];
-  const double* molCoords = coords + atomStart * dimension;
-  double*       molGrad   = grad;  // grad is already offset by caller (see combinedGradKernel)
+                                            const int                           tid) {
+  const int atomStart = systemIndices.atomStarts[molIdx];
 
   namespace cg            = cooperative_groups;
   constexpr int WARP_SIZE = 32;
@@ -983,14 +974,13 @@ static __device__ __inline__ void molGradDG(const EnergyForceContribsDevicePtr& 
       if (baseIdx + laneId < numDist) {
         const int localIdx1 = d_idx1s[termIdx] - atomStart;
         const int localIdx2 = d_idx2s[termIdx] - atomStart;
-        distViolationGrad(molCoords,
-                          localIdx1,
-                          localIdx2,
-                          d_lb2s[termIdx],
-                          d_ub2s[termIdx],
-                          d_weights[termIdx],
-                          dimension,
-                          molGrad);
+        distViolationGrad<dimension>(molCoords,
+                                     localIdx1,
+                                     localIdx2,
+                                     d_lb2s[termIdx],
+                                     d_ub2s[termIdx],
+                                     d_weights[termIdx],
+                                     molGrad);
       }
     } else if (chunkIdx < warpsForDist + warpsForChiral) {
       // Chiral terms
@@ -1002,16 +992,15 @@ static __device__ __inline__ void molGradDG(const EnergyForceContribsDevicePtr& 
         const int localIdx2 = c_idx2s[termIdx] - atomStart;
         const int localIdx3 = c_idx3s[termIdx] - atomStart;
         const int localIdx4 = c_idx4s[termIdx] - atomStart;
-        chiralViolationGrad(molCoords,
-                            localIdx1,
-                            localIdx2,
-                            localIdx3,
-                            localIdx4,
-                            c_volLowers[termIdx],
-                            c_volUppers[termIdx],
-                            chiralWeight,
-                            dimension,
-                            molGrad);
+        chiralViolationGrad<dimension>(molCoords,
+                                       localIdx1,
+                                       localIdx2,
+                                       localIdx3,
+                                       localIdx4,
+                                       c_volLowers[termIdx],
+                                       c_volUppers[termIdx],
+                                       chiralWeight,
+                                       molGrad);
       }
     } else {
       // Fourth dimension terms
@@ -1020,7 +1009,7 @@ static __device__ __inline__ void molGradDG(const EnergyForceContribsDevicePtr& 
       const int termIdx    = fourthStart + baseIdx + laneId;
       if (baseIdx + laneId < numFourth) {
         const int localIdx = f_idxs[termIdx] - atomStart;
-        fourthDimGrad(molCoords, localIdx, fourthDimWeight, dimension, molGrad);
+        fourthDimGrad<dimension>(molCoords, localIdx, fourthDimWeight, molGrad);
       }
     }
   }
@@ -1028,12 +1017,10 @@ static __device__ __inline__ void molGradDG(const EnergyForceContribsDevicePtr& 
 
 static __device__ __inline__ double molEnergyETK(const Energy3DForceContribsDevicePtr& terms,
                                                  const BatchedIndices3DDevicePtr&      systemIndices,
-                                                 const double*                         coords,
+                                                 const double*                         molCoords,
                                                  const int                             molIdx,
-                                                 const int                             tid,
-                                                 const int                             stride) {
-  const int     atomStart = systemIndices.atomStarts[molIdx];
-  const double* molCoords = coords + atomStart * 4;  // ETK uses 4D coordinates
+                                                 const int                             tid) {
+  const int atomStart = systemIndices.atomStarts[molIdx];
 
   double energy = 0.0;
 
@@ -1198,20 +1185,19 @@ static __device__ __inline__ double molEnergyETK(const Energy3DForceContribsDevi
 
 static __device__ __inline__ void molGradETK(const Energy3DForceContribsDevicePtr& terms,
                                              const BatchedIndices3DDevicePtr&      systemIndices,
-                                             const double*                         coords,
+                                             const double*                         molCoords,
                                              double*                               grad,
                                              const int                             molIdx,
-                                             const int                             tid,
-                                             const int                             stride) {
-  const int     atomStart = systemIndices.atomStarts[molIdx];
-  const double* molCoords = coords + atomStart * 4;  // ETK uses 4D coordinates
+                                             const int                             tid) {
+  const int atomStart = systemIndices.atomStarts[molIdx];
 
   namespace cg            = cooperative_groups;
   constexpr int WARP_SIZE = 32;
   auto          tile32    = cg::tiled_partition<WARP_SIZE>(cg::this_thread_block());
   const int     laneId    = tile32.thread_rank();
-  const int     warpId    = mark_warp_uniform(tile32.meta_group_rank());
-  const int     numWarps  = mark_warp_uniform(tile32.meta_group_size());
+
+  const int warpId   = mark_warp_uniform(tile32.meta_group_rank());
+  const int numWarps = mark_warp_uniform(tile32.meta_group_size());
 
   // Get term ranges
   const int torsionStart  = systemIndices.experimentalTorsionTermStarts[molIdx];

@@ -55,10 +55,6 @@ void butinaGpu(cuda::std::span<const double> distanceMatrix,
  * This is the core GPU implementation of the Butina clustering algorithm. It takes
  * a binary hit matrix where element (i,j) indicates whether items i and j are neighbors.
  *
- * Cluster IDs are assigned in descending order by cluster size: cluster 0 is the largest,
- * cluster 1 is the second largest, and so on. Ties are broken by assigning the lower ID
- * to the cluster that was formed first.
- *
  * @param hitMatrix Binary matrix of size NxN where hitMatrix[i*N+j] = 1 if items i and j
  *                  are neighbors (distance < cutoff), 0 otherwise.
  * @param clusters Output array of size N. Each element will contain the cluster ID for

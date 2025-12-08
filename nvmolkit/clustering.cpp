@@ -32,11 +32,10 @@ BOOST_PYTHON_MODULE(_clustering) {
       const size_t         dataPointer = boost::python::extract<std::size_t>(data[0]);
       const auto matSpan = nvMolKit::getSpanFromDictElems<double>(reinterpret_cast<void*>(dataPointer), shape);
       nvMolKit::butinaGpu(matSpan, toSpan(clusterIds), cutoff, neighborlistMaxSize);
-
       return nvMolKit::makePyArray(clusterIds, boost::python::make_tuple(matDim1));
     },
     (boost::python::arg("distance_matrix"),
      boost::python::arg("cutoff"),
-     boost::python::arg("neighborlist_max_size") = 8),
+     boost::python::arg("neighborlist_max_size") = 64),
     boost::python::return_value_policy<boost::python::manage_new_object>());
 };

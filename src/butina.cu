@@ -242,9 +242,9 @@ __global__ void butinaWriteClusterValue(const cuda::std::span<const uint8_t> hit
                                         const int*                           centralIdx,
                                         int*                                 clusterIdx,
                                         const int*                           maxClusterSize) {
-  const auto numPoints = static_cast<int>(clusters.size());
-  const auto tid       = static_cast<int>(threadIdx.x + (blockIdx.x * blockDim.x));
-  const int  clusterSz = *maxClusterSize;
+  const size_t numPoints = clusters.size();
+  const size_t tid       = static_cast<int>(threadIdx.x + (blockIdx.x * blockDim.x));
+  const int    clusterSz = *maxClusterSize;
   if (clusterSz < kMinLoopSizeForAssignment) {
     return;
   }
