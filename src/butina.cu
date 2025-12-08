@@ -243,7 +243,7 @@ __global__ void butinaWriteClusterValue(const cuda::std::span<const uint8_t> hit
                                         const int*                           clusterIdx,
                                         const int*                           maxClusterSize) {
   const size_t numPoints = clusters.size();
-  const size_t tid       = static_cast<int>(threadIdx.x + (blockIdx.x * blockDim.x));
+  const size_t tid       = threadIdx.x + blockIdx.x * blockDim.x;
   const int    clusterSz = *maxClusterSize;
   if (clusterSz < kMinLoopSizeForAssignment) {
     return;
@@ -300,7 +300,7 @@ __global__ void assignSingletonIdsKernel(const cuda::std::span<int> clusters, in
 __global__ void countClusterSizesKernel(const cuda::std::span<const int> clusters,
                                         const cuda::std::span<int>       clusterSizes) {
   const int numPoints = static_cast<int>(clusters.size());
-  for (int i = threadIdx.x; i < numPoints; i += blockDim.x) {
+  for (int i = threadIdx.x + blockIdx.x * blockDim.x; i < numPoints; i += blockDim.x * gridDim.x) {
     const int clusterId = clusters[i];
     atomicAdd(&clusterSizes[clusterId], 1);
   }

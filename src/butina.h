@@ -42,7 +42,7 @@ namespace nvMolKit {
 void butinaGpu(cuda::std::span<const double> distanceMatrix,
                cuda::std::span<int>          clusters,
                double                        cutoff,
-               int                           neighborlistMaxSize = 8,
+               int                           neighborlistMaxSize = 64,
                cudaStream_t                  stream              = nullptr);
 
 /**
@@ -62,7 +62,7 @@ void butinaGpu(cuda::std::span<const double> distanceMatrix,
  */
 void butinaGpu(cuda::std::span<const uint8_t> hitMatrix,
                cuda::std::span<int>           clusters,
-               int                            neighborlistMaxSize = 8,
+               int                            neighborlistMaxSize = 64,
                cudaStream_t                   stream              = nullptr);
 }  // namespace nvMolKit
 

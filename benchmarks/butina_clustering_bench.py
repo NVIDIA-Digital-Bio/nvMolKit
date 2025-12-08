@@ -113,7 +113,6 @@ if __name__ == "__main__":
 
     sizes = [1000, 5000, 10000, 20000, 30000, 40000]
     cutoffs = [1e-10, 0.1, 0.2, 0.35, 1.1]
-    strict_modes = [True, False]
     max_nl_sizes = [8, 16, 32, 64, 128]
     results = []
 

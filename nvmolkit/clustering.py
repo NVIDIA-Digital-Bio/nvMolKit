@@ -21,7 +21,7 @@ from nvmolkit import _clustering
 from nvmolkit._arrayHelpers import *  # noqa: F403
 from nvmolkit.types import AsyncGpuResult
 
-def butina(distance_matrix: AsyncGpuResult | torch.Tensor, cutoff: float, neighborlist_max_size: int = 8) -> AsyncGpuResult:
+def butina(distance_matrix: AsyncGpuResult | torch.Tensor, cutoff: float, neighborlist_max_size: int = 64) -> AsyncGpuResult:
     """
     Perform Butina clustering on a distance matrix.
     
