@@ -290,8 +290,6 @@ __global__ void assignSingletonIdsKernel(const cuda::std::span<int> clusters, co
   }
 }
 
-constexpr int argMaxBlockSize = 512;
-
 #if NVMOLKIT_HAS_NEW_ARGMAX_API
 
 //! Helper class to manage CUB temporary storage for ArgMax (CCCL >= 2.8.0)
@@ -417,6 +415,9 @@ __global__ void pruneNeighborlistKernel(const cuda::std::span<int> clusters,
 }
 
 #if !NVMOLKIT_HAS_NEW_ARGMAX_API
+
+constexpr int argMaxBlockSize = 512;
+
 //! Custom ArgMax kernel that returns the largest value and index.
 //! Only used when CUB's new ArgMax API is not available (CCCL < 2.8.0)
 __global__ void lastArgMax(const cuda::std::span<const int> values, int* outVal, int* outIdx) {
