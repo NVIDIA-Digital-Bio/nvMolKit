@@ -57,11 +57,17 @@ std::vector<int> runButina(const std::vector<double>& distances,
                            const int                  nPts,
                            const double               cutoff,
                            const bool                 enforceStrictIndexing,
+                           const int                  neighborlistMaxSize,
                            cudaStream_t               stream) {
   AsyncDeviceVector<double> distancesDev(distances.size(), stream);
   AsyncDeviceVector<int>    resultDev(nPts, stream);
   distancesDev.copyFromHost(distances);
-  nvMolKit::butinaGpu(toSpan(distancesDev), toSpan(resultDev), cutoff, enforceStrictIndexing, stream);
+  nvMolKit::butinaGpu(toSpan(distancesDev),
+                      toSpan(resultDev),
+                      cutoff,
+                      enforceStrictIndexing,
+                      neighborlistMaxSize,
+                      stream);
   std::vector<int> got(nPts);
   resultDev.copyToHost(got);
   cudaStreamSynchronize(stream);
@@ -135,9 +141,11 @@ void checkButinaCorrectness(const std::vector<uint8_t>& adjacency, const std::ve
 
 }  // namespace
 
-TEST(ButinaClusterTest, HandlesSinglePoint) {
-  constexpr int                nPts   = 1;
-  constexpr double             cutoff = 0.2;
+class ButinaSinglePointFixture : public ::testing::TestWithParam<int> {};
+TEST_P(ButinaSinglePointFixture, HandlesSinglePoint) {
+  constexpr int                nPts                = 1;
+  constexpr double             cutoff              = 0.2;
+  const int                    neighborlistMaxSize = GetParam();
   nvMolKit::ScopedStream const scopedStream;
   cudaStream_t                 stream = scopedStream.stream();
 
@@ -145,35 +153,42 @@ TEST(ButinaClusterTest, HandlesSinglePoint) {
   AsyncDeviceVector<int>    resultDev(nPts, stream);
   distancesDev.copyFromHost(std::vector<double>{0.0});
 
-  nvMolKit::butinaGpu(toSpan(distancesDev), toSpan(resultDev), cutoff, true, stream);
+  nvMolKit::butinaGpu(toSpan(distancesDev), toSpan(resultDev), cutoff, true, neighborlistMaxSize, stream);
   std::vector<int> got(nPts);
   resultDev.copyToHost(got);
   cudaStreamSynchronize(stream);
   EXPECT_THAT(got, ::testing::ElementsAre(0));
 }
+INSTANTIATE_TEST_SUITE_P(ButinaClusterTest, ButinaSinglePointFixture, ::testing::Values(8, 16, 24, 32, 64, 128));
 
-class ButinaClusterTestFixture : public ::testing::TestWithParam<std::tuple<int, bool>> {};
+class ButinaClusterTestFixture : public ::testing::TestWithParam<std::tuple<int, bool, int>> {};
 TEST_P(ButinaClusterTestFixture, ClusteringMatchesReference) {
   nvMolKit::ScopedStream const scopedStream;
   cudaStream_t                 stream = scopedStream.stream();
   std::mt19937                 rng(42);
 
-  const auto [nPts, enforceStrictIndexing] = GetParam();
-  constexpr double       cutoff            = 0.1;
-  const auto             distances         = makeSymmetricDifferenceMatrix(nPts, rng);
-  const auto             adjacency         = makeAdjacency(distances, nPts, cutoff);
-  const std::vector<int> labels            = runButina(distances, nPts, cutoff, enforceStrictIndexing, stream);
-  SCOPED_TRACE(::testing::Message() << "nPts=" << nPts << " enforceStrictIndexing=" << enforceStrictIndexing);
+  const auto [nPts, enforceStrictIndexing, neighborlistMaxSize] = GetParam();
+  constexpr double       cutoff                                 = 0.1;
+  const auto             distances                              = makeSymmetricDifferenceMatrix(nPts, rng);
+  const auto             adjacency                              = makeAdjacency(distances, nPts, cutoff);
+  const std::vector<int> labels =
+    runButina(distances, nPts, cutoff, enforceStrictIndexing, neighborlistMaxSize, stream);
+  SCOPED_TRACE(::testing::Message() << "nPts=" << nPts << " enforceStrictIndexing=" << enforceStrictIndexing
+                                    << " neighborlistMaxSize=" << neighborlistMaxSize);
   checkButinaCorrectness(adjacency, labels, enforceStrictIndexing);
 }
 
 INSTANTIATE_TEST_SUITE_P(ButinaClusterTest,
                          ButinaClusterTestFixture,
-                         ::testing::Combine(::testing::Values(1, 10, 100, 1000), ::testing::Bool()));
+                         ::testing::Combine(::testing::Values(1, 10, 100, 1000),
+                                            ::testing::Bool(),
+                                            ::testing::Values(8, 16, 24, 32, 64, 128)));
 
-TEST(ButinaClusterEdgeTest, EdgeOneCluster) {
-  constexpr int                nPts   = 10;
-  constexpr double             cutoff = 100.0;
+class ButinaEdgeTestFixture : public ::testing::TestWithParam<int> {};
+TEST_P(ButinaEdgeTestFixture, EdgeOneCluster) {
+  constexpr int                nPts                = 10;
+  constexpr double             cutoff              = 100.0;
+  const int                    neighborlistMaxSize = GetParam();
   nvMolKit::ScopedStream const scopedStream;
   cudaStream_t                 stream = scopedStream.stream();
 
@@ -182,13 +197,14 @@ TEST(ButinaClusterEdgeTest, EdgeOneCluster) {
     distances[static_cast<size_t>(i) * nPts + i] = 0.0;
   }
 
-  const std::vector<int> labels = runButina(distances, nPts, cutoff, true, stream);
+  const std::vector<int> labels = runButina(distances, nPts, cutoff, true, neighborlistMaxSize, stream);
   EXPECT_THAT(labels, ::testing::Each(0));
 }
 
-TEST(ButinaClusterEdgeTest, EdgeNClusters) {
-  constexpr int                nPts   = 10;
-  constexpr double             cutoff = 1e-8;
+TEST_P(ButinaEdgeTestFixture, EdgeNClusters) {
+  constexpr int                nPts                = 10;
+  constexpr double             cutoff              = 1e-8;
+  const int                    neighborlistMaxSize = GetParam();
   nvMolKit::ScopedStream const scopedStream;
   cudaStream_t                 stream = scopedStream.stream();
 
@@ -197,10 +213,12 @@ TEST(ButinaClusterEdgeTest, EdgeNClusters) {
     distances[static_cast<size_t>(i) * nPts + i] = 0.0;
   }
 
-  const std::vector<int> labels = runButina(distances, nPts, cutoff, true, stream);
+  const std::vector<int> labels = runButina(distances, nPts, cutoff, true, neighborlistMaxSize, stream);
   std::vector<int>       sorted = labels;
   std::ranges::sort(sorted);
   std::vector<int> want(nPts);
   std::iota(want.begin(), want.end(), 0);
   EXPECT_THAT(sorted, ::testing::ElementsAreArray(want));
 }
+
+INSTANTIATE_TEST_SUITE_P(ButinaClusterEdgeTest, ButinaEdgeTestFixture, ::testing::Values(8, 16, 24, 32, 64, 128));

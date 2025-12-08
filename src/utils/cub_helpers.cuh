@@ -20,9 +20,10 @@
 
 #if defined(NVMOLKIT_HAS_CCCL_GE_3) || CUDART_VERSION >= 12090
 // CCCL >= 3.0.0 provides modern C++ functional operators
-using cubMax = cuda::maximum<>;
-using cubMin = cuda::minimum<>;
-using cubSum = cuda::std::plus<>;
+using cubMax  = cuda::maximum<>;
+using cubMin  = cuda::minimum<>;
+using cubSum  = cuda::std::plus<>;
+using cubLess = cuda::std::less<>;
 #else
 // Fall back to CUB operators for older CCCL or bundled CUDA headers
 // Suppress deprecation warnings for cub::Max and cub::Sum in CCCL 2.x
@@ -31,6 +32,12 @@ using cubSum = cuda::std::plus<>;
 using cubMax = cub::Max;
 using cubMin = cub::Min;
 using cubSum = cub::Sum;
+struct cubLess {
+  template <typename T> __host__ __device__ __forceinline__ bool operator()(const T& a, const T& b) const {
+    return a < b;
+  }
+};
+
 #pragma GCC diagnostic pop
 #endif  // NVMOLKIT_HAS_CCCL_GE_3
 #endif  // NVMOLKIT_CUB_HELPERS_H

@@ -17,6 +17,7 @@
 #define NVMOLKIT_BUTINA_H
 
 #include "device_vector.h"
+
 namespace nvMolKit {
 
 /**
@@ -35,12 +36,16 @@ namespace nvMolKit {
  *               considered neighbors.
  * @param enforceStrictIndexing If true, cluster IDs are assigned in strict largest-first order.
  *                              If false, allows parallel assignment for better performance.
+ * @param neighborlistMaxSize Maximum size of the neighborlist used for small cluster optimization.
+ *                            Must be 8, 16, 24, 32, 64, or 128. Larger values allow parallel
+ *                            processing of larger clusters but use more memory.
  * @param stream CUDA stream to execute operations on. Defaults to stream 0.
  */
 void butinaGpu(cuda::std::span<const double> distanceMatrix,
                cuda::std::span<int>          clusters,
                double                        cutoff,
                bool                          enforceStrictIndexing = true,
+               int                           neighborlistMaxSize   = 8,
                cudaStream_t                  stream                = nullptr);
 
 /**
@@ -48,13 +53,6 @@ void butinaGpu(cuda::std::span<const double> distanceMatrix,
  *
  * This is the core GPU implementation of the Butina clustering algorithm. It takes
  * a binary hit matrix where element (i,j) indicates whether items i and j are neighbors.
- * The algorithm iteratively:
- * 1. Counts cluster sizes for each unclustered item
- * 2. Selects the item with the largest cluster
- * 3. Assigns all neighbors to that cluster
- * 4. Repeats until clusters are too small (< 3 items)
- * 5. Pairs doublets (2-item clusters)
- * 6. Assigns singleton clusters
  *
  * @param hitMatrix Binary matrix of size NxN where hitMatrix[i*N+j] = 1 if items i and j
  *                  are neighbors (distance < cutoff), 0 otherwise.
@@ -62,11 +60,15 @@ void butinaGpu(cuda::std::span<const double> distanceMatrix,
  *                 that item. Modified in-place.
  * @param enforceStrictIndexing If true, cluster IDs are assigned in strict largest-first order.
  *                              If false, allows parallel assignment for better performance.
+ * @param neighborlistMaxSize Maximum size of the neighborlist used for small cluster optimization.
+ *                            Must be 8, 16, 24, 32, 64, or 128. Larger values allow parallel
+ *                            processing of larger clusters but use more memory.
  * @param stream CUDA stream to execute operations on. Defaults to stream 0.
  */
 void butinaGpu(cuda::std::span<const uint8_t> hitMatrix,
                cuda::std::span<int>           clusters,
                bool                           enforceStrictIndexing = true,
+               int                            neighborlistMaxSize   = 8,
                cudaStream_t                   stream                = nullptr);
 }  // namespace nvMolKit
 
