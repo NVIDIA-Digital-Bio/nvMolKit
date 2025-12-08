@@ -116,7 +116,7 @@ if __name__ == "__main__":
                         if cutoff in (1e-10, 1.1) and size > 20000:
                             continue
                         mode_str = "strict" if enforce_strict else "relaxed"
-                        print(f"Running size {size} cutoff {cutoff} mode {mode_str}")
+                        print(f"Running size {size} cutoff {cutoff} mode {mode_str} max_nl {max_nl}")
                         dist_mat = resize_and_fill(dists, size)
                         if do_rdkit:
                             dist_mat_numpy = dist_mat.cpu().numpy()
@@ -124,7 +124,7 @@ if __name__ == "__main__":
                         else:
                             rdkit_time = 0.0
                             rdk_std = 0.0
-                        nvmol_time, nvmol_std = time_it(lambda: butina_nvmol(dist_mat, cutoff, enforce_strict_indexing=enforce_strict))
+                        nvmol_time, nvmol_std = time_it(lambda: butina_nvmol(dist_mat, cutoff, neighborlist_max_size=max_nl, enforce_strict_indexing=enforce_strict))
 
                         # Verify correctness
                         nvmol_res = butina_nvmol(dist_mat, cutoff, enforce_strict_indexing=enforce_strict, neighborlist_max_size=max_nl).torch()
@@ -136,6 +136,7 @@ if __name__ == "__main__":
                                 "size": size,
                                 "cutoff": cutoff,
                                 "enforce_strict": enforce_strict,
+                                "max_neighborlist_size": max_nl,
                                 "rdkit_time_ms": rdkit_time,
                                 "rdkit_std_ms": rdk_std,
                                 "nvmol_time_ms": nvmol_time,
