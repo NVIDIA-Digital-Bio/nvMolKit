@@ -371,11 +371,6 @@ BfgsBatchMinimizer::BfgsBatchMinimizer(const int    dataDim,
     loopStatusHost_.resize(1);
   }
 
-  // Initialize per-molecule data structures if using that backend
-  if (backend_ == BfgsBackend::PER_MOLECULE) {
-    activeMolIdsDevice_.setStream(stream_);
-  }
-
   if (stream_ != nullptr) {
     activeSystemIndices_.setStream(stream_);
     allSystemIndices_.setStream(stream_);
