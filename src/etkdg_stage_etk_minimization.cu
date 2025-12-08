@@ -178,62 +178,17 @@ void ETKMinimizationStage::setReferenceValues(const ETKDGContext& ctx) {
 void ETKMinimizationStage::execute(ETKDGContext& ctx) {
   // 1. Update reference positions for start of loop.
   setReferenceValues(ctx);
-  // 2. Minimize via BFGS.
-  // Create energy and gradient functions
-  // Use PLAIN mode for ETDG (useBasicKnowledge=false), ALL mode for ETKDG/KDG (useBasicKnowledge=true)
-  const auto etkTerm = embedParam_.useBasicKnowledge ? DistGeom::ETKTerm::ALL : DistGeom::ETKTerm::PLAIN;
 
-  if (minimizer_.backend() == BfgsBackend::BATCHED) {
-    // BATCHED backend: use generic minimize() with energy/gradient functors
-    auto eFunc = [&](const double* pos) {
-      computeEnergyETK(molSystemDevice,
-                       ctx.systemDevice.atomStarts,
-                       ctx.systemDevice.positions,
-                       ctx.activeThisStage.data(),
-                       pos,
-                       etkTerm,
-                       stream_);
-    };
-
-    auto gFunc = [&]() {
-      computeGradientsETK(molSystemDevice,
-                          ctx.systemDevice.atomStarts,
-                          ctx.systemDevice.positions,
-                          ctx.activeThisStage.data(),
-                          etkTerm,
-                          stream_);
-    };
-
-    constexpr int maxIters = 300;  // Taken from hard-coded RDKit value.
-    minimizer_.minimize(maxIters,
-                        embedParam_.optimizerForceTol,
-                        ctx.systemHost.atomStarts,
-                        ctx.systemDevice.atomStarts,
-                        ctx.systemDevice.positions,
-                        molSystemDevice.grad,
-                        molSystemDevice.energyOuts,
-                        molSystemDevice.energyBuffer,
-                        eFunc,
-                        gFunc,
-                        ctx.activeThisStage.data());
-  } else {
-    // PER_MOLECULE backend: use specialized minimizeWithETK()
-    constexpr int maxIters = 300;  // Taken from hard-coded RDKit value.
-    auto          terms    = nvMolKit::DistGeom::toEnergy3DForceContribsDevicePtr(molSystemDevice);
-    auto          systemIndices =
-      nvMolKit::DistGeom::toBatchedIndices3DDevicePtr(molSystemDevice, ctx.systemDevice.atomStarts.data());
-    minimizer_.minimizeWithETK(maxIters,
-                               embedParam_.optimizerForceTol,
-                               ctx.systemHost.atomStarts,
-                               ctx.systemDevice.atomStarts,
-                               ctx.systemDevice.positions,
-                               molSystemDevice.grad,
-                               molSystemDevice.energyOuts,
-                               molSystemDevice.energyBuffer,
-                               terms,
-                               systemIndices,
-                               ctx.activeThisStage.data());
-  }
+  // 2. Minimize via BFGS - unified API handles backend selection internally
+  constexpr int maxIters = 300;  // Taken from hard-coded RDKit value.
+  minimizer_.minimizeWithETK(maxIters,
+                             embedParam_.optimizerForceTol,
+                             ctx.systemHost.atomStarts,
+                             ctx.systemDevice.atomStarts,
+                             ctx.systemDevice.positions,
+                             molSystemDevice,
+                             embedParam_.useBasicKnowledge,
+                             ctx.activeThisStage.data());
 
   // 3. Check planar tolerance (only if useBasicKnowledge is true - ETKDG/KDG variants)
   if (embedParam_.useBasicKnowledge) {

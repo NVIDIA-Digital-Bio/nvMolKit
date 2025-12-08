@@ -39,7 +39,7 @@ void embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
                     bool                                        debugMode        = false,
                     std::vector<std::vector<int16_t>>*          failures         = nullptr,
                     const BatchHardwareOptions&                 hardwareOptions  = {},
-                    BfgsBackend                                 backend          = BfgsBackend::PER_MOLECULE);
+                    BfgsBackend                                 backend          = BfgsBackend::HYBRID);
 
 }  // namespace nvMolKit
 

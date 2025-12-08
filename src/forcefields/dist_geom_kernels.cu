@@ -474,32 +474,32 @@ cudaError_t launchDistViolationEnergyKernel(const int      numDist,
   const int     numBlocks = (numDist + blockSize - 1) / blockSize;
   if (dimension == 3) {
     DistViolationEnergyKernel<3><<<numBlocks, blockSize, 0, stream>>>(numDist,
-                                                                 idx1,
-                                                                 idx2,
-                                                                 lb2,
-                                                                 ub2,
-                                                                 weight,
-                                                                 pos,
-                                                                 energyBuffer,
-                                                                 energyBufferStarts,
-                                                                 atomIdxToBatchIdx,
-                                                                 distTermStarts,
-                                                                 atomStarts,
-                                                                 activeThisStage);
+                                                                      idx1,
+                                                                      idx2,
+                                                                      lb2,
+                                                                      ub2,
+                                                                      weight,
+                                                                      pos,
+                                                                      energyBuffer,
+                                                                      energyBufferStarts,
+                                                                      atomIdxToBatchIdx,
+                                                                      distTermStarts,
+                                                                      atomStarts,
+                                                                      activeThisStage);
   } else if (dimension == 4) {
     DistViolationEnergyKernel<4><<<numBlocks, blockSize, 0, stream>>>(numDist,
-                                                                 idx1,
-                                                                 idx2,
-                                                                 lb2,
-                                                                 ub2,
-                                                                 weight,
-                                                                 pos,
-                                                                 energyBuffer,
-                                                                 energyBufferStarts,
-                                                                 atomIdxToBatchIdx,
-                                                                 distTermStarts,
-                                                                 atomStarts,
-                                                                 activeThisStage);
+                                                                      idx1,
+                                                                      idx2,
+                                                                      lb2,
+                                                                      ub2,
+                                                                      weight,
+                                                                      pos,
+                                                                      energyBuffer,
+                                                                      energyBufferStarts,
+                                                                      atomIdxToBatchIdx,
+                                                                      distTermStarts,
+                                                                      atomStarts,
+                                                                      activeThisStage);
   }
   return cudaGetLastError();
 }
@@ -574,36 +574,36 @@ cudaError_t launchChiralViolationEnergyKernel(const int      numChiral,
   const int     numBlocks = (numChiral + blockSize - 1) / blockSize;
   if (dimension == 3) {
     ChiralViolationEnergyKernel<3><<<numBlocks, blockSize, 0, stream>>>(numChiral,
-                                                                   idx1,
-                                                                   idx2,
-                                                                   idx3,
-                                                                   idx4,
-                                                                   volLower,
-                                                                   volUpper,
-                                                                   weight,
-                                                                   pos,
-                                                                   energyBuffer,
-                                                                   energyBufferStarts,
-                                                                   atomIdxToBatchIdx,
-                                                                   chiralTermStarts,
-                                                                   atomStarts,
-                                                                   activeThisStage);
+                                                                        idx1,
+                                                                        idx2,
+                                                                        idx3,
+                                                                        idx4,
+                                                                        volLower,
+                                                                        volUpper,
+                                                                        weight,
+                                                                        pos,
+                                                                        energyBuffer,
+                                                                        energyBufferStarts,
+                                                                        atomIdxToBatchIdx,
+                                                                        chiralTermStarts,
+                                                                        atomStarts,
+                                                                        activeThisStage);
   } else if (dimension == 4) {
     ChiralViolationEnergyKernel<4><<<numBlocks, blockSize, 0, stream>>>(numChiral,
-                                                                   idx1,
-                                                                   idx2,
-                                                                   idx3,
-                                                                   idx4,
-                                                                   volLower,
-                                                                   volUpper,
-                                                                   weight,
-                                                                   pos,
-                                                                   energyBuffer,
-                                                                   energyBufferStarts,
-                                                                   atomIdxToBatchIdx,
-                                                                   chiralTermStarts,
-                                                                   atomStarts,
-                                                                   activeThisStage);
+                                                                        idx1,
+                                                                        idx2,
+                                                                        idx3,
+                                                                        idx4,
+                                                                        volLower,
+                                                                        volUpper,
+                                                                        weight,
+                                                                        pos,
+                                                                        energyBuffer,
+                                                                        energyBufferStarts,
+                                                                        atomIdxToBatchIdx,
+                                                                        chiralTermStarts,
+                                                                        atomStarts,
+                                                                        activeThisStage);
   }
   return cudaGetLastError();
 }
@@ -630,32 +630,32 @@ cudaError_t launchChiralViolationGradientKernel(const int      numChiral,
   const int     numBlocks = (numChiral + blockSize - 1) / blockSize;
   if (dimension == 3) {
     ChiralViolationGradientKernel<3><<<numBlocks, blockSize, 0, stream>>>(numChiral,
-                                                                     idx1,
-                                                                     idx2,
-                                                                     idx3,
-                                                                     idx4,
-                                                                     volLower,
-                                                                     volUpper,
-                                                                     weight,
-                                                                     pos,
-                                                                     grad,
-                                                                     atomIdxToBatchIdx,
-                                                                     atomStarts,
-                                                                     activeThisStage);
+                                                                          idx1,
+                                                                          idx2,
+                                                                          idx3,
+                                                                          idx4,
+                                                                          volLower,
+                                                                          volUpper,
+                                                                          weight,
+                                                                          pos,
+                                                                          grad,
+                                                                          atomIdxToBatchIdx,
+                                                                          atomStarts,
+                                                                          activeThisStage);
   } else if (dimension == 4) {
     ChiralViolationGradientKernel<4><<<numBlocks, blockSize, 0, stream>>>(numChiral,
-                                                                     idx1,
-                                                                     idx2,
-                                                                     idx3,
-                                                                     idx4,
-                                                                     volLower,
-                                                                     volUpper,
-                                                                     weight,
-                                                                     pos,
-                                                                     grad,
-                                                                     atomIdxToBatchIdx,
-                                                                     atomStarts,
-                                                                     activeThisStage);
+                                                                          idx1,
+                                                                          idx2,
+                                                                          idx3,
+                                                                          idx4,
+                                                                          volLower,
+                                                                          volUpper,
+                                                                          weight,
+                                                                          pos,
+                                                                          grad,
+                                                                          atomIdxToBatchIdx,
+                                                                          atomStarts,
+                                                                          activeThisStage);
   }
   return cudaGetLastError();
 }
@@ -679,26 +679,26 @@ cudaError_t launchFourthDimEnergyKernel(const int      numFD,
   const int     numBlocks = (numFD + blockSize - 1) / blockSize;
   if (dimension == 3) {
     fourthDimEnergyKernel<3><<<numBlocks, blockSize, 0, stream>>>(numFD,
-                                                             idx,
-                                                             weight,
-                                                             pos,
-                                                             energyBuffer,
-                                                             energyBufferStarts,
-                                                             atomIdxToBatchIdx,
-                                                             fourthTermStarts,
-                                                             atomStarts,
-                                                             activeThisStage);
+                                                                  idx,
+                                                                  weight,
+                                                                  pos,
+                                                                  energyBuffer,
+                                                                  energyBufferStarts,
+                                                                  atomIdxToBatchIdx,
+                                                                  fourthTermStarts,
+                                                                  atomStarts,
+                                                                  activeThisStage);
   } else if (dimension == 4) {
     fourthDimEnergyKernel<4><<<numBlocks, blockSize, 0, stream>>>(numFD,
-                                                             idx,
-                                                             weight,
-                                                             pos,
-                                                             energyBuffer,
-                                                             energyBufferStarts,
-                                                             atomIdxToBatchIdx,
-                                                             fourthTermStarts,
-                                                             atomStarts,
-                                                             activeThisStage);
+                                                                  idx,
+                                                                  weight,
+                                                                  pos,
+                                                                  energyBuffer,
+                                                                  energyBufferStarts,
+                                                                  atomIdxToBatchIdx,
+                                                                  fourthTermStarts,
+                                                                  atomStarts,
+                                                                  activeThisStage);
   }
   return cudaGetLastError();
 }
@@ -720,22 +720,22 @@ cudaError_t launchFourthDimGradientKernel(const int      numFD,
   const int     numBlocks = (numFD + blockSize - 1) / blockSize;
   if (dimension == 3) {
     fourthDimGradientKernel<3><<<numBlocks, blockSize, 0, stream>>>(numFD,
-                                                               idx,
-                                                               weight,
-                                                               pos,
-                                                               grad,
-                                                               atomIdxToBatchIdx,
-                                                               atomStarts,
-                                                               activeThisStage);
+                                                                    idx,
+                                                                    weight,
+                                                                    pos,
+                                                                    grad,
+                                                                    atomIdxToBatchIdx,
+                                                                    atomStarts,
+                                                                    activeThisStage);
   } else if (dimension == 4) {
     fourthDimGradientKernel<4><<<numBlocks, blockSize, 0, stream>>>(numFD,
-                                                               idx,
-                                                               weight,
-                                                               pos,
-                                                               grad,
-                                                               atomIdxToBatchIdx,
-                                                               atomStarts,
-                                                               activeThisStage);
+                                                                    idx,
+                                                                    weight,
+                                                                    pos,
+                                                                    grad,
+                                                                    atomIdxToBatchIdx,
+                                                                    atomStarts,
+                                                                    activeThisStage);
   }
   return cudaGetLastError();
 }
@@ -1110,14 +1110,7 @@ __global__ void combinedGradKernel(const EnergyForceContribsDevicePtr* terms,
   __syncthreads();
 
   const double* molCoords = coords + atomStart * dimension;
-  molGradDG<dimension>(*terms,
-                       *systemIndices,
-                       molCoords,
-                       molGradBase,
-                       molIdx,
-                       chiralWeight,
-                       fourthDimWeight,
-                       tid);
+  molGradDG<dimension>(*terms, *systemIndices, molCoords, molGradBase, molIdx, chiralWeight, fourthDimWeight, tid);
   __syncthreads();
 
   if (useSharedMem) {
@@ -1187,7 +1180,7 @@ cudaError_t launchBlockPerMolGradKernel(int                                 numM
                                                                    grad,
                                                                    chiralWeight,
                                                                    fourthDimWeight,
-                                                                  activeThisStage);
+                                                                   activeThisStage);
   }
   return cudaGetLastError();
 }

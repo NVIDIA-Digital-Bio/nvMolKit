@@ -208,9 +208,7 @@ static __device__ __forceinline__ void chiralViolationGrad(const double* pos,
 }
 
 template <int dimension>
-static __device__ __forceinline__ double fourthDimEnergy(const double* pos,
-                                                         const int     idx,
-                                                         const double  weight) {
+static __device__ __forceinline__ double fourthDimEnergy(const double* pos, const int idx, const double weight) {
   if constexpr (dimension != 4) {
     return 0.0;
   }

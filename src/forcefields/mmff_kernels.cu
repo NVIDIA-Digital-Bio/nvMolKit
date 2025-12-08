@@ -660,8 +660,8 @@ __global__ void combinedEnergiesKernel(const EnergyForceContribsDevicePtr* terms
                                        const BatchedIndicesDevicePtr*      systemIndices,
                                        const double*                       coords,
                                        double*                             energies) {
-  const int molIdx  = blockIdx.x;
-  const int tid     = threadIdx.x;
+  const int molIdx = blockIdx.x;
+  const int tid    = threadIdx.x;
 
   using BlockReduce = cub::BlockReduce<double, blockSizePerMol>;
   __shared__ typename BlockReduce::TempStorage tempStorage;

@@ -54,7 +54,7 @@ BOOST_PYTHON_MODULE(_mmffOptimization) {
         molsVec.push_back(mol);
       }
 
-      // Call the C++ function
+      // Call the C++ function (uses HYBRID backend by default, which auto-selects based on max atoms)
       auto result =
         nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molsVec, maxIters, nonBondedThreshold, hardwareOptions);
 

@@ -210,48 +210,12 @@ std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKi
       nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dataDim=*/3, nvMolKit::DebugLevel::NONE, true, streamPtr, backend);
       constexpr double             gradTol = 1e-4;  // hard-coded in RDKit.
       setupBatchRange.pop();
-      if (backend == BfgsBackend::BATCHED) {
-        auto eFunc = [&](const double* positions) {
-          nvMolKit::MMFF::computeEnergy(systemDevice, positions, streamPtr);
-        };
-        auto gFunc = [&]() { nvMolKit::MMFF::computeGradients(systemDevice, streamPtr); };
-        bfgsMinimizer.minimize(maxIters,
-                               gradTol,
-                               systemHost.indices.atomStarts,
-                               systemDevice.indices.atomStarts,
-                               systemDevice.positions,
-                               systemDevice.grad,
-                               systemDevice.energyOuts,
-                               systemDevice.energyBuffer,
-                               eFunc,
-                               gFunc);
-      } else {
-        auto terms         = nvMolKit::MMFF::toEnergyForceContribsDevicePtr(systemDevice);
-        auto systemIndices = nvMolKit::MMFF::toBatchedIndicesDevicePtr(systemDevice);
-        bfgsMinimizer.minimizeWithMMFF(maxIters,
-                                       gradTol,
-                                       systemHost.indices.atomStarts,
-                                       systemDevice.indices.atomStarts,
-                                       systemDevice.positions,
-                                       systemDevice.grad,
-                                       systemDevice.energyOuts,
-                                       systemDevice.energyBuffer,
-                                       terms,
-                                       systemIndices);
-      }
+
+      bfgsMinimizer.minimizeWithMMFF(maxIters, gradTol, systemHost.indices.atomStarts, systemDevice);
+
       ScopedNvtxRange finalizeBatchRange("OpenMP loop finalizing batch");
 
-      // Copy positions using pinned memory for async transfer
       systemDevice.positions.copyToHost(buffers.positions.data(), systemDevice.positions.size());
-
-      // Compute final energies. If permol, are already populated.
-      if (backend == BfgsBackend::BATCHED) {
-        buffers.energies.zero();
-        systemDevice.energyBuffer.zero();
-        systemDevice.energyOuts.zero();
-        nvMolKit::MMFF::computeEnergy(systemDevice, nullptr, streamPtr);
-      }
-
       systemDevice.energyOuts.copyToHost(buffers.energies.data(), systemDevice.energyOuts.size());
       cudaStreamSynchronize(streamPtr);
 

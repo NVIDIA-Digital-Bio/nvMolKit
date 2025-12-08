@@ -521,13 +521,8 @@ __launch_bounds__(BLOCK_SIZE, 12) __global__ void bfgsMinimizeKernel(const int  
   } else if constexpr (FFType == ForceFieldType::ETK) {
     threadEnergy = DistGeom::molEnergyETK(*terms, *systemIndices, localPos, molIdx, tid);
   } else {  // DG
-    threadEnergy = DistGeom::molEnergyDG<dataDim>(*terms,
-                                                  *systemIndices,
-                                                  localPos,
-                                                  molIdx,
-                                                  chiralWeight,
-                                                  fourthDimWeight,
-                                                  tid);
+    threadEnergy =
+      DistGeom::molEnergyDG<dataDim>(*terms, *systemIndices, localPos, molIdx, chiralWeight, fourthDimWeight, tid);
   }
   const double blockEnergy = BlockReduce(tempStorage).Sum(threadEnergy);
 
