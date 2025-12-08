@@ -240,7 +240,7 @@ __global__ void attemptAssignClustersFromNeighborlist(const cuda::std::span<int>
 __global__ void butinaWriteClusterValue(const cuda::std::span<const uint8_t> hitMatrix,
                                         const cuda::std::span<int>           clusters,
                                         const int*                           centralIdx,
-                                        int*                                 clusterIdx,
+                                        const int*                           clusterIdx,
                                         const int*                           maxClusterSize) {
   const size_t numPoints = clusters.size();
   const size_t tid       = static_cast<int>(threadIdx.x + (blockIdx.x * blockDim.x));
@@ -252,8 +252,7 @@ __global__ void butinaWriteClusterValue(const cuda::std::span<const uint8_t> hit
   if (pointIdx < 0) {
     return;
   }
-  const int clusterVal                      = *clusterIdx;
-  *clusterIdx                               = clusterVal + 1;
+  const int                            clusterVal = *clusterIdx;
   const cuda::std::span<const uint8_t> hits = hitMatrix.subspan(static_cast<size_t>(pointIdx) * numPoints, numPoints);
   if (tid < numPoints) {
     if (hits[tid]) {
@@ -261,6 +260,13 @@ __global__ void butinaWriteClusterValue(const cuda::std::span<const uint8_t> hit
         clusters[tid] = clusterVal;
       }
     }
+  }
+}
+
+//! Kernel to increment cluster index after assignment. Must be launched with <<<1, 1>>>.
+__global__ void bumpClusterIdxKernel(int* clusterIdx, const int* lastClusterSize) {
+  if (*lastClusterSize >= kMinLoopSizeForAssignment) {
+    *clusterIdx += 1;
   }
 }
 
@@ -302,7 +308,7 @@ __global__ void countClusterSizesKernel(const cuda::std::span<const int> cluster
 
 //! Build the remapping array from sorted cluster IDs. After sorting by (-size, originalId),
 //! the position in the sorted array is the new cluster ID.
-__global__ void buildRemapFromSortedKernel(const cuda::std::span<const int> sortedOriginalIds,
+__global__ void createNewIndexMapping(const cuda::std::span<const int> sortedOriginalIds,
                                            const cuda::std::span<int>       remap) {
   const int numClusters = static_cast<int>(sortedOriginalIds.size());
   for (int newId = threadIdx.x; newId < numClusters; newId += blockDim.x) {
@@ -312,7 +318,7 @@ __global__ void buildRemapFromSortedKernel(const cuda::std::span<const int> sort
 }
 
 //! Apply the remapping to all cluster assignments.
-__global__ void applyRemapKernel(const cuda::std::span<int> clusters, const cuda::std::span<const int> remap) {
+__global__ void applyNewIndices(const cuda::std::span<int> clusters, const cuda::std::span<const int> remap) {
   const int numPoints = static_cast<int>(clusters.size());
   const int tid       = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
   if (tid < numPoints) {
@@ -332,10 +338,12 @@ __global__ void setupSortKeysKernel(const cuda::std::span<const int> sizes,
 }
 
 /**
- * @brief Renumber cluster IDs so larger clusters have smaller IDs (descending order by size).
+ * @brief Renumber cluster IDs so larger clusters have smaller IDs
  *
- * This ensures cluster 0 is always the largest, cluster 1 is second largest, etc.
- * Ties are broken by original cluster ID (lower original ID gets lower new ID).
+ * 1. Maps clusters by size to cluster ID.
+ * 2. Then sorts by size (descending)
+ * 3. Creates mapping of old ID -> new ID based on sorted order.
+ * 4. Applies new IDs to all points.
  */
 void renumberClustersBySize(const cuda::std::span<int> clusters, const int numClusters, cudaStream_t stream) {
   if (numClusters <= 1) {
@@ -344,41 +352,42 @@ void renumberClustersBySize(const cuda::std::span<int> clusters, const int numCl
 
   const int numPoints = static_cast<int>(clusters.size());
 
-  // Allocate temporary storage
   AsyncDeviceVector<int> clusterSizes(numClusters, stream);
   AsyncDeviceVector<int> sortKeys(numClusters, stream);
-  AsyncDeviceVector<int> sortedKeys(numClusters, stream);
   AsyncDeviceVector<int> originalIds(numClusters, stream);
   AsyncDeviceVector<int> sortedOriginalIds(numClusters, stream);
-  AsyncDeviceVector<int> remap(numClusters, stream);
 
   clusterSizes.zero();
 
+  constexpr int blockSize       = 256;
+  const int     numBlocksRenumber = (numClusters + blockSize - 1) / blockSize;
+
   // Count cluster sizes
-  countClusterSizesKernel<<<1, 256, 0, stream>>>(clusters, toSpan(clusterSizes));
+  countClusterSizesKernel<<<numBlocksRenumber, blockSize, 0, stream>>>(clusters, toSpan(clusterSizes));
   cudaCheckError(cudaGetLastError());
 
   // Prepare sort keys: negative size for descending order
-  setupSortKeysKernel<<<1, 256, 0, stream>>>(toSpan(clusterSizes), toSpan(sortKeys), toSpan(originalIds));
+  setupSortKeysKernel<<<numBlocksRenumber, blockSize, 0, stream>>>(toSpan(clusterSizes), toSpan(sortKeys), toSpan(originalIds));
   cudaCheckError(cudaGetLastError());
 
   // Sort by (negative size, original id) to get descending size order with stable tiebreak
+  // Reuse clusterSizes as sortedKeys output (we never read the sorted keys)
   std::size_t sortTempBytes = 0;
   cub::DeviceRadixSort::SortPairs(nullptr,
                                   sortTempBytes,
                                   sortKeys.data(),
-                                  sortedKeys.data(),
+                                  clusterSizes.data(),
                                   originalIds.data(),
                                   sortedOriginalIds.data(),
                                   numClusters,
                                   0,
                                   sizeof(int) * 8,
                                   stream);
-  AsyncDeviceVector<uint8_t> sortTemp(sortTempBytes, stream);
+  const AsyncDeviceVector<uint8_t> sortTemp(sortTempBytes, stream);
   cub::DeviceRadixSort::SortPairs(sortTemp.data(),
                                   sortTempBytes,
                                   sortKeys.data(),
-                                  sortedKeys.data(),
+                                  clusterSizes.data(),
                                   originalIds.data(),
                                   sortedOriginalIds.data(),
                                   numClusters,
@@ -388,13 +397,14 @@ void renumberClustersBySize(const cuda::std::span<int> clusters, const int numCl
   cudaCheckError(cudaGetLastError());
 
   // Build remap: remap[originalId] = newId
-  buildRemapFromSortedKernel<<<1, 256, 0, stream>>>(toSpan(sortedOriginalIds), toSpan(remap));
+  // Reuse sortKeys as remap (sortKeys is unused after the sort)
+  const auto remap = toSpan(sortKeys);
+  createNewIndexMapping<<<numBlocksRenumber, blockSize, 0, stream>>>(toSpan(sortedOriginalIds), remap);
   cudaCheckError(cudaGetLastError());
 
-  // Apply remap to all points
-  constexpr int blockSize = 256;
-  const int     numBlocks = (numPoints + blockSize - 1) / blockSize;
-  applyRemapKernel<<<numBlocks, blockSize, 0, stream>>>(clusters, toSpan(remap));
+  // Apply new indices to all points
+  const int numBlocks = (numPoints + blockSize - 1) / blockSize;
+  applyNewIndices<<<numBlocks, blockSize, 0, stream>>>(clusters, remap);
   cudaCheckError(cudaGetLastError());
 }
 
@@ -551,6 +561,8 @@ void innerButinaLoop(const int                            numPoints,
                                                                         clusterIdx.data(),
                                                                         maxValue.data());
   cudaCheckError(cudaGetLastError());
+  bumpClusterIdxKernel<<<1, 1, 0, stream>>>(clusterIdx.data(), maxValue.data());
+  cudaCheckError(cudaGetLastError());
   cudaCheckError(cudaMemcpyAsync(maxCluster.data(), maxValue.data(), sizeof(int), cudaMemcpyDefault, stream));
   cudaStreamSynchronize(stream);
 }
@@ -689,11 +701,10 @@ void butinaGpuImpl(const cuda::std::span<const uint8_t> hitMatrix,
   assignSingletonIdsKernel<<<1, kSingletonBlockSize, 0, stream>>>(clusters, clusterIdx.data());
   cudaCheckError(cudaGetLastError());
 
-  // Renumber clusters so largest clusters have smallest IDs (descending order by size)
-  PinnedHostVector<int> finalClusterCount(1);
-  cudaCheckError(cudaMemcpyAsync(finalClusterCount.data(), clusterIdx.data(), sizeof(int), cudaMemcpyDefault, stream));
+  // Renumber clusters to be in descending order.
+  cudaCheckError(cudaMemcpyAsync(maxCluster.data(), clusterIdx.data(), sizeof(int), cudaMemcpyDefault, stream));
   cudaCheckError(cudaStreamSynchronize(stream));
-  renumberClustersBySize(clusters, finalClusterCount[0], stream);
+  renumberClustersBySize(clusters, maxCluster[0], stream);
   cudaCheckError(cudaStreamSynchronize(stream));
 }
 

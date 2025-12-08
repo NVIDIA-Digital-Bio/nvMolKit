@@ -19,7 +19,6 @@ import pandas as pd
 import pytest
 from rdkit import Chem
 
-
 @pytest.fixture
 def one_hundred_smiles():
     """Load one hundred smiles from a CSV file.

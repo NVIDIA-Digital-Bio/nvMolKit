@@ -32,9 +32,6 @@ def butina(distance_matrix: AsyncGpuResult | torch.Tensor, cutoff: float, neighb
     3. Removes clustered items from consideration
     4. Repeats until all items are clustered
     
-    Cluster IDs are assigned in descending order by cluster size: cluster 0 is the
-    largest, cluster 1 is the second largest, and so on.
-    
     Args:
         distance_matrix: Square distance matrix of shape (N, N) where N is the number
                         of items. Can be an AsyncGpuResult or torch.Tensor on GPU.
