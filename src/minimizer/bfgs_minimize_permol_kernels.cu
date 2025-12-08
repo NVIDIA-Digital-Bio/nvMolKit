@@ -404,22 +404,22 @@ template <> struct DataDimTraits<ForceFieldType::DG> {
 }  // namespace
 
 template <int MaxAtoms, bool UseSharedMem, ForceFieldType FFType, typename TermsType, typename IndicesType>
-__launch_bounds__(BLOCK_SIZE, 12) __global__ void bfgsMinimizeKernel(const int               numIters,
-                                                                     const double            gradTol,
-                                                                     const bool              scaleGrads,
-                                                                     const TermsType*        terms,
-                                                                     const IndicesType*      systemIndices,
-                                                                     const int*              molIdList,
-                                                                     const int*              atomStarts,
-                                                                     const int*              hessianStarts,
-                                                                     double*                 positions,
-                                                                     double*                 grad,
-                                                                     double*                 inverseHessian,
-                                                                     double**                scratchBuffers,
-                                                                     double*                 energyOuts,
-                                                                     int16_t*                statuses,
-                                                                     [[maybe_unused]] double chiralWeight,
-                                                                     [[maybe_unused]] double fourthDimWeight) {
+__launch_bounds__(BLOCK_SIZE) __global__ void bfgsMinimizeKernel(const int               numIters,
+                                                                 const double            gradTol,
+                                                                 const bool              scaleGrads,
+                                                                 const TermsType*        terms,
+                                                                 const IndicesType*      systemIndices,
+                                                                 const int*              molIdList,
+                                                                 const int*              atomStarts,
+                                                                 const int*              hessianStarts,
+                                                                 double*                 positions,
+                                                                 double*                 grad,
+                                                                 double*                 inverseHessian,
+                                                                 double**                scratchBuffers,
+                                                                 double*                 energyOuts,
+                                                                 int16_t*                statuses,
+                                                                 [[maybe_unused]] double chiralWeight,
+                                                                 [[maybe_unused]] double fourthDimWeight) {
   const int     molIdx = molIdList[blockIdx.x];
   const int16_t tid    = threadIdx.x;
 
