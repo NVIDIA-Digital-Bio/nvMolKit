@@ -62,7 +62,7 @@ __global__ void butinaKernelCountClusterSize(const cuda::std::span<const uint8_t
     return;
   }
 
-  const cuda::std::span<const uint8_t> hits       = hitMatrix.subspan(pointIdx * numPoints, numPoints);
+  const cuda::std::span<const uint8_t> hits = hitMatrix.subspan(static_cast<size_t>(pointIdx) * numPoints, numPoints);
   int                                  localCount = 0;
   for (int i = tid; i < numPoints; i += blockSizeCount) {
     if (hits[i]) {
@@ -100,7 +100,7 @@ __global__ void butinaKernelCountClusterSizeWithNeighborlist(const cuda::std::sp
     return;
   }
 
-  const cuda::std::span<const uint8_t> hits       = hitMatrix.subspan(pointIdx * numPoints, numPoints);
+  const cuda::std::span<const uint8_t> hits = hitMatrix.subspan(static_cast<size_t>(pointIdx) * numPoints, numPoints);
   int                                  localCount = 0;
   __syncthreads();  // for neighborlistIndex init
   for (int i = tid; i < numPoints; i += blockSizeCount) {
@@ -254,7 +254,7 @@ __global__ void butinaWriteClusterValue(const cuda::std::span<const uint8_t> hit
   }
   const int clusterVal                      = *clusterIdx;
   *clusterIdx                               = clusterVal + 1;
-  const cuda::std::span<const uint8_t> hits = hitMatrix.subspan(pointIdx * numPoints, numPoints);
+  const cuda::std::span<const uint8_t> hits = hitMatrix.subspan(static_cast<size_t>(pointIdx) * numPoints, numPoints);
   if (tid < numPoints) {
     if (hits[tid]) {
       if (clusters[tid] < 0) {
