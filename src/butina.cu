@@ -309,7 +309,7 @@ __global__ void countClusterSizesKernel(const cuda::std::span<const int> cluster
 //! Build the remapping array from sorted cluster IDs. After sorting by (-size, originalId),
 //! the position in the sorted array is the new cluster ID.
 __global__ void createNewIndexMapping(const cuda::std::span<const int> sortedOriginalIds,
-                                           const cuda::std::span<int>       remap) {
+                                      const cuda::std::span<int>       remap) {
   const int numClusters = static_cast<int>(sortedOriginalIds.size());
   for (int newId = threadIdx.x; newId < numClusters; newId += blockDim.x) {
     const int originalId = sortedOriginalIds[newId];
@@ -359,7 +359,7 @@ void renumberClustersBySize(const cuda::std::span<int> clusters, const int numCl
 
   clusterSizes.zero();
 
-  constexpr int blockSize       = 256;
+  constexpr int blockSize         = 256;
   const int     numBlocksRenumber = (numClusters + blockSize - 1) / blockSize;
 
   // Count cluster sizes
@@ -367,7 +367,9 @@ void renumberClustersBySize(const cuda::std::span<int> clusters, const int numCl
   cudaCheckError(cudaGetLastError());
 
   // Prepare sort keys: negative size for descending order
-  setupSortKeysKernel<<<numBlocksRenumber, blockSize, 0, stream>>>(toSpan(clusterSizes), toSpan(sortKeys), toSpan(originalIds));
+  setupSortKeysKernel<<<numBlocksRenumber, blockSize, 0, stream>>>(toSpan(clusterSizes),
+                                                                   toSpan(sortKeys),
+                                                                   toSpan(originalIds));
   cudaCheckError(cudaGetLastError());
 
   // Sort by (negative size, original id) to get descending size order with stable tiebreak
