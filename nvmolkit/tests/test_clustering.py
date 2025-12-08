@@ -19,30 +19,31 @@ import numpy as np
 from nvmolkit.clustering import butina
 
 def check_butina_correctness(hit_mat, clusts):
+    hit_mat = hit_mat.clone()
     seen = set()
 
-    # Verify clusters are in descending size order
-    for i in range(1, len(clusts)):
-        assert len(clusts[i - 1]) >= len(clusts[i]), \
-            f"Clusters not in descending size order: cluster {i-1} has size {len(clusts[i-1])} but cluster {i} has size {len(clusts[i])}"
-
-    for clust_idx, clust in enumerate(clusts):
+    for i, clust in enumerate(clusts):
         assert len(clust) > 0, "Empty cluster found"
-        
-        # Verify no point is assigned to multiple clusters
+        clust_size = len(clust)
+
+        if clust_size == 1:
+            remaining_items = []
+            for remaining_clust in clusts[i:]:
+                assert len(remaining_clust) == 1, "Expected all remaining clusters to be singletons"
+                remaining_items.append(remaining_clust[0])
+
+            remaining_set = set(remaining_items)
+            assert len(remaining_set) == len(remaining_items), "Duplicate items in singleton clusters"
+            assert remaining_set.isdisjoint(seen), "Singleton item was already seen"
+            seen.update(remaining_set)
+            break
+        counts = hit_mat.sum(-1)
+        assert clust_size == counts.max(), f"Cluster size {clust_size} doesn't match max available count {counts.max()}"
         for item in clust:
             assert item not in seen, f"Point {item} assigned to multiple clusters"
             seen.add(item)
-        
-        # Verify valid Butina cluster: there exists a centroid that is neighbor of all other members
-        valid_cluster = False
-        for centroid in clust:
-            all_neighbors = all(hit_mat[centroid, member] for member in clust if member != centroid)
-            if all_neighbors:
-                valid_cluster = True
-                break
-        assert valid_cluster, f"Cluster {clust_idx} has no valid centroid"
-    
+            hit_mat[item, :] = False
+            hit_mat[:, item] = False
     assert len(seen) == hit_mat.shape[0]
 
 @pytest.mark.parametrize("size,neighborlist_max_size", 

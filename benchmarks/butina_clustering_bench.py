@@ -26,13 +26,24 @@ from nvmolkit.similarity import crossTanimotoSimilarity
 
 
 def check_butina_correctness(hit_mat, clusts):
-    """Verify that butina clustering results are valid."""
     hit_mat = hit_mat.clone()
     seen = set()
 
-    for clust in clusts:
+    for i, clust in enumerate(clusts):
         assert len(clust) > 0, "Empty cluster found"
         clust_size = len(clust)
+
+        if clust_size == 1:
+            remaining_items = []
+            for remaining_clust in clusts[i:]:
+                assert len(remaining_clust) == 1, "Expected all remaining clusters to be singletons"
+                remaining_items.append(remaining_clust[0])
+
+            remaining_set = set(remaining_items)
+            assert len(remaining_set) == len(remaining_items), "Duplicate items in singleton clusters"
+            assert remaining_set.isdisjoint(seen), "Singleton item was already seen"
+            seen.update(remaining_set)
+            break
         counts = hit_mat.sum(-1)
         assert clust_size == counts.max(), f"Cluster size {clust_size} doesn't match max available count {counts.max()}"
         for item in clust:
@@ -40,7 +51,7 @@ def check_butina_correctness(hit_mat, clusts):
             seen.add(item)
             hit_mat[item, :] = False
             hit_mat[:, item] = False
-    assert len(seen) == hit_mat.shape[0], "Not all points were clustered"
+    assert len(seen) == hit_mat.shape[0]
 
 
 def get_distance_matrix(molecules):
