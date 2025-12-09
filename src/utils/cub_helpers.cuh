@@ -18,8 +18,9 @@
 
 #include <cub/cub.cuh>
 
-#if defined(NVMOLKIT_HAS_CCCL_GE_3) || CUDART_VERSION >= 12090
-// CCCL >= 3.0.0 provides modern C++ functional operators
+// Check for modern C++ operators support (CCCL >= 3.0.0)
+// CUB_MAJOR_VERSION is defined in <cub/version.cuh>, included by cub.cuh
+#if CUB_MAJOR_VERSION >= 3
 using cubMax  = cuda::maximum<>;
 using cubMin  = cuda::minimum<>;
 using cubSum  = cuda::std::plus<>;
@@ -39,5 +40,5 @@ struct cubLess {
 };
 
 #pragma GCC diagnostic pop
-#endif  // NVMOLKIT_HAS_CCCL_GE_3
+#endif  // CUB_MAJOR_VERSION >= 3
 #endif  // NVMOLKIT_CUB_HELPERS_H

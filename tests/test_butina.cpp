@@ -18,7 +18,6 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <cstdint>
 #include <numeric>
 #include <random>
 #include <vector>
@@ -45,7 +44,7 @@ std::vector<double> makeSymmetricDifferenceMatrix(const int nPts, std::mt19937& 
   return distances;
 }
 
-std::vector<uint8_t> makeAdjacency(const std::vector<double>& distances, int nPts, double cutoff) {
+std::vector<uint8_t> makeAdjacency(const std::vector<double>& distances, double cutoff) {
   std::vector<uint8_t> adjacency(distances.size(), 0);
   for (size_t idx = 0; idx < distances.size(); ++idx) {
     adjacency[idx] = distances[idx] <= cutoff ? 1U : 0U;
@@ -158,7 +157,7 @@ TEST_P(ButinaClusterTestFixture, ClusteringMatchesReference) {
   const auto [nPts, neighborlistMaxSize] = GetParam();
   constexpr double       cutoff          = 0.1;
   const auto             distances       = makeSymmetricDifferenceMatrix(nPts, rng);
-  const auto             adjacency       = makeAdjacency(distances, nPts, cutoff);
+  const auto             adjacency       = makeAdjacency(distances, cutoff);
   const std::vector<int> labels          = runButina(distances, nPts, cutoff, neighborlistMaxSize, stream);
   SCOPED_TRACE(::testing::Message() << "nPts=" << nPts << " neighborlistMaxSize=" << neighborlistMaxSize);
   checkButinaCorrectness(adjacency, labels);
