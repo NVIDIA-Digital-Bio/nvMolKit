@@ -311,7 +311,7 @@ __global__ void countClusterSizesKernel(const cuda::std::span<const int> cluster
 __global__ void createNewIndexMapping(const cuda::std::span<const int> sortedOriginalIds,
                                       const cuda::std::span<int>       remap) {
   const int numClusters = static_cast<int>(sortedOriginalIds.size());
-  for (int newId = threadIdx.x; newId < numClusters; newId += blockDim.x) {
+  for (int newId = blockIdx.x * blockDim.x + threadIdx.x; newId < numClusters; newId += blockDim.x * gridDim.x) {
     const int originalId = sortedOriginalIds[newId];
     remap[originalId]    = newId;
   }
@@ -331,7 +331,7 @@ __global__ void setupSortKeysKernel(const cuda::std::span<const int> sizes,
                                     const cuda::std::span<int>       keys,
                                     const cuda::std::span<int>       ids) {
   const int numClusters = static_cast<int>(sizes.size());
-  for (int idx = threadIdx.x; idx < numClusters; idx += blockDim.x) {
+  for (int idx = blockIdx.x * blockDim.x + threadIdx.x; idx < numClusters; idx += blockDim.x * gridDim.x) {
     keys[idx] = -sizes[idx];
     ids[idx]  = idx;
   }
