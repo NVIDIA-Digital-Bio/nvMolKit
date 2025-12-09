@@ -37,8 +37,8 @@
 
 // Check for modern C++ operators support:
 // - CCCL >= 3.0.0 (detected via CMake as numeric version >= 30000), OR
-// - CUDA >= 12.9 when CCCL version detection failed (bundled CCCL >= 3.0.0)
-#if NVMOLKIT_CCCL_VERSION >= 30000 || (NVMOLKIT_CCCL_VERSION == 0 && CUDART_VERSION >= 12090)
+// - CUDA >= 13.0 when CCCL version detection failed (bundled CCCL >= 3.0.0)
+#if NVMOLKIT_CCCL_VERSION >= 30000 || (NVMOLKIT_CCCL_VERSION == 0 && CUDART_VERSION >= 13000)
 // CCCL >= 3.0.0 provides modern C++ functional operators
 using cubMax  = cuda::maximum<>;
 using cubMin  = cuda::minimum<>;
