@@ -290,6 +290,7 @@ __global__ void assignSingletonIdsKernel(const cuda::std::span<int> clusters, co
   }
 }
 
+#if CUB_VERSION < 200800
 constexpr int argMaxBlockSize = 512;
 
 //! Custom ArgMax kernel that returns the largest value and index.
@@ -322,12 +323,13 @@ __global__ void lastArgMaxKernel(const int* values, int numItems, int* outVal, i
     }
   }
 }
+#endif  // CUB_VERSION < 200800
 
 //! Helper class to run ArgMax on device data.
 //! Uses CUB's DeviceReduce::ArgMax when available (CCCL >= 2.8.0), otherwise falls back to custom kernel.
 class ArgMaxRunner {
  public:
-  ArgMaxRunner(size_t num_items, cudaStream_t stream)
+  ArgMaxRunner([[maybe_unused]] size_t num_items, cudaStream_t stream)
       : stream_(stream)
 #if CUB_VERSION >= 200800
         ,
