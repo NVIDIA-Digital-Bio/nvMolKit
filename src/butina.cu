@@ -290,64 +290,96 @@ __global__ void assignSingletonIdsKernel(const cuda::std::span<int> clusters, co
   }
 }
 
-#if CUB_VERSION >= 200800
+constexpr int argMaxBlockSize = 512;
 
-//! Wrapper for CUB's DeviceReduce::ArgMax (CCCL >= 2.8.0)
-//! Uses the new API that returns max value and index separately
-template <typename InputIteratorT>
-inline cudaError_t DeviceArgMax(void*          d_temp_storage,
-                                size_t&        temp_storage_bytes,
-                                InputIteratorT d_in,
-                                int*           d_max_value_out,
-                                int*           d_max_index_out,
-                                int            num_items,
-                                cudaStream_t   stream = 0) {
-  ScopedNvtxRange range("CUB ArgMax (CCCL >= 2.8.0)");
-  return cub::DeviceReduce::ArgMax(d_temp_storage,
-                                   temp_storage_bytes,
-                                   d_in,
-                                   d_max_value_out,
-                                   d_max_index_out,
-                                   static_cast<int64_t>(num_items),
-                                   stream);
+//! Custom ArgMax kernel that returns the largest value and index.
+//! Used when CUB's new ArgMax API is not available (CCCL < 2.8.0)
+__global__ void lastArgMaxKernel(const int* values, int numItems, int* outVal, int* outIdx) {
+  int            maxVal = cuda::std::numeric_limits<int>::min();
+  int            maxID  = -1;
+  __shared__ int foundMaxVal[argMaxBlockSize];
+  __shared__ int foundMaxIds[argMaxBlockSize];
+  const auto     tid = static_cast<int>(threadIdx.x);
+  for (int i = tid; i < numItems; i += argMaxBlockSize) {
+    if (const int val = values[i]; val >= maxVal) {
+      maxID  = i;
+      maxVal = val;
+    }
+  }
+  foundMaxVal[tid] = maxVal;
+  foundMaxIds[tid] = maxID;
+
+  __shared__ cub::BlockReduce<int, argMaxBlockSize>::TempStorage storage;
+  const int actualMaxVal = cub::BlockReduce<int, argMaxBlockSize>(storage).Reduce(maxVal, cubMax());
+  __syncthreads();  // For shared memory write of maxVal and maxID
+  if (tid == 0) {
+    *outVal = actualMaxVal;
+    for (int i = argMaxBlockSize - 1; i >= 0; i--) {
+      if (foundMaxVal[i] == actualMaxVal) {
+        *outIdx = foundMaxIds[i];
+        break;
+      }
+    }
+  }
 }
 
-//! Helper class to manage CUB temporary storage for ArgMax (CCCL >= 2.8.0)
-class ArgMaxTempStorage {
+//! Helper class to run ArgMax on device data.
+//! Uses CUB's DeviceReduce::ArgMax when available (CCCL >= 2.8.0), otherwise falls back to custom kernel.
+class ArgMaxRunner {
  public:
-  ArgMaxTempStorage(size_t num_items, cudaStream_t stream)
+  ArgMaxRunner(size_t num_items, cudaStream_t stream)
       : stream_(stream),
+        num_items_(num_items)
+#if CUB_VERSION >= 200800
+        ,
         temp_storage_(nullptr),
-        temp_storage_bytes_(0) {
-    // Determine temporary storage requirements
-    DeviceArgMax(nullptr,
-                 temp_storage_bytes_,
-                 static_cast<int*>(nullptr),
-                 static_cast<int*>(nullptr),
-                 static_cast<int*>(nullptr),
-                 static_cast<int>(num_items),
-                 stream_);
-    // Allocate temporary storage
+        temp_storage_bytes_(0)
+#endif
+  {
+#if CUB_VERSION >= 200800
+    // Determine temporary storage requirements for CUB
+    cub::DeviceReduce::ArgMax(nullptr,
+                              temp_storage_bytes_,
+                              static_cast<int*>(nullptr),
+                              static_cast<int*>(nullptr),
+                              static_cast<int*>(nullptr),
+                              static_cast<int64_t>(num_items),
+                              stream_);
     cudaCheckError(cudaMallocAsync(&temp_storage_, temp_storage_bytes_, stream_));
+#endif
   }
 
-  ~ArgMaxTempStorage() {
+  ~ArgMaxRunner() {
+#if CUB_VERSION >= 200800
     if (temp_storage_ != nullptr) {
       cudaFreeAsync(temp_storage_, stream_);
     }
+#endif
   }
 
-  cudaError_t operator()(int* d_in, int* d_max_value_out, int* d_max_index_out, int num_items) {
-    return DeviceArgMax(temp_storage_, temp_storage_bytes_, d_in, d_max_value_out, d_max_index_out, num_items, stream_);
+  void operator()(int* d_in, int* d_max_value_out, int* d_max_index_out, int num_items) {
+#if CUB_VERSION >= 200800
+    cudaCheckError(cub::DeviceReduce::ArgMax(temp_storage_,
+                                             temp_storage_bytes_,
+                                             d_in,
+                                             d_max_value_out,
+                                             d_max_index_out,
+                                             static_cast<int64_t>(num_items),
+                                             stream_));
+#else
+    lastArgMaxKernel<<<1, argMaxBlockSize, 0, stream_>>>(d_in, num_items, d_max_value_out, d_max_index_out);
+    cudaCheckError(cudaGetLastError());
+#endif
   }
 
  private:
   cudaStream_t stream_;
-  void*        temp_storage_;
-  size_t       temp_storage_bytes_;
+  size_t       num_items_;
+#if CUB_VERSION >= 200800
+  void*  temp_storage_;
+  size_t temp_storage_bytes_;
+#endif
 };
-
-#endif  // CUB_VERSION >= 200800
 
 /**
  * @brief Prune neighborlists by removing assigned neighbors and reordering.
@@ -428,42 +460,6 @@ __global__ void pruneNeighborlistKernel(const cuda::std::span<int> clusters,
   }
 }
 
-#if CUB_VERSION < 200800
-
-constexpr int argMaxBlockSize = 512;
-
-//! Custom ArgMax kernel that returns the largest value and index.
-//! Only used when CUB's new ArgMax API is not available (CCCL < 2.8.0)
-__global__ void lastArgMax(const cuda::std::span<const int> values, int* outVal, int* outIdx) {
-  int            maxVal = cuda::std::numeric_limits<int>::min();
-  int            maxID  = -1;
-  __shared__ int foundMaxVal[argMaxBlockSize];
-  __shared__ int foundMaxIds[argMaxBlockSize];
-  const auto     tid = static_cast<int>(threadIdx.x);
-  for (int i = tid; i < values.size(); i += argMaxBlockSize) {
-    if (const int val = values[i]; val >= maxVal) {
-      maxID  = i;
-      maxVal = val;
-    }
-  }
-  foundMaxVal[tid] = maxVal;
-  foundMaxIds[tid] = maxID;
-
-  __shared__ cub::BlockReduce<int, argMaxBlockSize>::TempStorage storage;
-  const int actualMaxVal = cub::BlockReduce<int, argMaxBlockSize>(storage).Reduce(maxVal, cubMax());
-  __syncthreads();  // For shared memory write of maxVal and maxID
-  if (tid == 0) {
-    *outVal = actualMaxVal;
-    for (int i = argMaxBlockSize - 1; i >= 0; i--) {
-      if (foundMaxVal[i] == actualMaxVal) {
-        *outIdx = foundMaxIds[i];
-        break;
-      }
-    }
-  }
-}
-#endif  // CUB_VERSION < 200800
-
 // TODO - consolidate this to device vector code.
 template <typename T> __global__ void setAllKernel(const size_t numElements, T value, T* dst) {
   const size_t idx = (blockIdx.x * blockDim.x) + threadIdx.x;
@@ -490,26 +486,14 @@ void innerButinaLoop(const int                            numPoints,
                      const AsyncDevicePtr<int>&           maxValue,
                      const AsyncDevicePtr<int>&           clusterIdx,
                      PinnedHostVector<int>&               maxCluster,
-#if CUB_VERSION >= 200800
-                     ArgMaxTempStorage& argMaxStorage,
-#endif
-                     cudaStream_t stream) {
+                     ArgMaxRunner&                        argMaxRunner,
+                     cudaStream_t                         stream) {
   const int numBlocksFlat = ((static_cast<int>(clusterSizesSpan.size()) - 1) / blockSizeCount) + 1;
 
   butinaKernelCountClusterSize<<<numPoints, blockSizeCount, 0, stream>>>(hitMatrix, clusters, clusterSizesSpan);
   cudaCheckError(cudaGetLastError());
 
-#if CUB_VERSION >= 200800
-  // CCCL >= 2.8.0: Use CUB ArgMax via wrapper
-  cudaCheckError(argMaxStorage(clusterSizesSpan.data(),
-                               maxValue.data(),
-                               maxIndex.data(),
-                               static_cast<int>(clusterSizesSpan.size())));
-#else
-  // CCCL < 2.8.0: Use custom kernel
-  lastArgMax<<<1, argMaxBlockSize, 0, stream>>>(clusterSizesSpan, maxValue.data(), maxIndex.data());
-  cudaCheckError(cudaGetLastError());
-#endif
+  argMaxRunner(clusterSizesSpan.data(), maxValue.data(), maxIndex.data(), static_cast<int>(clusterSizesSpan.size()));
 
   butinaWriteClusterValue<<<numBlocksFlat, blockSizeCount, 0, stream>>>(hitMatrix,
                                                                         clusters,
@@ -553,10 +537,8 @@ void innerButinaLoopWithPruning(const int                  numPoints,
                                 PinnedHostVector<int>&     maxCluster,
                                 const cuda::std::span<int> neighborList,
                                 const bool                 enforceStrictIndexing,
-#if CUB_VERSION >= 200800
-                                ArgMaxTempStorage& argMaxStorage,
-#endif
-                                cudaStream_t stream) {
+                                ArgMaxRunner&              argMaxRunner,
+                                cudaStream_t               stream) {
   const int numBlocksAssign = (numPoints + kTilesPerBlockAssign - 1) / kTilesPerBlockAssign;
   if (enforceStrictIndexing) {
     attemptAssignClustersFromNeighborlist<NeighborlistMaxSize, true>
@@ -586,15 +568,7 @@ void innerButinaLoopWithPruning(const int                  numPoints,
   cudaCheckError(cudaGetLastError());
 
   // Compute argmax for next iteration, copy to host before sync
-#if CUB_VERSION >= 200800
-  cudaCheckError(argMaxStorage(clusterSizesSpan.data(),
-                               maxValue.data(),
-                               maxIndex.data(),
-                               static_cast<int>(clusterSizesSpan.size())));
-#else
-  lastArgMax<<<1, argMaxBlockSize, 0, stream>>>(clusterSizesSpan, maxValue.data(), maxIndex.data());
-  cudaCheckError(cudaGetLastError());
-#endif
+  argMaxRunner(clusterSizesSpan.data(), maxValue.data(), maxIndex.data(), static_cast<int>(clusterSizesSpan.size()));
   cudaCheckError(cudaMemcpyAsync(maxCluster.data(), maxValue.data(), sizeof(int), cudaMemcpyDefault, stream));
 
   cudaStreamSynchronize(stream);
@@ -623,10 +597,7 @@ void butinaGpuImpl(const cuda::std::span<const uint8_t> hitMatrix,
   PinnedHostVector<int>     maxCluster(1);
   maxCluster[0] = std::numeric_limits<int>::max();
 
-#if CUB_VERSION >= 200800
-  // CCCL >= 2.8.0: Use CUB DeviceReduce::ArgMax with temporary storage
-  ArgMaxTempStorage argMaxStorage(clusters.size(), stream);
-#endif
+  ArgMaxRunner argMaxRunner(clusters.size(), stream);
 
   setupRange.pop();
   const auto clusterSizesSpan = toSpan(clusterSizes);
@@ -644,9 +615,7 @@ void butinaGpuImpl(const cuda::std::span<const uint8_t> hitMatrix,
                     maxValue,
                     clusterIdx,
                     maxCluster,
-#if CUB_VERSION >= 200800
-                    argMaxStorage,
-#endif
+                    argMaxRunner,
                     stream);
   }
 
@@ -660,15 +629,7 @@ void butinaGpuImpl(const cuda::std::span<const uint8_t> hitMatrix,
                                                   stream);
 
     // Initial argmax to prime the loop (buildInitialNeighborlist already synced)
-#if CUB_VERSION >= 200800
-    cudaCheckError(argMaxStorage(clusterSizesSpan.data(),
-                                 maxValue.data(),
-                                 maxIndex.data(),
-                                 static_cast<int>(clusterSizesSpan.size())));
-#else
-    lastArgMax<<<1, argMaxBlockSize, 0, stream>>>(clusterSizesSpan, maxValue.data(), maxIndex.data());
-    cudaCheckError(cudaGetLastError());
-#endif
+    argMaxRunner(clusterSizesSpan.data(), maxValue.data(), maxIndex.data(), static_cast<int>(clusterSizesSpan.size()));
     cudaCheckError(cudaMemcpyAsync(maxCluster.data(), maxValue.data(), sizeof(int), cudaMemcpyDefault, stream));
     cudaStreamSynchronize(stream);
 
@@ -684,9 +645,7 @@ void butinaGpuImpl(const cuda::std::span<const uint8_t> hitMatrix,
                                                       maxCluster,
                                                       neighborListSpan,
                                                       enforceStrictIndexing,
-#if CUB_VERSION >= 200800
-                                                      argMaxStorage,
-#endif
+                                                      argMaxRunner,
                                                       stream);
     }
   }
