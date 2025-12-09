@@ -290,7 +290,27 @@ __global__ void assignSingletonIdsKernel(const cuda::std::span<int> clusters, co
   }
 }
 
-#if NVMOLKIT_HAS_NEW_ARGMAX_API
+#if CUB_VERSION >= 200800
+
+//! Wrapper for CUB's DeviceReduce::ArgMax (CCCL >= 2.8.0)
+//! Uses the new API that returns max value and index separately
+template <typename InputIteratorT>
+inline cudaError_t DeviceArgMax(void*          d_temp_storage,
+                                size_t&        temp_storage_bytes,
+                                InputIteratorT d_in,
+                                int*           d_max_value_out,
+                                int*           d_max_index_out,
+                                int            num_items,
+                                cudaStream_t   stream = 0) {
+  ScopedNvtxRange range("CUB ArgMax (CCCL >= 2.8.0)");
+  return cub::DeviceReduce::ArgMax(d_temp_storage,
+                                   temp_storage_bytes,
+                                   d_in,
+                                   d_max_value_out,
+                                   d_max_index_out,
+                                   static_cast<int64_t>(num_items),
+                                   stream);
+}
 
 //! Helper class to manage CUB temporary storage for ArgMax (CCCL >= 2.8.0)
 class ArgMaxTempStorage {
@@ -300,13 +320,13 @@ class ArgMaxTempStorage {
         temp_storage_(nullptr),
         temp_storage_bytes_(0) {
     // Determine temporary storage requirements
-    nvmolkit::detail::DeviceArgMax(nullptr,
-                                   temp_storage_bytes_,
-                                   static_cast<int*>(nullptr),
-                                   static_cast<int*>(nullptr),
-                                   static_cast<int*>(nullptr),
-                                   static_cast<int>(num_items),
-                                   stream_);
+    DeviceArgMax(nullptr,
+                 temp_storage_bytes_,
+                 static_cast<int*>(nullptr),
+                 static_cast<int*>(nullptr),
+                 static_cast<int*>(nullptr),
+                 static_cast<int>(num_items),
+                 stream_);
     // Allocate temporary storage
     cudaCheckError(cudaMallocAsync(&temp_storage_, temp_storage_bytes_, stream_));
   }
@@ -318,13 +338,7 @@ class ArgMaxTempStorage {
   }
 
   cudaError_t operator()(int* d_in, int* d_max_value_out, int* d_max_index_out, int num_items) {
-    return nvmolkit::detail::DeviceArgMax(temp_storage_,
-                                          temp_storage_bytes_,
-                                          d_in,
-                                          d_max_value_out,
-                                          d_max_index_out,
-                                          num_items,
-                                          stream_);
+    return DeviceArgMax(temp_storage_, temp_storage_bytes_, d_in, d_max_value_out, d_max_index_out, num_items, stream_);
   }
 
  private:
@@ -333,7 +347,7 @@ class ArgMaxTempStorage {
   size_t       temp_storage_bytes_;
 };
 
-#endif  // NVMOLKIT_HAS_NEW_ARGMAX_API
+#endif  // CUB_VERSION >= 200800
 
 /**
  * @brief Prune neighborlists by removing assigned neighbors and reordering.
@@ -414,7 +428,7 @@ __global__ void pruneNeighborlistKernel(const cuda::std::span<int> clusters,
   }
 }
 
-#if !NVMOLKIT_HAS_NEW_ARGMAX_API
+#if CUB_VERSION < 200800
 
 constexpr int argMaxBlockSize = 512;
 
@@ -448,7 +462,7 @@ __global__ void lastArgMax(const cuda::std::span<const int> values, int* outVal,
     }
   }
 }
-#endif  // !NVMOLKIT_HAS_NEW_ARGMAX_API
+#endif  // CUB_VERSION < 200800
 
 // TODO - consolidate this to device vector code.
 template <typename T> __global__ void setAllKernel(const size_t numElements, T value, T* dst) {
@@ -476,7 +490,7 @@ void innerButinaLoop(const int                            numPoints,
                      const AsyncDevicePtr<int>&           maxValue,
                      const AsyncDevicePtr<int>&           clusterIdx,
                      PinnedHostVector<int>&               maxCluster,
-#if NVMOLKIT_HAS_NEW_ARGMAX_API
+#if CUB_VERSION >= 200800
                      ArgMaxTempStorage& argMaxStorage,
 #endif
                      cudaStream_t stream) {
@@ -485,7 +499,7 @@ void innerButinaLoop(const int                            numPoints,
   butinaKernelCountClusterSize<<<numPoints, blockSizeCount, 0, stream>>>(hitMatrix, clusters, clusterSizesSpan);
   cudaCheckError(cudaGetLastError());
 
-#if NVMOLKIT_HAS_NEW_ARGMAX_API
+#if CUB_VERSION >= 200800
   // CCCL >= 2.8.0: Use CUB ArgMax via wrapper
   cudaCheckError(argMaxStorage(clusterSizesSpan.data(),
                                maxValue.data(),
@@ -539,7 +553,7 @@ void innerButinaLoopWithPruning(const int                  numPoints,
                                 PinnedHostVector<int>&     maxCluster,
                                 const cuda::std::span<int> neighborList,
                                 const bool                 enforceStrictIndexing,
-#if NVMOLKIT_HAS_NEW_ARGMAX_API
+#if CUB_VERSION >= 200800
                                 ArgMaxTempStorage& argMaxStorage,
 #endif
                                 cudaStream_t stream) {
@@ -572,7 +586,7 @@ void innerButinaLoopWithPruning(const int                  numPoints,
   cudaCheckError(cudaGetLastError());
 
   // Compute argmax for next iteration, copy to host before sync
-#if NVMOLKIT_HAS_NEW_ARGMAX_API
+#if CUB_VERSION >= 200800
   cudaCheckError(argMaxStorage(clusterSizesSpan.data(),
                                maxValue.data(),
                                maxIndex.data(),
@@ -609,7 +623,7 @@ void butinaGpuImpl(const cuda::std::span<const uint8_t> hitMatrix,
   PinnedHostVector<int>     maxCluster(1);
   maxCluster[0] = std::numeric_limits<int>::max();
 
-#if NVMOLKIT_HAS_NEW_ARGMAX_API
+#if CUB_VERSION >= 200800
   // CCCL >= 2.8.0: Use CUB DeviceReduce::ArgMax with temporary storage
   ArgMaxTempStorage argMaxStorage(clusters.size(), stream);
 #endif
@@ -630,7 +644,7 @@ void butinaGpuImpl(const cuda::std::span<const uint8_t> hitMatrix,
                     maxValue,
                     clusterIdx,
                     maxCluster,
-#if NVMOLKIT_HAS_NEW_ARGMAX_API
+#if CUB_VERSION >= 200800
                     argMaxStorage,
 #endif
                     stream);
@@ -646,7 +660,7 @@ void butinaGpuImpl(const cuda::std::span<const uint8_t> hitMatrix,
                                                   stream);
 
     // Initial argmax to prime the loop (buildInitialNeighborlist already synced)
-#if NVMOLKIT_HAS_NEW_ARGMAX_API
+#if CUB_VERSION >= 200800
     cudaCheckError(argMaxStorage(clusterSizesSpan.data(),
                                  maxValue.data(),
                                  maxIndex.data(),
@@ -670,7 +684,7 @@ void butinaGpuImpl(const cuda::std::span<const uint8_t> hitMatrix,
                                                       maxCluster,
                                                       neighborListSpan,
                                                       enforceStrictIndexing,
-#if NVMOLKIT_HAS_NEW_ARGMAX_API
+#if CUB_VERSION >= 200800
                                                       argMaxStorage,
 #endif
                                                       stream);

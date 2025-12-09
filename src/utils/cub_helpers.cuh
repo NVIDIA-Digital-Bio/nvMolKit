@@ -18,28 +18,9 @@
 
 #include <cub/cub.cuh>
 
-#include "nvtx.h"
-
-// Default to 0 if not defined (no CCCL or unknown version)
-// Version encoding: MAJOR * 10000 + MINOR * 100 + PATCH
-// Examples: 2.8.0 = 20800, 3.0.0 = 30000
-#ifndef NVMOLKIT_CCCL_VERSION
-#define NVMOLKIT_CCCL_VERSION 0
-#endif
-
-// Feature detection macros for cleaner conditional compilation
-// NVMOLKIT_HAS_NEW_ARGMAX_API: CUB's DeviceReduce::ArgMax returns separate value/index (CCCL >= 2.8.0)
-#if NVMOLKIT_CCCL_VERSION >= 20800 || (NVMOLKIT_CCCL_VERSION == 0 && CUDART_VERSION >= 12090)
-#define NVMOLKIT_HAS_NEW_ARGMAX_API 1
-#else
-#define NVMOLKIT_HAS_NEW_ARGMAX_API 0
-#endif
-
-// Check for modern C++ operators support:
-// - CCCL >= 3.0.0 (detected via CMake as numeric version >= 30000), OR
-// - CUDA >= 13.0 when CCCL version detection failed (bundled CCCL >= 3.0.0)
-#if NVMOLKIT_CCCL_VERSION >= 30000 || (NVMOLKIT_CCCL_VERSION == 0 && CUDART_VERSION >= 13000)
-// CCCL >= 3.0.0 provides modern C++ functional operators
+// Check for modern C++ operators support (CCCL >= 3.0.0)
+// CUB_MAJOR_VERSION is defined in <cub/version.cuh>, included by cub.cuh
+#if CUB_MAJOR_VERSION >= 3
 using cubMax  = cuda::maximum<>;
 using cubMin  = cuda::minimum<>;
 using cubSum  = cuda::std::plus<>;
@@ -57,38 +38,7 @@ struct cubLess {
     return a < b;
   }
 };
+
 #pragma GCC diagnostic pop
-#endif  // NVMOLKIT_CCCL_VERSION >= 30000
-
-namespace nvmolkit {
-namespace detail {
-
-#if NVMOLKIT_HAS_NEW_ARGMAX_API
-
-// CCCL >= 2.8.0: Use CUB's DeviceReduce::ArgMax with new API
-//! Wrapper for CUB's DeviceReduce::ArgMax (CCCL >= 2.8.0)
-//! Uses the new API that returns max value and index separately
-template <typename InputIteratorT>
-inline cudaError_t DeviceArgMax(void*          d_temp_storage,
-                                size_t&        temp_storage_bytes,
-                                InputIteratorT d_in,
-                                int*           d_max_value_out,
-                                int*           d_max_index_out,
-                                int            num_items,
-                                cudaStream_t   stream = 0) {
-  nvMolKit::ScopedNvtxRange range("CUB ArgMax (CCCL >= 2.8.0)");
-  return cub::DeviceReduce::ArgMax(d_temp_storage,
-                                   temp_storage_bytes,
-                                   d_in,
-                                   d_max_value_out,
-                                   d_max_index_out,
-                                   static_cast<int64_t>(num_items),
-                                   stream);
-}
-
-#endif  // NVMOLKIT_HAS_NEW_ARGMAX_API
-
-}  // namespace detail
-}  // namespace nvmolkit
-
+#endif  // CUB_MAJOR_VERSION >= 3
 #endif  // NVMOLKIT_CUB_HELPERS_H

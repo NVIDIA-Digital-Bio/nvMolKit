@@ -1,14 +1,17 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved. SPDX-License-Identifier: Apache-2.0
 #
-# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
-# the License. You may obtain a copy of the License at
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not
+# use this file except in compliance with the License. You may obtain a copy of
+# the License at
 #
 # http://www.apache.org/licenses/LICENSE-2.0
 #
-# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
-# specific language governing permissions and limitations under the License.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations under
+# the License.
 
 cmake_minimum_required(VERSION 3.30)
 
@@ -25,56 +28,13 @@ find_package(CCCL HINTS ${CUDAToolkit_LIBRARY_DIR}/cmake/cccl QUIET)
 # Create the cccl_interface library
 add_library(cccl_interface INTERFACE)
 
-if(CCCL_FOUND)
-  # Parse CCCL version into numeric macro: MAJOR * 10000 + MINOR * 100 + PATCH
-  # Example: 2.8.0 -> 20800, 3.0.0 -> 30000
-  string(REGEX MATCH "^([0-9]+)\\.([0-9]+)\\.([0-9]+)" CCCL_VERSION_MATCH
-               "${CCCL_VERSION}")
-  if(CCCL_VERSION_MATCH)
-    set(CCCL_VERSION_MAJOR ${CMAKE_MATCH_1})
-    set(CCCL_VERSION_MINOR ${CMAKE_MATCH_2})
-    set(CCCL_VERSION_PATCH ${CMAKE_MATCH_3})
-    math(
-      EXPR
-      CCCL_VERSION_NUMERIC
-      "${CCCL_VERSION_MAJOR} * 10000 + ${CCCL_VERSION_MINOR} * 100 + ${CCCL_VERSION_PATCH}"
-    )
-
-    # Only link CCCL::CCCL if version >= 3.0.0
-    if(CCCL_VERSION VERSION_GREATER_EQUAL "3.0.0")
-      message(
-        STATUS
-          "CCCL ${CCCL_VERSION} found (numeric: ${CCCL_VERSION_NUMERIC}), using CCCL::CCCL"
-      )
-      target_link_libraries(cccl_interface INTERFACE CCCL::CCCL)
-    else()
-      message(
-        STATUS
-          "CCCL ${CCCL_VERSION} found (numeric: ${CCCL_VERSION_NUMERIC}) but version < 3.0.0"
-      )
-      if(CMAKE_PREFIX_PATH)
-        message(
-          STATUS
-            "CMAKE_PREFIX_PATH is set - CCCL ${CCCL_VERSION} headers may be used from PREFIX path"
-        )
-      else()
-        message(STATUS "Using bundled CUDA headers")
-      endif()
-    endif()
-
-    # Define numeric version macro that can be compared in code
-    target_compile_definitions(
-      cccl_interface INTERFACE NVMOLKIT_CCCL_VERSION=${CCCL_VERSION_NUMERIC})
-  else()
-    message(WARNING "Could not parse CCCL version: ${CCCL_VERSION}")
-    if(CMAKE_PREFIX_PATH)
-      message(
-        STATUS
-          "CMAKE_PREFIX_PATH is set - CCCL headers may be used from PREFIX path"
-      )
-    else()
-      message(STATUS "Using bundled CUDA headers")
-    endif()
+if(CCCL_FOUND AND CCCL_VERSION VERSION_GREATER_EQUAL "3.0.0")
+  message(STATUS "CCCL ${CCCL_VERSION} found, using CCCL::CCCL")
+  target_link_libraries(cccl_interface INTERFACE CCCL::CCCL)
+elseif(CCCL_FOUND)
+  message(STATUS "CCCL ${CCCL_VERSION} found but < 3.0.0, using bundled CUDA headers")
+  if(CMAKE_PREFIX_PATH)
+    message(STATUS "CMAKE_PREFIX_PATH is set - CCCL headers may be used from PREFIX path")
   endif()
 else()
   message(STATUS "CCCL not found, using bundled CUDA headers")
