@@ -328,39 +328,19 @@ __global__ void lastArgMaxKernel(const int* values, int numItems, int* outVal, i
 class ArgMaxRunner {
  public:
   ArgMaxRunner(size_t num_items, cudaStream_t stream)
-      : stream_(stream),
-        num_items_(num_items)
+      : stream_(stream)
 #if CUB_VERSION >= 200800
         ,
-        temp_storage_(nullptr),
-        temp_storage_bytes_(0)
+        temp_storage_(getTempStorageSize(num_items, stream), stream)
 #endif
   {
-#if CUB_VERSION >= 200800
-    // Determine temporary storage requirements for CUB
-    cub::DeviceReduce::ArgMax(nullptr,
-                              temp_storage_bytes_,
-                              static_cast<int*>(nullptr),
-                              static_cast<int*>(nullptr),
-                              static_cast<int*>(nullptr),
-                              static_cast<int64_t>(num_items),
-                              stream_);
-    cudaCheckError(cudaMallocAsync(&temp_storage_, temp_storage_bytes_, stream_));
-#endif
-  }
-
-  ~ArgMaxRunner() {
-#if CUB_VERSION >= 200800
-    if (temp_storage_ != nullptr) {
-      cudaFreeAsync(temp_storage_, stream_);
-    }
-#endif
   }
 
   void operator()(int* d_in, int* d_max_value_out, int* d_max_index_out, int num_items) {
 #if CUB_VERSION >= 200800
-    cudaCheckError(cub::DeviceReduce::ArgMax(temp_storage_,
-                                             temp_storage_bytes_,
+    size_t temp_storage_bytes = temp_storage_.size();
+    cudaCheckError(cub::DeviceReduce::ArgMax(temp_storage_.data(),
+                                             temp_storage_bytes,
                                              d_in,
                                              d_max_value_out,
                                              d_max_index_out,
@@ -373,11 +353,23 @@ class ArgMaxRunner {
   }
 
  private:
-  cudaStream_t stream_;
-  size_t       num_items_;
 #if CUB_VERSION >= 200800
-  void*  temp_storage_;
-  size_t temp_storage_bytes_;
+  static size_t getTempStorageSize(size_t num_items, cudaStream_t stream) {
+    size_t temp_storage_bytes = 0;
+    cub::DeviceReduce::ArgMax(nullptr,
+                              temp_storage_bytes,
+                              static_cast<int*>(nullptr),
+                              static_cast<int*>(nullptr),
+                              static_cast<int*>(nullptr),
+                              static_cast<int64_t>(num_items),
+                              stream);
+    return temp_storage_bytes;
+  }
+#endif
+
+  cudaStream_t stream_;
+#if CUB_VERSION >= 200800
+  AsyncDeviceVector<uint8_t> temp_storage_;
 #endif
 };
 
