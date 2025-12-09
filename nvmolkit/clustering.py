@@ -21,7 +21,7 @@ from nvmolkit import _clustering
 from nvmolkit._arrayHelpers import *  # noqa: F403
 from nvmolkit.types import AsyncGpuResult
 
-def butina(distance_matrix: AsyncGpuResult | torch.Tensor, cutoff: float, enforce_strict_indexing: bool = True, neighborlist_max_size: int = 8) -> AsyncGpuResult:
+def butina(distance_matrix: AsyncGpuResult | torch.Tensor, cutoff: float, neighborlist_max_size: int = 64) -> AsyncGpuResult:
     """
     Perform Butina clustering on a distance matrix.
     
@@ -37,12 +37,6 @@ def butina(distance_matrix: AsyncGpuResult | torch.Tensor, cutoff: float, enforc
                         of items. Can be an AsyncGpuResult or torch.Tensor on GPU.
         cutoff: Distance threshold for clustering. Items are neighbors if their
                 distance is less than this cutoff.
-        enforce_strict_indexing: If True, cluster IDs are assigned in strict largest-first
-                                order (slower but deterministic ordering). If False, allows
-                                parallel assignment for better performance (faster but
-                                non-deterministic cluster ID ordering). Clusters will be the
-                                same but the cluster IDs will not be in the same order and larger
-                                clusters may have higher IDs.
         neighborlist_max_size: Maximum size of the neighborlist used for small cluster
                               optimization. Must be 8, 16, 24, 32, 64, or 128. Larger values
                               allow parallel processing of larger clusters but use more
@@ -51,9 +45,9 @@ def butina(distance_matrix: AsyncGpuResult | torch.Tensor, cutoff: float, enforc
     Returns:
         AsyncGpuResult containing cluster assignments as integers. Each element i
         contains the cluster ID for item i. Cluster IDs are sequential integers
-        starting from 0.
+        starting from 0, with cluster 0 being the largest.
     
     Note:
         The distance matrix should be symmetric and have zeros on the diagonal.
     """
-    return AsyncGpuResult(_clustering.butina(distance_matrix.__cuda_array_interface__, cutoff, enforce_strict_indexing, neighborlist_max_size))
+    return AsyncGpuResult(_clustering.butina(distance_matrix.__cuda_array_interface__, cutoff, neighborlist_max_size))

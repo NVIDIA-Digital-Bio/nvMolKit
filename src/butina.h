@@ -34,8 +34,6 @@ namespace nvMolKit {
  *                 that item. Modified in-place.
  * @param cutoff Distance threshold for clustering. Items with distance < cutoff are
  *               considered neighbors.
- * @param enforceStrictIndexing If true, cluster IDs are assigned in strict largest-first order.
- *                              If false, allows parallel assignment for better performance.
  * @param neighborlistMaxSize Maximum size of the neighborlist used for small cluster optimization.
  *                            Must be 8, 16, 24, 32, 64, or 128. Larger values allow parallel
  *                            processing of larger clusters but use more memory.
@@ -44,9 +42,8 @@ namespace nvMolKit {
 void butinaGpu(cuda::std::span<const double> distanceMatrix,
                cuda::std::span<int>          clusters,
                double                        cutoff,
-               bool                          enforceStrictIndexing = true,
-               int                           neighborlistMaxSize   = 8,
-               cudaStream_t                  stream                = nullptr);
+               int                           neighborlistMaxSize = 64,
+               cudaStream_t                  stream              = nullptr);
 
 /**
  * @brief Perform Butina clustering on a precomputed hit matrix.
@@ -58,8 +55,6 @@ void butinaGpu(cuda::std::span<const double> distanceMatrix,
  *                  are neighbors (distance < cutoff), 0 otherwise.
  * @param clusters Output array of size N. Each element will contain the cluster ID for
  *                 that item. Modified in-place.
- * @param enforceStrictIndexing If true, cluster IDs are assigned in strict largest-first order.
- *                              If false, allows parallel assignment for better performance.
  * @param neighborlistMaxSize Maximum size of the neighborlist used for small cluster optimization.
  *                            Must be 8, 16, 24, 32, 64, or 128. Larger values allow parallel
  *                            processing of larger clusters but use more memory.
@@ -67,9 +62,8 @@ void butinaGpu(cuda::std::span<const double> distanceMatrix,
  */
 void butinaGpu(cuda::std::span<const uint8_t> hitMatrix,
                cuda::std::span<int>           clusters,
-               bool                           enforceStrictIndexing = true,
-               int                            neighborlistMaxSize   = 8,
-               cudaStream_t                   stream                = nullptr);
+               int                            neighborlistMaxSize = 64,
+               cudaStream_t                   stream              = nullptr);
 }  // namespace nvMolKit
 
 #endif  // NVMOLKIT_BUTINA_H

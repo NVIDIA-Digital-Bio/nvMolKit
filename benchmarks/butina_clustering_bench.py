@@ -25,18 +25,25 @@ from nvmolkit.fingerprints import MorganFingerprintGenerator as nvmolMorganGen
 from nvmolkit.similarity import crossTanimotoSimilarity
 
 
-def check_butina_correctness(hit_mat, clusts, strict):
-    """Verify that butina clustering results are valid."""
+def check_butina_correctness(hit_mat, clusts):
     hit_mat = hit_mat.clone()
     seen = set()
-    
-    # In relaxed mode, sort clusters by size (descending)
-    if not strict:
-        clusts = sorted(clusts, key=len, reverse=True)
 
-    for clust in clusts:
+    for i, clust in enumerate(clusts):
         assert len(clust) > 0, "Empty cluster found"
         clust_size = len(clust)
+
+        if clust_size == 1:
+            remaining_items = []
+            for remaining_clust in clusts[i:]:
+                assert len(remaining_clust) == 1, "Expected all remaining clusters to be singletons"
+                remaining_items.append(remaining_clust[0])
+
+            remaining_set = set(remaining_items)
+            assert len(remaining_set) == len(remaining_items), "Duplicate items in singleton clusters"
+            assert remaining_set.isdisjoint(seen), "Singleton item was already seen"
+            seen.update(remaining_set)
+            break
         counts = hit_mat.sum(-1)
         assert clust_size == counts.max(), f"Cluster size {clust_size} doesn't match max available count {counts.max()}"
         for item in clust:
@@ -44,7 +51,7 @@ def check_butina_correctness(hit_mat, clusts, strict):
             seen.add(item)
             hit_mat[item, :] = False
             hit_mat[:, item] = False
-    assert len(seen) == hit_mat.shape[0], "Not all points were clustered"
+    assert len(seen) == hit_mat.shape[0]
 
 
 def get_distance_matrix(molecules):
@@ -84,6 +91,9 @@ def time_it(func, runs=3, warmups=1):
 def bench_rdkit(data, threshold):
     return time_it(lambda: ClusterData(data, len(data), threshold, isDistData=True, reordering=True))
 
+def bench_nvmol_inner(data, threshold, neighborlist_max_size):
+    butina_nvmol(data, threshold, neighborlist_max_size=neighborlist_max_size)
+    torch.cuda.synchronize()
 
 MAX_BENCH_SIZE = 40000
 
@@ -103,20 +113,17 @@ if __name__ == "__main__":
 
     sizes = [1000, 5000, 10000, 20000, 30000, 40000]
     cutoffs = [1e-10, 0.1, 0.2, 0.35, 1.1]
-    strict_modes = [True, False]
     max_nl_sizes = [8, 16, 32, 64, 128]
     results = []
 
     try:
         for size in sizes:
             for cutoff in cutoffs:
-                for enforce_strict in strict_modes:
                     for max_nl in max_nl_sizes:
                         # Don't run large sizes for edge cases.
                         if cutoff in (1e-10, 1.1) and size > 20000:
                             continue
-                        mode_str = "strict" if enforce_strict else "relaxed"
-                        print(f"Running size {size} cutoff {cutoff} mode {mode_str} max_nl {max_nl}")
+                        print(f"Running size {size} cutoff {cutoff} max_nl {max_nl}")
                         dist_mat = resize_and_fill(dists, size)
                         if do_rdkit:
                             dist_mat_numpy = dist_mat.cpu().numpy()
@@ -124,18 +131,18 @@ if __name__ == "__main__":
                         else:
                             rdkit_time = 0.0
                             rdk_std = 0.0
-                        nvmol_time, nvmol_std = time_it(lambda: butina_nvmol(dist_mat, cutoff, neighborlist_max_size=max_nl, enforce_strict_indexing=enforce_strict))
+                        nvmol_time, nvmol_std = time_it(lambda: bench_nvmol_inner(dist_mat, cutoff, max_nl))
 
                         # Verify correctness
-                        nvmol_res = butina_nvmol(dist_mat, cutoff, enforce_strict_indexing=enforce_strict, neighborlist_max_size=max_nl).torch()
+                        nvmol_res = butina_nvmol(dist_mat, cutoff, neighborlist_max_size=max_nl).torch()
+                        torch.cuda.synchronize()
                         nvmol_clusts = [tuple(torch.argwhere(nvmol_res == i).flatten().tolist()) for i in range(nvmol_res.max() + 1)]
-                        check_butina_correctness(dist_mat <= cutoff, nvmol_clusts, enforce_strict)
+                        check_butina_correctness(dist_mat <= cutoff, nvmol_clusts)
 
                         results.append(
                             {
                                 "size": size,
                                 "cutoff": cutoff,
-                                "enforce_strict": enforce_strict,
                                 "max_neighborlist_size": max_nl,
                                 "rdkit_time_ms": rdkit_time,
                                 "rdkit_std_ms": rdk_std,
