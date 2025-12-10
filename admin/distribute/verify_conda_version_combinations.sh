@@ -2,13 +2,14 @@
 
 set -uo pipefail
 
-if [[ $# -ne 2 ]]; then
-  echo "Usage: $0 <local_conda_endpoint> <pytest_directory>" >&2
+if [[ $# -ne 3 ]]; then
+  echo "Usage: $0 <local_conda_endpoint> <pytest_directory> <log_dir>" >&2
   exit 1
 fi
 
 LOCAL_CONDA_ENDPOINT=$1
 PYTEST_DIR=$2
+LOG_DIR=$3
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 VERIFY_SCRIPT="$SCRIPT_DIR/verify_conda_distributable.sh"
@@ -22,14 +23,13 @@ if [[ ! -x $VERIFY_SCRIPT ]]; then
   fi
 fi
 
-LOG_DIR="$SCRIPT_DIR/logs"
 mkdir -p "$LOG_DIR"
 
 SUMMARY_LOG="$LOG_DIR/summary.log"
 printf 'Verification Summary - %s\n' "$(date)" >"$SUMMARY_LOG"
 
-PYTHON_VERSIONS=("3.11" "3.12" "3.13")
-RDKIT_VERSIONS=("2025.03.1" "2024.09.6")
+PYTHON_VERSIONS=("3.10" "3.11" "3.12" "3.13")
+RDKIT_VERSIONS=("2024.09.6" "2025.03.1" "2025.03.2"  "2025.03.3"  "2025.03.4"  "2025.03.5"  "2025.03.6" "2025.09.1" "2025.09.2" "2025.09.3")
 
 for PYTHON_VERSION in "${PYTHON_VERSIONS[@]}"; do
   for RDKIT_VERSION in "${RDKIT_VERSIONS[@]}"; do

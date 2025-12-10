@@ -22,12 +22,16 @@ if(NVMOLKIT_CUDA_TARGET_MODE STREQUAL "native")
       "NVMOLKIT_CUDA_TARGET_MODE=native: Using native CUDA architecture for fast local builds"
   )
 elseif(NVMOLKIT_CUDA_TARGET_MODE STREQUAL "full")
-  set(_nvmolkit_cuda_arch_list "70;75-real;80-real;86-real;89-real;90-real")
+  set(_nvmolkit_cuda_arch_list "70-real;75-real;80-real;86-real;90-real;90")
   if(DEFINED CUDAToolkit_VERSION)
     string(REPLACE "." ";" _cuda_version_list "${CUDAToolkit_VERSION}")
     list(GET _cuda_version_list 0 _cuda_major)
     list(GET _cuda_version_list 1 _cuda_minor)
     math(EXPR _cuda_version_num "${_cuda_major} * 100 + ${_cuda_minor}")
+    if(_cuda_major GREATER_EQUAL 13)
+      list(REMOVE_ITEM _nvmolkit_cuda_arch_list "70-real")
+      message(STATUS "CUDA >= 13 detected, removing Volta (70-real) arch")
+    endif()
     if(_cuda_version_num GREATER_EQUAL 1208)
       list(APPEND _nvmolkit_cuda_arch_list "100-real")
       message(
@@ -64,10 +68,10 @@ else() # default
           "  Resetting to 70.")
     endif()
   else()
-    set(CMAKE_CUDA_ARCHITECTURES 70)
+    set(CMAKE_CUDA_ARCHITECTURES 80)
     message(
       STATUS
-        "NVMOLKIT_CUDA_TARGET_MODE=default: No CMAKE_CUDA_ARCHITECTURES set, defaulting to 70"
+        "NVMOLKIT_CUDA_TARGET_MODE=default: No CMAKE_CUDA_ARCHITECTURES set, defaulting to 80"
     )
   endif()
 endif()
