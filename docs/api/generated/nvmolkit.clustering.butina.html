@@ -9,7 +9,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>MorganFingerprintGenerator &#8212; nvMolKit</title>
+    <title>butina &#8212; nvMolKit</title>
   
   
   
@@ -48,12 +48,12 @@
     <script src="../../_static/thebelab-helper.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@jupyter-widgets/html-manager@^1.0.1/dist/embed-amd.js"></script>
-    <script>DOCUMENTATION_OPTIONS.pagename = 'api/generated/nvmolkit.fingerprints.MorganFingerprintGenerator';</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'api/generated/nvmolkit.clustering.butina';</script>
     <link rel="icon" href="../../_static/favicon.png"/>
     <link rel="index" title="Index" href="../../genindex.html" />
     <link rel="search" title="Search" href="../../search.html" />
-    <link rel="next" title="pack_fingerprint" href="nvmolkit.fingerprints.pack_fingerprint.html" />
-    <link rel="prev" title="nvMolKit APIs" href="../nvmolkit.html" />
+    <link rel="next" title="AsyncGpuResult" href="nvmolkit.types.AsyncGpuResult.html" />
+    <link rel="prev" title="MMFFOptimizeMoleculesConfs" href="nvmolkit.mmffOptimization.MMFFOptimizeMoleculesConfs.html" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
@@ -255,7 +255,7 @@
 </ul>
 <ul class="current nav bd-sidenav">
 <li class="toctree-l1 current active has-children"><a class="reference internal" href="../nvmolkit.html">nvMolKit APIs</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
-<li class="toctree-l2 current active"><a class="current reference internal" href="#">MorganFingerprintGenerator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="nvmolkit.fingerprints.MorganFingerprintGenerator.html">MorganFingerprintGenerator</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.fingerprints.pack_fingerprint.html">pack_fingerprint</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.fingerprints.unpack_fingerprint.html">unpack_fingerprint</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.similarity.crossTanimotoSimilarity.html">crossTanimotoSimilarity</a></li>
@@ -264,7 +264,7 @@
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.similarity.crossCosineSimilarityMemoryConstrained.html">crossCosineSimilarityMemoryConstrained</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.embedMolecules.EmbedMolecules.html">EmbedMolecules</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.mmffOptimization.MMFFOptimizeMoleculesConfs.html">MMFFOptimizeMoleculesConfs</a></li>
-<li class="toctree-l2"><a class="reference internal" href="nvmolkit.clustering.butina.html">butina</a></li>
+<li class="toctree-l2 current active"><a class="current reference internal" href="#">butina</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.types.AsyncGpuResult.html">AsyncGpuResult</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.types.HardwareOptions.html">HardwareOptions</a></li>
 </ul>
@@ -309,7 +309,7 @@
     
     <li class="breadcrumb-item"><a href="../nvmolkit.html" class="nav-link">nvMolKit APIs</a></li>
     
-    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">MorganFingerprintGenerator</span></li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">butina</span></li>
   </ul>
 </nav>
 </div>
@@ -326,55 +326,49 @@
 <div id="searchbox"></div>
                 <article class="bd-article">
                   
-  <section id="morganfingerprintgenerator">
-<h1>MorganFingerprintGenerator<a class="headerlink" href="#morganfingerprintgenerator" title="Link to this heading">#</a></h1>
-<dl class="py class">
-<dt class="sig sig-object py" id="nvmolkit.fingerprints.MorganFingerprintGenerator">
-<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">nvmolkit.fingerprints.</span></span><span class="sig-name descname"><span class="pre">MorganFingerprintGenerator</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">radius</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">fpSize</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span></em><span class="sig-paren">)</span><a class="headerlink" href="#nvmolkit.fingerprints.MorganFingerprintGenerator" title="Link to this definition">#</a></dt>
-<dd><p>Morgan fingerprint generator.</p>
-<dl class="py method">
-<dt class="sig sig-object py" id="nvmolkit.fingerprints.MorganFingerprintGenerator.__init__">
-<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">radius</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">fpSize</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span></em><span class="sig-paren">)</span><a class="headerlink" href="#nvmolkit.fingerprints.MorganFingerprintGenerator.__init__" title="Link to this definition">#</a></dt>
-<dd><p>Initialize the Morgan fingerprint generator.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>radius</strong> – The radius of the Morgan fingerprint.</p></li>
-<li><p><strong>fpSize</strong> – The size of the fingerprint. Must be one of {128, 256, 512, 1024, 2048}.</p></li>
-</ul>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py method">
-<dt class="sig sig-object py" id="nvmolkit.fingerprints.MorganFingerprintGenerator.GetFingerprints">
-<span class="sig-name descname"><span class="pre">GetFingerprints</span></span><span class="sig-paren">(</span>
+  <section id="butina">
+<h1>butina<a class="headerlink" href="#butina" title="Link to this heading">#</a></h1>
+<dl class="py function">
+<dt class="sig sig-object py" id="nvmolkit.clustering.butina">
+<span class="sig-prename descclassname"><span class="pre">nvmolkit.clustering.</span></span><span class="sig-name descname"><span class="pre">butina</span></span><span class="sig-paren">(</span>
 
 <dl>
-<dd><em class="sig-param"><span class="n"><span class="pre">mols</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a></span></em>,</dd>
-<dd><em class="sig-param"><span class="n"><span class="pre">num_threads</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0</span></span></em>,</dd>
+<dd><em class="sig-param"><span class="n"><span class="pre">distance_matrix</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="nvmolkit.types.AsyncGpuResult.html#nvmolkit.types.AsyncGpuResult" title="nvmolkit.types.AsyncGpuResult"><span class="pre">AsyncGpuResult</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Tensor</span></span></em>,</dd>
+<dd><em class="sig-param"><span class="n"><span class="pre">cutoff</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><span class="pre">float</span></a></span></em>,</dd>
+<dd><em class="sig-param"><span class="n"><span class="pre">neighborlist_max_size</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">64</span></span></em>,</dd>
 </dl>
 
-<span class="sig-paren">)</span><a class="headerlink" href="#nvmolkit.fingerprints.MorganFingerprintGenerator.GetFingerprints" title="Link to this definition">#</a></dt>
-<dd><p>Compute Morgan fingerprints for a list of molecules.</p>
-<p>Preprocessing of fingerprinting features is done on the CPU, and is parallelized with the <cite>num_threads</cite> argument.
-The resulting tensor has dtype torch.int32 and contains a packed fingerprint for each molecule, one row per molecule.</p>
-<p>Packed fingerprints can be passed directly to nvMolKit similarity calculations, or unpacked
-via <cite>unpack_fingerprint</cite>.</p>
+<span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="nvmolkit.types.AsyncGpuResult.html#nvmolkit.types.AsyncGpuResult" title="nvmolkit.types.AsyncGpuResult"><span class="pre">AsyncGpuResult</span></a></span></span><a class="headerlink" href="#nvmolkit.clustering.butina" title="Link to this definition">#</a></dt>
+<dd><p>Perform Butina clustering on a distance matrix.</p>
+<p>The Butina algorithm is a deterministic clustering method that groups items based
+on distance thresholds. It iteratively:
+1. Finds the item with the most neighbors within the cutoff distance
+2. Forms a cluster with that item and all its neighbors
+3. Removes clustered items from consideration
+4. Repeats until all items are clustered</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>mols</strong> – List of RDKit molecules to generate fingerprints for</p></li>
-<li><p><strong>num_threads</strong> – Number of CPU threads to use for fingerprint generation. If 0, uses all available threads.</p></li>
+<li><p><strong>distance_matrix</strong> – Square distance matrix of shape (N, N) where N is the number
+of items. Can be an AsyncGpuResult or torch.Tensor on GPU.</p></li>
+<li><p><strong>cutoff</strong> – Distance threshold for clustering. Items are neighbors if their
+distance is less than this cutoff.</p></li>
+<li><p><strong>neighborlist_max_size</strong> – Maximum size of the neighborlist used for small cluster
+optimization. Must be 8, 16, 24, 32, 64, or 128. Larger values
+allow parallel processing of larger clusters but use more
+shared memory.</p></li>
 </ul>
 </dd>
 <dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>AsyncGpuResult wrapping a torch.Tensor of shape (len(mols), fpSize / 32) containing the fingerprints.
-Each row is a fingerprint for the corresponding molecule.</p>
+<dd class="field-even"><p>AsyncGpuResult containing cluster assignments as integers. Each element i
+contains the cluster ID for item i. Cluster IDs are sequential integers
+starting from 0, with cluster 0 being the largest.</p>
 </dd>
 </dl>
-</dd></dl>
-
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The distance matrix should be symmetric and have zeros on the diagonal.</p>
+</div>
 </dd></dl>
 
 </section>
@@ -390,20 +384,20 @@ Each row is a fingerprint for the corresponding molecule.</p>
                   
 <div class="prev-next-area">
     <a class="left-prev"
-       href="../nvmolkit.html"
+       href="nvmolkit.mmffOptimization.MMFFOptimizeMoleculesConfs.html"
        title="previous page">
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
         <p class="prev-next-subtitle">previous</p>
-        <p class="prev-next-title">nvMolKit APIs</p>
+        <p class="prev-next-title">MMFFOptimizeMoleculesConfs</p>
       </div>
     </a>
     <a class="right-next"
-       href="nvmolkit.fingerprints.pack_fingerprint.html"
+       href="nvmolkit.types.AsyncGpuResult.html"
        title="next page">
       <div class="prev-next-info">
         <p class="prev-next-subtitle">next</p>
-        <p class="prev-next-title">pack_fingerprint</p>
+        <p class="prev-next-title">AsyncGpuResult</p>
       </div>
       <i class="fa-solid fa-angle-right"></i>
     </a>
@@ -428,11 +422,7 @@ Each row is a fingerprint for the corresponding molecule.</p>
   </div>
   <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="visible nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#nvmolkit.fingerprints.MorganFingerprintGenerator"><code class="docutils literal notranslate"><span class="pre">MorganFingerprintGenerator</span></code></a><ul class="nav section-nav flex-column">
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nvmolkit.fingerprints.MorganFingerprintGenerator.__init__"><code class="docutils literal notranslate"><span class="pre">__init__()</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nvmolkit.fingerprints.MorganFingerprintGenerator.GetFingerprints"><code class="docutils literal notranslate"><span class="pre">GetFingerprints()</span></code></a></li>
-</ul>
-</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#nvmolkit.clustering.butina"><code class="docutils literal notranslate"><span class="pre">butina()</span></code></a></li>
 </ul>
   </nav></div>
 

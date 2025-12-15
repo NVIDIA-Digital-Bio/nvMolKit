@@ -42,7 +42,7 @@
   <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
 <link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
 
-    <script src="_static/documentation_options.js?v=938c9ccc"></script>
+    <script src="_static/documentation_options.js?v=e259d695"></script>
     <script src="_static/doctools.js?v=9bcbadda"></script>
     <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="_static/thebelab-helper.js"></script>
@@ -56,7 +56,7 @@
 
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
-  <meta name="docsearch:version" content="0.2.0" />
+  <meta name="docsearch:version" content="0.3.0" />
 
 
   </head>
@@ -263,6 +263,7 @@
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.similarity.crossCosineSimilarityMemoryConstrained.html">crossCosineSimilarityMemoryConstrained</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.embedMolecules.EmbedMolecules.html">EmbedMolecules</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.mmffOptimization.MMFFOptimizeMoleculesConfs.html">MMFFOptimizeMoleculesConfs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.clustering.butina.html">butina</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.types.AsyncGpuResult.html">AsyncGpuResult</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.types.HardwareOptions.html">HardwareOptions</a></li>
 </ul>
@@ -363,7 +364,7 @@ A CUDA Driver compatible with CUDA 12.6 or later is also required (driver versio
 <h3>Conda Forge<a class="headerlink" href="#conda-forge" title="Link to this heading">#</a></h3>
 <p>Conda is the recommended way to install nvMolKit, in line with RDKit’s recommended installation practice. First, ensure
 you have a conda-based environment manager installed and activated, such as <a class="reference external" href="https://docs.conda.io/en/latest/miniconda.html">Miniconda</a> or <a class="reference external" href="https://conda-forge.org/download/">Miniforge</a>.</p>
-<p>nvMolKit v0.2.0 supports RDKit 2024.09.6 and 2025.03.1.</p>
+<p>nvMolKit v0.3.0 supports RDKit 2024.09.6 through 2025.09.3.</p>
 <p>To install with conda, run:</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">conda</span> <span class="n">install</span> <span class="o">-</span><span class="n">c</span> <span class="n">conda</span><span class="o">-</span><span class="n">forge</span> <span class="n">nvmolkit</span>
 </pre></div>
@@ -413,6 +414,7 @@ you have a conda-based environment manager installed and activated, such as <a c
 </dd>
 </dl>
 </li>
+<li><p><strong>Butina clustering</strong>: GPU-accelerated clustering from a distance matrix via the Taylor-Butina method</p></li>
 </ul>
 </section>
 <section id="asynchronous-gpu-results">

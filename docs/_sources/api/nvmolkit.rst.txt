@@ -49,6 +49,15 @@ MMFF Optimization
 
    mmffOptimization.MMFFOptimizeMoleculesConfs
 
+Butina Clustering
+-----------------
+
+.. autosummary::
+   :toctree: generated/
+   :template: function_template.rst
+
+   clustering.butina
+
 Types
 -----
 
