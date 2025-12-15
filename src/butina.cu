@@ -592,34 +592,67 @@ template <typename T> void setAll(const cuda::std::span<T>& vec, const T& value,
   cudaCheckError(cudaGetLastError());
 }
 
-void innerButinaLoop(const int                            numPoints,
-                     const cuda::std::span<const uint8_t> hitMatrix,
-                     const cuda::std::span<int>           clusters,
-                     const cuda::std::span<int>           clusterSizesSpan,
-                     const AsyncDevicePtr<int>&           maxIndex,
-                     const AsyncDevicePtr<int>&           maxValue,
-                     const AsyncDevicePtr<int>&           clusterIdx,
-                     PinnedHostVector<int>&               maxCluster,
-                     ArgMaxRunner&                        argMaxRunner,
-                     cudaStream_t                         stream) {
-  const int numBlocksFlat = ((static_cast<int>(clusterSizesSpan.size()) - 1) / blockSizeCount) + 1;
+//! CUDA Graph wrapper for the inner Butina loop (large cluster path).
+//! Captures the sequence: CountClusterSize -> ArgMax -> WriteClusterValue -> BumpClusterIdx -> MemcpyAsync
+//! This reduces CPU overhead by avoiding repeated kernel launch setup.
+class ButinaInnerLoopGraph {
+ public:
+  ButinaInnerLoopGraph() = default;
 
-  butinaKernelCountClusterSize<<<numPoints, blockSizeCount, 0, stream>>>(hitMatrix, clusters, clusterSizesSpan);
-  cudaCheckError(cudaGetLastError());
+  ~ButinaInnerLoopGraph() { destroy(); }
 
-  argMaxRunner(clusterSizesSpan.data(), maxValue.data(), maxIndex.data(), static_cast<int>(clusterSizesSpan.size()));
+  // Non-copyable
+  ButinaInnerLoopGraph(const ButinaInnerLoopGraph&)            = delete;
+  ButinaInnerLoopGraph& operator=(const ButinaInnerLoopGraph&) = delete;
 
-  butinaWriteClusterValue<<<numBlocksFlat, blockSizeCount, 0, stream>>>(hitMatrix,
-                                                                        clusters,
-                                                                        maxIndex.data(),
-                                                                        clusterIdx.data(),
-                                                                        maxValue.data());
-  cudaCheckError(cudaGetLastError());
-  bumpClusterIdxKernel<<<1, 1, 0, stream>>>(clusterIdx.data(), maxValue.data());
-  cudaCheckError(cudaGetLastError());
-  cudaCheckError(cudaMemcpyAsync(maxCluster.data(), maxValue.data(), sizeof(int), cudaMemcpyDefault, stream));
-  cudaStreamSynchronize(stream);
-}
+  //! Capture the inner loop operations into a CUDA graph
+  void capture(int                                  numPoints,
+               int                                  numBlocksFlat,
+               const cuda::std::span<const uint8_t> hitMatrix,
+               const cuda::std::span<int>           clusters,
+               const cuda::std::span<int>           clusterSizesSpan,
+               int*                                 maxIndexPtr,
+               int*                                 maxValuePtr,
+               int*                                 clusterIdxPtr,
+               int*                                 hostMaxCluster,
+               ArgMaxRunner&                        argMaxRunner,
+               cudaStream_t                         stream) {
+    destroy();  // Clean up any existing graph
+
+    cudaCheckError(cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal));
+
+    butinaKernelCountClusterSize<<<numPoints, blockSizeCount, 0, stream>>>(hitMatrix, clusters, clusterSizesSpan);
+    argMaxRunner(clusterSizesSpan.data(), maxValuePtr, maxIndexPtr, static_cast<int>(clusterSizesSpan.size()));
+    butinaWriteClusterValue<<<numBlocksFlat, blockSizeCount, 0, stream>>>(hitMatrix,
+                                                                          clusters,
+                                                                          maxIndexPtr,
+                                                                          clusterIdxPtr,
+                                                                          maxValuePtr);
+    bumpClusterIdxKernel<<<1, 1, 0, stream>>>(clusterIdxPtr, maxValuePtr);
+    cudaMemcpyAsync(hostMaxCluster, maxValuePtr, sizeof(int), cudaMemcpyDefault, stream);
+
+    cudaCheckError(cudaStreamEndCapture(stream, &graph_));
+    cudaCheckError(cudaGraphInstantiate(&graphExec_, graph_, nullptr, nullptr, 0));
+  }
+
+  //! Launch the captured graph
+  void launch(cudaStream_t stream) { cudaCheckError(cudaGraphLaunch(graphExec_, stream)); }
+
+ private:
+  void destroy() {
+    if (graphExec_) {
+      cudaGraphExecDestroy(graphExec_);
+      graphExec_ = nullptr;
+    }
+    if (graph_) {
+      cudaGraphDestroy(graph_);
+      graph_ = nullptr;
+    }
+  }
+
+  cudaGraph_t     graph_     = nullptr;
+  cudaGraphExec_t graphExec_ = nullptr;
+};
 
 /**
  * @brief Build the initial neighborlist and cluster sizes from the hit matrix.
@@ -707,19 +740,31 @@ void butinaGpuImpl(const cuda::std::span<const uint8_t> hitMatrix,
 
   // If a neighborlist is up to N, then the cluster is up to N+1 (including the central point).
   constexpr int clusterSizeWithMaxNeighborlist = NeighborlistMaxSize + 1;
-  while (maxCluster[0] >= clusterSizeWithMaxNeighborlist) {
-    const std::string     maxClusterSize = std::to_string(maxCluster[0]);
-    const ScopedNvtxRange loopRange("Large cluster Butina Loop, max cluster: " + maxClusterSize);
-    innerButinaLoop(numPoints,
-                    hitMatrix,
-                    clusters,
-                    clusterSizesSpan,
-                    maxIndex,
-                    maxValue,
-                    clusterIdx,
-                    maxCluster,
-                    argMaxRunner,
-                    stream);
+
+  // Use CUDA Graph to reduce CPU overhead in the large cluster loop
+  if (maxCluster[0] >= clusterSizeWithMaxNeighborlist) {
+    const int            numBlocksFlat = ((static_cast<int>(clusterSizesSpan.size()) - 1) / blockSizeCount) + 1;
+    ButinaInnerLoopGraph innerLoopGraph;
+    ScopedNvtxRange      captureRange("Capture inner loop graph");
+    innerLoopGraph.capture(static_cast<int>(numPoints),
+                           numBlocksFlat,
+                           hitMatrix,
+                           clusters,
+                           clusterSizesSpan,
+                           maxIndex.data(),
+                           maxValue.data(),
+                           clusterIdx.data(),
+                           maxCluster.data(),
+                           argMaxRunner,
+                           stream);
+    captureRange.pop();
+
+    while (maxCluster[0] >= clusterSizeWithMaxNeighborlist) {
+      const std::string     maxClusterSize = std::to_string(maxCluster[0]);
+      const ScopedNvtxRange loopRange("Large cluster Butina Loop (graph), max cluster: " + maxClusterSize);
+      innerLoopGraph.launch(stream);
+      cudaStreamSynchronize(stream);
+    }
   }
 
   // Build neighborlist once, then prune dynamically instead of rebuilding each iteration
