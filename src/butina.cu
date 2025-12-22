@@ -616,9 +616,75 @@ __global__ void checkLoopConditionKernel(cudaGraphConditionalHandle handle, cons
   cudaGraphSetConditional(handle, (*maxValue >= threshold) ? 1 : 0);
 }
 
+//! Inner loop iteration for Butina clustering.
+void innerButinaLoop(const int                            numPoints,
+                     const cuda::std::span<const uint8_t> hitMatrix,
+                     const cuda::std::span<int>           clusters,
+                     const cuda::std::span<int>           clusterSizesSpan,
+                     int*                                 maxIndexPtr,
+                     int*                                 maxValuePtr,
+                     int*                                 clusterIdxPtr,
+                     ArgMaxRunner&                        argMaxRunner,
+                     cudaStream_t                         stream) {
+  const int numBlocksFlat = ((static_cast<int>(clusterSizesSpan.size()) - 1) / blockSizeCount) + 1;
+
+  butinaKernelCountClusterSize<<<numPoints, blockSizeCount, 0, stream>>>(hitMatrix, clusters, clusterSizesSpan);
+  cudaCheckError(cudaGetLastError());
+
+  argMaxRunner.captureOn(stream,
+                         clusterSizesSpan.data(),
+                         maxValuePtr,
+                         maxIndexPtr,
+                         static_cast<int>(clusterSizesSpan.size()));
+
+  butinaWriteClusterValue<<<numBlocksFlat, blockSizeCount, 0, stream>>>(hitMatrix,
+                                                                        clusters,
+                                                                        maxIndexPtr,
+                                                                        clusterIdxPtr,
+                                                                        maxValuePtr);
+  cudaCheckError(cudaGetLastError());
+  bumpClusterIdxKernel<<<1, 1, 0, stream>>>(clusterIdxPtr, maxValuePtr);
+  cudaCheckError(cudaGetLastError());
+}
+
+//! Inner loop iteration that attempts assignment then prunes neighborlists.
+template <int NeighborlistMaxSize>
+void innerButinaLoopWithPruning(const int                  numPoints,
+                                const cuda::std::span<int> clusters,
+                                const cuda::std::span<int> clusterSizesSpan,
+                                int*                       maxIndexPtr,
+                                int*                       maxValuePtr,
+                                int*                       clusterIdxPtr,
+                                const cuda::std::span<int> neighborList,
+                                ArgMaxRunner&              argMaxRunner,
+                                cudaStream_t               stream) {
+  const int numBlocksAssign = (numPoints + kTilesPerBlockAssign - 1) / kTilesPerBlockAssign;
+  attemptAssignClustersFromNeighborlist<NeighborlistMaxSize>
+    <<<numBlocksAssign, blockSizeAssign, 0, stream>>>(clusters,
+                                                      clusterSizesSpan,
+                                                      neighborList,
+                                                      maxIndexPtr,
+                                                      clusterIdxPtr);
+  cudaCheckError(cudaGetLastError());
+
+  // Prune assigned neighbors from all neighborlists and update counts
+  constexpr int kWarpsPerBlock  = 4;
+  constexpr int kPruneBlockSize = kWarpsPerBlock * 32;
+  const int     numBlocksPrune  = (numPoints + kWarpsPerBlock - 1) / kWarpsPerBlock;
+  pruneNeighborlistKernel<NeighborlistMaxSize>
+    <<<numBlocksPrune, kPruneBlockSize, 0, stream>>>(clusters, clusterSizesSpan, neighborList);
+  cudaCheckError(cudaGetLastError());
+
+  // Compute argmax for next iteration
+  argMaxRunner.captureOn(stream,
+                         clusterSizesSpan.data(),
+                         maxValuePtr,
+                         maxIndexPtr,
+                         static_cast<int>(clusterSizesSpan.size()));
+}
+
 //! CUDA Graph wrapper for the inner Butina loop using conditional WHILE node.
 //! The GPU decides when to exit the loop - no CPU synchronization needed per iteration.
-//! Requires CUDA 12.3+.
 class ButinaInnerLoopGraph {
  public:
   ButinaInnerLoopGraph() = default;
@@ -631,7 +697,6 @@ class ButinaInnerLoopGraph {
 
   //! Build the graph with a conditional WHILE node for the inner loop
   void build(int                                  numPoints,
-             int                                  numBlocksFlat,
              const cuda::std::span<const uint8_t> hitMatrix,
              const cuda::std::span<int>           clusters,
              const cuda::std::span<int>           clusterSizesSpan,
@@ -667,30 +732,18 @@ class ButinaInnerLoopGraph {
     cudaCheckError(
       cudaStreamBeginCaptureToGraph(captureStream, bodyGraph, nullptr, nullptr, 0, cudaStreamCaptureModeRelaxed));
 
-    // Loop body operations:
-    // 1. Count cluster sizes
-    butinaKernelCountClusterSize<<<numPoints, blockSizeCount, 0, captureStream>>>(hitMatrix,
-                                                                                  clusters,
-                                                                                  clusterSizesSpan);
+    // Capture the inner loop kernel sequence
+    innerButinaLoop(numPoints,
+                    hitMatrix,
+                    clusters,
+                    clusterSizesSpan,
+                    maxIndexPtr,
+                    maxValuePtr,
+                    clusterIdxPtr,
+                    argMaxRunner,
+                    captureStream);
 
-    // 2. Find max cluster (ArgMax)
-    argMaxRunner.captureOn(captureStream,
-                           clusterSizesSpan.data(),
-                           maxValuePtr,
-                           maxIndexPtr,
-                           static_cast<int>(clusterSizesSpan.size()));
-
-    // 3. Write cluster assignments
-    butinaWriteClusterValue<<<numBlocksFlat, blockSizeCount, 0, captureStream>>>(hitMatrix,
-                                                                                 clusters,
-                                                                                 maxIndexPtr,
-                                                                                 clusterIdxPtr,
-                                                                                 maxValuePtr);
-
-    // 4. Bump cluster index
-    bumpClusterIdxKernel<<<1, 1, 0, captureStream>>>(clusterIdxPtr, maxValuePtr);
-
-    // 5. Check condition for next iteration (sets handle)
+    // Check condition for next iteration (sets handle)
     checkLoopConditionKernel<<<1, 1, 0, captureStream>>>(handle_, maxValuePtr, threshold);
 
     cudaCheckError(cudaStreamEndCapture(captureStream, nullptr));
@@ -770,32 +823,18 @@ template <int NeighborlistMaxSize> class ButinaPruningLoopGraph {
     cudaCheckError(
       cudaStreamBeginCaptureToGraph(captureStream, bodyGraph, nullptr, nullptr, 0, cudaStreamCaptureModeRelaxed));
 
-    // Loop body operations:
-    // 1. Attempt to assign clusters from neighborlist
-    const int numBlocksAssign = (numPoints + kTilesPerBlockAssign - 1) / kTilesPerBlockAssign;
-    attemptAssignClustersFromNeighborlist<NeighborlistMaxSize>
-      <<<numBlocksAssign, blockSizeAssign, 0, captureStream>>>(clusters,
-                                                               clusterSizesSpan,
-                                                               neighborListSpan,
-                                                               maxIndexPtr,
-                                                               clusterIdxPtr);
+    // Capture the pruning loop kernel sequence
+    innerButinaLoopWithPruning<NeighborlistMaxSize>(numPoints,
+                                                    clusters,
+                                                    clusterSizesSpan,
+                                                    maxIndexPtr,
+                                                    maxValuePtr,
+                                                    clusterIdxPtr,
+                                                    neighborListSpan,
+                                                    argMaxRunner,
+                                                    captureStream);
 
-    // 2. Prune assigned neighbors from all neighborlists and update counts
-    constexpr int kWarpsPerBlock  = 4;
-    constexpr int kPruneBlockSize = kWarpsPerBlock * 32;
-    const int     numBlocksPrune  = (numPoints + kWarpsPerBlock - 1) / kWarpsPerBlock;
-    pruneNeighborlistKernel<NeighborlistMaxSize>
-      <<<numBlocksPrune, kPruneBlockSize, 0, captureStream>>>(clusters, clusterSizesSpan, neighborListSpan);
-
-    // 3. Compute argmax for next iteration
-    argMaxRunner.captureOn(captureStream,
-                           clusterSizesSpan.data(),
-                           maxValuePtr,
-                           maxIndexPtr,
-                           static_cast<int>(clusterSizesSpan.size()));
-
-    // 4. Check condition for next iteration (sets handle)
-    // Continue looping if maxValue >= kMinLoopSizeForAssignment
+    // Check condition for next iteration (sets handle)
     checkLoopConditionKernel<<<1, 1, 0, captureStream>>>(handle_, maxValuePtr, kMinLoopSizeForAssignment);
 
     cudaCheckError(cudaStreamEndCapture(captureStream, nullptr));
@@ -878,11 +917,9 @@ void butinaGpuImpl(const cuda::std::span<const uint8_t> hitMatrix,
   // Use CUDA Graph with conditional WHILE node for fully GPU-side loop control.
   // The GPU decides when to exit - no CPU synchronization needed per iteration.
   {
-    const int            numBlocksFlat = ((static_cast<int>(clusterSizesSpan.size()) - 1) / blockSizeCount) + 1;
     ButinaInnerLoopGraph innerLoopGraph;
     ScopedNvtxRange      buildRange("Build inner loop graph with WHILE node");
     innerLoopGraph.build(static_cast<int>(numPoints),
-                         numBlocksFlat,
                          hitMatrix,
                          clusters,
                          clusterSizesSpan,
