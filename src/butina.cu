@@ -686,26 +686,15 @@ void innerButinaLoopWithPruning(const int                  numPoints,
 //! The GPU decides when to exit the loop - no CPU synchronization needed per iteration.
 class ButinaInnerLoopGraph {
  public:
-  ButinaInnerLoopGraph() = default;
-
-  ~ButinaInnerLoopGraph() { destroy(); }
-
-  // Non-copyable
-  ButinaInnerLoopGraph(const ButinaInnerLoopGraph&)            = delete;
-  ButinaInnerLoopGraph& operator=(const ButinaInnerLoopGraph&) = delete;
-
-  //! Build the graph with a conditional WHILE node for the inner loop
-  void build(int                                  numPoints,
-             const cuda::std::span<const uint8_t> hitMatrix,
-             const cuda::std::span<int>           clusters,
-             const cuda::std::span<int>           clusterSizesSpan,
-             int*                                 maxIndexPtr,
-             int*                                 maxValuePtr,
-             int*                                 clusterIdxPtr,
-             int                                  threshold,
-             ArgMaxRunner&                        argMaxRunner) {
-    destroy();  // Clean up any existing graph
-
+  ButinaInnerLoopGraph(int                                  numPoints,
+                       const cuda::std::span<const uint8_t> hitMatrix,
+                       const cuda::std::span<int>           clusters,
+                       const cuda::std::span<int>           clusterSizesSpan,
+                       int*                                 maxIndexPtr,
+                       int*                                 maxValuePtr,
+                       int*                                 clusterIdxPtr,
+                       int                                  threshold,
+                       ArgMaxRunner&                        argMaxRunner) {
     // Create the parent graph
     cudaCheckError(cudaGraphCreate(&graph_, 0));
 
@@ -756,23 +745,19 @@ class ButinaInnerLoopGraph {
     cudaCheckError(cudaGraphInstantiate(&graphExec_, graph_, nullptr, nullptr, 0));
   }
 
+  ~ButinaInnerLoopGraph() {
+    if (graphExec_) {
+      cudaGraphExecDestroy(graphExec_);
+    }
+    if (graph_) {
+      cudaGraphDestroy(graph_);
+    }
+  }
+
   //! Launch the graph - GPU executes all iterations until condition fails
   void launch(cudaStream_t stream) { cudaCheckError(cudaGraphLaunch(graphExec_, stream)); }
 
  private:
-  void destroy() {
-    if (graphExec_) {
-      cudaGraphExecDestroy(graphExec_);
-      graphExec_ = nullptr;
-    }
-    if (graph_) {
-      cudaGraphDestroy(graph_);
-      graph_ = nullptr;
-    }
-    // Note: handle is destroyed when graph is destroyed
-    handle_ = {};
-  }
-
   cudaGraph_t                graph_     = nullptr;
   cudaGraphExec_t            graphExec_ = nullptr;
   cudaGraphConditionalHandle handle_    = {};
@@ -782,25 +767,14 @@ class ButinaInnerLoopGraph {
 //! This handles small clusters with neighborlist-based assignment and pruning.
 template <int NeighborlistMaxSize> class ButinaPruningLoopGraph {
  public:
-  ButinaPruningLoopGraph() = default;
-
-  ~ButinaPruningLoopGraph() { destroy(); }
-
-  // Non-copyable
-  ButinaPruningLoopGraph(const ButinaPruningLoopGraph&)            = delete;
-  ButinaPruningLoopGraph& operator=(const ButinaPruningLoopGraph&) = delete;
-
-  //! Build the graph with a conditional WHILE node for the pruning loop
-  void build(int                        numPoints,
-             const cuda::std::span<int> clusters,
-             const cuda::std::span<int> clusterSizesSpan,
-             const cuda::std::span<int> neighborListSpan,
-             int*                       maxIndexPtr,
-             int*                       maxValuePtr,
-             int*                       clusterIdxPtr,
-             ArgMaxRunner&              argMaxRunner) {
-    destroy();  // Clean up any existing graph
-
+  ButinaPruningLoopGraph(int                        numPoints,
+                         const cuda::std::span<int> clusters,
+                         const cuda::std::span<int> clusterSizesSpan,
+                         const cuda::std::span<int> neighborListSpan,
+                         int*                       maxIndexPtr,
+                         int*                       maxValuePtr,
+                         int*                       clusterIdxPtr,
+                         ArgMaxRunner&              argMaxRunner) {
     // Create the parent graph
     cudaCheckError(cudaGraphCreate(&graph_, 0));
 
@@ -851,22 +825,19 @@ template <int NeighborlistMaxSize> class ButinaPruningLoopGraph {
     cudaCheckError(cudaGraphInstantiate(&graphExec_, graph_, nullptr, nullptr, 0));
   }
 
+  ~ButinaPruningLoopGraph() {
+    if (graphExec_) {
+      cudaGraphExecDestroy(graphExec_);
+    }
+    if (graph_) {
+      cudaGraphDestroy(graph_);
+    }
+  }
+
   //! Launch the graph - GPU executes all iterations until condition fails
   void launch(cudaStream_t stream) { cudaCheckError(cudaGraphLaunch(graphExec_, stream)); }
 
  private:
-  void destroy() {
-    if (graphExec_) {
-      cudaGraphExecDestroy(graphExec_);
-      graphExec_ = nullptr;
-    }
-    if (graph_) {
-      cudaGraphDestroy(graph_);
-      graph_ = nullptr;
-    }
-    handle_ = {};
-  }
-
   cudaGraph_t                graph_     = nullptr;
   cudaGraphExec_t            graphExec_ = nullptr;
   cudaGraphConditionalHandle handle_    = {};
@@ -924,17 +895,16 @@ void butinaGpuImpl(const cuda::std::span<const uint8_t> hitMatrix,
   // Use CUDA Graph with conditional WHILE node for fully GPU-side loop control.
   // The GPU decides when to exit - no CPU synchronization needed per iteration.
   {
-    ButinaInnerLoopGraph innerLoopGraph;
     ScopedNvtxRange      buildRange("Build inner loop graph with WHILE node");
-    innerLoopGraph.build(static_cast<int>(numPoints),
-                         hitMatrix,
-                         clusters,
-                         clusterSizesSpan,
-                         maxIndex.data(),
-                         maxValue.data(),
-                         clusterIdx.data(),
-                         clusterSizeWithMaxNeighborlist,
-                         argMaxRunner);
+    ButinaInnerLoopGraph innerLoopGraph(static_cast<int>(numPoints),
+                                        hitMatrix,
+                                        clusters,
+                                        clusterSizesSpan,
+                                        maxIndex.data(),
+                                        maxValue.data(),
+                                        clusterIdx.data(),
+                                        clusterSizeWithMaxNeighborlist,
+                                        argMaxRunner);
     buildRange.pop();
 
     // Launch once - GPU executes all iterations until maxValue < threshold
@@ -961,25 +931,21 @@ void butinaGpuImpl(const cuda::std::span<const uint8_t> hitMatrix,
     cudaCheckError(cudaStreamSynchronize(stream));
 
     // Use CUDA Graph with conditional WHILE node for fully GPU-side pruning loop control
-    ButinaPruningLoopGraph<NeighborlistMaxSize> pruningLoopGraph;
-    {
-      const ScopedNvtxRange buildRange("Build pruning loop graph with WHILE node");
-      pruningLoopGraph.build(numPoints,
-                             clusters,
-                             clusterSizesSpan,
-                             neighborListSpan,
-                             maxIndex.data(),
-                             maxValue.data(),
-                             clusterIdx.data(),
-                             argMaxRunner);
-    }
+    ScopedNvtxRange                             buildRange("Build pruning loop graph with WHILE node");
+    ButinaPruningLoopGraph<NeighborlistMaxSize> pruningLoopGraph(numPoints,
+                                                                 clusters,
+                                                                 clusterSizesSpan,
+                                                                 neighborListSpan,
+                                                                 maxIndex.data(),
+                                                                 maxValue.data(),
+                                                                 clusterIdx.data(),
+                                                                 argMaxRunner);
+    buildRange.pop();
 
     // Launch once - GPU executes all iterations until maxValue < kMinLoopSizeForAssignment
-    {
-      const ScopedNvtxRange loopRange("Small cluster Butina Loop with pruning (conditional WHILE graph)");
-      pruningLoopGraph.launch(stream);
-      cudaCheckError(cudaStreamSynchronize(stream));
-    }
+    const ScopedNvtxRange loopRange("Small cluster Butina Loop with pruning (conditional WHILE graph)");
+    pruningLoopGraph.launch(stream);
+    cudaCheckError(cudaStreamSynchronize(stream));
   }
 
   assignSingletonIdsKernel<<<1, kSingletonBlockSize, 0, stream>>>(clusters, clusterIdx.data());
