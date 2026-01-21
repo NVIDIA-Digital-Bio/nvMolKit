@@ -33,7 +33,7 @@ target_link_libraries(host_vector INTERFACE CUDA::cudart cuda_error_check)
 target_include_directories(host_vector INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(device device.cpp)
-target_link_libraries(device PRIVATE CUDA::cudart)
+target_link_libraries(device PRIVATE CUDA::cudart cuda_error_check)
 target_include_directories(device INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(rdkit_utils INTERFACE)
