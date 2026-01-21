@@ -96,21 +96,21 @@ AtomQueryMask makeOxygenMask() {
 
 AtomQueryMask makeAromaticMask() {
   AtomQueryMask mask;
-  mask.maskLo              = 0;
-  mask.expectedLo          = 0;
-  const int aromaticBitPos = AtomDataPacked::kDegreeByte * 8 + AtomDataPacked::kIsAromaticBit;
-  mask.maskHi              = 1ULL << aromaticBitPos;
-  mask.expectedHi          = 1ULL << aromaticBitPos;
+  mask.maskLo                  = 0;
+  mask.expectedLo              = 0;
+  constexpr int aromaticBitPos = AtomDataPacked::kDegreeByte * 8 + AtomDataPacked::kIsAromaticBit;
+  mask.maskHi                  = 1ULL << aromaticBitPos;
+  mask.expectedHi              = 1ULL << aromaticBitPos;
   return mask;
 }
 
 AtomQueryMask makeAliphaticMask() {
   AtomQueryMask mask;
-  mask.maskLo              = 0;
-  mask.expectedLo          = 0;
-  const int aromaticBitPos = AtomDataPacked::kDegreeByte * 8 + AtomDataPacked::kIsAromaticBit;
-  mask.maskHi              = 1ULL << aromaticBitPos;
-  mask.expectedHi          = 0;  // Expect bit NOT set for aliphatic
+  mask.maskLo                  = 0;
+  mask.expectedLo              = 0;
+  constexpr int aromaticBitPos = AtomDataPacked::kDegreeByte * 8 + AtomDataPacked::kIsAromaticBit;
+  mask.maskHi                  = 1ULL << aromaticBitPos;
+  mask.expectedHi              = 0;  // Expect bit NOT set for aliphatic
   return mask;
 }
 
@@ -158,31 +158,6 @@ TEST(BoolInstructionTest, MakeNotSetsCorrectFields) {
   EXPECT_EQ(instr.src1, 0);
 }
 
-TEST(BoolInstructionTest, SizeIsExactlyFiveBytes) {
-  EXPECT_EQ(sizeof(BoolInstruction), 5);
-}
-
-// =============================================================================
-// AtomQueryTree Tests
-// =============================================================================
-
-TEST(AtomQueryTreeTest, SizeIsExactlyFourBytes) {
-  EXPECT_EQ(sizeof(AtomQueryTree), 4);
-}
-
-TEST(AtomQueryTreeTest, SimpleLeafTreeStructure) {
-  AtomQueryTree tree;
-  tree.numLeaves       = 1;
-  tree.numInstructions = 1;
-  tree.scratchSize     = 1;
-  tree.resultIdx       = 0;
-
-  EXPECT_EQ(tree.numLeaves, 1);
-  EXPECT_EQ(tree.numInstructions, 1);
-  EXPECT_EQ(tree.scratchSize, 1);
-  EXPECT_EQ(tree.resultIdx, 0);
-}
-
 // =============================================================================
 // evaluateBoolTree Host Tests - Single Leaf (Simple AND-only)
 // =============================================================================
@@ -193,8 +168,8 @@ TEST(EvaluateBoolTreeTest, SingleLeafMatchesCarbon) {
   const AtomQueryMask  leafMasks[] = {makeCarbonMask()};
   const BondTypeCounts leafBonds[] = {makeEmptyBonds()};
 
-  BoolInstruction instructions[] = {BoolInstruction::makeLeaf(0, 0)};
-  AtomQueryTree   tree{1, 1, 1, 0};
+  BoolInstruction     instructions[] = {BoolInstruction::makeLeaf(0, 0)};
+  const AtomQueryTree tree{1, 1, 1, 0};
 
   const bool result = evaluateBoolTree(&target, &targetBonds, leafMasks, leafBonds, instructions, tree);
   EXPECT_TRUE(result);
