@@ -30,6 +30,7 @@ using nvMolKit::BondTypeCounts;
 using nvMolKit::BoolInstruction;
 using nvMolKit::BoolOp;
 using nvMolKit::checkReturnCode;
+using nvMolKit::CompareField;
 using nvMolKit::evaluateBoolTree;
 using nvMolKit::ScopedStream;
 
@@ -1021,4 +1022,541 @@ TEST_F(BoolTreeDeviceTest, RecursiveMatchNegated) {
 
   EXPECT_FALSE(results[0]) << "Target with pattern should NOT match negated recursive pattern";
   EXPECT_TRUE(results[1]) << "Target without pattern should match negated recursive pattern";
+}
+
+// =============================================================================
+// BoolInstruction Factory Tests - Comparison Operations
+// =============================================================================
+
+TEST(BoolInstructionTest, MakeGreaterThanSetsCorrectFields) {
+  const BoolInstruction instr = BoolInstruction::makeGreaterThan(2, CompareField::Degree, 3);
+
+  EXPECT_EQ(instr.op, BoolOp::GreaterThan);
+  EXPECT_EQ(instr.dst, 2);
+  EXPECT_EQ(instr.src1, static_cast<uint8_t>(CompareField::Degree));
+  EXPECT_EQ(instr.src2, 3);
+}
+
+TEST(BoolInstructionTest, MakeLessEqualSetsCorrectFields) {
+  const BoolInstruction instr = BoolInstruction::makeLessEqual(4, CompareField::NumRings, 5);
+
+  EXPECT_EQ(instr.op, BoolOp::LessEqual);
+  EXPECT_EQ(instr.dst, 4);
+  EXPECT_EQ(instr.src1, static_cast<uint8_t>(CompareField::NumRings));
+  EXPECT_EQ(instr.src2, 5);
+}
+
+TEST(BoolInstructionTest, MakeGreaterEqualSetsCorrectFields) {
+  const BoolInstruction instr = BoolInstruction::makeGreaterEqual(1, CompareField::TotalValence, 2);
+
+  EXPECT_EQ(instr.op, BoolOp::GreaterEqual);
+  EXPECT_EQ(instr.dst, 1);
+  EXPECT_EQ(instr.src1, static_cast<uint8_t>(CompareField::TotalValence));
+  EXPECT_EQ(instr.src2, 2);
+}
+
+TEST(BoolInstructionTest, MakeRangeSetsCorrectFields) {
+  const BoolInstruction instr = BoolInstruction::makeRange(3, CompareField::MinRingSize, 5, 7);
+
+  EXPECT_EQ(instr.op, BoolOp::Range);
+  EXPECT_EQ(instr.dst, 3);
+  EXPECT_EQ(instr.src1, static_cast<uint8_t>(CompareField::MinRingSize));
+  EXPECT_EQ(instr.src2, 5);    // minVal
+  EXPECT_EQ(instr.auxArg, 7);  // maxVal
+}
+
+// =============================================================================
+// evaluateBoolTree Host Tests - Empty Tree (Edge Case)
+// =============================================================================
+
+TEST(EvaluateBoolTreeTest, EmptyTreeMatchesAnyAtom) {
+  const AtomDataPacked target      = makeCarbon();
+  const BondTypeCounts targetBonds = makeEmptyBonds();
+  const AtomQueryMask  leafMasks[] = {makeCarbonMask()};
+  const BondTypeCounts leafBonds[] = {makeEmptyBonds()};
+
+  // Empty tree has no instructions
+  AtomQueryTree tree{1, 0, 0, 0};
+
+  const bool result = evaluateBoolTree(&target, &targetBonds, leafMasks, leafBonds, nullptr, tree);
+  EXPECT_TRUE(result);
+}
+
+TEST(EvaluateBoolTreeTest, EmptyTreeWithNoLeavesMatchesAny) {
+  const AtomDataPacked target      = makeNitrogen();
+  const BondTypeCounts targetBonds = makeEmptyBonds();
+
+  AtomQueryTree tree{0, 0, 0, 0};
+
+  const bool result = evaluateBoolTree(&target, &targetBonds, nullptr, nullptr, nullptr, tree);
+  EXPECT_TRUE(result);
+}
+
+TEST(EvaluateBoolTreeTest, EmptyTreeChecksBondsWhenLeafPresent) {
+  AtomDataPacked target;
+  target.setAtomicNum(6);
+  BondTypeCounts targetBonds{1, 0, 0, 0, 0};
+
+  const AtomQueryMask leafMasks[] = {makeCarbonMask()};
+  BondTypeCounts      leafBonds[] = {
+    {2, 0, 0, 0, 0}
+  };
+
+  // Empty tree but has leaf for bond count checking
+  AtomQueryTree tree{1, 0, 0, 0};
+
+  const bool result = evaluateBoolTree(&target, &targetBonds, leafMasks, leafBonds, nullptr, tree);
+  EXPECT_FALSE(result) << "Empty tree should still check bond counts via leaf 0";
+}
+
+// =============================================================================
+// evaluateBoolTree Host Tests - Comparison Operations
+// =============================================================================
+
+namespace {
+
+AtomDataPacked makeAtomWithDegree(uint8_t degree) {
+  AtomDataPacked atom;
+  atom.setAtomicNum(6);
+  atom.setDegree(degree);
+  return atom;
+}
+
+AtomDataPacked makeAtomWithMinRingSize(uint8_t ringSize) {
+  AtomDataPacked atom;
+  atom.setAtomicNum(6);
+  atom.setMinRingSize(ringSize);
+  return atom;
+}
+
+AtomDataPacked makeAtomWithNumRings(uint8_t numRings) {
+  AtomDataPacked atom;
+  atom.setAtomicNum(6);
+  atom.setNumRings(numRings);
+  return atom;
+}
+
+AtomDataPacked makeAtomWithTotalValence(uint8_t valence) {
+  AtomDataPacked atom;
+  atom.setAtomicNum(6);
+  atom.setTotalValence(valence);
+  return atom;
+}
+
+}  // namespace
+
+TEST(EvaluateBoolTreeTest, GreaterThanDegreeTrue) {
+  const AtomDataPacked target      = makeAtomWithDegree(4);
+  const BondTypeCounts targetBonds = makeEmptyBonds();
+
+  BoolInstruction instructions[] = {BoolInstruction::makeGreaterThan(0, CompareField::Degree, 3)};
+  AtomQueryTree   tree{0, 1, 1, 0};
+
+  const bool result = evaluateBoolTree(&target, &targetBonds, nullptr, nullptr, instructions, tree);
+  EXPECT_TRUE(result) << "degree 4 > 3 should be true";
+}
+
+TEST(EvaluateBoolTreeTest, GreaterThanDegreeFalse) {
+  const AtomDataPacked target      = makeAtomWithDegree(3);
+  const BondTypeCounts targetBonds = makeEmptyBonds();
+
+  BoolInstruction instructions[] = {BoolInstruction::makeGreaterThan(0, CompareField::Degree, 3)};
+  AtomQueryTree   tree{0, 1, 1, 0};
+
+  const bool result = evaluateBoolTree(&target, &targetBonds, nullptr, nullptr, instructions, tree);
+  EXPECT_FALSE(result) << "degree 3 > 3 should be false";
+}
+
+TEST(EvaluateBoolTreeTest, GreaterThanDegreeBoundary) {
+  const AtomDataPacked target      = makeAtomWithDegree(2);
+  const BondTypeCounts targetBonds = makeEmptyBonds();
+
+  BoolInstruction instructions[] = {BoolInstruction::makeGreaterThan(0, CompareField::Degree, 3)};
+  AtomQueryTree   tree{0, 1, 1, 0};
+
+  const bool result = evaluateBoolTree(&target, &targetBonds, nullptr, nullptr, instructions, tree);
+  EXPECT_FALSE(result) << "degree 2 > 3 should be false";
+}
+
+TEST(EvaluateBoolTreeTest, LessEqualDegreeTrue) {
+  const AtomDataPacked target      = makeAtomWithDegree(3);
+  const BondTypeCounts targetBonds = makeEmptyBonds();
+
+  BoolInstruction instructions[] = {BoolInstruction::makeLessEqual(0, CompareField::Degree, 3)};
+  AtomQueryTree   tree{0, 1, 1, 0};
+
+  const bool result = evaluateBoolTree(&target, &targetBonds, nullptr, nullptr, instructions, tree);
+  EXPECT_TRUE(result) << "degree 3 <= 3 should be true";
+}
+
+TEST(EvaluateBoolTreeTest, LessEqualDegreeTrueWhenLess) {
+  const AtomDataPacked target      = makeAtomWithDegree(2);
+  const BondTypeCounts targetBonds = makeEmptyBonds();
+
+  BoolInstruction instructions[] = {BoolInstruction::makeLessEqual(0, CompareField::Degree, 3)};
+  AtomQueryTree   tree{0, 1, 1, 0};
+
+  const bool result = evaluateBoolTree(&target, &targetBonds, nullptr, nullptr, instructions, tree);
+  EXPECT_TRUE(result) << "degree 2 <= 3 should be true";
+}
+
+TEST(EvaluateBoolTreeTest, LessEqualDegreeFalse) {
+  const AtomDataPacked target      = makeAtomWithDegree(4);
+  const BondTypeCounts targetBonds = makeEmptyBonds();
+
+  BoolInstruction instructions[] = {BoolInstruction::makeLessEqual(0, CompareField::Degree, 3)};
+  AtomQueryTree   tree{0, 1, 1, 0};
+
+  const bool result = evaluateBoolTree(&target, &targetBonds, nullptr, nullptr, instructions, tree);
+  EXPECT_FALSE(result) << "degree 4 <= 3 should be false";
+}
+
+TEST(EvaluateBoolTreeTest, GreaterEqualDegreeTrue) {
+  const AtomDataPacked target      = makeAtomWithDegree(3);
+  const BondTypeCounts targetBonds = makeEmptyBonds();
+
+  BoolInstruction instructions[] = {BoolInstruction::makeGreaterEqual(0, CompareField::Degree, 3)};
+  AtomQueryTree   tree{0, 1, 1, 0};
+
+  const bool result = evaluateBoolTree(&target, &targetBonds, nullptr, nullptr, instructions, tree);
+  EXPECT_TRUE(result) << "degree 3 >= 3 should be true";
+}
+
+TEST(EvaluateBoolTreeTest, GreaterEqualDegreeTrueWhenGreater) {
+  const AtomDataPacked target      = makeAtomWithDegree(4);
+  const BondTypeCounts targetBonds = makeEmptyBonds();
+
+  BoolInstruction instructions[] = {BoolInstruction::makeGreaterEqual(0, CompareField::Degree, 3)};
+  AtomQueryTree   tree{0, 1, 1, 0};
+
+  const bool result = evaluateBoolTree(&target, &targetBonds, nullptr, nullptr, instructions, tree);
+  EXPECT_TRUE(result) << "degree 4 >= 3 should be true";
+}
+
+TEST(EvaluateBoolTreeTest, GreaterEqualDegreeFalse) {
+  const AtomDataPacked target      = makeAtomWithDegree(2);
+  const BondTypeCounts targetBonds = makeEmptyBonds();
+
+  BoolInstruction instructions[] = {BoolInstruction::makeGreaterEqual(0, CompareField::Degree, 3)};
+  AtomQueryTree   tree{0, 1, 1, 0};
+
+  const bool result = evaluateBoolTree(&target, &targetBonds, nullptr, nullptr, instructions, tree);
+  EXPECT_FALSE(result) << "degree 2 >= 3 should be false";
+}
+
+TEST(EvaluateBoolTreeTest, RangeInclusive) {
+  const AtomDataPacked target      = makeAtomWithMinRingSize(5);
+  const BondTypeCounts targetBonds = makeEmptyBonds();
+
+  BoolInstruction instructions[] = {BoolInstruction::makeRange(0, CompareField::MinRingSize, 5, 7)};
+  AtomQueryTree   tree{0, 1, 1, 0};
+
+  const bool result = evaluateBoolTree(&target, &targetBonds, nullptr, nullptr, instructions, tree);
+  EXPECT_TRUE(result) << "minRingSize 5 in [5, 7] should be true";
+}
+
+TEST(EvaluateBoolTreeTest, RangeInclusiveUpperBound) {
+  const AtomDataPacked target      = makeAtomWithMinRingSize(7);
+  const BondTypeCounts targetBonds = makeEmptyBonds();
+
+  BoolInstruction instructions[] = {BoolInstruction::makeRange(0, CompareField::MinRingSize, 5, 7)};
+  AtomQueryTree   tree{0, 1, 1, 0};
+
+  const bool result = evaluateBoolTree(&target, &targetBonds, nullptr, nullptr, instructions, tree);
+  EXPECT_TRUE(result) << "minRingSize 7 in [5, 7] should be true";
+}
+
+TEST(EvaluateBoolTreeTest, RangeMiddleValue) {
+  const AtomDataPacked target      = makeAtomWithMinRingSize(6);
+  const BondTypeCounts targetBonds = makeEmptyBonds();
+
+  BoolInstruction instructions[] = {BoolInstruction::makeRange(0, CompareField::MinRingSize, 5, 7)};
+  AtomQueryTree   tree{0, 1, 1, 0};
+
+  const bool result = evaluateBoolTree(&target, &targetBonds, nullptr, nullptr, instructions, tree);
+  EXPECT_TRUE(result) << "minRingSize 6 in [5, 7] should be true";
+}
+
+TEST(EvaluateBoolTreeTest, RangeBelowMin) {
+  const AtomDataPacked target      = makeAtomWithMinRingSize(4);
+  const BondTypeCounts targetBonds = makeEmptyBonds();
+
+  BoolInstruction instructions[] = {BoolInstruction::makeRange(0, CompareField::MinRingSize, 5, 7)};
+  AtomQueryTree   tree{0, 1, 1, 0};
+
+  const bool result = evaluateBoolTree(&target, &targetBonds, nullptr, nullptr, instructions, tree);
+  EXPECT_FALSE(result) << "minRingSize 4 in [5, 7] should be false";
+}
+
+TEST(EvaluateBoolTreeTest, RangeAboveMax) {
+  const AtomDataPacked target      = makeAtomWithMinRingSize(8);
+  const BondTypeCounts targetBonds = makeEmptyBonds();
+
+  BoolInstruction instructions[] = {BoolInstruction::makeRange(0, CompareField::MinRingSize, 5, 7)};
+  AtomQueryTree   tree{0, 1, 1, 0};
+
+  const bool result = evaluateBoolTree(&target, &targetBonds, nullptr, nullptr, instructions, tree);
+  EXPECT_FALSE(result) << "minRingSize 8 in [5, 7] should be false";
+}
+
+TEST(EvaluateBoolTreeTest, ComparisonWithDifferentFields) {
+  AtomDataPacked target;
+  target.setAtomicNum(6);
+  target.setNumRings(2);
+  target.setTotalValence(4);
+  const BondTypeCounts targetBonds = makeEmptyBonds();
+
+  // numRings > 1 AND totalValence >= 4
+  BoolInstruction instructions[] = {BoolInstruction::makeGreaterThan(0, CompareField::NumRings, 1),
+                                    BoolInstruction::makeGreaterEqual(1, CompareField::TotalValence, 4),
+                                    BoolInstruction::makeAnd(2, 0, 1)};
+  AtomQueryTree   tree{0, 3, 3, 2};
+
+  const bool result = evaluateBoolTree(&target, &targetBonds, nullptr, nullptr, instructions, tree);
+  EXPECT_TRUE(result) << "numRings 2 > 1 AND totalValence 4 >= 4 should be true";
+}
+
+TEST(EvaluateBoolTreeTest, ComparisonOrLeaf) {
+  AtomDataPacked target;
+  target.setAtomicNum(7);  // nitrogen
+  target.setDegree(2);
+  const BondTypeCounts targetBonds = makeEmptyBonds();
+  const AtomQueryMask  leafMasks[] = {makeCarbonMask()};
+  const BondTypeCounts leafBonds[] = {makeEmptyBonds()};
+
+  // Carbon OR degree > 1
+  BoolInstruction instructions[] = {BoolInstruction::makeLeaf(0, 0),
+                                    BoolInstruction::makeGreaterThan(1, CompareField::Degree, 1),
+                                    BoolInstruction::makeOr(2, 0, 1)};
+  AtomQueryTree   tree{1, 3, 3, 2};
+
+  const bool result = evaluateBoolTree(&target, &targetBonds, leafMasks, leafBonds, instructions, tree);
+  EXPECT_TRUE(result) << "Not carbon but degree 2 > 1, so OR should be true";
+}
+
+// =============================================================================
+// evaluateBoolTree Device Tests - Comparison Operations
+// =============================================================================
+
+__global__ void evaluateComparisonKernel(const AtomDataPacked*  targets,
+                                         const BondTypeCounts*  targetBonds,
+                                         const BoolInstruction* instructions,
+                                         const AtomQueryTree*   trees,
+                                         int                    numTargets,
+                                         int*                   results) {
+  const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx >= numTargets) {
+    return;
+  }
+  results[idx] =
+    evaluateBoolTree<false>(&targets[idx], &targetBonds[idx], nullptr, nullptr, instructions, trees[0]) ? 1 : 0;
+}
+
+TEST_F(BoolTreeDeviceTest, GreaterThanOnDevice) {
+  std::vector<AtomDataPacked> targets = {makeAtomWithDegree(2), makeAtomWithDegree(3), makeAtomWithDegree(4)};
+  std::vector<BondTypeCounts> targetBonds(3);
+
+  std::vector<BoolInstruction> instructions = {BoolInstruction::makeGreaterThan(0, CompareField::Degree, 3)};
+  std::vector<AtomQueryTree>   trees        = {
+    {0, 1, 1, 0}
+  };
+
+  AsyncDeviceVector<AtomDataPacked>  targetsDev(targets.size(), stream_->stream());
+  AsyncDeviceVector<BondTypeCounts>  targetBondsDev(targetBonds.size(), stream_->stream());
+  AsyncDeviceVector<BoolInstruction> instructionsDev(instructions.size(), stream_->stream());
+  AsyncDeviceVector<AtomQueryTree>   treesDev(trees.size(), stream_->stream());
+  AsyncDeviceVector<int>             resultsDev(targets.size(), stream_->stream());
+
+  targetsDev.copyFromHost(targets);
+  targetBondsDev.copyFromHost(targetBonds);
+  instructionsDev.copyFromHost(instructions);
+  treesDev.copyFromHost(trees);
+
+  evaluateComparisonKernel<<<1, 3, 0, stream_->stream()>>>(targetsDev.data(),
+                                                           targetBondsDev.data(),
+                                                           instructionsDev.data(),
+                                                           treesDev.data(),
+                                                           static_cast<int>(targets.size()),
+                                                           resultsDev.data());
+  cudaCheckError(cudaGetLastError());
+
+  std::vector<int> results(targets.size());
+  resultsDev.copyToHost(results);
+  cudaCheckError(cudaStreamSynchronize(stream_->stream()));
+
+  EXPECT_FALSE(results[0]) << "degree 2 > 3 should be false";
+  EXPECT_FALSE(results[1]) << "degree 3 > 3 should be false";
+  EXPECT_TRUE(results[2]) << "degree 4 > 3 should be true";
+}
+
+TEST_F(BoolTreeDeviceTest, LessEqualOnDevice) {
+  std::vector<AtomDataPacked> targets = {makeAtomWithDegree(2), makeAtomWithDegree(3), makeAtomWithDegree(4)};
+  std::vector<BondTypeCounts> targetBonds(3);
+
+  std::vector<BoolInstruction> instructions = {BoolInstruction::makeLessEqual(0, CompareField::Degree, 3)};
+  std::vector<AtomQueryTree>   trees        = {
+    {0, 1, 1, 0}
+  };
+
+  AsyncDeviceVector<AtomDataPacked>  targetsDev(targets.size(), stream_->stream());
+  AsyncDeviceVector<BondTypeCounts>  targetBondsDev(targetBonds.size(), stream_->stream());
+  AsyncDeviceVector<BoolInstruction> instructionsDev(instructions.size(), stream_->stream());
+  AsyncDeviceVector<AtomQueryTree>   treesDev(trees.size(), stream_->stream());
+  AsyncDeviceVector<int>             resultsDev(targets.size(), stream_->stream());
+
+  targetsDev.copyFromHost(targets);
+  targetBondsDev.copyFromHost(targetBonds);
+  instructionsDev.copyFromHost(instructions);
+  treesDev.copyFromHost(trees);
+
+  evaluateComparisonKernel<<<1, 3, 0, stream_->stream()>>>(targetsDev.data(),
+                                                           targetBondsDev.data(),
+                                                           instructionsDev.data(),
+                                                           treesDev.data(),
+                                                           static_cast<int>(targets.size()),
+                                                           resultsDev.data());
+  cudaCheckError(cudaGetLastError());
+
+  std::vector<int> results(targets.size());
+  resultsDev.copyToHost(results);
+  cudaCheckError(cudaStreamSynchronize(stream_->stream()));
+
+  EXPECT_TRUE(results[0]) << "degree 2 <= 3 should be true";
+  EXPECT_TRUE(results[1]) << "degree 3 <= 3 should be true";
+  EXPECT_FALSE(results[2]) << "degree 4 <= 3 should be false";
+}
+
+TEST_F(BoolTreeDeviceTest, GreaterEqualOnDevice) {
+  std::vector<AtomDataPacked> targets = {makeAtomWithDegree(2), makeAtomWithDegree(3), makeAtomWithDegree(4)};
+  std::vector<BondTypeCounts> targetBonds(3);
+
+  std::vector<BoolInstruction> instructions = {BoolInstruction::makeGreaterEqual(0, CompareField::Degree, 3)};
+  std::vector<AtomQueryTree>   trees        = {
+    {0, 1, 1, 0}
+  };
+
+  AsyncDeviceVector<AtomDataPacked>  targetsDev(targets.size(), stream_->stream());
+  AsyncDeviceVector<BondTypeCounts>  targetBondsDev(targetBonds.size(), stream_->stream());
+  AsyncDeviceVector<BoolInstruction> instructionsDev(instructions.size(), stream_->stream());
+  AsyncDeviceVector<AtomQueryTree>   treesDev(trees.size(), stream_->stream());
+  AsyncDeviceVector<int>             resultsDev(targets.size(), stream_->stream());
+
+  targetsDev.copyFromHost(targets);
+  targetBondsDev.copyFromHost(targetBonds);
+  instructionsDev.copyFromHost(instructions);
+  treesDev.copyFromHost(trees);
+
+  evaluateComparisonKernel<<<1, 3, 0, stream_->stream()>>>(targetsDev.data(),
+                                                           targetBondsDev.data(),
+                                                           instructionsDev.data(),
+                                                           treesDev.data(),
+                                                           static_cast<int>(targets.size()),
+                                                           resultsDev.data());
+  cudaCheckError(cudaGetLastError());
+
+  std::vector<int> results(targets.size());
+  resultsDev.copyToHost(results);
+  cudaCheckError(cudaStreamSynchronize(stream_->stream()));
+
+  EXPECT_FALSE(results[0]) << "degree 2 >= 3 should be false";
+  EXPECT_TRUE(results[1]) << "degree 3 >= 3 should be true";
+  EXPECT_TRUE(results[2]) << "degree 4 >= 3 should be true";
+}
+
+TEST_F(BoolTreeDeviceTest, RangeOnDevice) {
+  std::vector<AtomDataPacked> targets = {makeAtomWithMinRingSize(4),
+                                         makeAtomWithMinRingSize(5),
+                                         makeAtomWithMinRingSize(6),
+                                         makeAtomWithMinRingSize(7),
+                                         makeAtomWithMinRingSize(8)};
+  std::vector<BondTypeCounts> targetBonds(5);
+
+  std::vector<BoolInstruction> instructions = {BoolInstruction::makeRange(0, CompareField::MinRingSize, 5, 7)};
+  std::vector<AtomQueryTree>   trees        = {
+    {0, 1, 1, 0}
+  };
+
+  AsyncDeviceVector<AtomDataPacked>  targetsDev(targets.size(), stream_->stream());
+  AsyncDeviceVector<BondTypeCounts>  targetBondsDev(targetBonds.size(), stream_->stream());
+  AsyncDeviceVector<BoolInstruction> instructionsDev(instructions.size(), stream_->stream());
+  AsyncDeviceVector<AtomQueryTree>   treesDev(trees.size(), stream_->stream());
+  AsyncDeviceVector<int>             resultsDev(targets.size(), stream_->stream());
+
+  targetsDev.copyFromHost(targets);
+  targetBondsDev.copyFromHost(targetBonds);
+  instructionsDev.copyFromHost(instructions);
+  treesDev.copyFromHost(trees);
+
+  evaluateComparisonKernel<<<1, 5, 0, stream_->stream()>>>(targetsDev.data(),
+                                                           targetBondsDev.data(),
+                                                           instructionsDev.data(),
+                                                           treesDev.data(),
+                                                           static_cast<int>(targets.size()),
+                                                           resultsDev.data());
+  cudaCheckError(cudaGetLastError());
+
+  std::vector<int> results(targets.size());
+  resultsDev.copyToHost(results);
+  cudaCheckError(cudaStreamSynchronize(stream_->stream()));
+
+  EXPECT_FALSE(results[0]) << "minRingSize 4 in [5, 7] should be false";
+  EXPECT_TRUE(results[1]) << "minRingSize 5 in [5, 7] should be true";
+  EXPECT_TRUE(results[2]) << "minRingSize 6 in [5, 7] should be true";
+  EXPECT_TRUE(results[3]) << "minRingSize 7 in [5, 7] should be true";
+  EXPECT_FALSE(results[4]) << "minRingSize 8 in [5, 7] should be false";
+}
+
+TEST_F(BoolTreeDeviceTest, ComparisonCombinedWithLeafOnDevice) {
+  std::vector<AtomDataPacked> targets(3);
+  targets[0].setAtomicNum(6);  // carbon with degree 2
+  targets[0].setDegree(2);
+  targets[1].setAtomicNum(7);  // nitrogen with degree 3
+  targets[1].setDegree(3);
+  targets[2].setAtomicNum(8);  // oxygen with degree 1
+  targets[2].setDegree(1);
+
+  std::vector<BondTypeCounts> targetBonds = {makeEmptyBonds(), makeEmptyBonds(), makeEmptyBonds()};
+  std::vector<AtomQueryMask>  leafMasks   = {makeCarbonMask()};
+  std::vector<BondTypeCounts> leafBonds   = {makeEmptyBonds()};
+
+  // Carbon OR degree > 2
+  std::vector<BoolInstruction> instructions = {BoolInstruction::makeLeaf(0, 0),
+                                               BoolInstruction::makeGreaterThan(1, CompareField::Degree, 2),
+                                               BoolInstruction::makeOr(2, 0, 1)};
+  std::vector<AtomQueryTree>   trees        = {
+    {1, 3, 3, 2}
+  };
+
+  AsyncDeviceVector<AtomDataPacked>  targetsDev(targets.size(), stream_->stream());
+  AsyncDeviceVector<BondTypeCounts>  targetBondsDev(targetBonds.size(), stream_->stream());
+  AsyncDeviceVector<AtomQueryMask>   leafMasksDev(leafMasks.size(), stream_->stream());
+  AsyncDeviceVector<BondTypeCounts>  leafBondsDev(leafBonds.size(), stream_->stream());
+  AsyncDeviceVector<BoolInstruction> instructionsDev(instructions.size(), stream_->stream());
+  AsyncDeviceVector<AtomQueryTree>   treesDev(trees.size(), stream_->stream());
+  AsyncDeviceVector<int>             resultsDev(targets.size(), stream_->stream());
+
+  targetsDev.copyFromHost(targets);
+  targetBondsDev.copyFromHost(targetBonds);
+  leafMasksDev.copyFromHost(leafMasks);
+  leafBondsDev.copyFromHost(leafBonds);
+  instructionsDev.copyFromHost(instructions);
+  treesDev.copyFromHost(trees);
+
+  evaluateBoolTreeKernel<<<1, 3, 0, stream_->stream()>>>(targetsDev.data(),
+                                                         targetBondsDev.data(),
+                                                         leafMasksDev.data(),
+                                                         leafBondsDev.data(),
+                                                         instructionsDev.data(),
+                                                         treesDev.data(),
+                                                         static_cast<int>(targets.size()),
+                                                         resultsDev.data());
+  cudaCheckError(cudaGetLastError());
+
+  std::vector<int> results(targets.size());
+  resultsDev.copyToHost(results);
+  cudaCheckError(cudaStreamSynchronize(stream_->stream()));
+
+  EXPECT_TRUE(results[0]) << "Carbon matches leaf, so OR is true";
+  EXPECT_TRUE(results[1]) << "Nitrogen with degree 3 > 2, so OR is true";
+  EXPECT_FALSE(results[2]) << "Oxygen with degree 1 <= 2, and not carbon, so OR is false";
 }
