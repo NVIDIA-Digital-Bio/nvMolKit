@@ -225,15 +225,14 @@ void MoleculesDevice::setStream(cudaStream_t stream) {
 
 namespace {
 
-template <typename T>
-void setFromVectorGrowOnly(AsyncDeviceVector<T>& dest, const std::vector<T>& src, cudaStream_t stream) {
+template <typename T> void setFromVectorGrowOnly(AsyncDeviceVector<T>& dest, const std::vector<T>& src) {
   if (src.empty()) {
     return;
   }
   if (src.size() > dest.size()) {
     dest.resize(static_cast<size_t>(src.size() * 1.5));
   }
-  cudaMemcpyAsync(dest.data(), src.data(), src.size() * sizeof(T), cudaMemcpyHostToDevice, stream);
+  dest.copyFromHost(src, src.size());
 }
 
 }  // namespace
@@ -246,31 +245,31 @@ void MoleculesDevice::copyFromHost(const MoleculesHost& host, cudaStream_t strea
   setStream(stream);
   numMolecules_ = static_cast<int>(host.numMolecules());
 
-  setFromVectorGrowOnly(batchAtomStarts_, host.batchAtomStarts, stream);
+  setFromVectorGrowOnly(batchAtomStarts_, host.batchAtomStarts);
 
   // Copy GPU-optimized packed data
-  setFromVectorGrowOnly(atomDataPacked_, host.atomDataPacked, stream);
+  setFromVectorGrowOnly(atomDataPacked_, host.atomDataPacked);
   if (!host.atomQueryMasks.empty()) {
-    setFromVectorGrowOnly(atomQueryMasks_, host.atomQueryMasks, stream);
+    setFromVectorGrowOnly(atomQueryMasks_, host.atomQueryMasks);
   }
   if (!host.bondTypeCounts.empty()) {
-    setFromVectorGrowOnly(bondTypeCounts_, host.bondTypeCounts, stream);
+    setFromVectorGrowOnly(bondTypeCounts_, host.bondTypeCounts);
   }
   if (!host.targetAtomBonds.empty()) {
-    setFromVectorGrowOnly(targetAtomBonds_, host.targetAtomBonds, stream);
+    setFromVectorGrowOnly(targetAtomBonds_, host.targetAtomBonds);
   }
   if (!host.queryAtomBonds.empty()) {
-    setFromVectorGrowOnly(queryAtomBonds_, host.queryAtomBonds, stream);
+    setFromVectorGrowOnly(queryAtomBonds_, host.queryAtomBonds);
   }
 
   // Copy boolean expression tree data for compound queries
   if (!host.atomQueryTrees.empty()) {
-    setFromVectorGrowOnly(atomQueryTrees_, host.atomQueryTrees, stream);
-    setFromVectorGrowOnly(queryInstructions_, host.queryInstructions, stream);
-    setFromVectorGrowOnly(queryLeafMasks_, host.queryLeafMasks, stream);
-    setFromVectorGrowOnly(queryLeafBondCounts_, host.queryLeafBondCounts, stream);
-    setFromVectorGrowOnly(atomInstrStarts_, host.atomInstrStarts, stream);
-    setFromVectorGrowOnly(atomLeafMaskStarts_, host.atomLeafMaskStarts, stream);
+    setFromVectorGrowOnly(atomQueryTrees_, host.atomQueryTrees);
+    setFromVectorGrowOnly(queryInstructions_, host.queryInstructions);
+    setFromVectorGrowOnly(queryLeafMasks_, host.queryLeafMasks);
+    setFromVectorGrowOnly(queryLeafBondCounts_, host.queryLeafBondCounts);
+    setFromVectorGrowOnly(atomInstrStarts_, host.atomInstrStarts);
+    setFromVectorGrowOnly(atomLeafMaskStarts_, host.atomLeafMaskStarts);
   }
 }
 
