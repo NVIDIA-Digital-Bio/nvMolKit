@@ -177,6 +177,9 @@ target_link_libraries(test_etkdg_result_tracker PRIVATE etkdg_impl)
 add_executable(test_butina test_butina.cpp)
 target_link_libraries(test_butina PRIVATE butina device)
 
+add_executable(test_molecules test_molecules.cu)
+target_link_libraries(test_molecules PRIVATE molecules device ${RDKit_LIBS})
+
 add_executable(test_boolean_tree test_boolean_tree.cu)
 target_link_libraries(test_boolean_tree PRIVATE substruct_definitions device)
 
@@ -200,6 +203,7 @@ set(TEST_LIST
     test_host_vector
     test_bfgs_minimizer
     test_etkdg_result_tracker
+    test_molecules
     test_mmff
     test_distgeom
     test_triangle_smooth
