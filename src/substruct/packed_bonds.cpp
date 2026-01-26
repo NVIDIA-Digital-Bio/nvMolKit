@@ -40,4 +40,3 @@ uint32_t buildQueryBondMatchMask(uint8_t queryBondType, uint8_t queryFlags, uint
 }
 
 }  // namespace nvMolKit
-

@@ -188,7 +188,7 @@ __global__ void readBondTypeKernel(MoleculesDeviceView view, int* results, int n
   const MoleculeView mol = getMolecule(view, molIdx);
   if (mol.numAtoms > 0 && mol.getAtomDegree(0) > 0) {
     const TargetAtomBonds& bonds = mol.getTargetBonds(0);
-    results[molIdx] = unpackBondType(bonds.bondInfo[0]);
+    results[molIdx]              = unpackBondType(bonds.bondInfo[0]);
   } else {
     results[molIdx] = -1;
   }
@@ -217,7 +217,7 @@ __global__ void readNeighborAtomKernel(MoleculesDeviceView view, int* results, i
   const MoleculeView mol = getMolecule(view, molIdx);
   if (mol.numAtoms > 0 && mol.getAtomDegree(0) > 0) {
     const TargetAtomBonds& bonds = mol.getTargetBonds(0);
-    results[molIdx] = bonds.neighborIdx[0];
+    results[molIdx]              = bonds.neighborIdx[0];
   } else {
     results[molIdx] = -1;
   }
@@ -318,8 +318,7 @@ TEST_F(BatchStructureTest, AtomDegreeMatchesRDKit) {
 
   for (int i = 0; i < numMols; ++i) {
     if (mols_[i]->getNumAtoms() > 0) {
-      EXPECT_EQ(results[i], static_cast<int>(mols_[i]->getAtomWithIdx(0)->getDegree())) 
-        << "Mismatch at molecule " << i;
+      EXPECT_EQ(results[i], static_cast<int>(mols_[i]->getAtomWithIdx(0)->getDegree())) << "Mismatch at molecule " << i;
     }
   }
 }
@@ -500,7 +499,6 @@ TEST_F(ConnectivityTestFixture, NeighborAtomIndexMatchesRDKit) {
     }
   }
 }
-
 
 TEST(MoleculesEmptyBatchTest, EmptyBatchHasZeroMolecules) {
   MoleculesHost batch;

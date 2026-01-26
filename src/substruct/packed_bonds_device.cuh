@@ -65,13 +65,11 @@ __device__ __forceinline__ bool packedBondMatches(uint32_t queryMask, uint8_t ta
  * @return true if edge consistency is satisfied
  */
 template <int MaxBonds = kMaxBondsPerAtom>
-__device__ __forceinline__ bool checkEdgeConsistencyPacked(
-    const TargetAtomBonds* targetBonds,
-    const QueryAtomBonds&  queryBonds,
-    const int8_t*          mapping,
-    int                    queryAtom,
-    int                    targetAtom) {
-
+__device__ __forceinline__ bool checkEdgeConsistencyPacked(const TargetAtomBonds* targetBonds,
+                                                           const QueryAtomBonds&  queryBonds,
+                                                           const int8_t*          mapping,
+                                                           int                    queryAtom,
+                                                           int                    targetAtom) {
   const int              depth        = queryAtom;
   const TargetAtomBonds& tb           = targetBonds[targetAtom];
   const int              queryDegree  = queryBonds.degree;
@@ -89,7 +87,7 @@ __device__ __forceinline__ bool checkEdgeConsistencyPacked(
 
     bool foundMatch = false;
 
-    #pragma unroll
+#pragma unroll
     for (int j = 0; j < MaxBonds; ++j) {
       if (j >= targetDegree) {
         break;

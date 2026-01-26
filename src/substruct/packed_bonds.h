@@ -36,8 +36,8 @@ enum BondQueryFlags : uint8_t {
   BondQueryUseBondMask      = 1 << 6,  ///< Use allowedBondTypes bitmask for arbitrary OR patterns
 };
 
-constexpr int kMaxBondsPerAtom = 8;
-constexpr uint8_t kNoNeighbor = 0xFF;
+constexpr int     kMaxBondsPerAtom = 8;
+constexpr uint8_t kNoNeighbor      = 0xFF;
 
 /**
  * @brief Packed bond adjacency for a target atom.
@@ -52,12 +52,11 @@ constexpr uint8_t kNoNeighbor = 0xFF;
  *   - bits [5-7]: unused
  * padding: ensures 4-byte alignment for coalesced GPU memory access
  */
-template <int MaxBonds = kMaxBondsPerAtom>
-struct alignas(4) TargetAtomBondsT {
+template <int MaxBonds = kMaxBondsPerAtom> struct alignas(4) TargetAtomBondsT {
   static constexpr int kMaxBonds = MaxBonds;
-  uint8_t degree;
-  uint8_t neighborIdx[MaxBonds];
-  uint8_t bondInfo[MaxBonds];
+  uint8_t              degree;
+  uint8_t              neighborIdx[MaxBonds];
+  uint8_t              bondInfo[MaxBonds];
 };
 
 /**
@@ -73,12 +72,11 @@ struct alignas(4) TargetAtomBondsT {
  *
  * Match check: (matchMask >> (isInRing * 16 + bondType)) & 1
  */
-template <int MaxBonds = kMaxBondsPerAtom>
-struct QueryAtomBondsT {
+template <int MaxBonds = kMaxBondsPerAtom> struct QueryAtomBondsT {
   static constexpr int kMaxBonds = MaxBonds;
-  uint8_t  degree;
-  uint8_t  neighborIdx[MaxBonds];
-  uint32_t matchMask[MaxBonds];
+  uint8_t              degree;
+  uint8_t              neighborIdx[MaxBonds];
+  uint32_t             matchMask[MaxBonds];
 };
 
 /// Type alias for max-sized target atom bonds (host-side storage)

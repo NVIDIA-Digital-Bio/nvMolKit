@@ -34,7 +34,7 @@ struct MoleculeView {
   int numAtoms;
 
   // GPU-optimized packed data
-  const AtomDataPacked* __restrict__ atomDataPacked;  ///< Packed atom properties for GPU matching
+  const AtomDataPacked* __restrict__ atomDataPacked;    ///< Packed atom properties for GPU matching
   const AtomQueryMask* __restrict__ atomQueryMasks;     ///< Precomputed query masks (query molecules only)
   const BondTypeCounts* __restrict__ bondTypeCounts;    ///< Precomputed bond type counts per atom
   const TargetAtomBonds* __restrict__ targetAtomBonds;  ///< Packed bond adjacency (targets only)
@@ -72,9 +72,7 @@ struct MoleculeView {
   }
 
   /// Get packed query atom bonds (only valid for query molecules)
-  __device__ __forceinline__ const QueryAtomBonds& getQueryBonds(int atomIdx) const {
-    return queryAtomBonds[atomIdx];
-  }
+  __device__ __forceinline__ const QueryAtomBonds& getQueryBonds(int atomIdx) const { return queryAtomBonds[atomIdx]; }
 
   /// Get query tree metadata for compound queries (only valid for query molecules)
   __device__ __forceinline__ const AtomQueryTree& getQueryTree(int atomIdx) const { return atomQueryTrees[atomIdx]; }

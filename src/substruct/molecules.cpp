@@ -15,14 +15,13 @@
 
 #include "molecules.h"
 
-#include <omp.h>
-
 #include <GraphMol/MolOps.h>
 #include <GraphMol/QueryAtom.h>
 #include <GraphMol/QueryOps.h>
 #include <GraphMol/ROMol.h>
 #include <GraphMol/SmilesParse/SmartsWrite.h>
 #include <GraphMol/Substruct/SubstructMatch.h>
+#include <omp.h>
 #include <RDGeneral/versions.h>
 
 #include <algorithm>
@@ -32,10 +31,10 @@
 #include <string>
 #include <type_traits>
 
+#include "nvtx.h"
 #include "packed_bonds.h"
 #include "substruct_debug.h"
 #include "substruct_types.h"
-#include "nvtx.h"
 
 namespace nvMolKit {
 
@@ -46,8 +45,7 @@ namespace {
  *
  * Uses a wrapper struct trick to avoid zero-initialization when capacity is sufficient.
  */
-template <typename T>
-void resizeUninit(std::vector<T>& vec, size_t newSize) {
+template <typename T> void resizeUninit(std::vector<T>& vec, size_t newSize) {
   static_assert(std::is_trivially_copyable_v<T>, "resizeUninit requires trivially copyable type");
   struct Wrapper {
     T value;
@@ -64,9 +62,7 @@ void resizeUninit(std::vector<T>& vec, size_t newSize) {
  * (ring bond count, heteroatom neighbors, bond type counts) are populated
  * separately during the fused bond iteration.
  */
-void populateAtomScalars(const RDKit::Atom*     atom,
-                         AtomDataPacked&        packed,
-                         const RDKit::RingInfo* ringInfo) {
+void populateAtomScalars(const RDKit::Atom* atom, AtomDataPacked& packed, const RDKit::RingInfo* ringInfo) {
   packed.setAtomicNum(atom->getAtomicNum());
   packed.setChiralTag(atom->getChiralTag());
   packed.setNumExplicitHs(atom->getTotalNumHs());
@@ -86,8 +82,7 @@ void populateAtomScalars(const RDKit::Atom*     atom,
   const int idx      = atom->getIdx();
   const int numRings = ringInfo->numAtomRings(idx);
   if (numRings > AtomDataPacked::kMax4BitValue) {
-    throw std::runtime_error("Atom ring count " + std::to_string(numRings) +
-                             " exceeds maximum storable value of " +
+    throw std::runtime_error("Atom ring count " + std::to_string(numRings) + " exceeds maximum storable value of " +
                              std::to_string(AtomDataPacked::kMax4BitValue));
   }
   packed.setNumRings(numRings);
@@ -97,8 +92,7 @@ void populateAtomScalars(const RDKit::Atom*     atom,
   const unsigned int numImplicitHs = atom->getNumImplicitHs();
   if (numImplicitHs > AtomDataPacked::kMax4BitValue) {
     throw std::runtime_error("Implicit H count " + std::to_string(numImplicitHs) +
-                             " exceeds maximum storable value of " +
-                             std::to_string(AtomDataPacked::kMax4BitValue));
+                             " exceeds maximum storable value of " + std::to_string(AtomDataPacked::kMax4BitValue));
   }
   packed.setNumImplicitHs(numImplicitHs);
 
@@ -143,9 +137,7 @@ inline void incrementBondTypeCount(BondTypeCounts& counts, int bondType) {
  * (bond iteration part), and populateBondTypeCounts into a single iteration per atom.
  * This eliminates redundant bond traversals.
  */
-void populateTargetMolecule(const RDKit::ROMol*    mol,
-                            MoleculesHost&         batch,
-                            const RDKit::RingInfo* ringInfo) {
+void populateTargetMolecule(const RDKit::ROMol* mol, MoleculesHost& batch, const RDKit::RingInfo* ringInfo) {
   auto& atomDataPackedVec  = batch.atomDataPacked;
   auto& bondTypeCountsVec  = batch.bondTypeCounts;
   auto& targetAtomBondsVec = batch.targetAtomBonds;
@@ -157,11 +149,11 @@ void populateTargetMolecule(const RDKit::ROMol*    mol,
 
     populateAtomScalars(atom, packed, ringInfo);
 
-    const unsigned int atomIdx = atom->getIdx();
+    const unsigned int atomIdx            = atom->getIdx();
     int                ringBondCount      = 0;
     int                numHeteroNeighbors = 0;
     int                totalBonds         = 0;
-    tab.degree = 0;
+    tab.degree                            = 0;
 
     auto [beg, bondEnd] = mol->getAtomBonds(atom);
     while (beg != bondEnd) {
@@ -193,15 +185,13 @@ void populateTargetMolecule(const RDKit::ROMol*    mol,
 
     if (ringBondCount > AtomDataPacked::kMax4BitValue) {
       throw std::runtime_error("Ring bond count " + std::to_string(ringBondCount) +
-                               " exceeds maximum storable value of " +
-                               std::to_string(AtomDataPacked::kMax4BitValue));
+                               " exceeds maximum storable value of " + std::to_string(AtomDataPacked::kMax4BitValue));
     }
     packed.setRingBondCount(ringBondCount);
 
     if (numHeteroNeighbors > AtomDataPacked::kMax4BitValue) {
       throw std::runtime_error("Heteroatom neighbor count " + std::to_string(numHeteroNeighbors) +
-                               " exceeds maximum storable value of " +
-                               std::to_string(AtomDataPacked::kMax4BitValue));
+                               " exceeds maximum storable value of " + std::to_string(AtomDataPacked::kMax4BitValue));
     }
     packed.setNumHeteroatomNeighbors(numHeteroNeighbors);
   }
@@ -256,8 +246,7 @@ int getQueryBondEffectiveType(const RDKit::Bond* bond) {
           if ((*it)->getNegation()) {
             hasNegated = true;
           }
-          if (childDesc == "SingleOrAromaticBond" || childDesc == "DoubleOrAromaticBond" ||
-              childDesc == "BondNull") {
+          if (childDesc == "SingleOrAromaticBond" || childDesc == "DoubleOrAromaticBond" || childDesc == "BondNull") {
             return 0;
           }
           if (childDesc == "BondOrder") {
@@ -311,8 +300,7 @@ void populateQueryBondTypeCounts(const RDKit::ROMol* mol, const RDKit::Atom* ato
         ++counts.aromatic;
         break;  // AROMATIC
       default:
-        throw std::runtime_error("Unsupported bond type " + std::to_string(bondType) +
-                                 " in query molecule.");
+        throw std::runtime_error("Unsupported bond type " + std::to_string(bondType) + " in query molecule.");
     }
     ++beg;
   }
@@ -531,8 +519,8 @@ AtomQueryMask buildQueryMask(const AtomDataPacked& queryAtom, AtomQuery queryFla
 
   // Impossible constraint (e.g., [C;a] aromatic aliphatic) - create unmatchable mask
   if (queryFlags & AtomQueryNeverMatches) {
-    m.maskLo     = 0xFFULL;   // Check atomic number byte
-    m.expectedLo = 0xFFULL;   // Require atomic number 255 (impossible, max is ~118)
+    m.maskLo     = 0xFFULL;  // Check atomic number byte
+    m.expectedLo = 0xFFULL;  // Require atomic number 255 (impossible, max is ~118)
     return m;
   }
 
@@ -603,13 +591,19 @@ AtomQueryMask buildQueryMask(const AtomDataPacked& queryAtom, AtomQuery queryFla
     setHi4BitField(AtomDataPacked::kNumRingsRingBondsByte, AtomDataPacked::kNumRingsBits, queryAtom.numRings());
   }
   if (queryFlags & AtomQueryRingBondCount) {
-    setHi4BitField(AtomDataPacked::kNumRingsRingBondsByte, AtomDataPacked::kRingBondCountBits, queryAtom.ringBondCount());
+    setHi4BitField(AtomDataPacked::kNumRingsRingBondsByte,
+                   AtomDataPacked::kRingBondCountBits,
+                   queryAtom.ringBondCount());
   }
   if (queryFlags & AtomQueryNumImplicitHs) {
-    setHi4BitField(AtomDataPacked::kImplicitHsHeterosByte, AtomDataPacked::kNumImplicitHsBits, queryAtom.numImplicitHs());
+    setHi4BitField(AtomDataPacked::kImplicitHsHeterosByte,
+                   AtomDataPacked::kNumImplicitHsBits,
+                   queryAtom.numImplicitHs());
   }
   if (queryFlags & AtomQueryNumHeteroNeighbors) {
-    setHi4BitField(AtomDataPacked::kImplicitHsHeterosByte, AtomDataPacked::kNumHeteroNeighborBits, queryAtom.numHeteroatomNeighbors());
+    setHi4BitField(AtomDataPacked::kImplicitHsHeterosByte,
+                   AtomDataPacked::kNumHeteroNeighborBits,
+                   queryAtom.numHeteroatomNeighbors());
   }
   if (queryFlags & AtomQueryTotalValence) {
     setHiField(AtomDataPacked::kTotalValenceByte, queryAtom.totalValence());
@@ -789,9 +783,7 @@ struct QueryTreeBuilder {
  * These require comparison instructions rather than mask/expected matching.
  */
 bool isComparisonQuery(const std::string& desc) {
-  return desc.rfind("less_", 0) == 0 ||
-         desc.rfind("greater_", 0) == 0 ||
-         desc.rfind("range_", 0) == 0;
+  return desc.rfind("less_", 0) == 0 || desc.rfind("greater_", 0) == 0 || desc.rfind("range_", 0) == 0;
 }
 
 /**
@@ -870,9 +862,7 @@ bool isAndOnlyQuery(const RDKit::Atom::QUERYATOM_QUERY* query) {
  * Detects contradictory constraints (same property with different values) and
  * sets AtomQueryNeverMatches when found.
  */
-void collectAndOnlyFlags(const RDKit::Atom::QUERYATOM_QUERY* query,
-                         AtomQuery&                          flags,
-                         AtomDataPacked&                     packed) {
+void collectAndOnlyFlags(const RDKit::Atom::QUERYATOM_QUERY* query, AtomQuery& flags, AtomDataPacked& packed) {
   const std::string desc = query->getDescription();
 
   if constexpr (kDebugBoolTreeBuild) {
@@ -974,7 +964,8 @@ void collectAndOnlyFlags(const RDKit::Atom::QUERYATOM_QUERY* query,
       packed.setMinRingSize(eqQuery->getVal());
     }
   } else if (desc == "AtomNumRadicalElectrons") {
-    if (!checkConflict(AtomQueryNumRadicalElectrons, packed.numRadicalElectrons(),
+    if (!checkConflict(AtomQueryNumRadicalElectrons,
+                       packed.numRadicalElectrons(),
                        static_cast<uint8_t>(eqQuery->getVal()))) {
       flags |= AtomQueryNumRadicalElectrons;
       packed.setNumRadicalElectrons(eqQuery->getVal());
@@ -988,8 +979,7 @@ void collectAndOnlyFlags(const RDKit::Atom::QUERYATOM_QUERY* query,
     int val = eqQuery->getVal();
     if (val > AtomDataPacked::kMax4BitValue) {
       throw std::runtime_error("Ring bond count query value " + std::to_string(val) +
-                               " exceeds maximum storable value of " +
-                               std::to_string(AtomDataPacked::kMax4BitValue));
+                               " exceeds maximum storable value of " + std::to_string(AtomDataPacked::kMax4BitValue));
     }
     if (!checkConflict(AtomQueryRingBondCount, packed.ringBondCount(), static_cast<uint8_t>(val))) {
       flags |= AtomQueryRingBondCount;
@@ -999,8 +989,7 @@ void collectAndOnlyFlags(const RDKit::Atom::QUERYATOM_QUERY* query,
     int val = eqQuery->getVal();
     if (val > AtomDataPacked::kMax4BitValue) {
       throw std::runtime_error("Implicit H count query value " + std::to_string(val) +
-                               " exceeds maximum storable value of " +
-                               std::to_string(AtomDataPacked::kMax4BitValue));
+                               " exceeds maximum storable value of " + std::to_string(AtomDataPacked::kMax4BitValue));
     }
     if (!checkConflict(AtomQueryNumImplicitHs, packed.numImplicitHs(), static_cast<uint8_t>(val))) {
       flags |= AtomQueryNumImplicitHs;
@@ -1014,8 +1003,7 @@ void collectAndOnlyFlags(const RDKit::Atom::QUERYATOM_QUERY* query,
     int val = eqQuery->getVal();
     if (val > AtomDataPacked::kMax4BitValue) {
       throw std::runtime_error("Heteroatom neighbor count query value " + std::to_string(val) +
-                               " exceeds maximum storable value of " +
-                               std::to_string(AtomDataPacked::kMax4BitValue));
+                               " exceeds maximum storable value of " + std::to_string(AtomDataPacked::kMax4BitValue));
     }
     if (!checkConflict(AtomQueryNumHeteroNeighbors, packed.numHeteroatomNeighbors(), static_cast<uint8_t>(val))) {
       flags |= AtomQueryNumHeteroNeighbors;
@@ -1036,7 +1024,8 @@ void collectAndOnlyFlags(const RDKit::Atom::QUERYATOM_QUERY* query,
       packed.setDegree(eqQuery->getVal());
     }
   } else if (desc == "AtomTotalDegree") {
-    if (!checkConflict(AtomQueryTotalConnectivity, packed.totalConnectivity(),
+    if (!checkConflict(AtomQueryTotalConnectivity,
+                       packed.totalConnectivity(),
                        static_cast<uint8_t>(eqQuery->getVal()))) {
       flags |= AtomQueryTotalConnectivity;
       packed.setTotalConnectivity(eqQuery->getVal());
@@ -1168,12 +1157,12 @@ uint8_t processQueryTree(const RDKit::Atom::QUERYATOM_QUERY* query,
 
   // Handle comparison queries (less_, greater_, range_ prefixes)
   if (isComparisonQuery(desc)) {
-    const std::string baseDesc = getBaseQueryName(desc);
-    const CompareField field = getCompareField(baseDesc);
+    const std::string  baseDesc = getBaseQueryName(desc);
+    const CompareField field    = getCompareField(baseDesc);
     // Cast to ATOM_EQUALS_QUERY to access getVal()/getTol() - all numeric query types derive from this
-    const auto* eqQuery = static_cast<const RDKit::ATOM_EQUALS_QUERY*>(query);
-    const int queryVal = eqQuery->getVal();
-    const int queryTol = eqQuery->getTol();
+    const auto*        eqQuery  = static_cast<const RDKit::ATOM_EQUALS_QUERY*>(query);
+    const int          queryVal = eqQuery->getVal();
+    const int          queryTol = eqQuery->getTol();
 
     uint8_t result;
     if (desc.rfind("less_", 0) == 0) {
@@ -1186,13 +1175,13 @@ uint8_t processQueryTree(const RDKit::Atom::QUERYATOM_QUERY* query,
     } else {
       // range_ - RDKit stores bounds in getLower()/getUpper(), not getVal()/getTol()
       const auto* rangeQuery = static_cast<const RDKit::ATOM_RANGE_QUERY*>(query);
-      int minVal = rangeQuery->getLower();
-      int maxVal = rangeQuery->getUpper();
-      if (minVal < 0) minVal = 0;
-      if (maxVal > 255) maxVal = 255;
-      result = builder.addCompare(BoolOp::Range, field,
-                                   static_cast<uint8_t>(minVal),
-                                   static_cast<uint8_t>(maxVal));
+      int         minVal     = rangeQuery->getLower();
+      int         maxVal     = rangeQuery->getUpper();
+      if (minVal < 0)
+        minVal = 0;
+      if (maxVal > 255)
+        maxVal = 255;
+      result = builder.addCompare(BoolOp::Range, field, static_cast<uint8_t>(minVal), static_cast<uint8_t>(maxVal));
     }
 
     if (isNegated) {
@@ -1329,8 +1318,7 @@ void populateQueryAtomDataPacked(const RDKit::Atom* atom, AtomDataPacked& packed
     } else if (desc == "AtomMass" || desc == "AtomIsotope") {
       int isotope = eqQuery->getVal();
       if (isotope > 255) {
-        throw std::runtime_error("Isotope mass " + std::to_string(isotope) +
-                                 " exceeds maximum supported value of 255");
+        throw std::runtime_error("Isotope mass " + std::to_string(isotope) + " exceeds maximum supported value of 255");
       }
       packed.setIsotope(static_cast<uint8_t>(isotope));
     } else if (desc == "AtomExplicitDegree") {
@@ -1384,8 +1372,8 @@ void extractBondQueryFlags(const RDKit::Bond* bond, BondQueryData& queryData) {
       bool hasPositiveTriple   = false;
       bool hasPositiveAromatic = false;
       for (auto it = q->beginChildren(); it != q->endChildren(); ++it) {
-        const std::string childDesc = (*it)->getDescription();
-        const bool childNegated = (*it)->getNegation();
+        const std::string childDesc    = (*it)->getDescription();
+        const bool        childNegated = (*it)->getNegation();
         if (childDesc == "BondOrder") {
           const auto* eqQuery  = static_cast<const RDKit::BOND_EQUALS_QUERY*>((*it).get());
           int         bondType = eqQuery->getVal();
@@ -1530,11 +1518,11 @@ void populateQueryAtomBonds(const RDKit::ROMol* mol, MoleculesHost& batch) {
   auto& queryAtomBondsVec = batch.queryAtomBonds;
 
   for (const RDKit::Atom* atom : mol->atoms()) {
-    auto& qab = queryAtomBondsVec.emplace_back();
+    auto& qab  = queryAtomBondsVec.emplace_back();
     qab.degree = 0;
 
     const unsigned int atomIdx = atom->getIdx();
-    auto [beg, bondEnd] = mol->getAtomBonds(atom);
+    auto [beg, bondEnd]        = mol->getAtomBonds(atom);
 
     while (beg != bondEnd && qab.degree < kMaxBondsPerAtom) {
       const auto* bond        = (*mol)[*beg];
@@ -1545,8 +1533,13 @@ void populateQueryAtomBonds(const RDKit::ROMol* mol, MoleculesHost& batch) {
 
       if constexpr (kDebugBoolTreeBuild) {
         printf("[BondQuery] atom %d bond %d (%d-%d): queryType=%d, flags=0x%x, allowedTypes=0x%x\n",
-               atomIdx, qab.degree, bond->getBeginAtomIdx(), bond->getEndAtomIdx(),
-               bqd.bondType, bqd.queryFlags, bqd.allowedBondTypes);
+               atomIdx,
+               qab.degree,
+               bond->getBeginAtomIdx(),
+               bond->getEndAtomIdx(),
+               bqd.bondType,
+               bqd.queryFlags,
+               bqd.allowedBondTypes);
       }
 
       qab.neighborIdx[qab.degree] = static_cast<uint8_t>(otherAtomId);
@@ -1573,9 +1566,10 @@ void addQueryToBatch(const RDKit::ROMol* mol, MoleculesHost& batch) {
   std::vector<int> fragMapping;
   const unsigned   numFrags = RDKit::MolOps::getMolFrags(*mol, fragMapping);
   if (numFrags > 1) {
-    throw std::runtime_error("Fragment queries (disconnected SMARTS patterns) are not supported. "
-                             "Query has " + std::to_string(numFrags) + " disconnected components: " +
-                             RDKit::MolToSmarts(*mol));
+    throw std::runtime_error(
+      "Fragment queries (disconnected SMARTS patterns) are not supported. "
+      "Query has " +
+      std::to_string(numFrags) + " disconnected components: " + RDKit::MolToSmarts(*mol));
   }
 
   auto& atomDataPackedVec = batch.atomDataPacked;
@@ -1583,12 +1577,12 @@ void addQueryToBatch(const RDKit::ROMol* mol, MoleculesHost& batch) {
   auto& bondTypeCountsVec = batch.bondTypeCounts;
 
   // Boolean tree data
-  auto& atomQueryTreesVec     = batch.atomQueryTrees;
-  auto& queryInstructionsVec  = batch.queryInstructions;
-  auto& queryLeafMasksVec     = batch.queryLeafMasks;
+  auto& atomQueryTreesVec      = batch.atomQueryTrees;
+  auto& queryInstructionsVec   = batch.queryInstructions;
+  auto& queryLeafMasksVec      = batch.queryLeafMasks;
   auto& queryLeafBondCountsVec = batch.queryLeafBondCounts;
-  auto& atomInstrStartsVec    = batch.atomInstrStarts;
-  auto& atomLeafMaskStartsVec = batch.atomLeafMaskStarts;
+  auto& atomInstrStartsVec     = batch.atomInstrStarts;
+  auto& atomLeafMaskStartsVec  = batch.atomLeafMaskStarts;
 
   populateQueryAtomBonds(mol, batch);
 
@@ -1622,12 +1616,8 @@ void addQueryToBatch(const RDKit::ROMol* mol, MoleculesHost& batch) {
     atomLeafMaskStartsVec.push_back(static_cast<int>(queryLeafMasksVec.size()));
 
     // Append this atom's data to global arrays
-    queryInstructionsVec.insert(queryInstructionsVec.end(),
-                                builder.instructions.begin(),
-                                builder.instructions.end());
-    queryLeafMasksVec.insert(queryLeafMasksVec.end(),
-                             builder.leafMasks.begin(),
-                             builder.leafMasks.end());
+    queryInstructionsVec.insert(queryInstructionsVec.end(), builder.instructions.begin(), builder.instructions.end());
+    queryLeafMasksVec.insert(queryLeafMasksVec.end(), builder.leafMasks.begin(), builder.leafMasks.end());
     queryLeafBondCountsVec.insert(queryLeafBondCountsVec.end(),
                                   builder.leafBondCounts.begin(),
                                   builder.leafBondCounts.end());
@@ -1647,8 +1637,7 @@ void addQueryToBatch(const RDKit::ROMol* mol, MoleculesHost& batch) {
   batch.recursivePatterns.push_back(extractRecursivePatterns(mol));
 }
 
-void addQueryToBatch(const RDKit::ROMol* mol, MoleculesHost& batch,
-                     const std::vector<int>& childPatternIds) {
+void addQueryToBatch(const RDKit::ROMol* mol, MoleculesHost& batch, const std::vector<int>& childPatternIds) {
   if (mol->getNumAtoms() > kMaxTargetAtoms) {
     throw std::runtime_error("Query molecule has " + std::to_string(mol->getNumAtoms()) +
                              " atoms, which exceeds the maximum of " + std::to_string(kMaxTargetAtoms));
@@ -1657,20 +1646,21 @@ void addQueryToBatch(const RDKit::ROMol* mol, MoleculesHost& batch,
   std::vector<int> fragMapping;
   const unsigned   numFrags = RDKit::MolOps::getMolFrags(*mol, fragMapping);
   if (numFrags > 1) {
-    throw std::runtime_error("Fragment queries (disconnected SMARTS patterns) are not supported. "
-                             "Query has " + std::to_string(numFrags) + " disconnected components: " +
-                             RDKit::MolToSmarts(*mol));
+    throw std::runtime_error(
+      "Fragment queries (disconnected SMARTS patterns) are not supported. "
+      "Query has " +
+      std::to_string(numFrags) + " disconnected components: " + RDKit::MolToSmarts(*mol));
   }
 
-  auto& atomDataPackedVec = batch.atomDataPacked;
-  auto& atomQueryMasksVec = batch.atomQueryMasks;
-  auto& bondTypeCountsVec = batch.bondTypeCounts;
-  auto& atomQueryTreesVec     = batch.atomQueryTrees;
-  auto& queryInstructionsVec  = batch.queryInstructions;
-  auto& queryLeafMasksVec     = batch.queryLeafMasks;
+  auto& atomDataPackedVec      = batch.atomDataPacked;
+  auto& atomQueryMasksVec      = batch.atomQueryMasks;
+  auto& bondTypeCountsVec      = batch.bondTypeCounts;
+  auto& atomQueryTreesVec      = batch.atomQueryTrees;
+  auto& queryInstructionsVec   = batch.queryInstructions;
+  auto& queryLeafMasksVec      = batch.queryLeafMasks;
   auto& queryLeafBondCountsVec = batch.queryLeafBondCounts;
-  auto& atomInstrStartsVec    = batch.atomInstrStarts;
-  auto& atomLeafMaskStartsVec = batch.atomLeafMaskStarts;
+  auto& atomInstrStartsVec     = batch.atomInstrStarts;
+  auto& atomLeafMaskStartsVec  = batch.atomLeafMaskStarts;
 
   populateQueryAtomBonds(mol, batch);
 
@@ -1704,12 +1694,8 @@ void addQueryToBatch(const RDKit::ROMol* mol, MoleculesHost& batch,
     atomInstrStartsVec.push_back(static_cast<int>(queryInstructionsVec.size()));
     atomLeafMaskStartsVec.push_back(static_cast<int>(queryLeafMasksVec.size()));
 
-    queryInstructionsVec.insert(queryInstructionsVec.end(),
-                                builder.instructions.begin(),
-                                builder.instructions.end());
-    queryLeafMasksVec.insert(queryLeafMasksVec.end(),
-                             builder.leafMasks.begin(),
-                             builder.leafMasks.end());
+    queryInstructionsVec.insert(queryInstructionsVec.end(), builder.instructions.begin(), builder.instructions.end());
+    queryLeafMasksVec.insert(queryLeafMasksVec.end(), builder.leafMasks.begin(), builder.leafMasks.end());
     queryLeafBondCountsVec.insert(queryLeafBondCountsVec.end(),
                                   builder.leafBondCounts.begin(),
                                   builder.leafBondCounts.end());
@@ -1792,26 +1778,26 @@ int collectPatternsFromMolecule(const RDKit::ROMol*                 mol,
  * @return Maximum depth encountered in this subtree
  */
 struct PendingRecursiveChild {
-  int                patternIdx = -1;
+  int                 patternIdx = -1;
   const RDKit::ROMol* queryMol   = nullptr;
-  int                atomIdx    = -1;
-  int                depth      = 0;
+  int                 atomIdx    = -1;
+  int                 depth      = 0;
 };
 
 int collectRecursivePatterns(const RDKit::Atom::QUERYATOM_QUERY* query,
                              int                                 atomIdx,
-                             std::vector<RecursivePatternEntry>&  patterns,
+                             std::vector<RecursivePatternEntry>& patterns,
                              int&                                nextPatternId,
                              int                                 parentIdx,
                              int                                 currentDepth,
                              int&                                nextLocalId,
-                             std::vector<PendingRecursiveChild>*  pendingChildren) {
+                             std::vector<PendingRecursiveChild>* pendingChildren) {
   if (query == nullptr) {
     return 0;
   }
 
-  const std::string desc = query->getDescription();
-  int maxDepth = 0;
+  const std::string desc     = query->getDescription();
+  int               maxDepth = 0;
 
   if (desc == "RecursiveStructure") {
     if (nextPatternId >= RecursivePatternInfo::kMaxPatterns) {
@@ -1820,7 +1806,7 @@ int collectRecursivePatterns(const RDKit::Atom::QUERYATOM_QUERY* query,
     }
 
     const auto* recursiveQuery = static_cast<const RDKit::RecursiveStructureQuery*>(query);
-    auto queryMol = recursiveQuery->getQueryMol();
+    auto        queryMol       = recursiveQuery->getQueryMol();
 
     if (queryMol != nullptr) {
       const int thisPatternIdx = static_cast<int>(patterns.size());
@@ -1837,8 +1823,14 @@ int collectRecursivePatterns(const RDKit::Atom::QUERYATOM_QUERY* query,
       patterns.push_back(entry);
 
       if constexpr (kDebugBoolTreeBuild) {
-        printf("[ExtractPatterns] Added pattern: patternId=%d, depth=%d, parentIdx=%d, parentPatternId=%d, localIdInParent=%d, smarts=%s\n",
-               entry.patternId, currentDepth, parentIdx, entry.parentPatternId, thisLocalId, RDKit::MolToSmarts(*queryMol).c_str());
+        printf(
+          "[ExtractPatterns] Added pattern: patternId=%d, depth=%d, parentIdx=%d, parentPatternId=%d, localIdInParent=%d, smarts=%s\n",
+          entry.patternId,
+          currentDepth,
+          parentIdx,
+          entry.parentPatternId,
+          thisLocalId,
+          RDKit::MolToSmarts(*queryMol).c_str());
       }
 
       // Defer descending into the recursive query molecule until we've assigned IDs
@@ -1854,22 +1846,28 @@ int collectRecursivePatterns(const RDKit::Atom::QUERYATOM_QUERY* query,
   }
 
   for (auto it = query->beginChildren(); it != query->endChildren(); ++it) {
-    int childDepth = collectRecursivePatterns(
-      (*it).get(), atomIdx, patterns, nextPatternId, parentIdx, currentDepth, nextLocalId, pendingChildren);
-    maxDepth = std::max(maxDepth, childDepth);
+    int childDepth = collectRecursivePatterns((*it).get(),
+                                              atomIdx,
+                                              patterns,
+                                              nextPatternId,
+                                              parentIdx,
+                                              currentDepth,
+                                              nextLocalId,
+                                              pendingChildren);
+    maxDepth       = std::max(maxDepth, childDepth);
   }
 
   return maxDepth;
 }
 
-int collectPatternsFromMolecule(const RDKit::ROMol*                  mol,
-                                std::vector<RecursivePatternEntry>&  patterns,
-                                int&                                 nextPatternId,
-                                int                                  parentIdx,
-                                int                                  parentAtomIdx,
-                                int                                  currentDepth,
-                                int&                                 nextLocalId) {
-  int maxDepth = 0;
+int collectPatternsFromMolecule(const RDKit::ROMol*                 mol,
+                                std::vector<RecursivePatternEntry>& patterns,
+                                int&                                nextPatternId,
+                                int                                 parentIdx,
+                                int                                 parentAtomIdx,
+                                int                                 currentDepth,
+                                int&                                nextLocalId) {
+  int                                maxDepth = 0;
   std::vector<PendingRecursiveChild> pendingChildren;
   for (const auto* atom : mol->atoms()) {
     if (!atom->hasQuery()) {
@@ -1878,17 +1876,23 @@ int collectPatternsFromMolecule(const RDKit::ROMol*                  mol,
 
     const auto* query = atom->getQuery();
     if (query != nullptr) {
-      int childDepth = collectRecursivePatterns(
-        query, atom->getIdx(), patterns, nextPatternId, parentIdx, currentDepth, nextLocalId, &pendingChildren);
-      maxDepth = std::max(maxDepth, childDepth);
+      int childDepth = collectRecursivePatterns(query,
+                                                atom->getIdx(),
+                                                patterns,
+                                                nextPatternId,
+                                                parentIdx,
+                                                currentDepth,
+                                                nextLocalId,
+                                                &pendingChildren);
+      maxDepth       = std::max(maxDepth, childDepth);
     }
   }
 
   // Now that all recursive patterns in this molecule have stable patternIds, walk
   // into each recursive query molecule to collect nested patterns and finalize depths.
   for (const auto& pending : pendingChildren) {
-    int childLocalId   = 0;
-    int childMaxDepth  = 0;
+    int childLocalId  = 0;
+    int childMaxDepth = 0;
     if (pending.queryMol != nullptr) {
       childMaxDepth = collectPatternsFromMolecule(pending.queryMol,
                                                   patterns,
@@ -1899,7 +1903,7 @@ int collectPatternsFromMolecule(const RDKit::ROMol*                  mol,
                                                   childLocalId);
     }
     patterns[pending.patternIdx].depth = childMaxDepth;
-    maxDepth = std::max(maxDepth, childMaxDepth + 1);
+    maxDepth                           = std::max(maxDepth, childMaxDepth + 1);
   }
 
   return maxDepth;
@@ -1940,24 +1944,25 @@ RecursivePatternInfo extractRecursivePatterns(const RDKit::ROMol* mol) {
   int maxDepth = collectPatternsFromMolecule(mol, info.patterns, nextPatternId, -1, -1, 0, nextLocalId);
 
   info.hasRecursivePatterns = !info.patterns.empty();
-  info.maxDepth = maxDepth;
+  info.maxDepth             = maxDepth;
 
   if (info.size() > RecursivePatternInfo::kMaxPatterns) {
-    throw std::runtime_error("Query contains " + std::to_string(info.size()) +
-                             " recursive SMARTS patterns, but only " +
+    throw std::runtime_error("Query contains " + std::to_string(info.size()) + " recursive SMARTS patterns, but only " +
                              std::to_string(RecursivePatternInfo::kMaxPatterns) + " are supported");
   }
 
-  std::stable_sort(info.patterns.begin(), info.patterns.end(),
-                   [](const RecursivePatternEntry& a, const RecursivePatternEntry& b) {
-                     return a.depth < b.depth;
-                   });
+  std::stable_sort(info.patterns.begin(),
+                   info.patterns.end(),
+                   [](const RecursivePatternEntry& a, const RecursivePatternEntry& b) { return a.depth < b.depth; });
 
   if constexpr (kDebugBoolTreeBuild) {
     printf("[ExtractPatterns] After sorting by depth:\n");
     for (const auto& p : info.patterns) {
       printf("[ExtractPatterns]   patternId=%d, depth=%d, parentPatternId=%d, localIdInParent=%d\n",
-             p.patternId, p.depth, p.parentPatternId, p.localIdInParent);
+             p.patternId,
+             p.depth,
+             p.parentPatternId,
+             p.localIdInParent);
     }
   }
 
@@ -1972,16 +1977,17 @@ namespace {
 
 /**
  * @brief Merge a source batch into destination, adjusting all offsets.
- * 
+ *
  * Works for both target and query batches. Query-specific fields are only
  * copied if non-empty in the source.
  */
 void mergeBatch(MoleculesHost& dest, const MoleculesHost& src) {
   ScopedNvtxRange range("mergeBatch");
-  if (src.numMolecules() == 0) return;
+  if (src.numMolecules() == 0)
+    return;
 
-  const int atomOffset = static_cast<int>(dest.atomDataPacked.size());
-  const int instrOffset = static_cast<int>(dest.queryInstructions.size());
+  const int atomOffset     = static_cast<int>(dest.atomDataPacked.size());
+  const int instrOffset    = static_cast<int>(dest.queryInstructions.size());
   const int leafMaskOffset = static_cast<int>(dest.queryLeafMasks.size());
 
   dest.atomDataPacked.insert(dest.atomDataPacked.end(), src.atomDataPacked.begin(), src.atomDataPacked.end());
@@ -1991,9 +1997,13 @@ void mergeBatch(MoleculesHost& dest, const MoleculesHost& src) {
 
   dest.atomQueryMasks.insert(dest.atomQueryMasks.end(), src.atomQueryMasks.begin(), src.atomQueryMasks.end());
   dest.atomQueryTrees.insert(dest.atomQueryTrees.end(), src.atomQueryTrees.begin(), src.atomQueryTrees.end());
-  dest.queryInstructions.insert(dest.queryInstructions.end(), src.queryInstructions.begin(), src.queryInstructions.end());
+  dest.queryInstructions.insert(dest.queryInstructions.end(),
+                                src.queryInstructions.begin(),
+                                src.queryInstructions.end());
   dest.queryLeafMasks.insert(dest.queryLeafMasks.end(), src.queryLeafMasks.begin(), src.queryLeafMasks.end());
-  dest.queryLeafBondCounts.insert(dest.queryLeafBondCounts.end(), src.queryLeafBondCounts.begin(), src.queryLeafBondCounts.end());
+  dest.queryLeafBondCounts.insert(dest.queryLeafBondCounts.end(),
+                                  src.queryLeafBondCounts.begin(),
+                                  src.queryLeafBondCounts.end());
 
   for (int start : src.atomInstrStarts) {
     dest.atomInstrStarts.push_back(start + instrOffset);
@@ -2006,9 +2016,9 @@ void mergeBatch(MoleculesHost& dest, const MoleculesHost& src) {
     dest.batchAtomStarts.push_back(src.batchAtomStarts[i] + atomOffset);
   }
 
-  dest.recursivePatterns.insert(dest.recursivePatterns.end(), 
-                                 src.recursivePatterns.begin(), 
-                                 src.recursivePatterns.end());
+  dest.recursivePatterns.insert(dest.recursivePatterns.end(),
+                                src.recursivePatterns.begin(),
+                                src.recursivePatterns.end());
 }
 
 /**
@@ -2024,9 +2034,7 @@ void mergeBatch(MoleculesHost& dest, const MoleculesHost& src) {
  * @param getBatch Accessor function to retrieve batch for thread tid
  */
 template <typename BatchAccessor>
-void mergeTargetBatchesParallelImpl(MoleculesHost&       result,
-                                    int                  numThreads,
-                                    BatchAccessor        getBatch) {
+void mergeTargetBatchesParallelImpl(MoleculesHost& result, int numThreads, BatchAccessor getBatch) {
   ScopedNvtxRange range("mergeTargetBatchesParallel");
 
   std::vector<size_t> atomOffsets(numThreads + 1, 0);
@@ -2034,8 +2042,8 @@ void mergeTargetBatchesParallelImpl(MoleculesHost&       result,
 
   for (int t = 0; t < numThreads; ++t) {
     const MoleculesHost& batch = getBatch(t);
-    atomOffsets[t + 1] = atomOffsets[t] + batch.atomDataPacked.size();
-    molOffsets[t + 1]  = molOffsets[t] + batch.numMolecules();
+    atomOffsets[t + 1]         = atomOffsets[t] + batch.atomDataPacked.size();
+    molOffsets[t + 1]          = molOffsets[t] + batch.numMolecules();
   }
 
   const size_t totalAtoms = atomOffsets[numThreads];
@@ -2058,12 +2066,12 @@ void mergeTargetBatchesParallelImpl(MoleculesHost&       result,
     ScopedNvtxRange copyRange("Merge: parallel copy");
 #pragma omp parallel num_threads(numThreads)
     {
-      const int tid = omp_get_thread_num();
-      const MoleculesHost& src = getBatch(tid);
-      const size_t atomOff = atomOffsets[tid];
-      const size_t molOff  = molOffsets[tid];
-      const size_t numAtoms = src.atomDataPacked.size();
-      const size_t numMols  = src.numMolecules();
+      const int            tid      = omp_get_thread_num();
+      const MoleculesHost& src      = getBatch(tid);
+      const size_t         atomOff  = atomOffsets[tid];
+      const size_t         molOff   = molOffsets[tid];
+      const size_t         numAtoms = src.atomDataPacked.size();
+      const size_t         numMols  = src.numMolecules();
 
       if (numAtoms > 0) {
         std::memcpy(result.atomDataPacked.data() + atomOff,
@@ -2078,8 +2086,7 @@ void mergeTargetBatchesParallelImpl(MoleculesHost&       result,
       }
 
       for (size_t i = 0; i < numMols; ++i) {
-        result.batchAtomStarts[molOff + i + 1] =
-            static_cast<int>(src.batchAtomStarts[i + 1] + atomOff);
+        result.batchAtomStarts[molOff + i + 1] = static_cast<int>(src.batchAtomStarts[i + 1] + atomOff);
       }
     }
   }
@@ -2095,7 +2102,7 @@ MoleculesHost buildTargetBatchParallel(const std::vector<const RDKit::ROMol*>& m
                                        const std::vector<int>&                 sortOrder,
                                        int                                     numThreads) {
   ScopedNvtxRange range("buildTargetBatchParallel");
-  
+
   const int numMols = static_cast<int>(molecules.size());
   if (numMols == 0) {
     return MoleculesHost();
@@ -2118,7 +2125,7 @@ MoleculesHost buildTargetBatchParallel(const std::vector<const RDKit::ROMol*>& m
     totalAtoms += molecules[i]->getNumAtoms();
   }
   const size_t atomsPerThread = (totalAtoms + numThreads - 1) / numThreads;
-  const size_t molsPerThread = (numMols + numThreads - 1) / numThreads;
+  const size_t molsPerThread  = (numMols + numThreads - 1) / numThreads;
 
   std::vector<MoleculesHost> threadBatches(numThreads);
 
@@ -2129,9 +2136,9 @@ MoleculesHost buildTargetBatchParallel(const std::vector<const RDKit::ROMol*>& m
 
 #pragma omp parallel num_threads(numThreads)
   {
-    const int tid = omp_get_thread_num();
+    const int       tid = omp_get_thread_num();
     ScopedNvtxRange threadRange("Preprocess thread " + std::to_string(tid));
-    MoleculesHost& localBatch = threadBatches[tid];
+    MoleculesHost&  localBatch = threadBatches[tid];
 
 #pragma omp for schedule(static)
     for (int i = 0; i < numMols; ++i) {
@@ -2141,8 +2148,9 @@ MoleculesHost buildTargetBatchParallel(const std::vector<const RDKit::ROMol*>& m
   }
 
   MoleculesHost result;
-  mergeTargetBatchesParallelImpl(result, numThreads,
-                                 [&](int tid) -> const MoleculesHost& { return threadBatches[tid]; });
+  mergeTargetBatchesParallelImpl(result, numThreads, [&](int tid) -> const MoleculesHost& {
+    return threadBatches[tid];
+  });
 
   return result;
 }
@@ -2152,9 +2160,9 @@ void buildTargetBatchParallelInto(MoleculesHost&                          result
                                   const std::vector<const RDKit::ROMol*>& molecules,
                                   const std::vector<int>&                 sortOrder) {
   ScopedNvtxRange range("buildTargetBatchParallelInto");
-  
+
   const int numMols = static_cast<int>(molecules.size());
-  
+
   if (numMols == 0) {
     result.clear();
     return;
@@ -2176,7 +2184,7 @@ void buildTargetBatchParallelInto(MoleculesHost&                          result
   atomStarts.resize(numMols + 1);
   atomStarts[0] = 0;
   for (int i = 0; i < numMols; ++i) {
-    const int molIdx = useSortOrder ? sortOrder[i] : i;
+    const int molIdx  = useSortOrder ? sortOrder[i] : i;
     atomStarts[i + 1] = atomStarts[i] + static_cast<int>(molecules[molIdx]->getNumAtoms());
   }
   const size_t totalAtoms = atomStarts[numMols];
@@ -2193,38 +2201,38 @@ void buildTargetBatchParallelInto(MoleculesHost&                          result
 
 #pragma omp for schedule(static)
     for (int i = 0; i < numMols; ++i) {
-      const int molIdx = useSortOrder ? sortOrder[i] : i;
-      const RDKit::ROMol* mol = molecules[molIdx];
-      const int atomOffset = atomStarts[i];
-      const auto* ringInfo = mol->getRingInfo();
+      const int           molIdx     = useSortOrder ? sortOrder[i] : i;
+      const RDKit::ROMol* mol        = molecules[molIdx];
+      const int           atomOffset = atomStarts[i];
+      const auto*         ringInfo   = mol->getRingInfo();
 
       int localAtomIdx = 0;
       for (const RDKit::Atom* atom : mol->atoms()) {
         const int destIdx = atomOffset + localAtomIdx;
-        
-        AtomDataPacked& packed = result.atomDataPacked[destIdx];
-        BondTypeCounts& bondCounts = result.bondTypeCounts[destIdx];
-        TargetAtomBonds& tab = result.targetAtomBonds[destIdx];
 
-        packed = AtomDataPacked{};
+        AtomDataPacked&  packed     = result.atomDataPacked[destIdx];
+        BondTypeCounts&  bondCounts = result.bondTypeCounts[destIdx];
+        TargetAtomBonds& tab        = result.targetAtomBonds[destIdx];
+
+        packed     = AtomDataPacked{};
         bondCounts = BondTypeCounts{};
-        tab = TargetAtomBonds{};
+        tab        = TargetAtomBonds{};
 
         populateAtomScalars(atom, packed, ringInfo);
 
-        const unsigned int atomIdx = atom->getIdx();
-        int ringBondCount = 0;
-        int numHeteroNeighbors = 0;
-        int totalBonds = 0;
-        tab.degree = 0;
+        const unsigned int atomIdx            = atom->getIdx();
+        int                ringBondCount      = 0;
+        int                numHeteroNeighbors = 0;
+        int                totalBonds         = 0;
+        tab.degree                            = 0;
 
         auto [beg, bondEnd] = mol->getAtomBonds(atom);
         while (beg != bondEnd) {
-          const auto* bond = (*mol)[*beg];
-          const unsigned int bondIdx = bond->getIdx();
-          const int bondType = bond->getBondType();
-          const int otherAtomId = bond->getOtherAtomIdx(atomIdx);
-          const bool isInRing = ringInfo->numBondRings(bondIdx) > 0;
+          const auto*        bond        = (*mol)[*beg];
+          const unsigned int bondIdx     = bond->getIdx();
+          const int          bondType    = bond->getBondType();
+          const int          otherAtomId = bond->getOtherAtomIdx(atomIdx);
+          const bool         isInRing    = ringInfo->numBondRings(bondIdx) > 0;
 
           incrementBondTypeCount(bondCounts, bondType);
           ringBondCount += isInRing;
@@ -2234,7 +2242,7 @@ void buildTargetBatchParallelInto(MoleculesHost&                          result
 
           if (tab.degree < kMaxBondsPerAtom) {
             tab.neighborIdx[tab.degree] = static_cast<uint8_t>(otherAtomId);
-            tab.bondInfo[tab.degree] = packTargetBondInfo(bondType, isInRing);
+            tab.bondInfo[tab.degree]    = packTargetBondInfo(bondType, isInRing);
             ++tab.degree;
           }
           ++totalBonds;
@@ -2264,7 +2272,7 @@ MoleculesHost buildQueryBatchParallel(const std::vector<const RDKit::ROMol*>& mo
                                       const std::vector<int>&                 sortOrder,
                                       int                                     numThreads) {
   ScopedNvtxRange range("buildQueryBatchParallel");
-  
+
   const int numMols = static_cast<int>(molecules.size());
   if (numMols == 0) {
     return MoleculesHost();
@@ -2287,7 +2295,7 @@ MoleculesHost buildQueryBatchParallel(const std::vector<const RDKit::ROMol*>& mo
     totalAtoms += molecules[i]->getNumAtoms();
   }
   const size_t atomsPerThread = (totalAtoms + numThreads - 1) / numThreads;
-  const size_t molsPerThread = (numMols + numThreads - 1) / numThreads;
+  const size_t molsPerThread  = (numMols + numThreads - 1) / numThreads;
 
   std::vector<MoleculesHost> threadBatches(numThreads);
 
@@ -2298,9 +2306,9 @@ MoleculesHost buildQueryBatchParallel(const std::vector<const RDKit::ROMol*>& mo
 
 #pragma omp parallel num_threads(numThreads)
   {
-    const int tid = omp_get_thread_num();
+    const int       tid = omp_get_thread_num();
     ScopedNvtxRange threadRange("Query preprocess thread " + std::to_string(tid));
-    MoleculesHost& localBatch = threadBatches[tid];
+    MoleculesHost&  localBatch = threadBatches[tid];
 
 #pragma omp for schedule(static)
     for (int i = 0; i < numMols; ++i) {
@@ -2354,7 +2362,7 @@ bool requiresRDKitFallback(const RDKit::ROMol* mol) {
 
     int ringBondCount      = 0;
     int numHeteroNeighbors = 0;
-    auto [beg, bondEnd] = mol->getAtomBonds(atom);
+    auto [beg, bondEnd]    = mol->getAtomBonds(atom);
     while (beg != bondEnd) {
       const auto* bond = (*mol)[*beg];
       if (ringInfo->numBondRings(bond->getIdx()) > 0) {
