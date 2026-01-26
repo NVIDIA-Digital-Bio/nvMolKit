@@ -180,6 +180,9 @@ target_link_libraries(test_butina PRIVATE butina device)
 add_executable(test_boolean_tree test_boolean_tree.cu)
 target_link_libraries(test_boolean_tree PRIVATE substruct_definitions device)
 
+add_executable(test_molecules test_molecules.cu)
+target_link_libraries(test_molecules PRIVATE molecules cuda_error_check ${RDKit_LIBS})
+
 set(TEST_LIST
     test_boolean_tree
     test_butina
