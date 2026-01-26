@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,7 +17,6 @@
 #define NVMOLKIT_MOLECULES_H
 
 #include <memory>
-#include <string>
 #include <vector>
 
 #include "atom_data_packed.h"
@@ -259,111 +258,6 @@ class MoleculesDevice {
  * @param batch The batch to add the molecule to
  */
 void addToBatch(const RDKit::ROMol* mol, MoleculesHost& batch);
-
-/**
- * @brief Add a query molecule (from SMARTS) to an existing batch.
- *
- * Extracts query information from QueryAtom objects and populates atomQueries.
- * Supports AND, OR, and NOT combinations of query types via boolean expression trees.
- * XOR queries and recursive SMARTS ($(...)) throw an exception.
- *
- * @param mol Pointer to the RDKit molecule (typically parsed from SMARTS)
- * @param batch The batch to add the query molecule to
- */
-void addQueryToBatch(const RDKit::ROMol* mol, MoleculesHost& batch);
-
-/**
- * @brief Build a target molecule batch in parallel using OpenMP.
- *
- * Processes molecules in parallel when numThreads > 1. The molecules are added
- * in the order specified by sortOrder (or sequential order if sortOrder is empty).
- *
- * @param molecules Vector of molecule pointers
- * @param sortOrder Optional sort order (empty = use sequential order)
- * @param numThreads Number of OpenMP threads (1 = serial)
- * @return Populated MoleculesHost batch
- */
-MoleculesHost buildTargetBatchParallel(const std::vector<const RDKit::ROMol*>& molecules,
-                                       const std::vector<int>&                 sortOrder,
-                                       int                                     numThreads);
-
-/**
- * @brief Build a target molecule batch in parallel into existing storage.
- *
- * Uses direct parallel writing - each thread writes directly to the result
- * buffer at computed offsets. Reuses result's existing capacity when possible.
- *
- * @param result Output batch (will be overwritten)
- * @param numThreads Number of OpenMP threads to use
- * @param molecules Vector of molecule pointers
- * @param sortOrder Optional sort order (empty = use sequential order)
- */
-void buildTargetBatchParallelInto(MoleculesHost&                          result,
-                                  int                                     numThreads,
-                                  const std::vector<const RDKit::ROMol*>& molecules,
-                                  const std::vector<int>&                 sortOrder);
-
-/**
- * @brief Build a query molecule batch in parallel using OpenMP.
- *
- * Processes molecules in parallel when numThreads > 1. The molecules are added
- * in the order specified by sortOrder (or sequential order if sortOrder is empty).
- *
- * @param molecules Vector of molecule pointers
- * @param sortOrder Optional sort order (empty = use sequential order)
- * @param numThreads Number of OpenMP threads (1 = serial)
- * @return Populated MoleculesHost batch
- */
-MoleculesHost buildQueryBatchParallel(const std::vector<const RDKit::ROMol*>& molecules,
-                                      const std::vector<int>&                 sortOrder,
-                                      int                                     numThreads);
-
-/**
- * @brief Add a query molecule with explicit child pattern ID mapping.
- *
- * Used when adding cached recursive patterns. The childPatternIds vector maps
- * local RecursiveStructure indices (in DFS order) to global pattern IDs.
- *
- * @param mol Pointer to the RDKit molecule
- * @param batch The batch to add the query molecule to
- * @param childPatternIds Map from local index (0, 1, ...) to global patternId
- */
-void addQueryToBatch(const RDKit::ROMol* mol, MoleculesHost& batch, const std::vector<int>& childPatternIds);
-
-/**
- * @brief Convert RDKit query description string to AtomQuery flags.
- * @param description The query description from RDKit (e.g., "AtomAtomicNum")
- * @return The corresponding AtomQuery flag value, or AtomQueryNone if unsupported
- */
-AtomQuery atomQueryFromDescription(const std::string& description);
-
-/**
- * @brief Build a query mask from packed atom data and query flags.
- *
- * Creates a precomputed mask and expected value pair for branchless GPU matching.
- * For each field specified in queryFlags, sets the corresponding mask byte to 0xFF
- * and the expected byte to the query atom's value.
- *
- * @param queryAtom The packed query atom data
- * @param queryFlags Bitmask of AtomQueryFlags indicating which fields to compare
- * @return AtomQueryMask with precomputed mask and expected values
- */
-AtomQueryMask        buildQueryMask(const AtomDataPacked& queryAtom, AtomQuery queryFlags);
-/**
- * @brief Extract recursive SMARTS patterns from a query molecule.
- *
- * Walks the query tree looking for RecursiveStructure nodes and extracts the
- * inner query molecules, including nested patterns. Patterns are extracted
- * depth-first and sorted by depth (leaves first) for level-by-level processing.
- *
- * Validates constraints:
- * - Maximum 32 total recursive patterns per query (including nested)
- *
- * @param mol The query molecule (typically parsed from SMARTS)
- * @return RecursivePatternInfo containing all found patterns sorted by depth
- * @throws std::runtime_error if constraints are violated
- */
-RecursivePatternInfo extractRecursivePatterns(const RDKit::ROMol* mol);
 
 }  // namespace nvMolKit
 
