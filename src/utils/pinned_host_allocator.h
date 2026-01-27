@@ -25,9 +25,27 @@
 
 namespace nvMolKit {
 
+/**
+ * @brief Arena allocator for CUDA pinned host memory.
+ *
+ * Provides fast bump-pointer allocation from a preallocated pinned memory pool.
+ * The total expected size should be provided exactly once, either via the constructor
+ * or by calling preallocate(). Calling both or calling preallocate() multiple times
+ * is an error.
+ *
+ * @note Does not support deallocation or defragmentation. Memory is freed when the
+ *       allocator is destroyed and all views are destroyed.
+ * @note All allocations are aligned to 256 bytes.
+ * @note If allocations exceed the preallocated size, additional buffers are allocated
+ *       in chunks equal to the original preallocation size. This incurs synchronous
+ *       cudaMallocHost calls and should be avoided for performance.
+ */
 class PinnedHostAllocator {
  public:
   PinnedHostAllocator() = default;
+
+  /// @brief Construct with preallocated pinned memory pool.
+  /// @param estimatedBytes Total bytes to preallocate. Cannot call preallocate() after this.
   explicit PinnedHostAllocator(size_t estimatedBytes);
 
   PinnedHostAllocator(const PinnedHostAllocator&)                = delete;
@@ -35,8 +53,12 @@ class PinnedHostAllocator {
   PinnedHostAllocator(PinnedHostAllocator&&) noexcept            = default;
   PinnedHostAllocator& operator=(PinnedHostAllocator&&) noexcept = default;
 
+  /// @brief Preallocate the pinned memory pool.
+  /// @param estimatedBytes Total bytes to preallocate.
+  /// @throws std::logic_error if already preallocated (via constructor or prior call).
   void preallocate(size_t estimatedBytes);
 
+  /// @brief Allocate a view of count elements from the pool.
   template <typename T> PinnedHostView<T> allocate(size_t count) {
     if (count == 0) {
       throw std::invalid_argument("PinnedHostAllocator allocate requires non-zero size.");

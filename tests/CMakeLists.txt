@@ -176,6 +176,9 @@ target_link_libraries(test_conformer_checkers PRIVATE ${RDKit_LIBS}
 add_executable(test_host_vector test_host_vector.cu)
 target_link_libraries(test_host_vector PRIVATE host_vector device_vector)
 
+add_executable(test_pinned_host_allocator test_pinned_host_allocator.cpp)
+target_link_libraries(test_pinned_host_allocator PRIVATE pinned_host_allocator)
+
 add_executable(test_etkdg_result_tracker test_etkdg_result_tracker.cpp)
 target_link_libraries(test_etkdg_result_tracker PRIVATE etkdg_impl)
 
@@ -212,6 +215,7 @@ set(TEST_LIST
     test_molecules
     test_mmff
     test_distgeom
+    test_pinned_host_allocator
     test_triangle_smooth
     test_morgan_fingerprint
     test_morgan_fingerprint_ref
