@@ -180,6 +180,9 @@ target_link_libraries(test_butina PRIVATE butina device)
 add_executable(test_boolean_tree test_boolean_tree.cu)
 target_link_libraries(test_boolean_tree PRIVATE substruct_definitions device)
 
+add_executable(test_molecules test_molecules.cu)
+target_link_libraries(test_molecules PRIVATE molecules cuda_error_check ${RDKit_LIBS})
+
 set(TEST_LIST
     test_boolean_tree
     test_butina
@@ -200,6 +203,7 @@ set(TEST_LIST
     test_host_vector
     test_bfgs_minimizer
     test_etkdg_result_tracker
+    test_molecules
     test_mmff
     test_distgeom
     test_triangle_smooth
