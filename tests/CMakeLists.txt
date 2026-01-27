@@ -34,6 +34,11 @@ target_link_libraries(test_cuda_error_check PRIVATE cuda_error_check)
 add_executable(test_device test_device.cpp)
 target_link_libraries(test_device PRIVATE device cuda_error_check CUDA::cudart)
 
+add_executable(test_device_timings test_device_timings.cu)
+target_link_libraries(test_device_timings PRIVATE device_timings)
+set_source_files_properties(
+  test_device_timings.cu PROPERTIES COMPILE_DEFINITIONS NVMOLKIT_ENABLE_DEVICE_TIMINGS=1)
+
 add_executable(test_device_vector test_device_vector.cpp)
 target_link_libraries(test_device_vector PRIVATE device_vector cuda_error_check
                                                  CUDA::cudart)
@@ -192,6 +197,7 @@ set(TEST_LIST
     test_coordgen
     test_cuda_error_check
     test_device
+    test_device_timings
     test_device_vector
     test_distgeom_kernels
     test_etkdg

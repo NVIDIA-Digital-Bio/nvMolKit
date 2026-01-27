@@ -26,7 +26,12 @@
 
 namespace nvMolKit {
 
-constexpr bool enableDeviceTimings = false;
+#ifndef NVMOLKIT_ENABLE_DEVICE_TIMINGS
+// Set NVMOLKIT_ENABLE_DEVICE_TIMINGS=1 per translation unit to enable timings.
+#define NVMOLKIT_ENABLE_DEVICE_TIMINGS 0
+#endif
+
+constexpr bool enableDeviceTimings = (NVMOLKIT_ENABLE_DEVICE_TIMINGS != 0);
 
 // ============================================================================
 // Device-side struct (passed to kernels)
