@@ -20,8 +20,6 @@
 #include <GraphMol/QueryOps.h>
 #include <GraphMol/ROMol.h>
 #include <GraphMol/SmilesParse/SmartsWrite.h>
-#include <GraphMol/Substruct/SubstructMatch.h>
-#include <omp.h>
 #include <RDGeneral/versions.h>
 
 #include <algorithm>
@@ -29,7 +27,6 @@
 #include <functional>
 #include <stdexcept>
 #include <string>
-#include <type_traits>
 
 #include "nvtx.h"
 #include "packed_bonds.h"
@@ -39,21 +36,6 @@
 namespace nvMolKit {
 
 namespace {
-
-/**
- * @brief Resize vector without value-initialization for trivially copyable types.
- *
- * Uses a wrapper struct trick to avoid zero-initialization when capacity is sufficient.
- */
-template <typename T> void resizeUninit(std::vector<T>& vec, size_t newSize) {
-  static_assert(std::is_trivially_copyable_v<T>, "resizeUninit requires trivially copyable type");
-  struct Wrapper {
-    T value;
-    Wrapper() = default;
-  };
-  static_assert(sizeof(Wrapper) == sizeof(T));
-  reinterpret_cast<std::vector<Wrapper>&>(vec).resize(newSize);
-}
 
 /**
  * @brief Populate non-bond-related atom properties into packed format.
@@ -353,8 +335,7 @@ void MoleculesDevice::setStream(cudaStream_t stream) {
 
 namespace {
 
-template <typename T>
-void setFromVectorGrowOnly(AsyncDeviceVector<T>& dest, const std::vector<T>& src, cudaStream_t stream) {
+template <typename T> void setFromVectorGrowOnly(AsyncDeviceVector<T>& dest, const std::vector<T>& src) {
   if (src.empty()) {
     return;
   }
@@ -374,31 +355,31 @@ void MoleculesDevice::copyFromHost(const MoleculesHost& host, cudaStream_t strea
   setStream(stream);
   numMolecules_ = static_cast<int>(host.numMolecules());
 
-  setFromVectorGrowOnly(batchAtomStarts_, host.batchAtomStarts, stream);
+  setFromVectorGrowOnly(batchAtomStarts_, host.batchAtomStarts);
 
   // Copy GPU-optimized packed data
-  setFromVectorGrowOnly(atomDataPacked_, host.atomDataPacked, stream);
+  setFromVectorGrowOnly(atomDataPacked_, host.atomDataPacked);
   if (!host.atomQueryMasks.empty()) {
-    setFromVectorGrowOnly(atomQueryMasks_, host.atomQueryMasks, stream);
+    setFromVectorGrowOnly(atomQueryMasks_, host.atomQueryMasks);
   }
   if (!host.bondTypeCounts.empty()) {
-    setFromVectorGrowOnly(bondTypeCounts_, host.bondTypeCounts, stream);
+    setFromVectorGrowOnly(bondTypeCounts_, host.bondTypeCounts);
   }
   if (!host.targetAtomBonds.empty()) {
-    setFromVectorGrowOnly(targetAtomBonds_, host.targetAtomBonds, stream);
+    setFromVectorGrowOnly(targetAtomBonds_, host.targetAtomBonds);
   }
   if (!host.queryAtomBonds.empty()) {
-    setFromVectorGrowOnly(queryAtomBonds_, host.queryAtomBonds, stream);
+    setFromVectorGrowOnly(queryAtomBonds_, host.queryAtomBonds);
   }
 
   // Copy boolean expression tree data for compound queries
   if (!host.atomQueryTrees.empty()) {
-    setFromVectorGrowOnly(atomQueryTrees_, host.atomQueryTrees, stream);
-    setFromVectorGrowOnly(queryInstructions_, host.queryInstructions, stream);
-    setFromVectorGrowOnly(queryLeafMasks_, host.queryLeafMasks, stream);
-    setFromVectorGrowOnly(queryLeafBondCounts_, host.queryLeafBondCounts, stream);
-    setFromVectorGrowOnly(atomInstrStarts_, host.atomInstrStarts, stream);
-    setFromVectorGrowOnly(atomLeafMaskStarts_, host.atomLeafMaskStarts, stream);
+    setFromVectorGrowOnly(atomQueryTrees_, host.atomQueryTrees);
+    setFromVectorGrowOnly(queryInstructions_, host.queryInstructions);
+    setFromVectorGrowOnly(queryLeafMasks_, host.queryLeafMasks);
+    setFromVectorGrowOnly(queryLeafBondCounts_, host.queryLeafBondCounts);
+    setFromVectorGrowOnly(atomInstrStarts_, host.atomInstrStarts);
+    setFromVectorGrowOnly(atomLeafMaskStarts_, host.atomLeafMaskStarts);
   }
 }
 
@@ -1157,7 +1138,6 @@ uint8_t processQueryTree(const RDKit::Atom::QUERYATOM_QUERY* query,
     // Cast to ATOM_EQUALS_QUERY to access getVal()/getTol() - all numeric query types derive from this
     const auto*        eqQuery  = static_cast<const RDKit::ATOM_EQUALS_QUERY*>(query);
     const int          queryVal = eqQuery->getVal();
-    const int          queryTol = eqQuery->getTol();
 
     uint8_t result;
     if (desc.rfind("less_", 0) == 0) {
@@ -1955,130 +1935,5 @@ RecursivePatternInfo extractRecursivePatterns(const RDKit::ROMol* mol) {
 
   return info;
 }
-
-// =============================================================================
-// Parallel Batch Building
-// =============================================================================
-
-namespace {
-
-/**
- * @brief Merge a source batch into destination, adjusting all offsets.
- *
- * Works for both target and query batches. Query-specific fields are only
- * copied if non-empty in the source.
- */
-void mergeBatch(MoleculesHost& dest, const MoleculesHost& src) {
-  ScopedNvtxRange range("mergeBatch");
-  if (src.numMolecules() == 0)
-    return;
-
-  const int atomOffset     = static_cast<int>(dest.atomDataPacked.size());
-  const int instrOffset    = static_cast<int>(dest.queryInstructions.size());
-  const int leafMaskOffset = static_cast<int>(dest.queryLeafMasks.size());
-
-  dest.atomDataPacked.insert(dest.atomDataPacked.end(), src.atomDataPacked.begin(), src.atomDataPacked.end());
-  dest.bondTypeCounts.insert(dest.bondTypeCounts.end(), src.bondTypeCounts.begin(), src.bondTypeCounts.end());
-  dest.targetAtomBonds.insert(dest.targetAtomBonds.end(), src.targetAtomBonds.begin(), src.targetAtomBonds.end());
-  dest.queryAtomBonds.insert(dest.queryAtomBonds.end(), src.queryAtomBonds.begin(), src.queryAtomBonds.end());
-
-  dest.atomQueryMasks.insert(dest.atomQueryMasks.end(), src.atomQueryMasks.begin(), src.atomQueryMasks.end());
-  dest.atomQueryTrees.insert(dest.atomQueryTrees.end(), src.atomQueryTrees.begin(), src.atomQueryTrees.end());
-  dest.queryInstructions.insert(dest.queryInstructions.end(),
-                                src.queryInstructions.begin(),
-                                src.queryInstructions.end());
-  dest.queryLeafMasks.insert(dest.queryLeafMasks.end(), src.queryLeafMasks.begin(), src.queryLeafMasks.end());
-  dest.queryLeafBondCounts.insert(dest.queryLeafBondCounts.end(),
-                                  src.queryLeafBondCounts.begin(),
-                                  src.queryLeafBondCounts.end());
-
-  for (int start : src.atomInstrStarts) {
-    dest.atomInstrStarts.push_back(start + instrOffset);
-  }
-  for (int start : src.atomLeafMaskStarts) {
-    dest.atomLeafMaskStarts.push_back(start + leafMaskOffset);
-  }
-
-  for (size_t i = 1; i < src.batchAtomStarts.size(); ++i) {
-    dest.batchAtomStarts.push_back(src.batchAtomStarts[i] + atomOffset);
-  }
-
-  dest.recursivePatterns.insert(dest.recursivePatterns.end(),
-                                src.recursivePatterns.begin(),
-                                src.recursivePatterns.end());
-}
-
-/**
- * @brief Parallel merge of thread batches into result for target molecules.
- *
- * Computes prefix sums of sizes, pre-allocates result, then uses parallel
- * memcpy to copy each thread's data to its destination range. This avoids
- * the serial bottleneck of sequential mergeBatch calls.
- *
- * @tparam BatchAccessor Callable with signature: const MoleculesHost&(int tid)
- * @param result Output batch to populate
- * @param numThreads Number of source thread batches
- * @param getBatch Accessor function to retrieve batch for thread tid
- */
-template <typename BatchAccessor>
-void mergeTargetBatchesParallelImpl(MoleculesHost& result, int numThreads, BatchAccessor getBatch) {
-  ScopedNvtxRange range("mergeTargetBatchesParallel");
-
-  std::vector<size_t> atomOffsets(numThreads + 1, 0);
-  std::vector<size_t> molOffsets(numThreads + 1, 0);
-
-  for (int t = 0; t < numThreads; ++t) {
-    const MoleculesHost& batch = getBatch(t);
-    atomOffsets[t + 1]         = atomOffsets[t] + batch.atomDataPacked.size();
-    molOffsets[t + 1]          = molOffsets[t] + batch.numMolecules();
-  }
-
-  const size_t totalAtoms = atomOffsets[numThreads];
-  const size_t totalMols  = molOffsets[numThreads];
-
-  if (totalAtoms == 0) {
-    return;
-  }
-
-  {
-    ScopedNvtxRange allocRange("Merge: allocate");
-    resizeUninit(result.atomDataPacked, totalAtoms);
-    resizeUninit(result.bondTypeCounts, totalAtoms);
-    resizeUninit(result.targetAtomBonds, totalAtoms);
-    result.batchAtomStarts.resize(totalMols + 1);
-    result.batchAtomStarts[0] = 0;
-  }
-
-  {
-    ScopedNvtxRange copyRange("Merge: parallel copy");
-#pragma omp parallel num_threads(numThreads)
-    {
-      const int            tid      = omp_get_thread_num();
-      const MoleculesHost& src      = getBatch(tid);
-      const size_t         atomOff  = atomOffsets[tid];
-      const size_t         molOff   = molOffsets[tid];
-      const size_t         numAtoms = src.atomDataPacked.size();
-      const size_t         numMols  = src.numMolecules();
-
-      if (numAtoms > 0) {
-        std::memcpy(result.atomDataPacked.data() + atomOff,
-                    src.atomDataPacked.data(),
-                    numAtoms * sizeof(AtomDataPacked));
-        std::memcpy(result.bondTypeCounts.data() + atomOff,
-                    src.bondTypeCounts.data(),
-                    numAtoms * sizeof(BondTypeCounts));
-        std::memcpy(result.targetAtomBonds.data() + atomOff,
-                    src.targetAtomBonds.data(),
-                    numAtoms * sizeof(TargetAtomBonds));
-      }
-
-      for (size_t i = 0; i < numMols; ++i) {
-        result.batchAtomStarts[molOff + i + 1] = static_cast<int>(src.batchAtomStarts[i + 1] + atomOff);
-      }
-    }
-  }
-}
-
-}  // namespace
 
 }  // namespace nvMolKit
