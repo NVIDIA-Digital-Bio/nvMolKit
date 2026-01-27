@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -30,27 +30,26 @@ class PinnedHostAllocator {
   PinnedHostAllocator() = default;
   explicit PinnedHostAllocator(size_t estimatedBytes);
 
-  PinnedHostAllocator(const PinnedHostAllocator&)            = delete;
-  PinnedHostAllocator& operator=(const PinnedHostAllocator&) = delete;
-  PinnedHostAllocator(PinnedHostAllocator&&) noexcept        = default;
+  PinnedHostAllocator(const PinnedHostAllocator&)                = delete;
+  PinnedHostAllocator& operator=(const PinnedHostAllocator&)     = delete;
+  PinnedHostAllocator(PinnedHostAllocator&&) noexcept            = default;
   PinnedHostAllocator& operator=(PinnedHostAllocator&&) noexcept = default;
 
   void preallocate(size_t estimatedBytes);
 
-  template <typename T>
-  PinnedHostView<T> allocate(size_t count) {
+  template <typename T> PinnedHostView<T> allocate(size_t count) {
     if (count == 0) {
       throw std::invalid_argument("PinnedHostAllocator allocate requires non-zero size.");
     }
-    const size_t bytes = count * sizeof(T);
+    const size_t         bytes = count * sizeof(T);
     PinnedHostAllocation alloc = allocateBytes(bytes);
     return PinnedHostView<T>(std::span<T>(reinterpret_cast<T*>(alloc.data), count), std::move(alloc.owner));
   }
 
  private:
   struct PinnedHostAllocation {
-    std::byte*                data = nullptr;
-    size_t                    bytes = 0;
+    std::byte*                 data  = nullptr;
+    size_t                     bytes = 0;
     std::shared_ptr<std::byte> owner;
   };
 
@@ -62,7 +61,7 @@ class PinnedHostAllocator {
   PinnedHostAllocation allocateBytes(size_t bytes);
 
   std::vector<BufferEntry> buffers_;
-  size_t                   bufferBytes_ = 0;
+  size_t                   bufferBytes_  = 0;
   bool                     preallocated_ = false;
 };
 
