@@ -16,7 +16,10 @@
 #ifndef NVMOLKIT_MOLECULES_H
 #define NVMOLKIT_MOLECULES_H
 
+#include <array>
+#include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "atom_data_packed.h"
@@ -179,31 +182,61 @@ struct MoleculesHost {
 };
 
 /**
- * @brief Device-side view into batched molecule data.
+ * @brief Molecule type for device-side views.
+ */
+enum class MoleculeType : uint8_t {
+  Target,
+  Query
+};
+
+/**
+ * @brief Device-side view into batched molecule data (templated by molecule type).
  *
  * This structure contains pointers to device memory for the full batch.
  * This is a POD struct that can be passed to CUDA kernels by value.
  * Use getMolecule() from molecules_device.cuh to get per-molecule views.
+ *
+ * @tparam Type MoleculeType::Target or MoleculeType::Query
  */
-struct MoleculesDeviceView {
-  const int* batchAtomStarts;
+template <MoleculeType Type> struct MoleculesDeviceViewT;
+
+/**
+ * @brief Device-side view for target molecule batches.
+ */
+template <> struct MoleculesDeviceViewT<MoleculeType::Target> {
+  int const* batchAtomStarts;
   int        numMolecules;
 
   // GPU-optimized packed data
-  const AtomDataPacked*  atomDataPacked;   ///< Packed atom properties for GPU matching
-  const AtomQueryMask*   atomQueryMasks;   ///< Precomputed query masks (query molecules only)
-  const BondTypeCounts*  bondTypeCounts;   ///< Precomputed bond type counts per atom
-  const TargetAtomBonds* targetAtomBonds;  ///< Packed bond adjacency for targets
-  const QueryAtomBonds*  queryAtomBonds;   ///< Packed bond adjacency for queries
+  AtomDataPacked const*  atomDataPacked;   ///< Packed atom properties for GPU matching
+  BondTypeCounts const*  bondTypeCounts;   ///< Precomputed bond type counts per atom
+  TargetAtomBonds const* targetAtomBonds;  ///< Packed bond adjacency for targets
+};
+
+/**
+ * @brief Device-side view for query molecule batches.
+ */
+template <> struct MoleculesDeviceViewT<MoleculeType::Query> {
+  int const* batchAtomStarts;
+  int        numMolecules;
+
+  // GPU-optimized packed data
+  AtomDataPacked const* atomDataPacked;  ///< Packed atom properties for GPU matching
+  AtomQueryMask const*  atomQueryMasks;  ///< Precomputed query masks
+  BondTypeCounts const* bondTypeCounts;  ///< Precomputed bond type counts per atom
+  QueryAtomBonds const* queryAtomBonds;  ///< Packed bond adjacency for queries
 
   // Boolean expression tree data for compound queries
-  const AtomQueryTree*   atomQueryTrees;       ///< Tree metadata per query atom
-  const BoolInstruction* queryInstructions;    ///< Flattened instruction arrays
-  const AtomQueryMask*   queryLeafMasks;       ///< Flattened leaf masks for compound queries
-  const BondTypeCounts*  queryLeafBondCounts;  ///< Flattened leaf bond counts
-  const int*             atomInstrStarts;      ///< Start index into queryInstructions per atom
-  const int*             atomLeafMaskStarts;   ///< Start index into queryLeafMasks per atom
+  AtomQueryTree const*   atomQueryTrees;       ///< Tree metadata per query atom
+  BoolInstruction const* queryInstructions;    ///< Flattened instruction arrays
+  AtomQueryMask const*   queryLeafMasks;       ///< Flattened leaf masks for compound queries
+  BondTypeCounts const*  queryLeafBondCounts;  ///< Flattened leaf bond counts
+  int const*             atomInstrStarts;      ///< Start index into queryInstructions per atom
+  int const*             atomLeafMaskStarts;   ///< Start index into queryLeafMasks per atom
 };
+
+using TargetMoleculesDeviceView = MoleculesDeviceViewT<MoleculeType::Target>;
+using QueryMoleculesDeviceView  = MoleculesDeviceViewT<MoleculeType::Query>;
 
 /**
  * @brief Device-side storage for batched molecules using AsyncDeviceVector.
@@ -226,7 +259,7 @@ class MoleculesDevice {
   /**
    * @brief Get a view suitable for passing to CUDA kernels.
    */
-  [[nodiscard]] MoleculesDeviceView view() const;
+  template <MoleculeType Type> [[nodiscard]] MoleculesDeviceViewT<Type> view() const;
 
   void setStream(cudaStream_t stream);
 
@@ -258,6 +291,145 @@ class MoleculesDevice {
  * @param batch The batch to add the molecule to
  */
 void addToBatch(const RDKit::ROMol* mol, MoleculesHost& batch);
+
+/**
+ * @brief Add a query molecule (from SMARTS) to an existing batch.
+ *
+ * Extracts query information from QueryAtom objects and populates atomQueries.
+ * Supports AND, OR, and NOT combinations of query types via boolean expression trees.
+ * XOR queries and recursive SMARTS ($(...)) throw an exception.
+ *
+ * @param mol Pointer to the RDKit molecule (typically parsed from SMARTS)
+ * @param batch The batch to add the query molecule to
+ */
+void addQueryToBatch(const RDKit::ROMol* mol, MoleculesHost& batch);
+
+/**
+ * @brief Build a target molecule batch in parallel using OpenMP.
+ *
+ * Processes molecules in parallel when numThreads > 1. The molecules are added
+ * in the order specified by sortOrder (or sequential order if sortOrder is empty).
+ *
+ * @param molecules Vector of molecule pointers
+ * @param sortOrder Optional sort order (empty = use sequential order)
+ * @param numThreads Number of OpenMP threads (1 = serial)
+ * @return Populated MoleculesHost batch
+ */
+MoleculesHost buildTargetBatchParallel(const std::vector<const RDKit::ROMol*>& molecules,
+                                       const std::vector<int>&                 sortOrder,
+                                       int                                     numThreads);
+
+/**
+ * @brief Build a target molecule batch in parallel into existing storage.
+ *
+ * Uses direct parallel writing - each thread writes directly to the result
+ * buffer at computed offsets. Reuses result's existing capacity when possible.
+ *
+ * @param result Output batch (will be overwritten)
+ * @param numThreads Number of OpenMP threads to use
+ * @param molecules Vector of molecule pointers
+ * @param sortOrder Optional sort order (empty = use sequential order)
+ */
+void buildTargetBatchParallelInto(MoleculesHost&                          result,
+                                  int                                     numThreads,
+                                  const std::vector<const RDKit::ROMol*>& molecules,
+                                  const std::vector<int>&                 sortOrder);
+
+/**
+ * @brief Build a query molecule batch in parallel using OpenMP.
+ *
+ * Processes molecules in parallel when numThreads > 1. The molecules are added
+ * in the order specified by sortOrder (or sequential order if sortOrder is empty).
+ *
+ * @param molecules Vector of molecule pointers
+ * @param sortOrder Optional sort order (empty = use sequential order)
+ * @param numThreads Number of OpenMP threads (1 = serial)
+ * @return Populated MoleculesHost batch
+ */
+MoleculesHost buildQueryBatchParallel(const std::vector<const RDKit::ROMol*>& molecules,
+                                      const std::vector<int>&                 sortOrder,
+                                      int                                     numThreads);
+
+/**
+ * @brief Add a query molecule with explicit child pattern ID mapping.
+ *
+ * Used when adding cached recursive patterns. The childPatternIds vector maps
+ * local RecursiveStructure indices (in DFS order) to global pattern IDs.
+ *
+ * @param mol Pointer to the RDKit molecule
+ * @param batch The batch to add the query molecule to
+ * @param childPatternIds Map from local index (0, 1, ...) to global patternId
+ */
+void addQueryToBatch(const RDKit::ROMol* mol, MoleculesHost& batch, const std::vector<int>& childPatternIds);
+
+/**
+ * @brief Convert RDKit query description string to AtomQuery flags.
+ * @param description The query description from RDKit (e.g., "AtomAtomicNum")
+ * @return The corresponding AtomQuery flag value, or AtomQueryNone if unsupported
+ */
+AtomQuery atomQueryFromDescription(const std::string& description);
+
+/**
+ * @brief Build a query mask from packed atom data and query flags.
+ *
+ * Creates a precomputed mask and expected value pair for branchless GPU matching.
+ * For each field specified in queryFlags, sets the corresponding mask byte to 0xFF
+ * and the expected byte to the query atom's value.
+ *
+ * @param queryAtom The packed query atom data
+ * @param queryFlags Bitmask of AtomQueryFlags indicating which fields to compare
+ * @return AtomQueryMask with precomputed mask and expected values
+ */
+AtomQueryMask        buildQueryMask(const AtomDataPacked& queryAtom, AtomQuery queryFlags);
+/**
+ * @brief Extract recursive SMARTS patterns from a query molecule.
+ *
+ * Walks the query tree looking for RecursiveStructure nodes and extracts the
+ * inner query molecules, including nested patterns. Patterns are extracted
+ * depth-first and sorted by depth (leaves first) for level-by-level processing.
+ *
+ * Validates constraints:
+ * - Maximum 32 total recursive patterns per query (including nested)
+ *
+ * @param mol The query molecule (typically parsed from SMARTS)
+ * @return RecursivePatternInfo containing all found patterns sorted by depth
+ * @throws std::runtime_error if constraints are violated
+ */
+RecursivePatternInfo extractRecursivePatterns(const RDKit::ROMol* mol);
+
+/**
+ * @brief Check if a SMARTS query contains recursive patterns.
+ *
+ * Quick check without full extraction. Useful for batch sorting.
+ *
+ * @param mol The query molecule to check
+ * @return true if the query contains any recursive SMARTS ($(...))
+ */
+bool hasRecursiveSmarts(const RDKit::ROMol* mol);
+
+/**
+ * @brief Check if a target molecule requires RDKit fallback processing.
+ *
+ * Detects molecules with properties that exceed GPU processing limits:
+ * - Atom degree > 8 (hypervalent atoms)
+ * - Atom ring count > 15 (e.g., buckyballs)
+ * - Ring bond count > 15
+ * - Implicit H count > 15
+ * - Heteroatom neighbor count > 15
+ *
+ * @param mol The molecule to check
+ * @return true if the molecule cannot be processed on GPU and needs RDKit fallback
+ */
+bool requiresRDKitFallback(const RDKit::ROMol* mol);
+
+/**
+ * @brief Get the recursion depth for a query in a batch.
+ *
+ * @param queriesHost The host batch containing the query
+ * @param queryIdx Index of the query in the batch
+ * @return 0 if no recursive patterns, otherwise maxDepth + 1
+ */
+int getQueryRecursionDepth(const MoleculesHost& queriesHost, int queryIdx);
 
 }  // namespace nvMolKit
 
