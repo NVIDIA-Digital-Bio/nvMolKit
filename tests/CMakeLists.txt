@@ -48,6 +48,10 @@ target_link_libraries(test_flat_bit_vect PRIVATE flatBitVect)
 target_include_directories(test_flat_bit_vect SYSTEM
                            PRIVATE ${Boost_INCLUDE_DIRS})
 
+add_executable(test_flat_bit_vect_device test_flat_bit_vect_device.cu)
+target_link_libraries(test_flat_bit_vect_device PRIVATE flatBitVect device
+        device_vector)
+
 add_executable(test_work_splitting test_work_splitting.cpp)
 target_link_libraries(test_work_splitting PRIVATE work_splitting)
 
@@ -194,6 +198,9 @@ target_link_libraries(test_molecules PRIVATE molecules cuda_error_check ${RDKit_
 add_executable(test_query test_query.cu)
 target_link_libraries(test_query PRIVATE molecules device ${RDKit_LIBS})
 
+add_executable(test_graph_labeler test_graph_labeler.cu)
+target_link_libraries(test_graph_labeler PRIVATE molecules device substruct_validation ${RDKit_LIBS})
+
 set(TEST_LIST
     test_boolean_tree
     test_butina
@@ -211,7 +218,9 @@ set(TEST_LIST
     test_etkdg_etk_minimize
     test_etkdg_stereochem_checks
     test_flat_bit_vect
+    test_flat_bit_vect_device
     test_flattened_builder
+    test_graph_labeler
     test_host_vector
     test_bfgs_minimizer
     test_etkdg_result_tracker
