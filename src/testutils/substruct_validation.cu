@@ -48,8 +48,6 @@ std::vector<std::vector<uint8_t>> computeRDKitLabelMatrix(const RDKit::ROMol& ta
 
   std::vector<std::vector<uint8_t>> result(numTargetAtoms, std::vector<uint8_t>(numQueryAtoms, 0));
 
-  // For recursive SMARTS, atom-level Match() doesn't work correctly.
-  // Use full substructure matching to get valid (targetAtom, queryAtom) pairs.
   RDKit::MatchVectType            match;
   RDKit::SubstructMatchParameters params;
   params.uniquify   = false;
