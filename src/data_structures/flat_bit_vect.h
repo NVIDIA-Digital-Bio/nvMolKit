@@ -19,9 +19,11 @@
 #ifdef __CUDACC__
 #define CUDA_CALLABLE_MEMBER __host__ __device__
 #define CPU_ONLY_MEMBER      __host__
+#define DEVICE_ONLY_MEMBER   __device__ __forceinline__
 #else
 #define CUDA_CALLABLE_MEMBER
 #define CPU_ONLY_MEMBER
+#define DEVICE_ONLY_MEMBER
 #endif  // __CUDACC__
 
 #include <cassert>
@@ -145,6 +147,38 @@ template <std::size_t NBits> class FlatBitVect {
     }
   }
 
+#ifdef __CUDACC__
+  /**
+   * @brief Atomically set a bit (thread-safe for concurrent access).
+   *
+   * Uses atomicOr on the containing word to safely set a single bit when
+   * multiple threads may be writing to different bits in the same word.
+   * This is essential for warp-parallel label matrix population.
+   *
+   * @param i The bit index to set
+   */
+  DEVICE_ONLY_MEMBER void setBitAtomic(const std::size_t i) {
+    const std::size_t storageIdx = i / kStorageBits;
+    const std::size_t bitIdx     = i % kStorageBits;
+    atomicOr(&bits_[storageIdx], 1U << bitIdx);
+  }
+
+  /**
+   * @brief Parallel clear using multiple threads.
+   *
+   * Each thread clears a subset of storage words in a strided pattern.
+   * Call this with all threads in a block, then __syncthreads() after.
+   *
+   * @param threadIdx Index of this thread within the clearing group
+   * @param numThreads Total number of threads participating in clear
+   */
+  DEVICE_ONLY_MEMBER void clearParallel(const int threadIdx, const int numThreads) {
+    for (std::size_t i = threadIdx; i < kStorageCount; i += numThreads) {
+      bits_[i] = 0;
+    }
+  }
+#endif  // __CUDACC__
+
   CUDA_CALLABLE_MEMBER bool operator==(const FlatBitVect& other) const { return bits_ == other.bits_; }
   CUDA_CALLABLE_MEMBER bool operator!=(const FlatBitVect& other) const { return bits_ != other.bits_; }
 
@@ -228,6 +262,102 @@ static_assert(sizeof(FlatBitVect<32>) == 4, "FlatBitVect<32> should be 4 bytes")
 static_assert(sizeof(FlatBitVect<33>) == 8, "FlatBitVect<33> should be 8 bytes");
 static_assert(sizeof(FlatBitVect<64>) == 8, "FlatBitVect<64> should be 8 bytes");
 
+/**
+ * @brief 2D view into a FlatBitVect for matrix-style bit access.
+ *
+ * Provides row-major 2D indexing into a flat bit vector. The underlying storage
+ * is a FlatBitVect of size Rows * Cols. This is a non-owning view that can wrap
+ * either stack-allocated (shared memory) or heap-allocated (global memory) storage.
+ *
+ * @tparam Rows Number of rows (typically target graph size)
+ * @tparam Cols Number of columns (typically query graph size)
+ */
+template <std::size_t Rows, std::size_t Cols> class BitMatrix2DView {
+ public:
+  static constexpr std::size_t kRows      = Rows;
+  static constexpr std::size_t kCols      = Cols;
+  static constexpr std::size_t kTotalBits = Rows * Cols;
+  using StorageType                       = FlatBitVect<kTotalBits>;
+
+ private:
+  StorageType* storage_;
+
+ public:
+  CUDA_CALLABLE_MEMBER BitMatrix2DView() : storage_(nullptr) {}
+
+  CUDA_CALLABLE_MEMBER explicit BitMatrix2DView(StorageType* storage) : storage_(storage) {}
+
+  CUDA_CALLABLE_MEMBER explicit BitMatrix2DView(StorageType& storage) : storage_(&storage) {}
+
+  /**
+   * @brief Get the linear index for a 2D coordinate (row-major order).
+   */
+  CUDA_CALLABLE_MEMBER static constexpr std::size_t linearIndex(std::size_t row, std::size_t col) {
+    return row * kCols + col;
+  }
+
+  /**
+   * @brief Get the bit value at (row, col).
+   */
+  CUDA_CALLABLE_MEMBER bool get(std::size_t row, std::size_t col) const { return (*storage_)[linearIndex(row, col)]; }
+
+  /**
+   * @brief Set the bit value at (row, col).
+   */
+  CUDA_CALLABLE_MEMBER void set(std::size_t row, std::size_t col, bool value) {
+    storage_->setBit(linearIndex(row, col), value);
+  }
+
+#ifdef __CUDACC__
+  /**
+   * @brief Atomically set the bit at (row, col) - thread-safe for concurrent writes.
+   *
+   * Use this when multiple threads may write to different positions in the matrix
+   * simultaneously. Essential for warp-parallel label matrix population.
+   *
+   * @param row Row index
+   * @param col Column index
+   */
+  DEVICE_ONLY_MEMBER void setAtomic(std::size_t row, std::size_t col) { storage_->setBitAtomic(linearIndex(row, col)); }
+
+  /**
+   * @brief Parallel clear using multiple threads.
+   *
+   * Distributes clearing work across all participating threads.
+   * Must be followed by __syncthreads() or equivalent barrier.
+   *
+   * @param threadIdx Index of this thread within the clearing group
+   * @param numThreads Total number of threads participating
+   */
+  DEVICE_ONLY_MEMBER void clearParallel(const int threadIdx, const int numThreads) {
+    storage_->clearParallel(threadIdx, numThreads);
+  }
+#endif  // __CUDACC__
+
+  /**
+   * @brief Clear all bits in the matrix.
+   */
+  CUDA_CALLABLE_MEMBER void clear() { storage_->clear(); }
+
+  /**
+   * @brief Check if a row has any bits set.
+   */
+  CUDA_CALLABLE_MEMBER bool rowHasAnySet(std::size_t row) const {
+    for (std::size_t col = 0; col < kCols; ++col) {
+      if (get(row, col)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * @brief Get the underlying storage pointer.
+   */
+  CUDA_CALLABLE_MEMBER StorageType*       storage() { return storage_; }
+  CUDA_CALLABLE_MEMBER const StorageType* storage() const { return storage_; }
+};
+
 }  // namespace nvMolKit
 
 namespace std {
@@ -253,4 +383,5 @@ template <std::size_t NBits> struct hash<nvMolKit::FlatBitVect<NBits>> {
 
 #undef CUDA_CALLABLE_MEMBER
 #undef CPU_ONLY_MEMBER
+#undef DEVICE_ONLY_MEMBER
 #endif  // NVMOLKIT_FLAT_BIT_VECT_H

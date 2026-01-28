@@ -340,3 +340,75 @@ TEST(FlatBitVect, NumOnBits) {
   fbv1.setBit(31, true);
   ASSERT_EQ(fbv1.numOnBits(), 2u);
 }
+
+TEST(BitMatrix2DView, LinearIndexRowMajor) {
+  using View = nvMolKit::BitMatrix2DView<3, 5>;
+  EXPECT_EQ(View::linearIndex(0, 0), 0u);
+  EXPECT_EQ(View::linearIndex(0, 4), 4u);
+  EXPECT_EQ(View::linearIndex(1, 0), 5u);
+  EXPECT_EQ(View::linearIndex(2, 3), 13u);
+}
+
+TEST(BitMatrix2DView, GetSetRoundTrip) {
+  constexpr std::size_t                 rows = 3;
+  constexpr std::size_t                 cols = 4;
+  nvMolKit::FlatBitVect<rows * cols>    storage(false);
+  nvMolKit::BitMatrix2DView<rows, cols> view(storage);
+
+  view.set(0, 0, true);
+  view.set(1, 2, true);
+  view.set(2, 3, true);
+
+  for (std::size_t row = 0; row < rows; ++row) {
+    for (std::size_t col = 0; col < cols; ++col) {
+      const bool expected = (row == 0 && col == 0) || (row == 1 && col == 2) || (row == 2 && col == 3);
+      EXPECT_EQ(view.get(row, col), expected) << "row = " << row << ", col = " << col;
+      EXPECT_EQ(storage[view.linearIndex(row, col)], expected) << "row = " << row << ", col = " << col;
+    }
+  }
+}
+
+TEST(BitMatrix2DView, ClearResetsBits) {
+  constexpr std::size_t                 rows = 2;
+  constexpr std::size_t                 cols = 6;
+  nvMolKit::FlatBitVect<rows * cols>    storage(true);
+  nvMolKit::BitMatrix2DView<rows, cols> view(storage);
+
+  view.clear();
+  for (std::size_t row = 0; row < rows; ++row) {
+    for (std::size_t col = 0; col < cols; ++col) {
+      EXPECT_FALSE(view.get(row, col)) << "row = " << row << ", col = " << col;
+    }
+  }
+}
+
+TEST(BitMatrix2DView, RowHasAnySet) {
+  constexpr std::size_t                 rows = 4;
+  constexpr std::size_t                 cols = 3;
+  nvMolKit::FlatBitVect<rows * cols>    storage(false);
+  nvMolKit::BitMatrix2DView<rows, cols> view(storage);
+
+  view.set(1, 0, true);
+  view.set(3, 2, true);
+
+  EXPECT_FALSE(view.rowHasAnySet(0));
+  EXPECT_TRUE(view.rowHasAnySet(1));
+  EXPECT_FALSE(view.rowHasAnySet(2));
+  EXPECT_TRUE(view.rowHasAnySet(3));
+
+  view.set(1, 0, false);
+  EXPECT_FALSE(view.rowHasAnySet(1));
+  EXPECT_TRUE(view.rowHasAnySet(3));
+}
+
+TEST(BitMatrix2DView, StoragePointer) {
+  constexpr std::size_t              rows = 2;
+  constexpr std::size_t              cols = 2;
+  nvMolKit::FlatBitVect<rows * cols> storage(false);
+
+  nvMolKit::BitMatrix2DView<rows, cols> view_from_ref(storage);
+  EXPECT_EQ(view_from_ref.storage(), &storage);
+
+  nvMolKit::BitMatrix2DView<rows, cols> view_from_ptr(&storage);
+  EXPECT_EQ(view_from_ptr.storage(), &storage);
+}
