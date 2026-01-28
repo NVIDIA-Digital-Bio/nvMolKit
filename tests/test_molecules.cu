@@ -33,11 +33,13 @@ using nvMolKit::AtomDataPacked;
 using nvMolKit::checkReturnCode;
 using nvMolKit::getMolecule;
 using nvMolKit::MoleculesDevice;
-using nvMolKit::MoleculesDeviceView;
+using nvMolKit::MoleculesDeviceViewT;
 using nvMolKit::MoleculesHost;
-using nvMolKit::MoleculeView;
+using nvMolKit::MoleculeType;
 using nvMolKit::ScopedStream;
 using nvMolKit::TargetAtomBonds;
+using nvMolKit::TargetMoleculesDeviceView;
+using nvMolKit::TargetMoleculeView;
 using nvMolKit::unpackBondType;
 
 namespace {
@@ -124,9 +126,10 @@ int getExpectedAtomProperty(const RDKit::ROMol* mol, int atomIdx, AtomProperty p
 }
 
 //! Kernel to read any atom property for all atoms of a specific molecule
-__global__ void readAtomPropertyKernel(MoleculesDeviceView view, int molIdx, AtomProperty prop, int* results) {
-  const MoleculeView mol     = getMolecule(view, molIdx);
-  const int          atomIdx = threadIdx.x;
+template <MoleculeType Type>
+__global__ void readAtomPropertyKernel(MoleculesDeviceViewT<Type> view, int molIdx, AtomProperty prop, int* results) {
+  const auto mol     = getMolecule(view, molIdx);
+  const int  atomIdx = threadIdx.x;
   if (atomIdx >= mol.numAtoms) {
     return;
   }
@@ -170,22 +173,22 @@ __global__ void readAtomPropertyKernel(MoleculesDeviceView view, int molIdx, Ato
 }
 
 //! Kernel to read number of atoms per molecule
-__global__ void readNumAtomsKernel(MoleculesDeviceView view, int* results, int numMols) {
+__global__ void readNumAtomsKernel(TargetMoleculesDeviceView view, int* results, int numMols) {
   const int molIdx = blockIdx.x * blockDim.x + threadIdx.x;
   if (molIdx >= numMols) {
     return;
   }
-  const MoleculeView mol = getMolecule(view, molIdx);
-  results[molIdx]        = mol.numAtoms;
+  const TargetMoleculeView mol = getMolecule(view, molIdx);
+  results[molIdx]              = mol.numAtoms;
 }
 
 //! Kernel to read bond type of first atom's first bond
-__global__ void readBondTypeKernel(MoleculesDeviceView view, int* results, int numMols) {
+__global__ void readBondTypeKernel(TargetMoleculesDeviceView view, int* results, int numMols) {
   const int molIdx = blockIdx.x * blockDim.x + threadIdx.x;
   if (molIdx >= numMols) {
     return;
   }
-  const MoleculeView mol = getMolecule(view, molIdx);
+  const TargetMoleculeView mol = getMolecule(view, molIdx);
   if (mol.numAtoms > 0 && mol.getAtomDegree(0) > 0) {
     const TargetAtomBonds& bonds = mol.getTargetBonds(0);
     results[molIdx]              = unpackBondType(bonds.bondInfo[0]);
@@ -195,12 +198,12 @@ __global__ void readBondTypeKernel(MoleculesDeviceView view, int* results, int n
 }
 
 //! Kernel to read degree (number of bonds) of first atom
-__global__ void readAtomDegreeKernel(MoleculesDeviceView view, int* results, int numMols) {
+__global__ void readAtomDegreeKernel(TargetMoleculesDeviceView view, int* results, int numMols) {
   const int molIdx = blockIdx.x * blockDim.x + threadIdx.x;
   if (molIdx >= numMols) {
     return;
   }
-  const MoleculeView mol = getMolecule(view, molIdx);
+  const TargetMoleculeView mol = getMolecule(view, molIdx);
   if (mol.numAtoms > 0) {
     results[molIdx] = mol.getAtomDegree(0);
   } else {
@@ -209,12 +212,12 @@ __global__ void readAtomDegreeKernel(MoleculesDeviceView view, int* results, int
 }
 
 //! Kernel to read neighbor atom index of first atom's first neighbor
-__global__ void readNeighborAtomKernel(MoleculesDeviceView view, int* results, int numMols) {
+__global__ void readNeighborAtomKernel(TargetMoleculesDeviceView view, int* results, int numMols) {
   const int molIdx = blockIdx.x * blockDim.x + threadIdx.x;
   if (molIdx >= numMols) {
     return;
   }
-  const MoleculeView mol = getMolecule(view, molIdx);
+  const TargetMoleculeView mol = getMolecule(view, molIdx);
   if (mol.numAtoms > 0 && mol.getAtomDegree(0) > 0) {
     const TargetAtomBonds& bonds = mol.getTargetBonds(0);
     results[molIdx]              = bonds.neighborIdx[0];
@@ -224,29 +227,29 @@ __global__ void readNeighborAtomKernel(MoleculesDeviceView view, int* results, i
 }
 
 //! Kernel to read degree for all atoms of a specific molecule
-__global__ void readAllAtomDegreesKernel(MoleculesDeviceView view, int molIdx, int* results) {
-  const MoleculeView mol     = getMolecule(view, molIdx);
-  const int          atomIdx = threadIdx.x;
+__global__ void readAllAtomDegreesKernel(TargetMoleculesDeviceView view, int molIdx, int* results) {
+  const TargetMoleculeView mol     = getMolecule(view, molIdx);
+  const int                atomIdx = threadIdx.x;
   if (atomIdx < mol.numAtoms) {
     results[atomIdx] = mol.getAtomDegree(atomIdx);
   }
 }
 
 //! Kernel to read all neighbor atom indices for a specific atom in a specific molecule
-__global__ void readAllNeighborsKernel(MoleculesDeviceView view, int molIdx, int atomIdx, int* results) {
-  const MoleculeView     mol         = getMolecule(view, molIdx);
-  const int              neighborIdx = threadIdx.x;
-  const TargetAtomBonds& bonds       = mol.getTargetBonds(atomIdx);
+__global__ void readAllNeighborsKernel(TargetMoleculesDeviceView view, int molIdx, int atomIdx, int* results) {
+  const TargetMoleculeView mol         = getMolecule(view, molIdx);
+  const int                neighborIdx = threadIdx.x;
+  const TargetAtomBonds&   bonds       = mol.getTargetBonds(atomIdx);
   if (neighborIdx < bonds.degree) {
     results[neighborIdx] = bonds.neighborIdx[neighborIdx];
   }
 }
 
 //! Kernel to read all neighbor bond types for a specific atom in a specific molecule
-__global__ void readAllNeighborBondTypesKernel(MoleculesDeviceView view, int molIdx, int atomIdx, int* results) {
-  const MoleculeView     mol         = getMolecule(view, molIdx);
-  const int              neighborIdx = threadIdx.x;
-  const TargetAtomBonds& bonds       = mol.getTargetBonds(atomIdx);
+__global__ void readAllNeighborBondTypesKernel(TargetMoleculesDeviceView view, int molIdx, int atomIdx, int* results) {
+  const TargetMoleculeView mol         = getMolecule(view, molIdx);
+  const int                neighborIdx = threadIdx.x;
+  const TargetAtomBonds&   bonds       = mol.getTargetBonds(atomIdx);
   if (neighborIdx < bonds.degree) {
     results[neighborIdx] = unpackBondType(bonds.bondInfo[neighborIdx]);
   }
@@ -289,7 +292,7 @@ TEST_F(BatchStructureTest, NumAtomsMatchRDKit) {
   const int              numMols = static_cast<int>(batch_.numMolecules());
   AsyncDeviceVector<int> resultsDev(numMols, stream.stream());
 
-  readNumAtomsKernel<<<1, 32, 0, stream.stream()>>>(device.view(), resultsDev.data(), numMols);
+  readNumAtomsKernel<<<1, 32, 0, stream.stream()>>>(device.view<MoleculeType::Target>(), resultsDev.data(), numMols);
   cudaCheckError(cudaGetLastError());
 
   std::vector<int> results(numMols);
@@ -309,7 +312,7 @@ TEST_F(BatchStructureTest, AtomDegreeMatchesRDKit) {
   const int              numMols = static_cast<int>(batch_.numMolecules());
   AsyncDeviceVector<int> resultsDev(numMols, stream.stream());
 
-  readAtomDegreeKernel<<<1, 32, 0, stream.stream()>>>(device.view(), resultsDev.data(), numMols);
+  readAtomDegreeKernel<<<1, 32, 0, stream.stream()>>>(device.view<MoleculeType::Target>(), resultsDev.data(), numMols);
   cudaCheckError(cudaGetLastError());
 
   std::vector<int> results(numMols);
@@ -331,7 +334,7 @@ TEST_F(BatchStructureTest, BondTypeMatchesRDKit) {
   const int              numMols = static_cast<int>(batch_.numMolecules());
   AsyncDeviceVector<int> resultsDev(numMols, stream.stream());
 
-  readBondTypeKernel<<<1, 32, 0, stream.stream()>>>(device.view(), resultsDev.data(), numMols);
+  readBondTypeKernel<<<1, 32, 0, stream.stream()>>>(device.view<MoleculeType::Target>(), resultsDev.data(), numMols);
   cudaCheckError(cudaGetLastError());
 
   std::vector<int> results(numMols);
@@ -394,7 +397,7 @@ TEST_P(AtomPropertyTest, PropertyMatchesRDKit) {
     const int   numAtoms = mol->getNumAtoms();
 
     AsyncDeviceVector<int> resultsDev(numAtoms, stream.stream());
-    readAtomPropertyKernel<<<1, numAtoms, 0, stream.stream()>>>(device.view(),
+    readAtomPropertyKernel<<<1, numAtoms, 0, stream.stream()>>>(device.view<MoleculeType::Target>(),
                                                                 static_cast<int>(molIdx),
                                                                 prop,
                                                                 resultsDev.data());
@@ -459,7 +462,7 @@ TEST_F(ConnectivityTestFixture, AtomDegreeMatchesRDKit) {
   const int              numMols = static_cast<int>(batch_.numMolecules());
   AsyncDeviceVector<int> resultsDev(numMols, stream.stream());
 
-  readAtomDegreeKernel<<<1, 32, 0, stream.stream()>>>(device.view(), resultsDev.data(), numMols);
+  readAtomDegreeKernel<<<1, 32, 0, stream.stream()>>>(device.view<MoleculeType::Target>(), resultsDev.data(), numMols);
   cudaCheckError(cudaGetLastError());
 
   std::vector<int> results(numMols);
@@ -482,7 +485,9 @@ TEST_F(ConnectivityTestFixture, NeighborAtomIndexMatchesRDKit) {
   const int              numMols = static_cast<int>(batch_.numMolecules());
   AsyncDeviceVector<int> resultsDev(numMols, stream.stream());
 
-  readNeighborAtomKernel<<<1, 32, 0, stream.stream()>>>(device.view(), resultsDev.data(), numMols);
+  readNeighborAtomKernel<<<1, 32, 0, stream.stream()>>>(device.view<MoleculeType::Target>(),
+                                                        resultsDev.data(),
+                                                        numMols);
   cudaCheckError(cudaGetLastError());
 
   std::vector<int> results(numMols);
@@ -539,7 +544,10 @@ TEST(MoleculesSingleMolTest, SingleMoleculeWorks) {
   device.copyFromHost(batch);
 
   AsyncDeviceVector<int> resultsDev(1, stream.stream());
-  readAtomPropertyKernel<<<1, 1, 0, stream.stream()>>>(device.view(), 0, AtomProperty::AtomicNum, resultsDev.data());
+  readAtomPropertyKernel<<<1, 1, 0, stream.stream()>>>(device.view<MoleculeType::Target>(),
+                                                       0,
+                                                       AtomProperty::AtomicNum,
+                                                       resultsDev.data());
   cudaCheckError(cudaGetLastError());
 
   std::vector<int> results(1);
@@ -568,7 +576,9 @@ TEST(MoleculesLargeBatchTest, ManyMoleculesWork) {
 
   AsyncDeviceVector<int> resultsDev(numMols, stream.stream());
   const int              numBlocks = (numMols + 255) / 256;
-  readNumAtomsKernel<<<numBlocks, 256, 0, stream.stream()>>>(device.view(), resultsDev.data(), numMols);
+  readNumAtomsKernel<<<numBlocks, 256, 0, stream.stream()>>>(device.view<MoleculeType::Target>(),
+                                                             resultsDev.data(),
+                                                             numMols);
   cudaCheckError(cudaGetLastError());
 
   std::vector<int> results(numMols);
@@ -615,7 +625,7 @@ TEST_F(RingMembershipTest, IndoleRingMembershipExhaustive) {
 
   // Test min ring size
   AsyncDeviceVector<int> minRingSizeDev(numAtoms, stream.stream());
-  readAtomPropertyKernel<<<1, numAtoms, 0, stream.stream()>>>(device.view(),
+  readAtomPropertyKernel<<<1, numAtoms, 0, stream.stream()>>>(device.view<MoleculeType::Target>(),
                                                               2,
                                                               AtomProperty::MinRingSize,
                                                               minRingSizeDev.data());
@@ -632,7 +642,7 @@ TEST_F(RingMembershipTest, IndoleRingMembershipExhaustive) {
 
   // Test num rings
   AsyncDeviceVector<int> numRingsDev(numAtoms, stream.stream());
-  readAtomPropertyKernel<<<1, numAtoms, 0, stream.stream()>>>(device.view(),
+  readAtomPropertyKernel<<<1, numAtoms, 0, stream.stream()>>>(device.view<MoleculeType::Target>(),
                                                               2,
                                                               AtomProperty::NumRings,
                                                               numRingsDev.data());
@@ -662,7 +672,7 @@ TEST_F(RingMembershipTest, HexaneHasNoRings) {
   device.copyFromHost(batch_);
 
   AsyncDeviceVector<int> numRingsDev(numAtoms, stream.stream());
-  readAtomPropertyKernel<<<1, numAtoms, 0, stream.stream()>>>(device.view(),
+  readAtomPropertyKernel<<<1, numAtoms, 0, stream.stream()>>>(device.view<MoleculeType::Target>(),
                                                               0,
                                                               AtomProperty::NumRings,
                                                               numRingsDev.data());
@@ -691,7 +701,7 @@ TEST_F(RingMembershipTest, BenzeneHasOneRing) {
   device.copyFromHost(batch_);
 
   AsyncDeviceVector<int> numRingsDev(numAtoms, stream.stream());
-  readAtomPropertyKernel<<<1, numAtoms, 0, stream.stream()>>>(device.view(),
+  readAtomPropertyKernel<<<1, numAtoms, 0, stream.stream()>>>(device.view<MoleculeType::Target>(),
                                                               1,
                                                               AtomProperty::NumRings,
                                                               numRingsDev.data());
@@ -706,7 +716,7 @@ TEST_F(RingMembershipTest, BenzeneHasOneRing) {
   }
 
   AsyncDeviceVector<int> minRingSizeDev(numAtoms, stream.stream());
-  readAtomPropertyKernel<<<1, numAtoms, 0, stream.stream()>>>(device.view(),
+  readAtomPropertyKernel<<<1, numAtoms, 0, stream.stream()>>>(device.view<MoleculeType::Target>(),
                                                               1,
                                                               AtomProperty::MinRingSize,
                                                               minRingSizeDev.data());
@@ -746,7 +756,7 @@ TEST_F(ExhaustiveConnectivityTest, MethaneHasNoNeighbors) {
   device.copyFromHost(batch_);
 
   AsyncDeviceVector<int> degreeDev(1, stream.stream());
-  readAllAtomDegreesKernel<<<1, 1, 0, stream.stream()>>>(device.view(), 0, degreeDev.data());
+  readAllAtomDegreesKernel<<<1, 1, 0, stream.stream()>>>(device.view<MoleculeType::Target>(), 0, degreeDev.data());
   cudaCheckError(cudaGetLastError());
 
   std::vector<int> degrees(1);
@@ -772,7 +782,9 @@ TEST_F(ExhaustiveConnectivityTest, NeopentaneDegreesExhaustive) {
   const int   numAtoms   = neopentane->getNumAtoms();
 
   AsyncDeviceVector<int> degreeDev(numAtoms, stream.stream());
-  readAllAtomDegreesKernel<<<1, numAtoms, 0, stream.stream()>>>(device.view(), 1, degreeDev.data());
+  readAllAtomDegreesKernel<<<1, numAtoms, 0, stream.stream()>>>(device.view<MoleculeType::Target>(),
+                                                                1,
+                                                                degreeDev.data());
   cudaCheckError(cudaGetLastError());
 
   std::vector<int> degrees(numAtoms);
@@ -802,7 +814,10 @@ TEST_F(ExhaustiveConnectivityTest, NeopentaneNeighborsExhaustive) {
     }
 
     AsyncDeviceVector<int> neighborsDev(degree, stream.stream());
-    readAllNeighborsKernel<<<1, degree, 0, stream.stream()>>>(device.view(), 1, atomIdx, neighborsDev.data());
+    readAllNeighborsKernel<<<1, degree, 0, stream.stream()>>>(device.view<MoleculeType::Target>(),
+                                                              1,
+                                                              atomIdx,
+                                                              neighborsDev.data());
     cudaCheckError(cudaGetLastError());
 
     std::vector<int> neighbors(degree);
@@ -840,7 +855,10 @@ TEST_F(ExhaustiveConnectivityTest, NeopentaneNeighborBondTypesExhaustive) {
     }
 
     AsyncDeviceVector<int> bondTypeDev(degree, stream.stream());
-    readAllNeighborBondTypesKernel<<<1, degree, 0, stream.stream()>>>(device.view(), 1, atomIdx, bondTypeDev.data());
+    readAllNeighborBondTypesKernel<<<1, degree, 0, stream.stream()>>>(device.view<MoleculeType::Target>(),
+                                                                      1,
+                                                                      atomIdx,
+                                                                      bondTypeDev.data());
     cudaCheckError(cudaGetLastError());
 
     std::vector<int> bondTypes(degree);
@@ -860,6 +878,131 @@ TEST_F(ExhaustiveConnectivityTest, NeopentaneNeighborBondTypesExhaustive) {
     EXPECT_EQ(actualBondTypes, expectedBondTypes) << "Bond type mismatch at atom " << atomIdx;
   }
 }
+
+// =============================================================================
+// Query Batch Structure Tests (addQueryToBatch produces same structure)
+// =============================================================================
+
+struct SmilesSmartsPair {
+  std::string smiles;
+  std::string smarts;  // Equivalent SMARTS using atomic number syntax
+};
+
+class QueryBatchStructureTest : public ::testing::TestWithParam<SmilesSmartsPair> {
+ protected:
+  std::unique_ptr<RDKit::ROMol> makeMolFromSmiles(const std::string& smiles) {
+    auto mol = std::unique_ptr<RDKit::ROMol>(RDKit::SmilesToMol(smiles));
+    EXPECT_NE(mol, nullptr) << "Failed to parse SMILES: " << smiles;
+    return mol;
+  }
+
+  std::unique_ptr<RDKit::ROMol> makeMolFromSmarts(const std::string& smarts) {
+    auto mol = std::unique_ptr<RDKit::ROMol>(RDKit::SmartsToMol(smarts));
+    EXPECT_NE(mol, nullptr) << "Failed to parse SMARTS: " << smarts;
+    return mol;
+  }
+};
+
+TEST_P(QueryBatchStructureTest, StructureMatchesBetweenSmilesAndSmarts) {
+  const auto& pair = GetParam();
+
+  auto smilesMol = makeMolFromSmiles(pair.smiles);
+  auto smartsMol = makeMolFromSmarts(pair.smarts);
+  ASSERT_NE(smilesMol, nullptr);
+  ASSERT_NE(smartsMol, nullptr);
+
+  MoleculesHost smilesBatch;
+  MoleculesHost smartsBatch;
+
+  nvMolKit::addToBatch(smilesMol.get(), smilesBatch);
+  nvMolKit::addQueryToBatch(smartsMol.get(), smartsBatch);
+
+  // Verify same structure
+  EXPECT_EQ(smilesBatch.numMolecules(), smartsBatch.numMolecules());
+  EXPECT_EQ(smilesBatch.totalAtoms(), smartsBatch.totalAtoms());
+
+  // Verify atom data matches (atomic numbers should match)
+  ASSERT_EQ(smilesBatch.atomDataPacked.size(), smartsBatch.atomDataPacked.size());
+  for (size_t i = 0; i < smilesBatch.atomDataPacked.size(); ++i) {
+    EXPECT_EQ(smilesBatch.atomDataPacked[i].atomicNum(), smartsBatch.atomDataPacked[i].atomicNum())
+      << "Atomic number mismatch at atom " << i;
+  }
+
+  // Verify packed bond data matches (same degree and neighbor structure)
+  ASSERT_EQ(smilesBatch.targetAtomBonds.size(), smartsBatch.queryAtomBonds.size());
+  for (size_t i = 0; i < smilesBatch.targetAtomBonds.size(); ++i) {
+    EXPECT_EQ(smilesBatch.targetAtomBonds[i].degree, smartsBatch.queryAtomBonds[i].degree)
+      << "Degree mismatch at atom " << i;
+  }
+}
+
+TEST_P(QueryBatchStructureTest, DeviceStructureMatchesBetweenSmilesAndSmarts) {
+  const auto& pair = GetParam();
+
+  auto smilesMol = makeMolFromSmiles(pair.smiles);
+  auto smartsMol = makeMolFromSmarts(pair.smarts);
+  ASSERT_NE(smilesMol, nullptr);
+  ASSERT_NE(smartsMol, nullptr);
+
+  MoleculesHost smilesBatch;
+  MoleculesHost smartsBatch;
+
+  nvMolKit::addToBatch(smilesMol.get(), smilesBatch);
+  nvMolKit::addQueryToBatch(smartsMol.get(), smartsBatch);
+
+  ScopedStream    stream;
+  MoleculesDevice smilesDevice(stream.stream());
+  MoleculesDevice smartsDevice(stream.stream());
+
+  smilesDevice.copyFromHost(smilesBatch);
+  smartsDevice.copyFromHost(smartsBatch);
+
+  const int numAtoms = static_cast<int>(smilesBatch.totalAtoms());
+
+  // Compare atomic numbers on device
+  AsyncDeviceVector<int> smilesResultsDev(numAtoms, stream.stream());
+  AsyncDeviceVector<int> smartsResultsDev(numAtoms, stream.stream());
+
+  readAtomPropertyKernel<<<1, numAtoms, 0, stream.stream()>>>(smilesDevice.view<MoleculeType::Target>(),
+                                                              0,
+                                                              AtomProperty::AtomicNum,
+                                                              smilesResultsDev.data());
+  readAtomPropertyKernel<<<1, numAtoms, 0, stream.stream()>>>(smartsDevice.view<MoleculeType::Query>(),
+                                                              0,
+                                                              AtomProperty::AtomicNum,
+                                                              smartsResultsDev.data());
+  cudaCheckError(cudaGetLastError());
+
+  std::vector<int> smilesResults(numAtoms);
+  std::vector<int> smartsResults(numAtoms);
+  smilesResultsDev.copyToHost(smilesResults);
+  smartsResultsDev.copyToHost(smartsResults);
+  cudaCheckError(cudaStreamSynchronize(stream.stream()));
+
+  for (int i = 0; i < numAtoms; ++i) {
+    EXPECT_EQ(smilesResults[i], smartsResults[i]) << "Device atomic number mismatch at atom " << i;
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(SmilesVsSmarts,
+                         QueryBatchStructureTest,
+                         ::testing::Values(
+                           // Same strings work as both SMILES and SMARTS
+                           SmilesSmartsPair{"CCO", "CCO"},            // ethanol
+                           SmilesSmartsPair{"c1ccccc1", "c1ccccc1"},  // benzene
+                           SmilesSmartsPair{"CC(=O)O", "CC(=O)O"},    // acetic acid
+                           SmilesSmartsPair{"C#N", "C#N"},            // hydrogen cyanide
+                           SmilesSmartsPair{"CCCCCC", "CCCCCC"}       // hexane
+                           ),
+                         [](const ::testing::TestParamInfo<SmilesSmartsPair>& info) {
+                           std::string name = info.param.smiles;
+                           for (char& c : name) {
+                             if (!std::isalnum(c)) {
+                               c = '_';
+                             }
+                           }
+                           return name;
+                         });
 
 // =============================================================================
 // Re-copy to Device Test
@@ -892,7 +1035,7 @@ TEST(MoleculesReCopyTest, CopyFromHostTwiceWorks) {
   device.copyFromHost(batch1);
 
   AsyncDeviceVector<int> resultsDev(2, stream.stream());
-  readNumAtomsKernel<<<1, 2, 0, stream.stream()>>>(device.view(), resultsDev.data(), 2);
+  readNumAtomsKernel<<<1, 2, 0, stream.stream()>>>(device.view<MoleculeType::Target>(), resultsDev.data(), 2);
   cudaCheckError(cudaGetLastError());
 
   std::vector<int> results1(2);
@@ -906,7 +1049,7 @@ TEST(MoleculesReCopyTest, CopyFromHostTwiceWorks) {
   device.copyFromHost(batch2);
 
   AsyncDeviceVector<int> resultsDev2(3, stream.stream());
-  readNumAtomsKernel<<<1, 3, 0, stream.stream()>>>(device.view(), resultsDev2.data(), 3);
+  readNumAtomsKernel<<<1, 3, 0, stream.stream()>>>(device.view<MoleculeType::Target>(), resultsDev2.data(), 3);
   cudaCheckError(cudaGetLastError());
 
   std::vector<int> results2(3);
@@ -933,6 +1076,17 @@ TEST(MoleculesSizeLimitTest, TargetMoleculeExceeding128AtomsThrows) {
   EXPECT_THROW(nvMolKit::addToBatch(mol.get(), batch), std::runtime_error);
 }
 
+TEST(MoleculesSizeLimitTest, QueryMoleculeExceeding128AtomsThrows) {
+  // 129-carbon chain as SMARTS: exceeds 128 atom limit
+  std::string longChain(129, 'C');
+  auto        mol = std::unique_ptr<RDKit::ROMol>(RDKit::SmartsToMol(longChain));
+  ASSERT_NE(mol, nullptr);
+  ASSERT_GT(mol->getNumAtoms(), 128u);
+
+  MoleculesHost batch;
+  EXPECT_THROW(nvMolKit::addQueryToBatch(mol.get(), batch), std::runtime_error);
+}
+
 TEST(MoleculesSizeLimitTest, TargetMoleculeAt128AtomsSucceeds) {
   // Exactly 128 carbons: should succeed
   std::string chain128(128, 'C');
@@ -942,6 +1096,19 @@ TEST(MoleculesSizeLimitTest, TargetMoleculeAt128AtomsSucceeds) {
 
   MoleculesHost batch;
   EXPECT_NO_THROW(nvMolKit::addToBatch(mol.get(), batch));
+  EXPECT_EQ(batch.numMolecules(), 1);
+  EXPECT_EQ(batch.totalAtoms(), 128);
+}
+
+TEST(MoleculesSizeLimitTest, QueryMoleculeAt128AtomsSucceeds) {
+  // Exactly 128 carbons as SMARTS: should succeed
+  std::string chain128(128, 'C');
+  auto        mol = std::unique_ptr<RDKit::ROMol>(RDKit::SmartsToMol(chain128));
+  ASSERT_NE(mol, nullptr);
+  ASSERT_EQ(mol->getNumAtoms(), 128u);
+
+  MoleculesHost batch;
+  EXPECT_NO_THROW(nvMolKit::addQueryToBatch(mol.get(), batch));
   EXPECT_EQ(batch.numMolecules(), 1);
   EXPECT_EQ(batch.totalAtoms(), 128);
 }

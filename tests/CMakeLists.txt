@@ -191,6 +191,9 @@ target_link_libraries(test_boolean_tree PRIVATE substruct_definitions device)
 add_executable(test_molecules test_molecules.cu)
 target_link_libraries(test_molecules PRIVATE molecules cuda_error_check ${RDKit_LIBS})
 
+add_executable(test_query test_query.cu)
+target_link_libraries(test_query PRIVATE molecules device ${RDKit_LIBS})
+
 set(TEST_LIST
     test_boolean_tree
     test_butina
@@ -219,6 +222,7 @@ set(TEST_LIST
     test_triangle_smooth
     test_morgan_fingerprint
     test_morgan_fingerprint_ref
+    test_query
     test_rdkit_comp
     test_rdkit_bounds_matrix
     test_similarity
