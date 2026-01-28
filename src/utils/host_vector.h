@@ -19,10 +19,14 @@
 #include <cuda_runtime.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <memory>
+#include <span>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #include "cuda_error_check.h"
 
@@ -169,6 +173,23 @@ template <typename T> class PinnedHostVector {
  private:
   size_t size_ = 0;
   T*     data_ = nullptr;
+};
+
+template <typename T> class PinnedHostView {
+ public:
+  PinnedHostView() = default;
+  PinnedHostView(std::span<T> view, std::shared_ptr<std::byte> owner) : view_(view), owner_(std::move(owner)) {}
+
+  T*     data() const noexcept { return view_.data(); }
+  size_t size() const noexcept { return view_.size(); }
+  bool   empty() const noexcept { return view_.empty(); }
+
+  T&       operator[](size_t index) noexcept { return view_[index]; }
+  const T& operator[](size_t index) const noexcept { return view_[index]; }
+
+ private:
+  std::span<T>               view_{};
+  std::shared_ptr<std::byte> owner_{};
 };
 
 }  // namespace nvMolKit

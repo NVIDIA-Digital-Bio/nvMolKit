@@ -34,6 +34,11 @@ target_link_libraries(test_cuda_error_check PRIVATE cuda_error_check)
 add_executable(test_device test_device.cpp)
 target_link_libraries(test_device PRIVATE device cuda_error_check CUDA::cudart)
 
+add_executable(test_device_timings test_device_timings.cu)
+target_link_libraries(test_device_timings PRIVATE device_timings)
+set_source_files_properties(
+  test_device_timings.cu PROPERTIES COMPILE_DEFINITIONS NVMOLKIT_ENABLE_DEVICE_TIMINGS=1)
+
 add_executable(test_device_vector test_device_vector.cpp)
 target_link_libraries(test_device_vector PRIVATE device_vector cuda_error_check
                                                  CUDA::cudart)
@@ -171,6 +176,9 @@ target_link_libraries(test_conformer_checkers PRIVATE ${RDKit_LIBS}
 add_executable(test_host_vector test_host_vector.cu)
 target_link_libraries(test_host_vector PRIVATE host_vector device_vector)
 
+add_executable(test_pinned_host_allocator test_pinned_host_allocator.cpp)
+target_link_libraries(test_pinned_host_allocator PRIVATE pinned_host_allocator)
+
 add_executable(test_etkdg_result_tracker test_etkdg_result_tracker.cpp)
 target_link_libraries(test_etkdg_result_tracker PRIVATE etkdg_impl)
 
@@ -192,6 +200,7 @@ set(TEST_LIST
     test_coordgen
     test_cuda_error_check
     test_device
+    test_device_timings
     test_device_vector
     test_distgeom_kernels
     test_etkdg
@@ -206,6 +215,7 @@ set(TEST_LIST
     test_molecules
     test_mmff
     test_distgeom
+    test_pinned_host_allocator
     test_triangle_smooth
     test_morgan_fingerprint
     test_morgan_fingerprint_ref
