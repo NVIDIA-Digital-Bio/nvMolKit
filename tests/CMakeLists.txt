@@ -210,6 +210,9 @@ target_link_libraries(test_graph_labeler_recursive PRIVATE substructure_search
         substruct_validation
         ${RDKit_LIBS})
 
+add_executable(test_recursive_preprocessor test_recursive_preprocessor.cu)
+target_link_libraries(test_recursive_preprocessor PRIVATE substructure_search molecules device ${RDKit_LIBS})
+
 add_executable(test_substructure_search test_substruct_search.cu)
 target_link_libraries(
         test_substructure_search PRIVATE substructure_search molecules device
@@ -241,6 +244,7 @@ set(TEST_LIST
     test_flattened_builder
     test_graph_labeler
     test_graph_labeler_recursive
+    test_recursive_preprocessor
     test_host_vector
     test_bfgs_minimizer
     test_etkdg_result_tracker

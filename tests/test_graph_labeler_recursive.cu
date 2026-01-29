@@ -53,7 +53,7 @@ using nvMolKit::LeafSubpatterns;
 using nvMolKit::MiniBatchResultsDevice;
 using nvMolKit::MoleculesDevice;
 using nvMolKit::MoleculesHost;
-using nvMolKit::preprocessRecursiveSmartsBatchedWithEvents;
+using nvMolKit::preprocessRecursiveSmarts;
 using nvMolKit::RecursivePatternInfo;
 using nvMolKit::RecursiveScratchBuffers;
 using nvMolKit::ScopedStream;
@@ -305,20 +305,20 @@ class RecursivePaintTest : public ::testing::Test {
     RecursiveScratchBuffers scratch(stream_.stream());
     scratch.allocateBuffers(256);
     std::vector<BatchedPatternEntry> scratchPatternEntries;
-    preprocessRecursiveSmartsBatchedWithEvents(SubstructTemplateConfig::Config_T128_Q64_B8,
-                                               targetDevice,
-                                               queryHost,
-                                               leafSubpatterns,
-                                               *results_,
-                                               numQueries_,
-                                               0,
-                                               numTargets_ * numQueries_,
-                                               SubstructAlgorithm::GSI,
-                                               stream_.stream(),
-                                               scratch,
-                                               scratchPatternEntries,
-                                               nullptr,
-                                               0);
+    preprocessRecursiveSmarts(SubstructTemplateConfig::Config_T128_Q64_B8,
+                              targetDevice,
+                              queryHost,
+                              leafSubpatterns,
+                              *results_,
+                              numQueries_,
+                              0,
+                              numTargets_ * numQueries_,
+                              SubstructAlgorithm::GSI,
+                              stream_.stream(),
+                              scratch,
+                              scratchPatternEntries,
+                              nullptr,
+                              0);
     cudaCheckError(cudaStreamSynchronize(stream_.stream()));
   }
 };

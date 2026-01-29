@@ -35,7 +35,7 @@ add_library(substruct_definitions INTERFACE)
 target_include_directories(substruct_definitions
         INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 
-add_library(substructure_search substruct_search.cu substruct_launch_config.cpp)
+add_library(substructure_search substruct_search.cu recursive_preprocessor.cu substruct_launch_config.cpp)
 target_include_directories(substructure_search
         PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(substructure_search PUBLIC molecules device_vector
