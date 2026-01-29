@@ -45,6 +45,7 @@
 #include "substruct_launch_config.h"
 #include "substruct_search.h"
 #include "substruct_search_internal.cuh"
+#include "thread_safe_queue.h"
 
 namespace nvMolKit {
 
@@ -132,73 +133,48 @@ RDKitFallbackQueue::RDKitFallbackQueue(const std::vector<const RDKit::ROMol*>* t
       boolResults_(boolResults),
       countResults_(countResults),
       resultsMutex_(resultsMutex),
-      maxMatches_(maxMatches),
-      shutdown_(false),
-      activeProducers_(0) {}
+      maxMatches_(maxMatches) {}
 
 void RDKitFallbackQueue::enqueue(const std::vector<RDKitFallbackEntry>& entries) {
   if (entries.empty())
     return;
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    for (const auto& entry : entries) {
-      queue_.push(entry);
-    }
-    queueSize_.store(queue_.size(), std::memory_order_release);
-  }
-  cv_.notify_all();
+  queue_.pushBatch(entries);
 }
 
 void RDKitFallbackQueue::enqueue(const RDKitFallbackEntry& entry) {
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    queue_.push(entry);
-    queueSize_.fetch_add(1, std::memory_order_release);
-  }
-  cv_.notify_one();
+  queue_.push(entry);
 }
 
 void RDKitFallbackQueue::registerProducer() {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(producerMutex_);
   ++activeProducers_;
 }
 
 void RDKitFallbackQueue::unregisterProducer() {
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    --activeProducers_;
-  }
-  cv_.notify_all();
+  std::lock_guard<std::mutex> lock(producerMutex_);
+  --activeProducers_;
+  closeQueueIfDone();
 }
 
 void RDKitFallbackQueue::shutdown() {
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    shutdown_ = true;
+  std::lock_guard<std::mutex> lock(producerMutex_);
+  shutdown_ = true;
+  closeQueueIfDone();
+}
+
+void RDKitFallbackQueue::closeQueueIfDone() {
+  if (shutdown_ || activeProducers_ == 0) {
+    queue_.close();
   }
-  cv_.notify_all();
 }
 
 void RDKitFallbackQueue::workerLoop() {
   while (true) {
-    RDKitFallbackEntry entry;
-    {
-      std::unique_lock<std::mutex> lock(mutex_);
-      cv_.wait(lock, [this] { return !queue_.empty() || shutdown_ || (activeProducers_ == 0 && queue_.empty()); });
-
-      if (queue_.empty()) {
-        if (shutdown_ || activeProducers_ == 0) {
-          return;
-        }
-        continue;
-      }
-
-      entry = queue_.front();
-      queue_.pop();
-      queueSize_.fetch_sub(1, std::memory_order_release);
+    auto optEntry = queue_.pop();
+    if (!optEntry) {
+      return;
     }
-
-    processEntry(entry);
+    processEntry(*optEntry);
   }
 }
 
@@ -207,14 +183,10 @@ size_t RDKitFallbackQueue::processedCount() const {
 }
 
 std::vector<RDKitFallbackEntry> RDKitFallbackQueue::drainToVector() {
-  std::lock_guard<std::mutex>     lock(mutex_);
   std::vector<RDKitFallbackEntry> result;
-  result.reserve(queue_.size());
-  while (!queue_.empty()) {
-    result.push_back(queue_.front());
-    queue_.pop();
+  while (auto opt = queue_.tryPop()) {
+    result.push_back(std::move(*opt));
   }
-  queueSize_.store(0, std::memory_order_release);
   return result;
 }
 
@@ -223,22 +195,16 @@ std::mutex& RDKitFallbackQueue::getResultsMutex() {
 }
 
 bool RDKitFallbackQueue::tryProcessOne() {
-  RDKitFallbackEntry entry;
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (queue_.empty()) {
-      return false;
-    }
-    entry = queue_.front();
-    queue_.pop();
-    queueSize_.fetch_sub(1, std::memory_order_release);
+  auto optEntry = queue_.tryPop();
+  if (!optEntry) {
+    return false;
   }
-  processEntry(entry);
+  processEntry(*optEntry);
   return true;
 }
 
 bool RDKitFallbackQueue::hasWork() const {
-  return queueSize_.load(std::memory_order_relaxed) > 0;
+  return !queue_.empty();
 }
 
 void RDKitFallbackQueue::processEntry(const RDKitFallbackEntry& entry) {
@@ -315,52 +281,29 @@ struct PinnedHostBuffer {
 class PinnedHostBufferPool {
  public:
   void initialize(int poolSize, int maxBatchSize, int maxMatchIndicesEstimate, int maxPatternsPerDepth) {
-    std::lock_guard<std::mutex> lock(mutex_);
     buffers_.clear();
-    std::queue<PinnedHostBuffer*> empty;
-    available_.swap(empty);
-    shutdown_ = false;
+    available_ = std::make_unique<ThreadSafeQueue<PinnedHostBuffer*>>();
 
     buffers_.reserve(static_cast<size_t>(poolSize));
     for (int i = 0; i < poolSize; ++i) {
       auto buffer = createBuffer(maxBatchSize, maxMatchIndicesEstimate, maxPatternsPerDepth);
-      available_.push(buffer.get());
+      available_->push(buffer.get());
       buffers_.push_back(std::move(buffer));
     }
   }
 
   PinnedHostBuffer* acquire() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    cv_.wait(lock, [this] { return shutdown_ || !available_.empty(); });
-    if (shutdown_) {
-      return nullptr;
-    }
-    PinnedHostBuffer* buffer = available_.front();
-    available_.pop();
-    return buffer;
+    auto opt = available_->pop();
+    return opt.value_or(nullptr);
   }
 
   void release(PinnedHostBuffer* buffer) {
-    if (buffer == nullptr) {
-      return;
+    if (buffer != nullptr) {
+      available_->push(buffer);
     }
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      if (shutdown_) {
-        return;
-      }
-      available_.push(buffer);
-    }
-    cv_.notify_one();
   }
 
-  void shutdown() {
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      shutdown_ = true;
-    }
-    cv_.notify_all();
-  }
+  void shutdown() { available_->close(); }
 
  private:
   static std::unique_ptr<PinnedHostBuffer> createBuffer(int maxBatchSize,
@@ -391,11 +334,8 @@ class PinnedHostBufferPool {
     return buffer;
   }
 
-  std::vector<std::unique_ptr<PinnedHostBuffer>> buffers_;
-  std::queue<PinnedHostBuffer*>                  available_;
-  std::mutex                                     mutex_;
-  std::condition_variable                        cv_;
-  bool                                           shutdown_ = false;
+  std::vector<std::unique_ptr<PinnedHostBuffer>>      buffers_;
+  std::unique_ptr<ThreadSafeQueue<PinnedHostBuffer*>> available_;
 };
 
 struct GpuExecutor {
@@ -474,54 +414,7 @@ struct PreparedMiniBatch {
   PinnedHostBuffer*                 pinnedBuffer = nullptr;
 };
 
-class PreparedBatchQueue {
- public:
-  void push(std::unique_ptr<PreparedMiniBatch> batch) {
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      if (closed_) {
-        return;
-      }
-      queue_.push(std::move(batch));
-    }
-    cv_.notify_one();
-  }
-
-  std::unique_ptr<PreparedMiniBatch> pop() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    cv_.wait(lock, [&]() { return closed_ || !queue_.empty(); });
-    if (queue_.empty()) {
-      return nullptr;
-    }
-    auto batch = std::move(queue_.front());
-    queue_.pop();
-    return batch;
-  }
-
-  std::unique_ptr<PreparedMiniBatch> tryPop() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (queue_.empty()) {
-      return nullptr;
-    }
-    auto batch = std::move(queue_.front());
-    queue_.pop();
-    return batch;
-  }
-
-  void close() {
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      closed_ = true;
-    }
-    cv_.notify_all();
-  }
-
- private:
-  std::queue<std::unique_ptr<PreparedMiniBatch>> queue_;
-  std::mutex                                     mutex_;
-  std::condition_variable                        cv_;
-  bool                                           closed_ = false;
-};
+using PreparedBatchQueue = ThreadSafeQueue<std::unique_ptr<PreparedMiniBatch>>;
 
 struct QueryPreprocessContext {
   PinnedHostVector<int> queryAtomCounts;
@@ -1399,19 +1292,22 @@ void runnerWorkerPipeline(int                       workerIdx,
 
       std::unique_ptr<PreparedMiniBatch> batch;
       if (pendingCount > 0) {
-        batch = batchQueue.tryPop();
-        if (!batch) {
+        auto optBatch = batchQueue.tryPop();
+        if (!optBatch) {
           drainOne();
           continue;
         }
+        batch = std::move(*optBatch);
       } else {
+        std::optional<std::unique_ptr<PreparedMiniBatch>> optBatch;
         {
           ScopedNvtxRange waitRange("Wait for prepared batch", NvtxColor::kRed);
-          batch = batchQueue.pop();
+          optBatch = batchQueue.pop();
         }
-        if (!batch) {
+        if (!optBatch) {
           break;
         }
+        batch = std::move(*optBatch);
       }
 
       GpuExecutor* executor = executors[pendingTail];
@@ -2161,38 +2057,6 @@ void preprocessRecursiveSmartsBatchedWithEvents(SubstructTemplateConfig         
 }
 
 namespace {
-
-/**
- * @brief Process RDKit fallback queue.
- *
- * Runs all (target, query) pairs in the fallback queue using RDKit CPU implementation.
- * Called on main thread after GPU workers have been dispatched.
- *
- * @param reason Human-readable reason for fallback (shown in profiler)
- */
-void processRDKitFallbackQueue(const std::vector<const RDKit::ROMol*>& targets,
-                               const std::vector<const RDKit::ROMol*>& queries,
-                               const std::vector<RDKitFallbackEntry>&  fallbackQueue,
-                               SubstructSearchResults&                 results,
-                               std::mutex&                             resultsMutex,
-                               int                                     maxMatches,
-                               const char*                             reason) {
-  ScopedNvtxRange fallbackRange("RDKIT FALLBACK: " + std::string(reason) + " (" + std::to_string(fallbackQueue.size()) +
-                                " pairs)");
-
-  for (const auto& entry : fallbackQueue) {
-    const RDKit::ROMol* target = targets[entry.originalTargetIdx];
-    const RDKit::ROMol* query  = queries[entry.originalQueryIdx];
-
-    processWithRDKitFallback(target,
-                             query,
-                             entry.originalTargetIdx,
-                             entry.originalQueryIdx,
-                             results,
-                             resultsMutex,
-                             maxMatches);
-  }
-}
 
 /**
  * @brief Remove duplicate matches that differ only in atom enumeration order.

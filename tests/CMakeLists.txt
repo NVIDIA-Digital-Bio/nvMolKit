@@ -55,6 +55,9 @@ target_link_libraries(test_flat_bit_vect_device PRIVATE flatBitVect device
 add_executable(test_work_splitting test_work_splitting.cpp)
 target_link_libraries(test_work_splitting PRIVATE work_splitting)
 
+add_executable(test_thread_safe_queue test_thread_safe_queue.cpp)
+target_include_directories(test_thread_safe_queue PRIVATE ${CMAKE_SOURCE_DIR}/src/utils)
+
 add_executable(test_openmp_helpers test_openmp_helpers.cpp)
 target_link_libraries(test_openmp_helpers PRIVATE openmp_helpers
                                                   OpenMP::OpenMP_CXX)
@@ -217,6 +220,7 @@ set(TEST_LIST
     test_butina
     test_bfgs_hessian
     test_openmp_helpers
+    test_thread_safe_queue
     test_conformer_checkers
     test_coordgen
     test_cuda_error_check

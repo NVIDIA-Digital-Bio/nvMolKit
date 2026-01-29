@@ -28,9 +28,7 @@
 
 #include <array>
 #include <atomic>
-#include <condition_variable>
 #include <mutex>
-#include <queue>
 #include <unordered_map>
 #include <vector>
 
@@ -38,6 +36,7 @@
 #include "host_vector.h"
 #include "nvtx.h"
 #include "pinned_host_allocator.h"
+#include "thread_safe_queue.h"
 
 namespace RDKit {
 class ROMol;
@@ -522,6 +521,7 @@ class RDKitFallbackQueue {
 
  private:
   void processEntry(const RDKitFallbackEntry& entry);
+  void closeQueueIfDone();
 
   const std::vector<const RDKit::ROMol*>* targets_;
   const std::vector<const RDKit::ROMol*>* queries_;
@@ -531,13 +531,11 @@ class RDKitFallbackQueue {
   std::mutex*                             resultsMutex_;
   int                                     maxMatches_;
 
-  mutable std::mutex             mutex_;
-  std::condition_variable        cv_;
-  std::queue<RDKitFallbackEntry> queue_;
-  std::atomic<size_t>            queueSize_{0};
-  bool                           shutdown_;
-  int                            activeProducers_;
-  std::atomic<size_t>            processedCount_{0};
+  ThreadSafeQueue<RDKitFallbackEntry> queue_;
+  mutable std::mutex                  producerMutex_;
+  bool                                shutdown_        = false;
+  int                                 activeProducers_ = 0;
+  std::atomic<size_t>                 processedCount_{0};
 };
 
 /**
