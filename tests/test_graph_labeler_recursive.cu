@@ -27,7 +27,7 @@
 #include "molecules.h"
 #include "molecules_device.cuh"
 #include "substruct_search.h"
-#include "substruct_search_internal.cuh"
+#include "substruct_search_internal.h"
 #include "substruct_types.h"
 #include "testutils/substruct_validation.h"
 

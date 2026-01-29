@@ -13,11 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef NVMOLKIT_SUBSTRUCTURE_SEARCH_INTERNAL_CUH
-#define NVMOLKIT_SUBSTRUCTURE_SEARCH_INTERNAL_CUH
+#ifndef NVMOLKIT_SUBSTRUCTURE_SEARCH_INTERNAL_H
+#define NVMOLKIT_SUBSTRUCTURE_SEARCH_INTERNAL_H
 
 /**
- * @file substruct_search_internal.cuh
+ * @file substruct_search_internal.h
  * @brief Internal implementation details for substructure search.
  *
  * This header exposes internal types and functions needed for testing.
@@ -45,8 +45,8 @@ class ROMol;
 #include "device_vector.h"
 #include "molecules.h"
 #include "recursive_preprocessor.h"
-#include "substruct_algos.cuh"
 #include "substruct_search.h"
+#include "thread_worker_context.h"
 
 namespace nvMolKit {
 
@@ -252,32 +252,6 @@ class FallbackQueueProducerGuard {
   RDKitFallbackQueue* queue_;
 };
 
-// =============================================================================
-// Thread Worker Context
-// =============================================================================
-
-/**
- * @brief Per-worker context for substructure search threads.
- *
- * Contains cached data about queries and targets that's reused across mini-batches.
- */
-struct ThreadWorkerContext {
-  const int*              queryAtomCounts       = nullptr;
-  const int*              queryDepths           = nullptr;
-  const int*              queryMaxDepths        = nullptr;
-  const int8_t*           queryHasPatterns      = nullptr;
-  const std::vector<int>* targetAtomCounts      = nullptr;
-  const std::vector<int>* targetOriginalIndices = nullptr;
-  int                     numTargets            = 0;
-  int                     numQueries            = 0;
-  int                     maxTargetAtoms        = 0;
-  int                     maxQueryAtoms         = 0;
-  int                     maxBondsPerAtom       = 0;
-  int                     maxMatches            = 0;
-  bool                    countOnly             = false;  ///< If true, count matches only (for hasSubstructMatch)
-  SubstructTemplateConfig templateConfig        = SubstructTemplateConfig::Config_T128_Q64_B8;
-};
-
 }  // namespace nvMolKit
 
-#endif  // NVMOLKIT_SUBSTRUCTURE_SEARCH_INTERNAL_CUH
+#endif  // NVMOLKIT_SUBSTRUCTURE_SEARCH_INTERNAL_H

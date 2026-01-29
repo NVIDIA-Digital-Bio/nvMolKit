@@ -20,7 +20,7 @@
 #include "substruct_debug.h"
 #include "substruct_kernels.h"
 #include "substruct_launch_config.h"
-#include "substruct_search_internal.cuh"
+#include "substruct_search_internal.h"
 #include "substruct_types.h"
 namespace nvMolKit {
 

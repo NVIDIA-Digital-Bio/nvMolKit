@@ -28,7 +28,7 @@
 #include "molecules.h"
 #include "molecules_device.cuh"
 #include "recursive_preprocessor.h"
-#include "substruct_search_internal.cuh"
+#include "substruct_search_internal.h"
 #include "substruct_types.h"
 
 using nvMolKit::BatchedPatternEntry;

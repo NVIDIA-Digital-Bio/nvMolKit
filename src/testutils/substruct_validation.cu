@@ -23,7 +23,7 @@
 #include "cuda_error_check.h"
 #include "graph_labeler.cuh"
 #include "molecules_device.cuh"
-#include "substruct_search_internal.cuh"
+#include "substruct_search_internal.h"
 #include "substruct_validation.h"
 
 namespace nvMolKit {

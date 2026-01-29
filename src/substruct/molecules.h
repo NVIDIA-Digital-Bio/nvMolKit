@@ -408,13 +408,18 @@ bool hasRecursiveSmarts(const RDKit::ROMol* mol);
 bool requiresRDKitFallback(const RDKit::ROMol* mol);
 
 /**
- * @brief Get the recursion depth for a query in a batch.
+ * @brief Get the pipeline scheduling depth for a query in a batch.
+ *
+ * This is used for scheduling match stages after recursive SMARTS painting:
+ * - Non-recursive queries return 0 (can run immediately).
+ * - Recursive queries return maxRecursiveDepth + 1 so at least one paint pass
+ *   occurs before matching.
  *
  * @param queriesHost The host batch containing the query
  * @param queryIdx Index of the query in the batch
- * @return 0 if no recursive patterns, otherwise maxDepth + 1
+ * @return 0 if no recursive patterns, otherwise maxRecursiveDepth + 1
  */
-int getQueryRecursionDepth(const MoleculesHost& queriesHost, int queryIdx);
+int getQueryPipelineDepth(const MoleculesHost& queriesHost, int queryIdx);
 
 }  // namespace nvMolKit
 

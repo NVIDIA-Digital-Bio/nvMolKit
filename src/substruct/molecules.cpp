@@ -2156,7 +2156,7 @@ MoleculesHost buildQueryBatchParallel(const std::vector<const RDKit::ROMol*>& mo
   return result;
 }
 
-int getQueryRecursionDepth(const MoleculesHost& queriesHost, int queryIdx) {
+int getQueryPipelineDepth(const MoleculesHost& queriesHost, int queryIdx) {
   if (queryIdx >= static_cast<int>(queriesHost.recursivePatterns.size())) {
     return 0;
   }

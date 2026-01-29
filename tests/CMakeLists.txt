@@ -210,6 +210,9 @@ target_link_libraries(test_graph_labeler_recursive PRIVATE substructure_search
         substruct_validation
         ${RDKit_LIBS})
 
+add_executable(test_minibatch_planner test_minibatch_planner.cpp)
+target_link_libraries(test_minibatch_planner PRIVATE substructure_search molecules ${RDKit_LIBS})
+
 add_executable(test_recursive_preprocessor test_recursive_preprocessor.cu)
 target_link_libraries(test_recursive_preprocessor PRIVATE substructure_search molecules device ${RDKit_LIBS})
 
@@ -244,6 +247,7 @@ set(TEST_LIST
     test_flattened_builder
     test_graph_labeler
     test_graph_labeler_recursive
+    test_minibatch_planner
     test_recursive_preprocessor
     test_host_vector
     test_bfgs_minimizer
