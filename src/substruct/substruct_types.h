@@ -30,6 +30,27 @@ enum class SubstructAlgorithm {
   GSI   ///< GSI-inspired BFS level-by-level join
 };
 
+/**
+ * @brief Partial match for BFS-style algorithms.
+ *
+ * @tparam MaxQueryAtoms Maximum query atoms for array sizing
+ *
+ * Represents a partial mapping from query atoms to target atoms.
+ * Stored compactly for queue-based BFS exploration.
+ *
+ * Complete matches are never stored in the queue, so we only need
+ * MaxQueryAtoms - 1 slots (matching atoms 0 through numQueryAtoms-2).
+ */
+template <std::size_t MaxQueryAtoms = kMaxQueryAtoms> struct PartialMatchT {
+  static constexpr std::size_t kMaxQueryAtomsValue = MaxQueryAtoms;
+  int8_t mapping[MaxQueryAtoms - 1];  ///< mapping[q] = target atom (only [0..nextQueryAtom-1] valid)
+  int8_t nextQueryAtom;               ///< Next query atom to extend (also serves as depth)
+};
+
+/// Type alias for max-sized partial match (backward compatibility)
+using PartialMatch = PartialMatchT<kMaxQueryAtoms>;
+static_assert(sizeof(PartialMatch) == kMaxQueryAtoms, "PartialMatch must be kMaxQueryAtoms bytes");
+
 }  // namespace nvMolKit
 
 #endif  // NVMOLKIT_SUBSTRUCT_TYPES_H
