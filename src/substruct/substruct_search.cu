@@ -899,6 +899,119 @@ void runnerWorkerPipelineCounts(int                                 workerIdx,
                        exceptionPtr);
 }
 
+void runGpuCoordinator(int                                 deviceId,
+                       int                                 startWorkerIdx,
+                       int                                 numWorkersThisGpu,
+                       int                                 executorsPerRunner,
+                       int                                 currentDevice,
+                       const MoleculesHost&                queriesHost,
+                       const MoleculesDevice&              queriesDevice,
+                       const RecursivePatternPreprocessor& recursivePreprocessor,
+                       SubstructSearchResults&             results,
+                       std::mutex&                         resultsMutex,
+                       SubstructAlgorithm                  algorithm,
+                       PreparedBatchQueue&                 batchQueue,
+                       PinnedHostBufferPool&               bufferPool,
+                       RDKitFallbackQueue*                 fallbackQueue,
+                       HasSubstructMatchResults*           boolResults,
+                       std::vector<int>*                   countResults,
+                       std::vector<std::exception_ptr>&    exceptions,
+                       std::atomic<bool>&                  pipelineAbort) {
+  try {
+    ScopedNvtxRange  coordRange("GPU" + std::to_string(deviceId) + " coordinator (pipeline)");
+    const WithDevice setDevice(deviceId);
+
+    const int numExecutorsThisGpu = numWorkersThisGpu * executorsPerRunner;
+
+    std::vector<std::unique_ptr<GpuExecutor>> executors;
+    executors.reserve(static_cast<size_t>(numExecutorsThisGpu));
+    for (int i = 0; i < numExecutorsThisGpu; ++i) {
+      auto executor = std::make_unique<GpuExecutor>(startWorkerIdx * executorsPerRunner + i, deviceId);
+      executor->initializeForStream();
+      executors.push_back(std::move(executor));
+    }
+
+    std::unique_ptr<MoleculesDevice>              localQueries;
+    std::unique_ptr<RecursivePatternPreprocessor> localPreprocessor;
+
+    const MoleculesDevice*              queriesPtr      = &queriesDevice;
+    const RecursivePatternPreprocessor* preprocessorPtr = &recursivePreprocessor;
+
+    if (deviceId != currentDevice) {
+      localQueries = std::make_unique<MoleculesDevice>();
+      localQueries->copyFromHost(queriesHost);
+      localPreprocessor = std::make_unique<RecursivePatternPreprocessor>();
+      localPreprocessor->buildPatterns(queriesHost);
+      localPreprocessor->syncToDevice(nullptr);
+      queriesPtr      = localQueries.get();
+      preprocessorPtr = localPreprocessor.get();
+    }
+
+    std::vector<std::thread> workers;
+    workers.reserve(numWorkersThisGpu);
+    for (int w = 0; w < numWorkersThisGpu; ++w) {
+      const int                 globalIdx = startWorkerIdx + w;
+      std::vector<GpuExecutor*> workerExecutors;
+      workerExecutors.reserve(executorsPerRunner);
+      for (int s = 0; s < executorsPerRunner; ++s) {
+        workerExecutors.push_back(executors[w * executorsPerRunner + s].get());
+      }
+
+      auto workerLoop = [&, globalIdx, workerExecutors]() mutable {
+        if (boolResults) {
+          runnerWorkerPipelineBoolean(globalIdx,
+                                      std::cref(*queriesPtr),
+                                      std::cref(*preprocessorPtr),
+                                      std::ref(*boolResults),
+                                      std::ref(resultsMutex),
+                                      algorithm,
+                                      deviceId,
+                                      std::move(workerExecutors),
+                                      std::ref(batchQueue),
+                                      std::ref(bufferPool),
+                                      std::ref(pipelineAbort),
+                                      std::ref(exceptions[globalIdx]));
+        } else if (countResults) {
+          runnerWorkerPipelineCounts(globalIdx,
+                                     std::cref(*queriesPtr),
+                                     std::cref(*preprocessorPtr),
+                                     std::ref(*countResults),
+                                     std::ref(resultsMutex),
+                                     algorithm,
+                                     deviceId,
+                                     std::move(workerExecutors),
+                                     std::ref(batchQueue),
+                                     std::ref(bufferPool),
+                                     std::ref(pipelineAbort),
+                                     std::ref(exceptions[globalIdx]));
+        } else {
+          runnerWorkerPipelineResults(globalIdx,
+                                      std::cref(*queriesPtr),
+                                      std::cref(*preprocessorPtr),
+                                      std::ref(results),
+                                      std::ref(resultsMutex),
+                                      algorithm,
+                                      deviceId,
+                                      std::move(workerExecutors),
+                                      std::ref(batchQueue),
+                                      std::ref(bufferPool),
+                                      fallbackQueue,
+                                      std::ref(pipelineAbort),
+                                      std::ref(exceptions[globalIdx]));
+        }
+      };
+
+      workers.emplace_back(workerLoop);
+    }
+
+    for (auto& worker : workers) {
+      worker.join();
+    }
+  } catch (...) {
+    exceptions[startWorkerIdx] = std::current_exception();
+  }
+}
+
 }  // namespace
 
 // =============================================================================
@@ -1029,7 +1142,6 @@ void runPipelinedSubstructSearch(const std::vector<const RDKit::ROMol*>& targets
   std::vector<std::thread> gpuThreads;
   gpuThreads.reserve(numGpus);
 
-  int executorOffset = 0;
   int workerIdOffset = 0;
   for (int g = 0; g < numGpus; ++g) {
     const int numWorkersThisGpu = workersPerGpu[g];
@@ -1037,11 +1149,9 @@ void runPipelinedSubstructSearch(const std::vector<const RDKit::ROMol*>& targets
       continue;
     }
 
-    const int deviceId            = gpuIds[g];
-    const int startWorkerIdx      = workerIdOffset;
-    const int numExecutorsThisGpu = numWorkersThisGpu * executorsPerRunner;
+    const int deviceId       = gpuIds[g];
+    const int startWorkerIdx = workerIdOffset;
     workerIdOffset += numWorkersThisGpu;
-    executorOffset += numExecutorsThisGpu;
 
     gpuThreads.emplace_back([=,
                              &batchQueue,
@@ -1053,97 +1163,24 @@ void runPipelinedSubstructSearch(const std::vector<const RDKit::ROMol*>& targets
                              &resultsMutex,
                              &exceptions,
                              &pipelineAbort]() mutable {
-      try {
-        ScopedNvtxRange  coordRange("GPU" + std::to_string(deviceId) + " coordinator (pipeline)");
-        const WithDevice setDevice(deviceId);
-
-        std::vector<std::unique_ptr<GpuExecutor>> executors;
-        executors.reserve(static_cast<size_t>(numExecutorsThisGpu));
-        for (int i = 0; i < numExecutorsThisGpu; ++i) {
-          auto executor = std::make_unique<GpuExecutor>(startWorkerIdx * executorsPerRunner + i, deviceId);
-          executor->initializeForStream();
-          executors.push_back(std::move(executor));
-        }
-
-        std::unique_ptr<MoleculesDevice>              localQueries;
-        std::unique_ptr<RecursivePatternPreprocessor> localPreprocessor;
-
-        const MoleculesDevice*              queriesPtr      = &queriesDevice;
-        const RecursivePatternPreprocessor* preprocessorPtr = &recursivePreprocessor;
-
-        if (deviceId != currentDevice) {
-          localQueries = std::make_unique<MoleculesDevice>();
-          localQueries->copyFromHost(queriesHost);
-          localPreprocessor = std::make_unique<RecursivePatternPreprocessor>();
-          localPreprocessor->buildPatterns(queriesHost);
-          localPreprocessor->syncToDevice(nullptr);
-          queriesPtr      = localQueries.get();
-          preprocessorPtr = localPreprocessor.get();
-        }
-
-        std::vector<std::thread> workers;
-        workers.reserve(numWorkersThisGpu);
-        for (int w = 0; w < numWorkersThisGpu; ++w) {
-          const int                 globalIdx = startWorkerIdx + w;
-          std::vector<GpuExecutor*> workerExecutors;
-          workerExecutors.reserve(executorsPerRunner);
-          for (int s = 0; s < executorsPerRunner; ++s) {
-            workerExecutors.push_back(executors[w * executorsPerRunner + s].get());
-          }
-
-          auto workerLoop = [&, globalIdx, workerExecutors]() mutable {
-            if (boolResults) {
-              runnerWorkerPipelineBoolean(globalIdx,
-                                          std::cref(*queriesPtr),
-                                          std::cref(*preprocessorPtr),
-                                          std::ref(*boolResults),
-                                          std::ref(resultsMutex),
-                                          algorithm,
-                                          deviceId,
-                                          std::move(workerExecutors),
-                                          std::ref(batchQueue),
-                                          std::ref(bufferPool),
-                                          std::ref(pipelineAbort),
-                                          std::ref(exceptions[globalIdx]));
-            } else if (countResults) {
-              runnerWorkerPipelineCounts(globalIdx,
-                                         std::cref(*queriesPtr),
-                                         std::cref(*preprocessorPtr),
-                                         std::ref(*countResults),
-                                         std::ref(resultsMutex),
-                                         algorithm,
-                                         deviceId,
-                                         std::move(workerExecutors),
-                                         std::ref(batchQueue),
-                                         std::ref(bufferPool),
-                                         std::ref(pipelineAbort),
-                                         std::ref(exceptions[globalIdx]));
-            } else {
-              runnerWorkerPipelineResults(globalIdx,
-                                          std::cref(*queriesPtr),
-                                          std::cref(*preprocessorPtr),
-                                          std::ref(results),
-                                          std::ref(resultsMutex),
-                                          algorithm,
-                                          deviceId,
-                                          std::move(workerExecutors),
-                                          std::ref(batchQueue),
-                                          std::ref(bufferPool),
-                                          fallbackQueue,
-                                          std::ref(pipelineAbort),
-                                          std::ref(exceptions[globalIdx]));
-            }
-          };
-
-          workers.emplace_back(workerLoop);
-        }
-
-        for (auto& worker : workers) {
-          worker.join();
-        }
-      } catch (...) {
-        exceptions[startWorkerIdx] = std::current_exception();
-      }
+      runGpuCoordinator(deviceId,
+                        startWorkerIdx,
+                        numWorkersThisGpu,
+                        executorsPerRunner,
+                        currentDevice,
+                        queriesHost,
+                        queriesDevice,
+                        recursivePreprocessor,
+                        results,
+                        resultsMutex,
+                        algorithm,
+                        batchQueue,
+                        bufferPool,
+                        fallbackQueue,
+                        boolResults,
+                        countResults,
+                        exceptions,
+                        pipelineAbort);
     });
   }
   launchRange.pop();
