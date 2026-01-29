@@ -52,8 +52,6 @@
 
 namespace nvMolKit {
 
-struct QueryPreprocessContext;
-
 namespace {
 
 void runPipelinedSubstructSearch(const std::vector<const RDKit::ROMol*>& targets,
@@ -86,15 +84,6 @@ struct PreparedMiniBatch {
 };
 
 using PreparedBatchQueue = ThreadSafeQueue<std::unique_ptr<PreparedMiniBatch>>;
-
-struct QueryPreprocessContext {
-  PinnedHostVector<int> queryAtomCounts;
-  std::vector<int>      queryPipelineDepths;  // Pipeline stage depth (maxRecursiveDepth + 1, 0 if none)
-  std::vector<int>      queryMaxDepths;
-  std::vector<int8_t>   queryHasPatterns;
-  int                   numQueries    = 0;
-  int                   maxQueryAtoms = 0;
-};
 
 // =============================================================================
 // Pipelined Batch Processing Implementation
@@ -241,8 +230,8 @@ void uploadAndLaunchMiniBatch(GpuExecutor&                        executor,
   cudaCheckError(cudaStreamWaitEvent(recursiveStream, executor.allocDoneEvent.event(), 0));
   waitAllocRange.pop();
 
-  std::array<cudaEvent_t, kMaxRecursionDepth> depthEventPtrs;
-  for (int i = 0; i < kMaxRecursionDepth; ++i) {
+  std::array<cudaEvent_t, kMaxSmartsNestingDepth> depthEventPtrs;
+  for (int i = 0; i < kMaxSmartsNestingDepth; ++i) {
     depthEventPtrs[i] = executor.depthEvents[i].event();
   }
 
@@ -261,7 +250,7 @@ void uploadAndLaunchMiniBatch(GpuExecutor&                        executor,
                                             executor.plan.firstTargetInMiniBatch,
                                             executor.plan.numTargetsInMiniBatch,
                                             depthEventPtrs.data(),
-                                            kMaxRecursionDepth);
+                                            kMaxSmartsNestingDepth);
   preprocRange.pop();
 
   ScopedNvtxRange depth0Range("Match depth-0 pairs (executorStream)");
@@ -423,10 +412,17 @@ void runnerWorkerPipeline(int                                 workerIdx,
   }
 }
 
-void runnerWorkerPipelineResults(int                                 workerIdx,
+/**
+ * @brief Unified worker pipeline that handles all result modes.
+ *
+ * Exactly one of results/boolResults/countResults should be non-null.
+ */
+void runnerWorkerPipelineUnified(int                                 workerIdx,
                                  const MoleculesDevice&              queriesDevice,
                                  const RecursivePatternPreprocessor& recursivePreprocessor,
-                                 SubstructSearchResults&             results,
+                                 SubstructSearchResults*             results,
+                                 HasSubstructMatchResults*           boolResults,
+                                 std::vector<int>*                   countResults,
                                  std::mutex&                         resultsMutex,
                                  SubstructAlgorithm                  algorithm,
                                  int                                 deviceId,
@@ -436,12 +432,26 @@ void runnerWorkerPipelineResults(int                                 workerIdx,
                                  RDKitFallbackQueue*                 fallbackQueue,
                                  std::atomic<bool>&                  pipelineAbort,
                                  std::exception_ptr&                 exceptionPtr) {
-  auto initiateCopy = [&](GpuExecutor& executor, const PinnedHostBuffer& hostBuffer) {
-    initiateResultsCopyToHost(executor, hostBuffer);
+  const bool countsOnly = (boolResults != nullptr) || (countResults != nullptr);
+
+  auto initiateCopy = [countsOnly](GpuExecutor& executor, const PinnedHostBuffer& hostBuffer) {
+    if (countsOnly) {
+      initiateCountsOnlyCopyToHost(executor, hostBuffer);
+    } else {
+      initiateResultsCopyToHost(executor, hostBuffer);
+    }
   };
+
   auto accumulate = [&](GpuExecutor& executor, const ThreadWorkerContext& ctx, const PinnedHostBuffer& hostBuffer) {
-    accumulateMiniBatchResults(executor, ctx, results, resultsMutex, hostBuffer, fallbackQueue);
+    if (boolResults) {
+      accumulateMiniBatchResultsBoolean(executor, ctx, *boolResults, resultsMutex, hostBuffer);
+    } else if (countResults) {
+      accumulateMiniBatchResultsCounts(executor, ctx, *countResults, resultsMutex, hostBuffer);
+    } else {
+      accumulateMiniBatchResults(executor, ctx, *results, resultsMutex, hostBuffer, fallbackQueue);
+    }
   };
+
   runnerWorkerPipeline(workerIdx,
                        queriesDevice,
                        recursivePreprocessor,
@@ -453,72 +463,6 @@ void runnerWorkerPipelineResults(int                                 workerIdx,
                        initiateCopy,
                        accumulate,
                        fallbackQueue,
-                       pipelineAbort,
-                       exceptionPtr);
-}
-
-void runnerWorkerPipelineBoolean(int                                 workerIdx,
-                                 const MoleculesDevice&              queriesDevice,
-                                 const RecursivePatternPreprocessor& recursivePreprocessor,
-                                 HasSubstructMatchResults&           results,
-                                 std::mutex&                         resultsMutex,
-                                 SubstructAlgorithm                  algorithm,
-                                 int                                 deviceId,
-                                 std::vector<GpuExecutor*>           executors,
-                                 PreparedBatchQueue&                 batchQueue,
-                                 PinnedHostBufferPool&               bufferPool,
-                                 std::atomic<bool>&                  pipelineAbort,
-                                 std::exception_ptr&                 exceptionPtr) {
-  auto initiateCopy = [&](GpuExecutor& executor, const PinnedHostBuffer& hostBuffer) {
-    initiateCountsOnlyCopyToHost(executor, hostBuffer);
-  };
-  auto accumulate = [&](GpuExecutor& executor, const ThreadWorkerContext& ctx, const PinnedHostBuffer& hostBuffer) {
-    accumulateMiniBatchResultsBoolean(executor, ctx, results, resultsMutex, hostBuffer);
-  };
-  runnerWorkerPipeline(workerIdx,
-                       queriesDevice,
-                       recursivePreprocessor,
-                       algorithm,
-                       deviceId,
-                       std::move(executors),
-                       batchQueue,
-                       bufferPool,
-                       initiateCopy,
-                       accumulate,
-                       nullptr,
-                       pipelineAbort,
-                       exceptionPtr);
-}
-
-void runnerWorkerPipelineCounts(int                                 workerIdx,
-                                const MoleculesDevice&              queriesDevice,
-                                const RecursivePatternPreprocessor& recursivePreprocessor,
-                                std::vector<int>&                   counts,
-                                std::mutex&                         resultsMutex,
-                                SubstructAlgorithm                  algorithm,
-                                int                                 deviceId,
-                                std::vector<GpuExecutor*>           executors,
-                                PreparedBatchQueue&                 batchQueue,
-                                PinnedHostBufferPool&               bufferPool,
-                                std::atomic<bool>&                  pipelineAbort,
-                                std::exception_ptr&                 exceptionPtr) {
-  auto initiateCopy = [&](GpuExecutor& executor, const PinnedHostBuffer& hostBuffer) {
-    initiateCountsOnlyCopyToHost(executor, hostBuffer);
-  };
-  auto accumulate = [&](GpuExecutor& executor, const ThreadWorkerContext& ctx, const PinnedHostBuffer& hostBuffer) {
-    accumulateMiniBatchResultsCounts(executor, ctx, counts, resultsMutex, hostBuffer);
-  };
-  runnerWorkerPipeline(workerIdx,
-                       queriesDevice,
-                       recursivePreprocessor,
-                       algorithm,
-                       deviceId,
-                       std::move(executors),
-                       batchQueue,
-                       bufferPool,
-                       initiateCopy,
-                       accumulate,
-                       nullptr,
                        pipelineAbort,
                        exceptionPtr);
 }
@@ -582,47 +526,21 @@ void runGpuCoordinator(int                                 deviceId,
       }
 
       auto workerLoop = [&, globalIdx, workerExecutors]() mutable {
-        if (boolResults) {
-          runnerWorkerPipelineBoolean(globalIdx,
-                                      std::cref(*queriesPtr),
-                                      std::cref(*preprocessorPtr),
-                                      std::ref(*boolResults),
-                                      std::ref(resultsMutex),
-                                      algorithm,
-                                      deviceId,
-                                      std::move(workerExecutors),
-                                      std::ref(batchQueue),
-                                      std::ref(bufferPool),
-                                      std::ref(pipelineAbort),
-                                      std::ref(exceptions[globalIdx]));
-        } else if (countResults) {
-          runnerWorkerPipelineCounts(globalIdx,
-                                     std::cref(*queriesPtr),
-                                     std::cref(*preprocessorPtr),
-                                     std::ref(*countResults),
-                                     std::ref(resultsMutex),
-                                     algorithm,
-                                     deviceId,
-                                     std::move(workerExecutors),
-                                     std::ref(batchQueue),
-                                     std::ref(bufferPool),
-                                     std::ref(pipelineAbort),
-                                     std::ref(exceptions[globalIdx]));
-        } else {
-          runnerWorkerPipelineResults(globalIdx,
-                                      std::cref(*queriesPtr),
-                                      std::cref(*preprocessorPtr),
-                                      std::ref(results),
-                                      std::ref(resultsMutex),
-                                      algorithm,
-                                      deviceId,
-                                      std::move(workerExecutors),
-                                      std::ref(batchQueue),
-                                      std::ref(bufferPool),
-                                      fallbackQueue,
-                                      std::ref(pipelineAbort),
-                                      std::ref(exceptions[globalIdx]));
-        }
+        runnerWorkerPipelineUnified(globalIdx,
+                                    std::cref(*queriesPtr),
+                                    std::cref(*preprocessorPtr),
+                                    boolResults ? nullptr : (countResults ? nullptr : &results),
+                                    boolResults,
+                                    countResults,
+                                    std::ref(resultsMutex),
+                                    algorithm,
+                                    deviceId,
+                                    std::move(workerExecutors),
+                                    std::ref(batchQueue),
+                                    std::ref(bufferPool),
+                                    fallbackQueue,
+                                    std::ref(pipelineAbort),
+                                    std::ref(exceptions[globalIdx]));
       };
 
       workers.emplace_back(workerLoop);
@@ -707,7 +625,7 @@ void runPipelinedSubstructSearch(const std::vector<const RDKit::ROMol*>& targets
 
   // Precompute max patterns per depth across all queries for pinned buffer sizing.
   int maxPatternsPerDepth = 256;
-  for (int d = 0; d <= kMaxRecursionDepth; ++d) {
+  for (int d = 0; d <= kMaxSmartsNestingDepth; ++d) {
     int patternsAtThisDepth = 0;
     for (size_t q = 0; q < leafSubpatterns.perQueryPatterns.size(); ++q) {
       patternsAtThisDepth += static_cast<int>(leafSubpatterns.perQueryPatterns[q][d].size());
@@ -1158,9 +1076,9 @@ void getSubstructMatchesImpl(const std::vector<const RDKit::ROMol*>& targets,
     }
   }
 
-  if (maxDepthSeen > kMaxRecursionDepth) {
+  if (maxDepthSeen > kMaxSmartsNestingDepth) {
     throw std::runtime_error("Recursive SMARTS depth " + std::to_string(maxDepthSeen) +
-                             " exceeds maximum supported depth of " + std::to_string(kMaxRecursionDepth));
+                             " exceeds maximum supported depth of " + std::to_string(kMaxSmartsNestingDepth));
   }
   queryContext.maxQueryAtoms = maxQueryAtoms;
 

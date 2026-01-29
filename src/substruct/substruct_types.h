@@ -138,7 +138,7 @@ struct HasSubstructMatchResults {
   void setMatch(int targetIdx, int queryIdx, bool value) { hasMatch[pairIndex(targetIdx, queryIdx)] = value ? 1 : 0; }
 };
 
-constexpr int kMaxRecursionDepth = 4;
+constexpr int kMaxSmartsNestingDepth = 4;
 
 /**
  * @brief Per-pattern metadata for batched recursive preprocessing kernel.

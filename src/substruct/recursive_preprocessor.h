@@ -75,7 +75,7 @@ struct LeafSubpatterns {
 
   /// Precomputed pattern entries per query, organized by depth.
   /// perQueryPatterns[queryIdx][depth] = vector of BatchedPatternEntry
-  std::vector<std::array<std::vector<BatchedPatternEntry>, kMaxRecursionDepth + 1>> perQueryPatterns;
+  std::vector<std::array<std::vector<BatchedPatternEntry>, kMaxSmartsNestingDepth + 1>> perQueryPatterns;
 
   /// Max recursion depth per query (0 if no recursive patterns)
   std::vector<int> perQueryMaxDepth;
@@ -252,21 +252,22 @@ class RecursivePatternPreprocessor {
 
   [[nodiscard]] const LeafSubpatterns& leafSubpatterns() const { return leafSubpatterns_; }
 
-  void preprocessMiniBatch(SubstructTemplateConfig  templateConfig,
-                           const MoleculesDevice&   targetsDevice,
-                           MiniBatchResultsDevice&  miniBatchResults,
-                           int                      numQueries,
-                           int                      miniBatchPairOffset,
-                           int                      miniBatchSize,
-                           SubstructAlgorithm       algorithm,
-                           cudaStream_t             stream,
-                           RecursiveScratchBuffers& scratch,
-                           const std::array<std::vector<BatchedPatternEntry>, kMaxRecursionDepth + 1>& patternsAtDepth,
-                           int                                                                         maxDepth,
-                           int          firstTargetInMiniBatch,
-                           int          numTargetsInMiniBatch,
-                           cudaEvent_t* depthEvents,
-                           int          numDepthEvents) const;
+  void preprocessMiniBatch(
+    SubstructTemplateConfig                                                         templateConfig,
+    const MoleculesDevice&                                                          targetsDevice,
+    MiniBatchResultsDevice&                                                         miniBatchResults,
+    int                                                                             numQueries,
+    int                                                                             miniBatchPairOffset,
+    int                                                                             miniBatchSize,
+    SubstructAlgorithm                                                              algorithm,
+    cudaStream_t                                                                    stream,
+    RecursiveScratchBuffers&                                                        scratch,
+    const std::array<std::vector<BatchedPatternEntry>, kMaxSmartsNestingDepth + 1>& patternsAtDepth,
+    int                                                                             maxDepth,
+    int                                                                             firstTargetInMiniBatch,
+    int                                                                             numTargetsInMiniBatch,
+    cudaEvent_t*                                                                    depthEvents,
+    int                                                                             numDepthEvents) const;
 
  private:
   LeafSubpatterns leafSubpatterns_;
@@ -291,7 +292,7 @@ class RecursivePatternPreprocessor {
  * @param scratch Reusable scratch buffers (avoids alloc/free between kernels)
  * @param scratchPatternEntries Vector to store pattern entries for the mini-batch
  * @param depthEvents Array of events to record after each depth level, or nullptr
- * @param numDepthEvents Number of events in the array (typically kMaxRecursionDepth)
+ * @param numDepthEvents Number of events in the array (typically kMaxSmartsNestingDepth)
  */
 void preprocessRecursiveSmarts(SubstructTemplateConfig           templateConfig,
                                const MoleculesDevice&            targetsDevice,

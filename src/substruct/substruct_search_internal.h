@@ -164,6 +164,25 @@ class MiniBatchResultsDevice {
 };
 
 // =============================================================================
+// Query Preprocessing Context
+// =============================================================================
+
+/**
+ * @brief Per-query preprocessing data used during batch search setup.
+ *
+ * Contains precomputed information about all queries in a batch, including
+ * atom counts and recursive pattern metadata for pipeline scheduling.
+ */
+struct QueryPreprocessContext {
+  PinnedHostVector<int> queryAtomCounts;
+  std::vector<int>      queryPipelineDepths;  ///< Pipeline stage depth (maxRecursiveDepth + 1, 0 if none)
+  std::vector<int>      queryMaxDepths;
+  std::vector<int8_t>   queryHasPatterns;
+  int                   numQueries    = 0;
+  int                   maxQueryAtoms = 0;
+};
+
+// =============================================================================
 // RDKit Fallback Processing
 // =============================================================================
 

@@ -286,6 +286,27 @@ void initiateCountsOnlyCopyToHost(GpuExecutor& executor, const PinnedHostBuffer&
 
 namespace {
 
+/**
+ * @brief Resolved pair indices from mini-batch to original indices.
+ */
+struct ResolvedPairIndices {
+  int originalTargetIdx;
+  int queryIdx;
+};
+
+/**
+ * @brief Resolve pair indices from mini-batch-local to original indices.
+ */
+inline ResolvedPairIndices resolvePairIndices(int                        miniBatchIdx,
+                                              const ThreadWorkerContext& ctx,
+                                              const PinnedHostBuffer&    hostBuffer) {
+  const int batchLocalPairIdx = hostBuffer.pairIndices[miniBatchIdx];
+  const int localTargetIdx    = batchLocalPairIdx / ctx.numQueries;
+  const int queryIdx          = batchLocalPairIdx % ctx.numQueries;
+  const int originalTargetIdx = (*ctx.targetOriginalIndices)[localTargetIdx];
+  return {originalTargetIdx, queryIdx};
+}
+
 struct PairUpdate {
   int targetIdx;
   int queryIdx;
@@ -308,11 +329,7 @@ void accumulateMiniBatchResults(GpuExecutor&               executor,
   updates.reserve(executor.plan.numPairsInMiniBatch);
 
   for (int i = 0; i < executor.plan.numPairsInMiniBatch; ++i) {
-    const int pairIdxInBatch = hostBuffer.pairIndices[i];
-    const int localTargetIdx = pairIdxInBatch / ctx.numQueries;
-    const int queryIdx       = pairIdxInBatch % ctx.numQueries;
-
-    const int targetIdx = (*ctx.targetOriginalIndices)[localTargetIdx];
+    const auto [targetIdx, queryIdx] = resolvePairIndices(i, ctx, hostBuffer);
 
     const int queryAtoms      = ctx.queryAtomCounts[queryIdx];
     const int actualMatches   = hostBuffer.matchCounts[i];
@@ -373,13 +390,7 @@ void accumulateMiniBatchResultsBoolean(GpuExecutor&               executor,
     if (hostBuffer.matchCounts[i] == 0) {
       continue;
     }
-
-    const int pairIdxInBatch = hostBuffer.pairIndices[i];
-    const int localTargetIdx = pairIdxInBatch / ctx.numQueries;
-    const int queryIdx       = pairIdxInBatch % ctx.numQueries;
-
-    const int targetIdx = (*ctx.targetOriginalIndices)[localTargetIdx];
-
+    const auto [targetIdx, queryIdx] = resolvePairIndices(i, ctx, hostBuffer);
     results.setMatch(targetIdx, queryIdx, true);
   }
 }
@@ -394,14 +405,9 @@ void accumulateMiniBatchResultsCounts(GpuExecutor&               executor,
   std::lock_guard<std::mutex> lock(resultsMutex);
 
   for (int i = 0; i < executor.plan.numPairsInMiniBatch; ++i) {
-    const int pairIdxInBatch = hostBuffer.pairIndices[i];
-    const int localTargetIdx = pairIdxInBatch / ctx.numQueries;
-    const int queryIdx       = pairIdxInBatch % ctx.numQueries;
-
-    const int targetIdx = (*ctx.targetOriginalIndices)[localTargetIdx];
-
-    const int pairIdx = targetIdx * ctx.numQueries + queryIdx;
-    counts[pairIdx]   = hostBuffer.matchCounts[i];
+    const auto [targetIdx, queryIdx] = resolvePairIndices(i, ctx, hostBuffer);
+    const int globalPairIdx          = targetIdx * ctx.numQueries + queryIdx;
+    counts[globalPairIdx]            = hostBuffer.matchCounts[i];
   }
 }
 

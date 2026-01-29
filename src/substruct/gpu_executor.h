@@ -43,17 +43,17 @@ struct GpuExecutor {
   ScopedCudaEvent targetsReadyEvent;
 
   // Recursive pipeline
-  ScopedStreamWithPriority                                   recursiveStream;
-  ScopedStreamWithPriority                                   postRecursionStream;
-  std::array<ScopedCudaEvent, kMaxRecursionDepth>            depthEvents;
-  ScopedCudaEvent                                            recursiveDoneEvent;
-  ScopedCudaEvent                                            postRecursionDoneEvent;
-  std::array<AsyncDeviceVector<int>, kMaxRecursionDepth + 1> matchGlobalPairIndices;
-  std::array<AsyncDeviceVector<int>, kMaxRecursionDepth + 1> matchMiniBatchLocalIndices;
-  RecursiveScratchBuffers                                    recursiveScratch;
-  MiniBatchResultsDevice                                     deviceResults;
-  AsyncDeviceVector<int>                                     pairIndicesDev;
-  MoleculesDevice                                            targetsDevice;
+  ScopedStreamWithPriority                                       recursiveStream;
+  ScopedStreamWithPriority                                       postRecursionStream;
+  std::array<ScopedCudaEvent, kMaxSmartsNestingDepth>            depthEvents;
+  ScopedCudaEvent                                                recursiveDoneEvent;
+  ScopedCudaEvent                                                postRecursionDoneEvent;
+  std::array<AsyncDeviceVector<int>, kMaxSmartsNestingDepth + 1> matchGlobalPairIndices;
+  std::array<AsyncDeviceVector<int>, kMaxSmartsNestingDepth + 1> matchMiniBatchLocalIndices;
+  RecursiveScratchBuffers                                        recursiveScratch;
+  MiniBatchResultsDevice                                         deviceResults;
+  AsyncDeviceVector<int>                                         pairIndicesDev;
+  MoleculesDevice                                                targetsDevice;
 
   int deviceId = 0;  ///< GPU device ID this executor is assigned to
 

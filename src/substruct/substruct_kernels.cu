@@ -48,8 +48,8 @@ template <std::size_t MaxQueryAtoms = kMaxQueryAtoms> struct SubstructMatchResul
   bool                          countOnly;
   uint8_t*                      overflowFlags;  ///< Per-pair overflow detection (set if buffers exhausted)
 
-  __device__ __forceinline__ uint32_t* getLabelMatrixPtr(int batchLocalIdx) const {
-    return labelMatrixBuffer + batchLocalIdx * labelMatrixWords;
+  __device__ __forceinline__ uint32_t* getLabelMatrixPtr(int miniBatchIdx) const {
+    return labelMatrixBuffer + miniBatchIdx * labelMatrixWords;
   }
 
   __device__ __forceinline__ PartialMatchT<MaxQueryAtoms>* getOverflowBuffer(int bufferIdx = 0) const {
@@ -58,13 +58,13 @@ template <std::size_t MaxQueryAtoms = kMaxQueryAtoms> struct SubstructMatchResul
 
   __device__ __forceinline__ int getOverflowCapacity() const { return overflowEntriesPerBuffer; }
 
-  __device__ __forceinline__ uint32_t getRecursiveMatchBits(int batchLocalIdx, int atomIdx) const {
-    return recursiveMatchBits[batchLocalIdx * maxTargetAtoms + atomIdx];
+  __device__ __forceinline__ uint32_t getRecursiveMatchBits(int miniBatchIdx, int atomIdx) const {
+    return recursiveMatchBits[miniBatchIdx * maxTargetAtoms + atomIdx];
   }
 
-  __device__ __forceinline__ void setRecursiveMatchBit(int batchLocalIdx, int atomIdx, int patternId) const {
+  __device__ __forceinline__ void setRecursiveMatchBit(int miniBatchIdx, int atomIdx, int patternId) const {
     if (patternId < 32) {
-      atomicOr(&recursiveMatchBits[batchLocalIdx * maxTargetAtoms + atomIdx], 1u << patternId);
+      atomicOr(&recursiveMatchBits[miniBatchIdx * maxTargetAtoms + atomIdx], 1u << patternId);
     }
   }
 };
@@ -209,10 +209,10 @@ __global__ void labelMatrixKernelT(TargetMoleculesDeviceView targets,
   using LabelMatrixStorageT               = FlatBitVect<kLabelMatrixBitsT>;
 
   const int launchIdx     = blockIdx.x;
-  const int batchLocalIdx = batchLocalIndices ? batchLocalIndices[launchIdx] : launchIdx;
-  const int pairIdx       = pairIndices[launchIdx];
-  const int targetIdx     = pairIdx / numQueries;
-  const int queryIdx      = pairIdx % numQueries;
+  const int miniBatchIdx  = batchLocalIndices ? batchLocalIndices[launchIdx] : launchIdx;
+  const int globalPairIdx = pairIndices[launchIdx];
+  const int targetIdx     = globalPairIdx / numQueries;
+  const int queryIdx      = globalPairIdx % numQueries;
 
   if (targetIdx >= targets.numMolecules || queryIdx >= queries.numMolecules) {
     return;
@@ -221,11 +221,10 @@ __global__ void labelMatrixKernelT(TargetMoleculesDeviceView targets,
   const TargetMoleculeView target = getMolecule(targets, targetIdx);
   const QueryMoleculeView  query  = getMolecule(queries, queryIdx);
 
-  const uint32_t* pairRecursiveBits =
-    recursiveMatchBits ? &recursiveMatchBits[batchLocalIdx * maxTargetAtoms] : nullptr;
+  const uint32_t* pairRecursiveBits = recursiveMatchBits ? &recursiveMatchBits[miniBatchIdx * maxTargetAtoms] : nullptr;
 
   __shared__ LabelMatrixStorageT sharedLabelMatrix;
-  uint32_t*                      globalOut = labelMatrixBuffer + batchLocalIdx * (kLabelMatrixBitsT / 32);
+  uint32_t*                      globalOut = labelMatrixBuffer + miniBatchIdx * (kLabelMatrixBitsT / 32);
   writeLabelMatrixToGlobal<MaxTargetAtoms, MaxQueryAtoms>(target,
                                                           query,
                                                           sharedLabelMatrix,
@@ -306,10 +305,10 @@ __global__ void substructMatchKernelT(TargetMoleculesDeviceView                 
                                       const int*                                      batchLocalIndices,
                                       DeviceTimingsData*                              timings) {
   const int launchIdx     = blockIdx.x;
-  const int batchLocalIdx = batchLocalIndices ? batchLocalIndices[launchIdx] : launchIdx;
-  const int pairIdx       = pairIndices[launchIdx];
-  const int targetIdx     = pairIdx / numQueries;
-  const int queryIdx      = pairIdx % numQueries;
+  const int miniBatchIdx  = batchLocalIndices ? batchLocalIndices[launchIdx] : launchIdx;
+  const int globalPairIdx = pairIndices[launchIdx];
+  const int targetIdx     = globalPairIdx / numQueries;
+  const int queryIdx      = globalPairIdx % numQueries;
 
   if (targetIdx >= targets.numMolecules || queryIdx >= queries.numMolecules) {
     return;
@@ -328,7 +327,7 @@ __global__ void substructMatchKernelT(TargetMoleculesDeviceView                 
   __shared__ TargetAtomBonds sharedTargetBonds[MaxTargetAtoms];
   __shared__ QueryAtomBonds  sharedQueryBonds[MaxQueryAtoms];
 
-  const uint32_t* globalIn   = results.getLabelMatrixPtr(batchLocalIdx);
+  const uint32_t* globalIn   = results.getLabelMatrixPtr(miniBatchIdx);
   const int       tid        = threadIdx.x;
   const int       numThreads = blockDim.x;
 
@@ -361,7 +360,7 @@ __global__ void substructMatchKernelT(TargetMoleculesDeviceView                 
   if constexpr (kDebugDumpLabelMatrix) {
     if (threadIdx.x == 0) {
       printf("[LabelDump] pair=%d (target=%d, query=%d): targetAtoms=%d, queryAtoms=%d\n",
-             pairIdx,
+             globalPairIdx,
              targetIdx,
              queryIdx,
              target.numAtoms,
@@ -386,8 +385,8 @@ __global__ void substructMatchKernelT(TargetMoleculesDeviceView                 
   const int  maxMatchesToFind = results.maxMatchesToFind;
   const bool countOnly        = results.countOnly;
 
-  const int matchOffset = countOnly ? 0 : results.pairMatchStarts[batchLocalIdx];
-  const int maxMatches  = countOnly ? 0 : (results.pairMatchStarts[batchLocalIdx + 1] - matchOffset) / query.numAtoms;
+  const int matchOffset = countOnly ? 0 : results.pairMatchStarts[miniBatchIdx];
+  const int maxMatches  = countOnly ? 0 : (results.pairMatchStarts[miniBatchIdx + 1] - matchOffset) / query.numAtoms;
 
   __shared__ int sharedMatchCount;
   __shared__ int sharedReportedCount;
@@ -433,7 +432,7 @@ __global__ void substructMatchKernelT(TargetMoleculesDeviceView                 
                   "Insufficient shared memory for GSI partials - check block size for MaxTargetAtoms/MaxQueryAtoms");
     __shared__ PartialMatchT<MaxQueryAtoms> gsiPartials[kMaxPartialsT * 2];
 
-    uint8_t* pairOverflowFlag = results.overflowFlags ? &results.overflowFlags[batchLocalIdx] : nullptr;
+    uint8_t* pairOverflowFlag = results.overflowFlags ? &results.overflowFlags[miniBatchIdx] : nullptr;
     gsiBFSSearchGPU<MaxTargetAtoms, MaxQueryAtoms, MaxBondsPerAtom>(target,
                                                                     query,
                                                                     labelMatrix,
@@ -457,9 +456,9 @@ __global__ void substructMatchKernelT(TargetMoleculesDeviceView                 
   __syncthreads();
 
   if (threadIdx.x == 0) {
-    results.matchCounts[batchLocalIdx] = sharedMatchCount;
+    results.matchCounts[miniBatchIdx] = sharedMatchCount;
     if (!countOnly) {
-      results.reportedCounts[batchLocalIdx] = sharedReportedCount;
+      results.reportedCounts[miniBatchIdx] = sharedReportedCount;
     }
   }
 }
@@ -719,6 +718,87 @@ INSTANTIATE_LABEL_MATRIX_KERNEL(128, 64)
 }  // anonymous namespace
 
 // =============================================================================
+// Template Config Dispatch Macros
+// =============================================================================
+
+// clang-format off
+
+/**
+ * @brief Dispatch macro for kernels that only need (MaxTargetAtoms, MaxQueryAtoms).
+ *
+ * Used by label matrix kernels where MaxBondsPerAtom doesn't affect the kernel.
+ * Groups B4/B6/B8 variants together with case fallthrough.
+ */
+#define DISPATCH_BY_TQ_CONFIG(config, func, ...)                                                          \
+  do {                                                                                                    \
+    switch (config) {                                                                                     \
+      case SubstructTemplateConfig::Config_T32_Q16_B4:                                                    \
+      case SubstructTemplateConfig::Config_T32_Q16_B6:                                                    \
+      case SubstructTemplateConfig::Config_T32_Q16_B8:   func<32, 16>(__VA_ARGS__);   break;              \
+      case SubstructTemplateConfig::Config_T32_Q32_B4:                                                    \
+      case SubstructTemplateConfig::Config_T32_Q32_B6:                                                    \
+      case SubstructTemplateConfig::Config_T32_Q32_B8:   func<32, 32>(__VA_ARGS__);   break;              \
+      case SubstructTemplateConfig::Config_T64_Q16_B4:                                                    \
+      case SubstructTemplateConfig::Config_T64_Q16_B6:                                                    \
+      case SubstructTemplateConfig::Config_T64_Q16_B8:   func<64, 16>(__VA_ARGS__);   break;              \
+      case SubstructTemplateConfig::Config_T64_Q32_B4:                                                    \
+      case SubstructTemplateConfig::Config_T64_Q32_B6:                                                    \
+      case SubstructTemplateConfig::Config_T64_Q32_B8:   func<64, 32>(__VA_ARGS__);   break;              \
+      case SubstructTemplateConfig::Config_T64_Q64_B4:                                                    \
+      case SubstructTemplateConfig::Config_T64_Q64_B6:                                                    \
+      case SubstructTemplateConfig::Config_T64_Q64_B8:   func<64, 64>(__VA_ARGS__);   break;              \
+      case SubstructTemplateConfig::Config_T128_Q16_B4:                                                   \
+      case SubstructTemplateConfig::Config_T128_Q16_B6:                                                   \
+      case SubstructTemplateConfig::Config_T128_Q16_B8:  func<128, 16>(__VA_ARGS__);  break;              \
+      case SubstructTemplateConfig::Config_T128_Q32_B4:                                                   \
+      case SubstructTemplateConfig::Config_T128_Q32_B6:                                                   \
+      case SubstructTemplateConfig::Config_T128_Q32_B8:  func<128, 32>(__VA_ARGS__);  break;              \
+      case SubstructTemplateConfig::Config_T128_Q64_B4:                                                   \
+      case SubstructTemplateConfig::Config_T128_Q64_B6:                                                   \
+      case SubstructTemplateConfig::Config_T128_Q64_B8:                                                   \
+      default:                                           func<128, 64>(__VA_ARGS__);  break;              \
+    }                                                                                                     \
+  } while (0)
+
+/**
+ * @brief Dispatch macro for kernels that need (MaxTargetAtoms, MaxQueryAtoms, MaxBondsPerAtom).
+ *
+ * Used by match and paint kernels where all three template parameters affect behavior.
+ */
+#define DISPATCH_BY_TQB_CONFIG(config, func, ...)                                                         \
+  do {                                                                                                    \
+    switch (config) {                                                                                     \
+      case SubstructTemplateConfig::Config_T32_Q16_B4:   func<32, 16, 4>(__VA_ARGS__);   break;           \
+      case SubstructTemplateConfig::Config_T32_Q16_B6:   func<32, 16, 6>(__VA_ARGS__);   break;           \
+      case SubstructTemplateConfig::Config_T32_Q16_B8:   func<32, 16, 8>(__VA_ARGS__);   break;           \
+      case SubstructTemplateConfig::Config_T32_Q32_B4:   func<32, 32, 4>(__VA_ARGS__);   break;           \
+      case SubstructTemplateConfig::Config_T32_Q32_B6:   func<32, 32, 6>(__VA_ARGS__);   break;           \
+      case SubstructTemplateConfig::Config_T32_Q32_B8:   func<32, 32, 8>(__VA_ARGS__);   break;           \
+      case SubstructTemplateConfig::Config_T64_Q16_B4:   func<64, 16, 4>(__VA_ARGS__);   break;           \
+      case SubstructTemplateConfig::Config_T64_Q16_B6:   func<64, 16, 6>(__VA_ARGS__);   break;           \
+      case SubstructTemplateConfig::Config_T64_Q16_B8:   func<64, 16, 8>(__VA_ARGS__);   break;           \
+      case SubstructTemplateConfig::Config_T64_Q32_B4:   func<64, 32, 4>(__VA_ARGS__);   break;           \
+      case SubstructTemplateConfig::Config_T64_Q32_B6:   func<64, 32, 6>(__VA_ARGS__);   break;           \
+      case SubstructTemplateConfig::Config_T64_Q32_B8:   func<64, 32, 8>(__VA_ARGS__);   break;           \
+      case SubstructTemplateConfig::Config_T64_Q64_B4:   func<64, 64, 4>(__VA_ARGS__);   break;           \
+      case SubstructTemplateConfig::Config_T64_Q64_B6:   func<64, 64, 6>(__VA_ARGS__);   break;           \
+      case SubstructTemplateConfig::Config_T64_Q64_B8:   func<64, 64, 8>(__VA_ARGS__);   break;           \
+      case SubstructTemplateConfig::Config_T128_Q16_B4:  func<128, 16, 4>(__VA_ARGS__);  break;           \
+      case SubstructTemplateConfig::Config_T128_Q16_B6:  func<128, 16, 6>(__VA_ARGS__);  break;           \
+      case SubstructTemplateConfig::Config_T128_Q16_B8:  func<128, 16, 8>(__VA_ARGS__);  break;           \
+      case SubstructTemplateConfig::Config_T128_Q32_B4:  func<128, 32, 4>(__VA_ARGS__);  break;           \
+      case SubstructTemplateConfig::Config_T128_Q32_B6:  func<128, 32, 6>(__VA_ARGS__);  break;           \
+      case SubstructTemplateConfig::Config_T128_Q32_B8:  func<128, 32, 8>(__VA_ARGS__);  break;           \
+      case SubstructTemplateConfig::Config_T128_Q64_B4:  func<128, 64, 4>(__VA_ARGS__);  break;           \
+      case SubstructTemplateConfig::Config_T128_Q64_B6:  func<128, 64, 6>(__VA_ARGS__);  break;           \
+      case SubstructTemplateConfig::Config_T128_Q64_B8:                                                   \
+      default:                                           func<128, 64, 8>(__VA_ARGS__);  break;           \
+    }                                                                                                     \
+  } while (0)
+
+// clang-format on
+
+// =============================================================================
 // Public Launch Wrapper Implementations
 // =============================================================================
 
@@ -759,121 +839,18 @@ void launchLabelMatrixKernel(SubstructTemplateConfig   config,
                              int                       maxTargetAtoms,
                              const int*                batchLocalIndices,
                              cudaStream_t              stream) {
-  switch (config) {
-    case SubstructTemplateConfig::Config_T32_Q16_B4:
-    case SubstructTemplateConfig::Config_T32_Q16_B6:
-    case SubstructTemplateConfig::Config_T32_Q16_B8:
-      launchLabelMatrixKernelForConfig<32, 16>(targets,
-                                               queries,
-                                               pairIndices,
-                                               numPairs,
-                                               numQueries,
-                                               labelMatrixBuffer,
-                                               recursiveMatchBits,
-                                               maxTargetAtoms,
-                                               batchLocalIndices,
-                                               stream);
-      break;
-    case SubstructTemplateConfig::Config_T32_Q32_B4:
-    case SubstructTemplateConfig::Config_T32_Q32_B6:
-    case SubstructTemplateConfig::Config_T32_Q32_B8:
-      launchLabelMatrixKernelForConfig<32, 32>(targets,
-                                               queries,
-                                               pairIndices,
-                                               numPairs,
-                                               numQueries,
-                                               labelMatrixBuffer,
-                                               recursiveMatchBits,
-                                               maxTargetAtoms,
-                                               batchLocalIndices,
-                                               stream);
-      break;
-    case SubstructTemplateConfig::Config_T64_Q16_B4:
-    case SubstructTemplateConfig::Config_T64_Q16_B6:
-    case SubstructTemplateConfig::Config_T64_Q16_B8:
-      launchLabelMatrixKernelForConfig<64, 16>(targets,
-                                               queries,
-                                               pairIndices,
-                                               numPairs,
-                                               numQueries,
-                                               labelMatrixBuffer,
-                                               recursiveMatchBits,
-                                               maxTargetAtoms,
-                                               batchLocalIndices,
-                                               stream);
-      break;
-    case SubstructTemplateConfig::Config_T64_Q32_B4:
-    case SubstructTemplateConfig::Config_T64_Q32_B6:
-    case SubstructTemplateConfig::Config_T64_Q32_B8:
-      launchLabelMatrixKernelForConfig<64, 32>(targets,
-                                               queries,
-                                               pairIndices,
-                                               numPairs,
-                                               numQueries,
-                                               labelMatrixBuffer,
-                                               recursiveMatchBits,
-                                               maxTargetAtoms,
-                                               batchLocalIndices,
-                                               stream);
-      break;
-    case SubstructTemplateConfig::Config_T64_Q64_B4:
-    case SubstructTemplateConfig::Config_T64_Q64_B6:
-    case SubstructTemplateConfig::Config_T64_Q64_B8:
-      launchLabelMatrixKernelForConfig<64, 64>(targets,
-                                               queries,
-                                               pairIndices,
-                                               numPairs,
-                                               numQueries,
-                                               labelMatrixBuffer,
-                                               recursiveMatchBits,
-                                               maxTargetAtoms,
-                                               batchLocalIndices,
-                                               stream);
-      break;
-    case SubstructTemplateConfig::Config_T128_Q16_B4:
-    case SubstructTemplateConfig::Config_T128_Q16_B6:
-    case SubstructTemplateConfig::Config_T128_Q16_B8:
-      launchLabelMatrixKernelForConfig<128, 16>(targets,
-                                                queries,
-                                                pairIndices,
-                                                numPairs,
-                                                numQueries,
-                                                labelMatrixBuffer,
-                                                recursiveMatchBits,
-                                                maxTargetAtoms,
-                                                batchLocalIndices,
-                                                stream);
-      break;
-    case SubstructTemplateConfig::Config_T128_Q32_B4:
-    case SubstructTemplateConfig::Config_T128_Q32_B6:
-    case SubstructTemplateConfig::Config_T128_Q32_B8:
-      launchLabelMatrixKernelForConfig<128, 32>(targets,
-                                                queries,
-                                                pairIndices,
-                                                numPairs,
-                                                numQueries,
-                                                labelMatrixBuffer,
-                                                recursiveMatchBits,
-                                                maxTargetAtoms,
-                                                batchLocalIndices,
-                                                stream);
-      break;
-    case SubstructTemplateConfig::Config_T128_Q64_B4:
-    case SubstructTemplateConfig::Config_T128_Q64_B6:
-    case SubstructTemplateConfig::Config_T128_Q64_B8:
-    default:
-      launchLabelMatrixKernelForConfig<128, 64>(targets,
-                                                queries,
-                                                pairIndices,
-                                                numPairs,
-                                                numQueries,
-                                                labelMatrixBuffer,
-                                                recursiveMatchBits,
-                                                maxTargetAtoms,
-                                                batchLocalIndices,
-                                                stream);
-      break;
-  }
+  DISPATCH_BY_TQ_CONFIG(config,
+                        launchLabelMatrixKernelForConfig,
+                        targets,
+                        queries,
+                        pairIndices,
+                        numPairs,
+                        numQueries,
+                        labelMatrixBuffer,
+                        recursiveMatchBits,
+                        maxTargetAtoms,
+                        batchLocalIndices,
+                        stream);
 }
 
 namespace {
@@ -922,145 +899,21 @@ void launchLabelMatrixPaintKernel(SubstructTemplateConfig    config,
                                   const uint32_t*            recursiveMatchBits,
                                   int                        maxTargetAtoms,
                                   cudaStream_t               stream) {
-  switch (config) {
-    case SubstructTemplateConfig::Config_T32_Q16_B4:
-    case SubstructTemplateConfig::Config_T32_Q16_B6:
-    case SubstructTemplateConfig::Config_T32_Q16_B8:
-      launchLabelMatrixPaintKernelForConfig<32, 16>(targets,
-                                                    patterns,
-                                                    patternEntries,
-                                                    numPatterns,
-                                                    numBlocks,
-                                                    numQueries,
-                                                    miniBatchPairOffset,
-                                                    miniBatchSize,
-                                                    labelMatrixBuffer,
-                                                    firstTargetIdx,
-                                                    recursiveMatchBits,
-                                                    maxTargetAtoms,
-                                                    stream);
-      break;
-    case SubstructTemplateConfig::Config_T32_Q32_B4:
-    case SubstructTemplateConfig::Config_T32_Q32_B6:
-    case SubstructTemplateConfig::Config_T32_Q32_B8:
-      launchLabelMatrixPaintKernelForConfig<32, 32>(targets,
-                                                    patterns,
-                                                    patternEntries,
-                                                    numPatterns,
-                                                    numBlocks,
-                                                    numQueries,
-                                                    miniBatchPairOffset,
-                                                    miniBatchSize,
-                                                    labelMatrixBuffer,
-                                                    firstTargetIdx,
-                                                    recursiveMatchBits,
-                                                    maxTargetAtoms,
-                                                    stream);
-      break;
-    case SubstructTemplateConfig::Config_T64_Q16_B4:
-    case SubstructTemplateConfig::Config_T64_Q16_B6:
-    case SubstructTemplateConfig::Config_T64_Q16_B8:
-      launchLabelMatrixPaintKernelForConfig<64, 16>(targets,
-                                                    patterns,
-                                                    patternEntries,
-                                                    numPatterns,
-                                                    numBlocks,
-                                                    numQueries,
-                                                    miniBatchPairOffset,
-                                                    miniBatchSize,
-                                                    labelMatrixBuffer,
-                                                    firstTargetIdx,
-                                                    recursiveMatchBits,
-                                                    maxTargetAtoms,
-                                                    stream);
-      break;
-    case SubstructTemplateConfig::Config_T64_Q32_B4:
-    case SubstructTemplateConfig::Config_T64_Q32_B6:
-    case SubstructTemplateConfig::Config_T64_Q32_B8:
-      launchLabelMatrixPaintKernelForConfig<64, 32>(targets,
-                                                    patterns,
-                                                    patternEntries,
-                                                    numPatterns,
-                                                    numBlocks,
-                                                    numQueries,
-                                                    miniBatchPairOffset,
-                                                    miniBatchSize,
-                                                    labelMatrixBuffer,
-                                                    firstTargetIdx,
-                                                    recursiveMatchBits,
-                                                    maxTargetAtoms,
-                                                    stream);
-      break;
-    case SubstructTemplateConfig::Config_T64_Q64_B4:
-    case SubstructTemplateConfig::Config_T64_Q64_B6:
-    case SubstructTemplateConfig::Config_T64_Q64_B8:
-      launchLabelMatrixPaintKernelForConfig<64, 64>(targets,
-                                                    patterns,
-                                                    patternEntries,
-                                                    numPatterns,
-                                                    numBlocks,
-                                                    numQueries,
-                                                    miniBatchPairOffset,
-                                                    miniBatchSize,
-                                                    labelMatrixBuffer,
-                                                    firstTargetIdx,
-                                                    recursiveMatchBits,
-                                                    maxTargetAtoms,
-                                                    stream);
-      break;
-    case SubstructTemplateConfig::Config_T128_Q16_B4:
-    case SubstructTemplateConfig::Config_T128_Q16_B6:
-    case SubstructTemplateConfig::Config_T128_Q16_B8:
-      launchLabelMatrixPaintKernelForConfig<128, 16>(targets,
-                                                     patterns,
-                                                     patternEntries,
-                                                     numPatterns,
-                                                     numBlocks,
-                                                     numQueries,
-                                                     miniBatchPairOffset,
-                                                     miniBatchSize,
-                                                     labelMatrixBuffer,
-                                                     firstTargetIdx,
-                                                     recursiveMatchBits,
-                                                     maxTargetAtoms,
-                                                     stream);
-      break;
-    case SubstructTemplateConfig::Config_T128_Q32_B4:
-    case SubstructTemplateConfig::Config_T128_Q32_B6:
-    case SubstructTemplateConfig::Config_T128_Q32_B8:
-      launchLabelMatrixPaintKernelForConfig<128, 32>(targets,
-                                                     patterns,
-                                                     patternEntries,
-                                                     numPatterns,
-                                                     numBlocks,
-                                                     numQueries,
-                                                     miniBatchPairOffset,
-                                                     miniBatchSize,
-                                                     labelMatrixBuffer,
-                                                     firstTargetIdx,
-                                                     recursiveMatchBits,
-                                                     maxTargetAtoms,
-                                                     stream);
-      break;
-    case SubstructTemplateConfig::Config_T128_Q64_B4:
-    case SubstructTemplateConfig::Config_T128_Q64_B6:
-    case SubstructTemplateConfig::Config_T128_Q64_B8:
-    default:
-      launchLabelMatrixPaintKernelForConfig<128, 64>(targets,
-                                                     patterns,
-                                                     patternEntries,
-                                                     numPatterns,
-                                                     numBlocks,
-                                                     numQueries,
-                                                     miniBatchPairOffset,
-                                                     miniBatchSize,
-                                                     labelMatrixBuffer,
-                                                     firstTargetIdx,
-                                                     recursiveMatchBits,
-                                                     maxTargetAtoms,
-                                                     stream);
-      break;
-  }
+  DISPATCH_BY_TQ_CONFIG(config,
+                        launchLabelMatrixPaintKernelForConfig,
+                        targets,
+                        patterns,
+                        patternEntries,
+                        numPatterns,
+                        numBlocks,
+                        numQueries,
+                        miniBatchPairOffset,
+                        miniBatchSize,
+                        labelMatrixBuffer,
+                        firstTargetIdx,
+                        recursiveMatchBits,
+                        maxTargetAtoms,
+                        stream);
 }
 
 namespace {
@@ -1133,103 +986,27 @@ void launchSubstructPaintKernel(SubstructTemplateConfig    config,
                                 const uint32_t*            labelMatrixBuffer,
                                 int                        firstTargetIdx,
                                 cudaStream_t               stream) {
-#define LAUNCH_PAINT(MaxT, MaxQ, MaxB)                                       \
-  launchSubstructPaintKernelForConfig<MaxT, MaxQ, MaxB>(algorithm,           \
-                                                        targets,             \
-                                                        patterns,            \
-                                                        patternEntries,      \
-                                                        numPatterns,         \
-                                                        numBlocks,           \
-                                                        outputRecursiveBits, \
-                                                        maxTargetAtoms,      \
-                                                        outputNumQueries,    \
-                                                        defaultPatternId,    \
-                                                        defaultMainQueryIdx, \
-                                                        miniBatchPairOffset, \
-                                                        miniBatchSize,       \
-                                                        overflowA,           \
-                                                        overflowB,           \
-                                                        overflowCapacity,    \
-                                                        labelMatrixBuffer,   \
-                                                        firstTargetIdx,      \
-                                                        stream)
-
-  switch (config) {
-    case SubstructTemplateConfig::Config_T32_Q16_B4:
-      LAUNCH_PAINT(32, 16, 4);
-      break;
-    case SubstructTemplateConfig::Config_T32_Q16_B6:
-      LAUNCH_PAINT(32, 16, 6);
-      break;
-    case SubstructTemplateConfig::Config_T32_Q16_B8:
-      LAUNCH_PAINT(32, 16, 8);
-      break;
-    case SubstructTemplateConfig::Config_T32_Q32_B4:
-      LAUNCH_PAINT(32, 32, 4);
-      break;
-    case SubstructTemplateConfig::Config_T32_Q32_B6:
-      LAUNCH_PAINT(32, 32, 6);
-      break;
-    case SubstructTemplateConfig::Config_T32_Q32_B8:
-      LAUNCH_PAINT(32, 32, 8);
-      break;
-    case SubstructTemplateConfig::Config_T64_Q16_B4:
-      LAUNCH_PAINT(64, 16, 4);
-      break;
-    case SubstructTemplateConfig::Config_T64_Q16_B6:
-      LAUNCH_PAINT(64, 16, 6);
-      break;
-    case SubstructTemplateConfig::Config_T64_Q16_B8:
-      LAUNCH_PAINT(64, 16, 8);
-      break;
-    case SubstructTemplateConfig::Config_T64_Q32_B4:
-      LAUNCH_PAINT(64, 32, 4);
-      break;
-    case SubstructTemplateConfig::Config_T64_Q32_B6:
-      LAUNCH_PAINT(64, 32, 6);
-      break;
-    case SubstructTemplateConfig::Config_T64_Q32_B8:
-      LAUNCH_PAINT(64, 32, 8);
-      break;
-    case SubstructTemplateConfig::Config_T64_Q64_B4:
-      LAUNCH_PAINT(64, 64, 4);
-      break;
-    case SubstructTemplateConfig::Config_T64_Q64_B6:
-      LAUNCH_PAINT(64, 64, 6);
-      break;
-    case SubstructTemplateConfig::Config_T64_Q64_B8:
-      LAUNCH_PAINT(64, 64, 8);
-      break;
-    case SubstructTemplateConfig::Config_T128_Q16_B4:
-      LAUNCH_PAINT(128, 16, 4);
-      break;
-    case SubstructTemplateConfig::Config_T128_Q16_B6:
-      LAUNCH_PAINT(128, 16, 6);
-      break;
-    case SubstructTemplateConfig::Config_T128_Q16_B8:
-      LAUNCH_PAINT(128, 16, 8);
-      break;
-    case SubstructTemplateConfig::Config_T128_Q32_B4:
-      LAUNCH_PAINT(128, 32, 4);
-      break;
-    case SubstructTemplateConfig::Config_T128_Q32_B6:
-      LAUNCH_PAINT(128, 32, 6);
-      break;
-    case SubstructTemplateConfig::Config_T128_Q32_B8:
-      LAUNCH_PAINT(128, 32, 8);
-      break;
-    case SubstructTemplateConfig::Config_T128_Q64_B4:
-      LAUNCH_PAINT(128, 64, 4);
-      break;
-    case SubstructTemplateConfig::Config_T128_Q64_B6:
-      LAUNCH_PAINT(128, 64, 6);
-      break;
-    case SubstructTemplateConfig::Config_T128_Q64_B8:
-    default:
-      LAUNCH_PAINT(128, 64, 8);
-      break;
-  }
-#undef LAUNCH_PAINT
+  DISPATCH_BY_TQB_CONFIG(config,
+                         launchSubstructPaintKernelForConfig,
+                         algorithm,
+                         targets,
+                         patterns,
+                         patternEntries,
+                         numPatterns,
+                         numBlocks,
+                         outputRecursiveBits,
+                         maxTargetAtoms,
+                         outputNumQueries,
+                         defaultPatternId,
+                         defaultMainQueryIdx,
+                         miniBatchPairOffset,
+                         miniBatchSize,
+                         overflowA,
+                         overflowB,
+                         overflowCapacity,
+                         labelMatrixBuffer,
+                         firstTargetIdx,
+                         stream);
 }
 
 void configureSubstructKernelsSharedMem() {
@@ -1315,297 +1092,18 @@ void launchSubstructMatchKernel(SubstructTemplateConfig       config,
                                 const int*                    batchLocalIndices,
                                 DeviceTimingsData*            timings,
                                 cudaStream_t                  stream) {
-  switch (config) {
-    case SubstructTemplateConfig::Config_T32_Q16_B4:
-      launchMatchKernelForConfig<32, 16, 4>(algorithm,
-                                            targets,
-                                            queries,
-                                            miniBatchResults,
-                                            pairIndices,
-                                            numPairs,
-                                            numQueries,
-                                            batchLocalIndices,
-                                            timings,
-                                            stream);
-      break;
-    case SubstructTemplateConfig::Config_T32_Q16_B6:
-      launchMatchKernelForConfig<32, 16, 6>(algorithm,
-                                            targets,
-                                            queries,
-                                            miniBatchResults,
-                                            pairIndices,
-                                            numPairs,
-                                            numQueries,
-                                            batchLocalIndices,
-                                            timings,
-                                            stream);
-      break;
-    case SubstructTemplateConfig::Config_T32_Q16_B8:
-      launchMatchKernelForConfig<32, 16, 8>(algorithm,
-                                            targets,
-                                            queries,
-                                            miniBatchResults,
-                                            pairIndices,
-                                            numPairs,
-                                            numQueries,
-                                            batchLocalIndices,
-                                            timings,
-                                            stream);
-      break;
-    case SubstructTemplateConfig::Config_T32_Q32_B4:
-      launchMatchKernelForConfig<32, 32, 4>(algorithm,
-                                            targets,
-                                            queries,
-                                            miniBatchResults,
-                                            pairIndices,
-                                            numPairs,
-                                            numQueries,
-                                            batchLocalIndices,
-                                            timings,
-                                            stream);
-      break;
-    case SubstructTemplateConfig::Config_T32_Q32_B6:
-      launchMatchKernelForConfig<32, 32, 6>(algorithm,
-                                            targets,
-                                            queries,
-                                            miniBatchResults,
-                                            pairIndices,
-                                            numPairs,
-                                            numQueries,
-                                            batchLocalIndices,
-                                            timings,
-                                            stream);
-      break;
-    case SubstructTemplateConfig::Config_T32_Q32_B8:
-      launchMatchKernelForConfig<32, 32, 8>(algorithm,
-                                            targets,
-                                            queries,
-                                            miniBatchResults,
-                                            pairIndices,
-                                            numPairs,
-                                            numQueries,
-                                            batchLocalIndices,
-                                            timings,
-                                            stream);
-      break;
-    case SubstructTemplateConfig::Config_T64_Q16_B4:
-      launchMatchKernelForConfig<64, 16, 4>(algorithm,
-                                            targets,
-                                            queries,
-                                            miniBatchResults,
-                                            pairIndices,
-                                            numPairs,
-                                            numQueries,
-                                            batchLocalIndices,
-                                            timings,
-                                            stream);
-      break;
-    case SubstructTemplateConfig::Config_T64_Q16_B6:
-      launchMatchKernelForConfig<64, 16, 6>(algorithm,
-                                            targets,
-                                            queries,
-                                            miniBatchResults,
-                                            pairIndices,
-                                            numPairs,
-                                            numQueries,
-                                            batchLocalIndices,
-                                            timings,
-                                            stream);
-      break;
-    case SubstructTemplateConfig::Config_T64_Q16_B8:
-      launchMatchKernelForConfig<64, 16, 8>(algorithm,
-                                            targets,
-                                            queries,
-                                            miniBatchResults,
-                                            pairIndices,
-                                            numPairs,
-                                            numQueries,
-                                            batchLocalIndices,
-                                            timings,
-                                            stream);
-      break;
-    case SubstructTemplateConfig::Config_T64_Q32_B4:
-      launchMatchKernelForConfig<64, 32, 4>(algorithm,
-                                            targets,
-                                            queries,
-                                            miniBatchResults,
-                                            pairIndices,
-                                            numPairs,
-                                            numQueries,
-                                            batchLocalIndices,
-                                            timings,
-                                            stream);
-      break;
-    case SubstructTemplateConfig::Config_T64_Q32_B6:
-      launchMatchKernelForConfig<64, 32, 6>(algorithm,
-                                            targets,
-                                            queries,
-                                            miniBatchResults,
-                                            pairIndices,
-                                            numPairs,
-                                            numQueries,
-                                            batchLocalIndices,
-                                            timings,
-                                            stream);
-      break;
-    case SubstructTemplateConfig::Config_T64_Q32_B8:
-      launchMatchKernelForConfig<64, 32, 8>(algorithm,
-                                            targets,
-                                            queries,
-                                            miniBatchResults,
-                                            pairIndices,
-                                            numPairs,
-                                            numQueries,
-                                            batchLocalIndices,
-                                            timings,
-                                            stream);
-      break;
-    case SubstructTemplateConfig::Config_T64_Q64_B4:
-      launchMatchKernelForConfig<64, 64, 4>(algorithm,
-                                            targets,
-                                            queries,
-                                            miniBatchResults,
-                                            pairIndices,
-                                            numPairs,
-                                            numQueries,
-                                            batchLocalIndices,
-                                            timings,
-                                            stream);
-      break;
-    case SubstructTemplateConfig::Config_T64_Q64_B6:
-      launchMatchKernelForConfig<64, 64, 6>(algorithm,
-                                            targets,
-                                            queries,
-                                            miniBatchResults,
-                                            pairIndices,
-                                            numPairs,
-                                            numQueries,
-                                            batchLocalIndices,
-                                            timings,
-                                            stream);
-      break;
-    case SubstructTemplateConfig::Config_T64_Q64_B8:
-      launchMatchKernelForConfig<64, 64, 8>(algorithm,
-                                            targets,
-                                            queries,
-                                            miniBatchResults,
-                                            pairIndices,
-                                            numPairs,
-                                            numQueries,
-                                            batchLocalIndices,
-                                            timings,
-                                            stream);
-      break;
-    case SubstructTemplateConfig::Config_T128_Q16_B4:
-      launchMatchKernelForConfig<128, 16, 4>(algorithm,
-                                             targets,
-                                             queries,
-                                             miniBatchResults,
-                                             pairIndices,
-                                             numPairs,
-                                             numQueries,
-                                             batchLocalIndices,
-                                             timings,
-                                             stream);
-      break;
-    case SubstructTemplateConfig::Config_T128_Q16_B6:
-      launchMatchKernelForConfig<128, 16, 6>(algorithm,
-                                             targets,
-                                             queries,
-                                             miniBatchResults,
-                                             pairIndices,
-                                             numPairs,
-                                             numQueries,
-                                             batchLocalIndices,
-                                             timings,
-                                             stream);
-      break;
-    case SubstructTemplateConfig::Config_T128_Q16_B8:
-      launchMatchKernelForConfig<128, 16, 8>(algorithm,
-                                             targets,
-                                             queries,
-                                             miniBatchResults,
-                                             pairIndices,
-                                             numPairs,
-                                             numQueries,
-                                             batchLocalIndices,
-                                             timings,
-                                             stream);
-      break;
-    case SubstructTemplateConfig::Config_T128_Q32_B4:
-      launchMatchKernelForConfig<128, 32, 4>(algorithm,
-                                             targets,
-                                             queries,
-                                             miniBatchResults,
-                                             pairIndices,
-                                             numPairs,
-                                             numQueries,
-                                             batchLocalIndices,
-                                             timings,
-                                             stream);
-      break;
-    case SubstructTemplateConfig::Config_T128_Q32_B6:
-      launchMatchKernelForConfig<128, 32, 6>(algorithm,
-                                             targets,
-                                             queries,
-                                             miniBatchResults,
-                                             pairIndices,
-                                             numPairs,
-                                             numQueries,
-                                             batchLocalIndices,
-                                             timings,
-                                             stream);
-      break;
-    case SubstructTemplateConfig::Config_T128_Q32_B8:
-      launchMatchKernelForConfig<128, 32, 8>(algorithm,
-                                             targets,
-                                             queries,
-                                             miniBatchResults,
-                                             pairIndices,
-                                             numPairs,
-                                             numQueries,
-                                             batchLocalIndices,
-                                             timings,
-                                             stream);
-      break;
-    case SubstructTemplateConfig::Config_T128_Q64_B4:
-      launchMatchKernelForConfig<128, 64, 4>(algorithm,
-                                             targets,
-                                             queries,
-                                             miniBatchResults,
-                                             pairIndices,
-                                             numPairs,
-                                             numQueries,
-                                             batchLocalIndices,
-                                             timings,
-                                             stream);
-      break;
-    case SubstructTemplateConfig::Config_T128_Q64_B6:
-      launchMatchKernelForConfig<128, 64, 6>(algorithm,
-                                             targets,
-                                             queries,
-                                             miniBatchResults,
-                                             pairIndices,
-                                             numPairs,
-                                             numQueries,
-                                             batchLocalIndices,
-                                             timings,
-                                             stream);
-      break;
-    case SubstructTemplateConfig::Config_T128_Q64_B8:
-    default:
-      launchMatchKernelForConfig<128, 64, 8>(algorithm,
-                                             targets,
-                                             queries,
-                                             miniBatchResults,
-                                             pairIndices,
-                                             numPairs,
-                                             numQueries,
-                                             batchLocalIndices,
-                                             timings,
-                                             stream);
-      break;
-  }
+  DISPATCH_BY_TQB_CONFIG(config,
+                         launchMatchKernelForConfig,
+                         algorithm,
+                         targets,
+                         queries,
+                         miniBatchResults,
+                         pairIndices,
+                         numPairs,
+                         numQueries,
+                         batchLocalIndices,
+                         timings,
+                         stream);
 }
 
 }  // namespace nvMolKit

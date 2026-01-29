@@ -33,7 +33,7 @@
 
 using nvMolKit::BatchedPatternEntry;
 using nvMolKit::checkReturnCode;
-using nvMolKit::kMaxRecursionDepth;
+using nvMolKit::kMaxSmartsNestingDepth;
 using nvMolKit::LeafSubpatterns;
 using nvMolKit::MiniBatchResultsDevice;
 using nvMolKit::MoleculesDevice;
@@ -123,7 +123,7 @@ TEST(RecursivePreprocessorTest, PaintsBitsForSimpleRecursivePattern) {
   const LeafSubpatterns& leafSubpatterns = preprocessor.leafSubpatterns();
   ASSERT_FALSE(leafSubpatterns.perQueryPatterns.empty());
 
-  std::array<std::vector<BatchedPatternEntry>, kMaxRecursionDepth + 1> patternsAtDepth;
+  std::array<std::vector<BatchedPatternEntry>, kMaxSmartsNestingDepth + 1> patternsAtDepth;
   for (auto& vec : patternsAtDepth) {
     vec.clear();
   }

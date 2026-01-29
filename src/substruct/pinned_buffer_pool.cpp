@@ -44,7 +44,7 @@ size_t computePinnedHostBufferBytes(int maxBatchSize, int maxMatchIndicesEstimat
   addBlock(sizeof(int16_t) * static_cast<size_t>(maxMatchIndicesEstimate));  // matchIndices
   addBlock(sizeof(uint8_t) * static_cast<size_t>(maxBatchSize));             // overflowFlags
 
-  for (int i = 0; i <= kMaxRecursionDepth; ++i) {
+  for (int i = 0; i <= kMaxSmartsNestingDepth; ++i) {
     addBlock(sizeof(int) * static_cast<size_t>(maxBatchSize));
     addBlock(sizeof(int) * static_cast<size_t>(maxBatchSize));
   }
@@ -102,7 +102,7 @@ std::unique_ptr<PinnedHostBuffer> PinnedHostBufferPool::createBuffer(int maxBatc
   }
   buffer->overflowFlags = allocator.allocate<uint8_t>(static_cast<size_t>(maxBatchSize));
 
-  for (int i = 0; i <= kMaxRecursionDepth; ++i) {
+  for (int i = 0; i <= kMaxSmartsNestingDepth; ++i) {
     buffer->matchGlobalPairIndicesHost[i] = allocator.allocate<int>(static_cast<size_t>(maxBatchSize));
     buffer->matchBatchLocalIndicesHost[i] = allocator.allocate<int>(static_cast<size_t>(maxBatchSize));
   }

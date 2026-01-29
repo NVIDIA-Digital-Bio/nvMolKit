@@ -43,9 +43,9 @@ struct PinnedHostBuffer {
   PinnedHostView<int16_t> matchIndices;
   PinnedHostView<uint8_t> overflowFlags;
 
-  std::array<PinnedHostView<int>, kMaxRecursionDepth + 1> matchGlobalPairIndicesHost = {};
-  std::array<PinnedHostView<int>, kMaxRecursionDepth + 1> matchBatchLocalIndicesHost = {};
-  std::array<PinnedHostView<BatchedPatternEntry>, 2>      patternsAtDepthHost        = {};
+  std::array<PinnedHostView<int>, kMaxSmartsNestingDepth + 1> matchGlobalPairIndicesHost = {};
+  std::array<PinnedHostView<int>, kMaxSmartsNestingDepth + 1> matchBatchLocalIndicesHost = {};
+  std::array<PinnedHostView<BatchedPatternEntry>, 2>          patternsAtDepthHost        = {};
 };
 
 /**

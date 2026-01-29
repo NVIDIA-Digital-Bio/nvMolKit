@@ -145,21 +145,21 @@ void RecursivePatternPreprocessor::syncToDevice(cudaStream_t stream) {
 }
 
 void RecursivePatternPreprocessor::preprocessMiniBatch(
-  const SubstructTemplateConfig                                               templateConfig,
-  const MoleculesDevice&                                                      targetsDevice,
-  MiniBatchResultsDevice&                                                     miniBatchResults,
-  const int                                                                   numQueries,
-  const int                                                                   miniBatchPairOffset,
-  const int                                                                   miniBatchSize,
-  const SubstructAlgorithm                                                    algorithm,
-  cudaStream_t                                                                stream,
-  RecursiveScratchBuffers&                                                    scratch,
-  const std::array<std::vector<BatchedPatternEntry>, kMaxRecursionDepth + 1>& patternsAtDepth,
-  const int                                                                   maxDepth,
-  const int                                                                   firstTargetInMiniBatch,
-  const int                                                                   numTargetsInMiniBatch,
-  cudaEvent_t*                                                                depthEvents,
-  const int                                                                   numDepthEvents) const {
+  const SubstructTemplateConfig                                                   templateConfig,
+  const MoleculesDevice&                                                          targetsDevice,
+  MiniBatchResultsDevice&                                                         miniBatchResults,
+  const int                                                                       numQueries,
+  const int                                                                       miniBatchPairOffset,
+  const int                                                                       miniBatchSize,
+  const SubstructAlgorithm                                                        algorithm,
+  cudaStream_t                                                                    stream,
+  RecursiveScratchBuffers&                                                        scratch,
+  const std::array<std::vector<BatchedPatternEntry>, kMaxSmartsNestingDepth + 1>& patternsAtDepth,
+  const int                                                                       maxDepth,
+  const int                                                                       firstTargetInMiniBatch,
+  const int                                                                       numTargetsInMiniBatch,
+  cudaEvent_t*                                                                    depthEvents,
+  const int                                                                       numDepthEvents) const {
   ScopedNvtxRange processRecursiveRange("launchRecursivePaintKernels");
 
   scratch.setStream(stream);

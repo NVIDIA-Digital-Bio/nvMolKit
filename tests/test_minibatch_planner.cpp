@@ -29,7 +29,7 @@
 #include "recursive_preprocessor.h"
 #include "thread_worker_context.h"
 
-using nvMolKit::kMaxRecursionDepth;
+using nvMolKit::kMaxSmartsNestingDepth;
 using nvMolKit::LeafSubpatterns;
 using nvMolKit::MiniBatchPlan;
 using nvMolKit::MiniBatchPlanner;
@@ -186,7 +186,7 @@ TEST(MiniBatchPlannerTest, BuildsScheduleAndRecursiveEntries) {
   }
   EXPECT_EQ(plan.recursiveMaxDepth, expectedRecursiveMaxDepth);
 
-  for (int depth = 0; depth <= nvMolKit::kMaxRecursionDepth; ++depth) {
+  for (int depth = 0; depth <= nvMolKit::kMaxSmartsNestingDepth; ++depth) {
     size_t expectedCount = 0;
     for (size_t q = 0; q < queries.size(); ++q) {
       if (!queryHasPatterns[q]) {

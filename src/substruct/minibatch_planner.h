@@ -38,8 +38,8 @@ struct MiniBatchPlan {
   int firstTargetInMiniBatch      = 0;
   int numTargetsInMiniBatch       = 0;
   int maxPipelineDepthInMiniBatch = 0;  ///< Max pipeline stage depth in batch
-  std::array<std::vector<BatchedPatternEntry>, kMaxRecursionDepth + 1> patternsAtDepth;
-  std::array<int, kMaxRecursionDepth + 1>                              matchPairsCounts = {};
+  std::array<std::vector<BatchedPatternEntry>, kMaxSmartsNestingDepth + 1> patternsAtDepth;
+  std::array<int, kMaxSmartsNestingDepth + 1>                              matchPairsCounts = {};
 };
 
 /**

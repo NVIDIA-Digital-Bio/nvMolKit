@@ -47,7 +47,7 @@ using nvMolKit::extractRecursivePatterns;
 using nvMolKit::FlatBitVect;
 using nvMolKit::hasRecursiveSmarts;
 using nvMolKit::kMaxQueryAtoms;
-using nvMolKit::kMaxRecursionDepth;
+using nvMolKit::kMaxSmartsNestingDepth;
 using nvMolKit::kMaxTargetAtoms;
 using nvMolKit::LeafSubpatterns;
 using nvMolKit::MiniBatchResultsDevice;
@@ -803,7 +803,7 @@ TEST(RecursiveLabelerEdgeCases, TooManyPatternsThrows) {
 }
 
 TEST(RecursiveLabelerEdgeCases, MaxRecursionDepthLimit) {
-  // kMaxRecursionDepth is 4, so maxDepth of 3 (0,1,2,3) should work
+  // kMaxSmartsNestingDepth is 4, so maxDepth of 3 (0,1,2,3) should work
   // maxDepth of 4 (0,1,2,3,4) should throw
   // Create nested patterns: depth 0 inside depth 1 inside depth 2 etc.
   // [$([*;$([*;$([*;$([*;$(*)])])])])] has depth 4 (5 levels: 0,1,2,3,4)
@@ -821,11 +821,11 @@ TEST(RecursiveLabelerEdgeCases, MaxRecursionDepthLimit) {
 
   // Extract should succeed (patterns are extracted but depth is recorded)
   auto info = extractRecursivePatterns(queryMol.get());
-  EXPECT_GE(info.maxDepth, kMaxRecursionDepth);
+  EXPECT_GE(info.maxDepth, kMaxSmartsNestingDepth);
 }
 
 TEST(RecursiveLabelerEdgeCases, MaxRecursionDepthThrowsOnPreprocess) {
-  // Create a pattern that exceeds kMaxRecursionDepth and verify it throws
+  // Create a pattern that exceeds kMaxSmartsNestingDepth and verify it throws
   // during preprocessing when run through the full pipeline
   const std::string deeplyNested = "[$([*;$([*;$([*;$([*;$(*-N)])])])])]";
 
@@ -836,7 +836,7 @@ TEST(RecursiveLabelerEdgeCases, MaxRecursionDepthThrowsOnPreprocess) {
 
   // Verify the pattern exceeds depth limit
   auto info = extractRecursivePatterns(queryMol.get());
-  ASSERT_GE(info.maxDepth, kMaxRecursionDepth) << "Test pattern does not exceed depth limit";
+  ASSERT_GE(info.maxDepth, kMaxSmartsNestingDepth) << "Test pattern does not exceed depth limit";
 
   ScopedStream                     stream;
   std::vector<const RDKit::ROMol*> targets = {targetMol.get()};
