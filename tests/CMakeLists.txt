@@ -201,6 +201,17 @@ target_link_libraries(test_query PRIVATE molecules device ${RDKit_LIBS})
 add_executable(test_graph_labeler test_graph_labeler.cu)
 target_link_libraries(test_graph_labeler PRIVATE molecules device substruct_validation ${RDKit_LIBS})
 
+add_executable(test_graph_labeler_recursive test_graph_labeler_recursive.cu)
+target_link_libraries(test_graph_labeler_recursive PRIVATE substructure_search
+        molecules device
+        substruct_validation
+        ${RDKit_LIBS})
+
+add_executable(test_substructure_search test_substruct_search.cu)
+target_link_libraries(
+        test_substructure_search PRIVATE substructure_search molecules device
+        substruct_validation ${RDKit_LIBS})
+
 set(TEST_LIST
     test_boolean_tree
     test_butina
@@ -221,6 +232,7 @@ set(TEST_LIST
     test_flat_bit_vect_device
     test_flattened_builder
     test_graph_labeler
+    test_graph_labeler_recursive
     test_host_vector
     test_bfgs_minimizer
     test_etkdg_result_tracker
@@ -234,6 +246,7 @@ set(TEST_LIST
     test_query
     test_rdkit_comp
     test_rdkit_bounds_matrix
+    test_substructure_search
     test_similarity
     test_work_splitting)
 
