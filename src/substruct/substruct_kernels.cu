@@ -46,6 +46,7 @@ template <std::size_t MaxQueryAtoms = kMaxQueryAtoms> struct SubstructMatchResul
   std::size_t                   labelMatrixWords;
   int                           maxMatchesToFind;
   bool                          countOnly;
+  uint8_t*                      overflowFlags;  ///< Per-pair overflow detection (set if buffers exhausted)
 
   __device__ __forceinline__ uint32_t* getLabelMatrixPtr(int batchLocalIdx) const {
     return labelMatrixBuffer + batchLocalIdx * labelMatrixWords;
@@ -432,6 +433,7 @@ __global__ void substructMatchKernelT(TargetMoleculesDeviceView                 
                   "Insufficient shared memory for GSI partials - check block size for MaxTargetAtoms/MaxQueryAtoms");
     __shared__ PartialMatchT<MaxQueryAtoms> gsiPartials[kMaxPartialsT * 2];
 
+    uint8_t* pairOverflowFlag = results.overflowFlags ? &results.overflowFlags[batchLocalIdx] : nullptr;
     gsiBFSSearchGPU<MaxTargetAtoms, MaxQueryAtoms, MaxBondsPerAtom>(target,
                                                                     query,
                                                                     labelMatrix,
@@ -448,7 +450,8 @@ __global__ void substructMatchKernelT(TargetMoleculesDeviceView                 
                                                                     {},
                                                                     maxMatchesToFind,
                                                                     countOnly,
-                                                                    timings);
+                                                                    timings,
+                                                                    pairOverflowFlag);
   }
 
   __syncthreads();
@@ -1273,6 +1276,7 @@ void launchMatchKernelForConfig(SubstructAlgorithm            algorithm,
   results.labelMatrixWords         = labelMatrixWordsT;
   results.maxMatchesToFind         = miniBatchResults.maxMatchesToFind();
   results.countOnly                = miniBatchResults.countOnly();
+  results.overflowFlags            = miniBatchResults.overflowFlags();
 
   switch (algorithm) {
     case SubstructAlgorithm::VF2:

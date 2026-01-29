@@ -215,6 +215,10 @@ target_link_libraries(
         test_substructure_search PRIVATE substructure_search molecules device
         substruct_validation ${RDKit_LIBS})
 
+add_executable(test_substruct_algos test_substruct_algos.cu)
+target_link_libraries(test_substruct_algos PRIVATE
+        substruct_definitions molecules device flatBitVect device_vector)
+
 set(TEST_LIST
     test_boolean_tree
     test_butina
@@ -250,6 +254,7 @@ set(TEST_LIST
     test_query
     test_rdkit_comp
     test_rdkit_bounds_matrix
+    test_substruct_algos
     test_substructure_search
     test_similarity
     test_work_splitting)

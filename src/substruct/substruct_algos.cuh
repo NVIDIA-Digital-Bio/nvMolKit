@@ -278,6 +278,7 @@ __device__ void vf2SearchGPU(const TargetMoleculeView&                          
  * @param maxMatchesToFind Stop searching after this many matches (-1 = no limit)
  * @param countOnly If true, count matches but don't store them
  * @param timings Optional timing data collection
+ * @param overflowFlag Output: set to 1 if partial or output buffers overflow (nullptr to skip)
  */
 template <std::size_t         MaxTargetAtoms,
           std::size_t         MaxQueryAtoms,
@@ -299,7 +300,8 @@ __device__ void gsiBFSSearchGPU(const TargetMoleculeView&                       
                                 PaintModeParams                                       paintParams      = {},
                                 int                                                   maxMatchesToFind = -1,
                                 bool                                                  countOnly        = false,
-                                DeviceTimingsData*                                    timings          = nullptr) {
+                                DeviceTimingsData*                                    timings          = nullptr,
+                                uint8_t*                                              overflowFlag     = nullptr) {
   long long int t_start;
   DEVICE_TIMING_START(timings, 0, t_start);
 
@@ -338,11 +340,13 @@ __device__ void gsiBFSSearchGPU(const TargetMoleculeView&                       
   __shared__ int currentCount;
   __shared__ int nextCount;
   __shared__ int earlyExitFlag;
+  __shared__ int partialOverflowFlag;
 
   if (tid == 0) {
-    currentCount  = 0;
-    nextCount     = 0;
-    earlyExitFlag = 0;
+    currentCount        = 0;
+    nextCount           = 0;
+    earlyExitFlag       = 0;
+    partialOverflowFlag = 0;
   }
   __syncthreads();
 
@@ -419,6 +423,7 @@ __device__ void gsiBFSSearchGPU(const TargetMoleculeView&                       
               printf("[GSI] WARNING: Level 0 OVERFLOW EXHAUSTED! slot=%d >= maxTotal=%d\n", slot, maxTotal);
             }
           }
+          partialOverflowFlag = 1;
         }
       }
     }
@@ -602,6 +607,7 @@ __device__ void gsiBFSSearchGPU(const TargetMoleculeView&                       
                   printf("[GSI] WARNING: Level %d OVERFLOW EXHAUSTED! slot=%d >= maxTotal=%d\n", level, slot, maxTotal);
                 }
               }
+              partialOverflowFlag = 1;
             }
           }
         }
@@ -658,6 +664,11 @@ __device__ void gsiBFSSearchGPU(const TargetMoleculeView&                       
     if (tid == 0) {
       printf("[GSI] DONE: final matchCount=%d, reportedCount=%d\n", *matchCount, *reportedCount);
     }
+  }
+
+  // Write overflow flag if requested
+  if (tid == 0 && overflowFlag != nullptr && partialOverflowFlag) {
+    *overflowFlag = 1;
   }
 }
 

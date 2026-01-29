@@ -224,11 +224,12 @@ static size_t computePinnedHostBufferBytes(int maxBatchSize, int maxMatchIndices
     offset += bytes;
   };
 
-  addBlock(sizeof(int) * static_cast<size_t>(maxBatchSize));
-  addBlock(sizeof(int) * static_cast<size_t>(maxBatchSize + 1));
-  addBlock(sizeof(int) * static_cast<size_t>(maxBatchSize));
-  addBlock(sizeof(int) * static_cast<size_t>(maxBatchSize));
-  addBlock(sizeof(int16_t) * static_cast<size_t>(maxMatchIndicesEstimate));
+  addBlock(sizeof(int) * static_cast<size_t>(maxBatchSize));                 // pairIndices
+  addBlock(sizeof(int) * static_cast<size_t>(maxBatchSize + 1));             // miniBatchPairMatchStarts
+  addBlock(sizeof(int) * static_cast<size_t>(maxBatchSize));                 // matchCounts
+  addBlock(sizeof(int) * static_cast<size_t>(maxBatchSize));                 // reportedCounts
+  addBlock(sizeof(int16_t) * static_cast<size_t>(maxMatchIndicesEstimate));  // matchIndices
+  addBlock(sizeof(uint8_t) * static_cast<size_t>(maxBatchSize));             // overflowFlags
 
   for (int i = 0; i <= kMaxRecursionDepth; ++i) {
     addBlock(sizeof(int) * static_cast<size_t>(maxBatchSize));
@@ -248,6 +249,7 @@ struct PinnedHostBuffer {
   PinnedHostView<int>     matchCounts;
   PinnedHostView<int>     reportedCounts;
   PinnedHostView<int16_t> matchIndices;
+  PinnedHostView<uint8_t> overflowFlags;
 
   std::array<PinnedHostView<int>, kMaxRecursionDepth + 1> matchGlobalPairIndicesHost = {};
   std::array<PinnedHostView<int>, kMaxRecursionDepth + 1> matchBatchLocalIndicesHost = {};
@@ -296,6 +298,7 @@ class PinnedHostBufferPool {
     if (maxMatchIndicesEstimate > 0) {
       buffer->matchIndices = allocator.allocate<int16_t>(static_cast<size_t>(maxMatchIndicesEstimate));
     }
+    buffer->overflowFlags = allocator.allocate<uint8_t>(static_cast<size_t>(maxBatchSize));
 
     for (int i = 0; i <= kMaxRecursionDepth; ++i) {
       buffer->matchGlobalPairIndicesHost[i] = allocator.allocate<int>(static_cast<size_t>(maxBatchSize));
@@ -593,6 +596,11 @@ void MiniBatchResultsDevice::allocateMiniBatch(int        miniBatchSize,
   if (labelMatrixBuffer_.size() < labelMatrixSize) {
     labelMatrixBuffer_.resize(static_cast<size_t>(labelMatrixSize * 1.5));
   }
+
+  if (overflowFlags_.size() < static_cast<size_t>(miniBatchSize)) {
+    overflowFlags_.resize(static_cast<size_t>(miniBatchSize * 1.5));
+  }
+  overflowFlags_.zero();
 }
 
 void MiniBatchResultsDevice::setQueryAtomCounts(const int* queryAtomCounts, size_t count) {
@@ -608,10 +616,12 @@ void MiniBatchResultsDevice::zeroRecursiveBits() {
 
 void MiniBatchResultsDevice::copyMiniBatchToHost(int*     hostMatchCounts,
                                                  int*     hostReportedCounts,
-                                                 int16_t* hostMatchIndices) const {
+                                                 int16_t* hostMatchIndices,
+                                                 uint8_t* hostOverflowFlags) const {
   matchCounts_.copyToHost(hostMatchCounts, miniBatchSize_);
   reportedCounts_.copyToHost(hostReportedCounts, miniBatchSize_);
   matchIndices_.copyToHost(hostMatchIndices, totalMiniBatchMatchIndices_);
+  overflowFlags_.copyToHost(hostOverflowFlags, miniBatchSize_);
 }
 
 void MiniBatchResultsDevice::copyCountsOnlyToHost(int* hostMatchCounts) const {
@@ -1065,7 +1075,8 @@ void initiateResultsCopyToHost(GpuExecutor& executor, const PinnedHostBuffer& ho
   ScopedNvtxRange copyRange("initiateResultsCopyToHost");
   executor.deviceResults.copyMiniBatchToHost(hostBuffer.matchCounts.data(),
                                              hostBuffer.reportedCounts.data(),
-                                             hostBuffer.matchIndices.data());
+                                             hostBuffer.matchIndices.data(),
+                                             hostBuffer.overflowFlags.data());
   cudaCheckError(cudaEventRecord(executor.copyDoneEvent.event(), executor.stream()));
 }
 
@@ -1101,8 +1112,11 @@ void accumulateMiniBatchResults(GpuExecutor&               executor,
     const int actualMatches   = hostBuffer.matchCounts[i];
     const int reportedMatches = hostBuffer.reportedCounts[i];
 
-    const bool isBufferOverflow = (actualMatches > reportedMatches) && (ctx.maxMatches == 0);
-    if (isBufferOverflow && fallbackQueue != nullptr) {
+    // Check for overflow: either output buffer overflow (more matches than stored)
+    // or partial match buffer overflow (algorithm couldn't explore all paths)
+    const bool isOutputOverflow  = (actualMatches > reportedMatches) && (ctx.maxMatches == 0);
+    const bool isPartialOverflow = hostBuffer.overflowFlags[i] != 0;
+    if ((isOutputOverflow || isPartialOverflow) && fallbackQueue != nullptr) {
       fallbackQueue->enqueue({targetIdx, queryIdx});
       continue;
     }

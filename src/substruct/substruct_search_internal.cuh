@@ -299,8 +299,12 @@ class MiniBatchResultsDevice {
    * @param hostMatchCounts Output: match counts for this mini-batch [miniBatchSize]
    * @param hostReportedCounts Output: reported counts for this mini-batch [miniBatchSize]
    * @param hostMatchIndices Output: match indices for this mini-batch
+   * @param hostOverflowFlags Output: overflow flags for this mini-batch [miniBatchSize]
    */
-  void copyMiniBatchToHost(int* hostMatchCounts, int* hostReportedCounts, int16_t* hostMatchIndices) const;
+  void copyMiniBatchToHost(int*     hostMatchCounts,
+                           int*     hostReportedCounts,
+                           int16_t* hostMatchIndices,
+                           uint8_t* hostOverflowFlags) const;
 
   /**
    * @brief Copy only match counts to host (for boolean output mode).
@@ -329,6 +333,7 @@ class MiniBatchResultsDevice {
   [[nodiscard]] PartialMatch* overflowBuffer() const { return overflowBuffer_.data(); }
   [[nodiscard]] uint32_t*     recursiveMatchBits() const { return recursiveMatchBits_.data(); }
   [[nodiscard]] uint32_t*     labelMatrixBuffer() const { return labelMatrixBuffer_.data(); }
+  [[nodiscard]] uint8_t*      overflowFlags() const { return overflowFlags_.data(); }
 
  private:
   cudaStream_t stream_ = nullptr;
@@ -349,6 +354,8 @@ class MiniBatchResultsDevice {
   AsyncDeviceVector<uint32_t> recursiveMatchBits_;
 
   AsyncDeviceVector<uint32_t> labelMatrixBuffer_;
+
+  AsyncDeviceVector<uint8_t> overflowFlags_;  ///< Per-pair overflow detection
 
   int totalMiniBatchMatchIndices_ = 0;
 
