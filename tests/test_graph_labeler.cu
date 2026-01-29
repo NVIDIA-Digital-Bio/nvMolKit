@@ -84,17 +84,6 @@ class GraphLabelerTest : public ::testing::Test {
       }
     }
   }
-
-  void runLabelingTestVsRDKit(const std::string& targetSmiles, const std::string& querySmarts) {
-    auto targetMol = makeMolFromSmiles(targetSmiles);
-    auto queryMol  = makeMolFromSmarts(querySmarts);
-    ASSERT_NE(targetMol, nullptr) << "Failed to parse target: " << targetSmiles;
-    ASSERT_NE(queryMol, nullptr) << "Failed to parse query: " << querySmarts;
-
-    auto result = compareLabelMatrices(*targetMol, *queryMol, stream_.stream());
-    EXPECT_TRUE(result.allMatch) << "GPU/RDKit mismatch for target=" << targetSmiles << ", query=" << querySmarts
-                                 << " (FP=" << result.falsePositives << ", FN=" << result.falseNegatives << ")";
-  }
 };
 
 TEST_F(GraphLabelerTest, EthaneQueryCarbon) {

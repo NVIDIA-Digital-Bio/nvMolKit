@@ -87,8 +87,6 @@ std::vector<std::vector<uint8_t>> computeGpuLabelMatrix(const RDKit::ROMol& targ
   std::vector<int> queryAtomCounts          = {numQueryAtoms};
   std::vector<int> miniBatchPairMatchStarts = {0, 0};
 
-  RecursivePatternInfo info = extractRecursivePatterns(&queryMol);
-
   AsyncDeviceVector<LabelMatrixStorage> matrixDev(1, stream);
   const LabelMatrixStorage              hostMatrix(false);
   matrixDev.setFromVector(std::vector<LabelMatrixStorage>{hostMatrix});
