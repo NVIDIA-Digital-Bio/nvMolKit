@@ -19,7 +19,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "substruct_types.h"
+#include "substruct_template_config.h"
 
 namespace nvMolKit {
 

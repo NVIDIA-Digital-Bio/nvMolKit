@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "substruct_search_internal.h"
+
 #include <GraphMol/ROMol.h>
 #include <GraphMol/Substruct/SubstructMatch.h>
 
@@ -25,7 +27,6 @@
 #include "pinned_buffer_pool.h"
 #include "substruct_launch_config.h"
 #include "substruct_search.h"
-#include "substruct_search_internal.h"
 #include "thread_worker_context.h"
 
 namespace nvMolKit {
