@@ -113,31 +113,6 @@ template <std::size_t MaxQueryAtoms = kMaxQueryAtoms> struct VF2StateT {
   }
 };
 
-/// Type alias for max-sized VF2 state (backward compatibility)
-using VF2State = VF2StateT<kMaxQueryAtoms>;
-
-// =============================================================================
-// GSI/BFS Data Structures (templated)
-// =============================================================================
-
-// PartialMatchT is defined in substruct_types.h
-
-/**
- * @brief Candidate list for a query atom.
- *
- * @tparam MaxTargetAtoms Maximum target atoms for array sizing
- *
- * Precomputed from label matrix for efficient iteration.
- */
-template <std::size_t MaxTargetAtoms = kMaxTargetAtoms> struct CandidateListT {
-  static constexpr std::size_t kMaxTargetAtomsValue = MaxTargetAtoms;
-  int8_t                       candidates[MaxTargetAtoms];  ///< Target atoms that can match this query atom
-  int                          count;                       ///< Number of valid candidates
-};
-
-/// Type alias for max-sized candidate list (backward compatibility)
-using CandidateList = CandidateListT<kMaxTargetAtoms>;
-
 // =============================================================================
 // VF2 Algorithm Implementation
 // =============================================================================

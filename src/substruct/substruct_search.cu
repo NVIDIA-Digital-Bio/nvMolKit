@@ -156,38 +156,14 @@ void RDKitFallbackQueue::unregisterProducer() {
   closeQueueIfDone();
 }
 
-void RDKitFallbackQueue::shutdown() {
-  std::lock_guard<std::mutex> lock(producerMutex_);
-  shutdown_ = true;
-  closeQueueIfDone();
-}
-
 void RDKitFallbackQueue::closeQueueIfDone() {
-  if (shutdown_ || activeProducers_ == 0) {
+  if (activeProducers_ == 0) {
     queue_.close();
-  }
-}
-
-void RDKitFallbackQueue::workerLoop() {
-  while (true) {
-    auto optEntry = queue_.pop();
-    if (!optEntry) {
-      return;
-    }
-    processEntry(*optEntry);
   }
 }
 
 size_t RDKitFallbackQueue::processedCount() const {
   return processedCount_.load(std::memory_order_relaxed);
-}
-
-std::vector<RDKitFallbackEntry> RDKitFallbackQueue::drainToVector() {
-  std::vector<RDKitFallbackEntry> result;
-  while (auto opt = queue_.tryPop()) {
-    result.push_back(std::move(*opt));
-  }
-  return result;
 }
 
 std::mutex& RDKitFallbackQueue::getResultsMutex() {

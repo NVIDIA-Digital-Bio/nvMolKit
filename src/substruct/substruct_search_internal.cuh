@@ -358,67 +358,6 @@ class MiniBatchResultsDevice {
 };
 
 /**
- * @brief Pipeline context for overlapping recursive preprocessing with matching.
- *
- * Uses a high-priority stream for recursive paint operations and a low-priority
- * stream for main query matching. Events synchronize pairs that depend on
- * recursive preprocessing results.
- *
- * Host-side pinned buffers are referenced via allocator-backed views rather than
- * owned allocations.
- */
-struct RecursivePipelineContext {
-  ScopedStreamWithPriority recursiveStream;  ///< High priority stream for paint kernels
-
-  /// Low priority stream for match kernels at depth > 0.
-  /// Depth 0 uses the main ctx.stream.
-  ScopedStreamWithPriority postRecursionStream;
-
-  std::array<ScopedCudaEvent, kMaxRecursionDepth> depthEvents;
-
-  ScopedCudaEvent recursiveDoneEvent;      ///< Signaled when recursive stream work completes
-  ScopedCudaEvent postRecursionDoneEvent;  ///< Signaled when post-recursion stream work completes
-
-  /// Matching: global pair indices for each depth group (depth 0..kMaxRecursionDepth)
-  std::array<AsyncDeviceVector<int>, kMaxRecursionDepth + 1> matchGlobalPairIndices;
-
-  /// Matching: mini-batch-local indices for each depth group (depth 0..kMaxRecursionDepth)
-  std::array<AsyncDeviceVector<int>, kMaxRecursionDepth + 1> matchMiniBatchLocalIndices;
-
-  /// Pointers to pinned buffers for H2D transfers (allocator-backed views)
-  std::array<int*, kMaxRecursionDepth + 1> matchGlobalPairIndicesHost     = {};
-  std::array<int*, kMaxRecursionDepth + 1> matchMiniBatchLocalIndicesHost = {};
-
-  /// Counts of pairs per depth level (populated during schedule precomputation)
-  std::array<int, kMaxRecursionDepth + 1> matchPairsCounts = {};
-
-  int perDepthCapacity = 0;
-
-  int maxDepthInMiniBatch = 0;
-
-  /**
-   * @brief Construct pipeline context with priority streams.
-   *
-   * The recursive stream gets high priority (lower numerical value),
-   * post-recursion stream gets low priority (higher numerical value).
-   *
-   * @param executorIdx Executor index for unique stream naming
-   */
-  explicit RecursivePipelineContext(int executorIdx = 0);
-
-  /**
-   * @brief Set pointers to pinned buffer regions.
-   */
-  void setPinnedBuffers(const std::array<int*, kMaxRecursionDepth + 1>& globalPairPtrs,
-                        const std::array<int*, kMaxRecursionDepth + 1>& miniBatchLocalPtrs,
-                        int                                             capacity) {
-    matchGlobalPairIndicesHost     = globalPairPtrs;
-    matchMiniBatchLocalIndicesHost = miniBatchLocalPtrs;
-    perDepthCapacity               = capacity;
-  }
-};
-
-/**
  * @brief Preprocess ALL recursive SMARTS patterns for a mini-batch.
  *
  * Uses pre-built leaf subpatterns to run paint kernels for all recursive patterns
@@ -498,24 +437,10 @@ class RDKitFallbackQueue {
 
   void registerProducer();
   void unregisterProducer();
-  void shutdown();
-  void workerLoop();
 
-  [[nodiscard]] size_t            processedCount() const;
-  std::vector<RDKitFallbackEntry> drainToVector();
-  std::mutex&                     getResultsMutex();
-  bool                            tryProcessOne();
-
-  template <typename Predicate> int processWhileWaiting(Predicate shouldStop) {
-    int processed = 0;
-    while (!shouldStop()) {
-      if (!tryProcessOne()) {
-        break;
-      }
-      ++processed;
-    }
-    return processed;
-  }
+  [[nodiscard]] size_t processedCount() const;
+  std::mutex&          getResultsMutex();
+  bool                 tryProcessOne();
 
   [[nodiscard]] bool hasWork() const;
 
@@ -533,7 +458,6 @@ class RDKitFallbackQueue {
 
   ThreadSafeQueue<RDKitFallbackEntry> queue_;
   mutable std::mutex                  producerMutex_;
-  bool                                shutdown_        = false;
   int                                 activeProducers_ = 0;
   std::atomic<size_t>                 processedCount_{0};
 };
