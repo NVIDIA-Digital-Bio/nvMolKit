@@ -22,7 +22,7 @@ if(NVMOLKIT_BUILD_TESTS OR NVMOLKIT_BUILD_BENCHMARKS)
   target_include_directories(
           substruct_validation PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
           ${CMAKE_SOURCE_DIR}/src)
-  target_link_libraries(substruct_validation PUBLIC ${RDKit_LIBS} substruct_definitions cuda_error_check flatBitVect)
+  target_link_libraries(substruct_validation PUBLIC ${RDKit_LIBS}  substructure_search substruct_definitions cuda_error_check flatBitVect)
 endif()
 
 add_library(conformer_checkers conformer_checkers.cpp)

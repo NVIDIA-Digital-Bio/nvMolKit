@@ -45,7 +45,6 @@ class ROMol;
 #include "device.h"
 #include "device_vector.h"
 #include "molecules.h"
-#include "molecules_device.cuh"
 #include "substruct_algos.cuh"
 #include "substruct_search.h"
 
@@ -86,13 +85,13 @@ struct LeafSubpatternKeyHash {
  */
 struct LeafSubpatterns {
   std::unordered_map<LeafSubpatternKey, int, LeafSubpatternKeyHash> patternIndexMap;
-  MoleculesHost   patternsHost;
-  MoleculesDevice patternsDevice;
+  MoleculesHost                                                     patternsHost;
+  MoleculesDevice                                                   patternsDevice;
 
   /// Precomputed pattern entries per query, organized by depth.
   /// perQueryPatterns[queryIdx][depth] = vector of BatchedPatternEntry
   std::vector<std::array<std::vector<BatchedPatternEntry>, kMaxRecursionDepth + 1>> perQueryPatterns;
-  
+
   /// Max recursion depth per query (0 if no recursive patterns)
   std::vector<int> perQueryMaxDepth;
 
@@ -125,7 +124,7 @@ struct LeafSubpatterns {
    */
   [[nodiscard]] int getPatternIndex(int queryIdx, int patternId) const {
     LeafSubpatternKey key{queryIdx, patternId};
-    auto it = patternIndexMap.find(key);
+    auto              it = patternIndexMap.find(key);
     return (it != patternIndexMap.end()) ? it->second : -1;
   }
 
@@ -142,9 +141,7 @@ struct LeafSubpatterns {
   /**
    * @brief Get view for kernel access.
    */
-  [[nodiscard]] QueryMoleculesDeviceView view() const {
-    return patternsDevice.view<MoleculeType::Query>();
-  }
+  [[nodiscard]] QueryMoleculesDeviceView view() const { return patternsDevice.view<MoleculeType::Query>(); }
 };
 
 /**
@@ -165,15 +162,18 @@ struct RecursiveScratchBuffers {
   AsyncDeviceVector<uint32_t>            intermediateBits;  ///< Child pattern results for nested recursion
 
   /// Double-buffered pinned pattern entries for overlap
-  std::array<PinnedHostView<BatchedPatternEntry>, 2> patternsAtDepthHost = {};
-  std::array<int, 2>                     patternsAtDepthHostCapacity = {0, 0};
-  std::array<ScopedCudaEvent, 2>         patternsAtDepthHostCopyDone;
-  std::array<bool, 2>                    patternsAtDepthHostCopyPending = {false, false};
-  int                                    currentPatternBuffer = 0;  ///< Index of buffer to fill next
-  PinnedHostAllocator                    pinnedAllocator_;
+  std::array<PinnedHostView<BatchedPatternEntry>, 2> patternsAtDepthHost         = {};
+  std::array<int, 2>                                 patternsAtDepthHostCapacity = {0, 0};
+  std::array<ScopedCudaEvent, 2>                     patternsAtDepthHostCopyDone;
+  std::array<bool, 2>                                patternsAtDepthHostCopyPending = {false, false};
+  int                                                currentPatternBuffer = 0;  ///< Index of buffer to fill next
+  PinnedHostAllocator                                pinnedAllocator_;
 
-  explicit RecursiveScratchBuffers(cudaStream_t stream) 
-      : patternEntries(), overflow(), labelMatrixBuffer(), intermediateBits() {
+  explicit RecursiveScratchBuffers(cudaStream_t stream)
+      : patternEntries(),
+        overflow(),
+        labelMatrixBuffer(),
+        intermediateBits() {
     patternEntries.setStream(stream);
     overflow.setStream(stream);
     labelMatrixBuffer.setStream(stream);
@@ -206,10 +206,10 @@ struct RecursiveScratchBuffers {
    * For tests and standalone usage.
    */
   void allocateBuffers(int capacity) {
-    const size_t bufferBytes = static_cast<size_t>(capacity) * sizeof(BatchedPatternEntry);
-    pinnedAllocator_         = PinnedHostAllocator(bufferBytes * 2 + 256);
-    patternsAtDepthHost[0]   = pinnedAllocator_.allocate<BatchedPatternEntry>(capacity);
-    patternsAtDepthHost[1]   = pinnedAllocator_.allocate<BatchedPatternEntry>(capacity);
+    const size_t bufferBytes       = static_cast<size_t>(capacity) * sizeof(BatchedPatternEntry);
+    pinnedAllocator_               = PinnedHostAllocator(bufferBytes * 2 + 256);
+    patternsAtDepthHost[0]         = pinnedAllocator_.allocate<BatchedPatternEntry>(capacity);
+    patternsAtDepthHost[1]         = pinnedAllocator_.allocate<BatchedPatternEntry>(capacity);
     patternsAtDepthHostCapacity[0] = capacity;
     patternsAtDepthHostCapacity[1] = capacity;
   }
@@ -218,7 +218,7 @@ struct RecursiveScratchBuffers {
    * @brief Get the current buffer index and advance to next for double-buffering.
    */
   int acquireBufferIndex() {
-    int idx = currentPatternBuffer;
+    int idx              = currentPatternBuffer;
     currentPatternBuffer = 1 - currentPatternBuffer;
     return idx;
   }
@@ -250,11 +250,9 @@ struct RecursiveScratchBuffers {
       return;
     }
     throw std::runtime_error(
-        "Recursive SMARTS pattern count (" + std::to_string(requiredCapacity) +
-        ") exceeds pre-allocated capacity (" + std::to_string(patternsAtDepthHostCapacity[bufferIdx]) +
-        "). Ensure buffers are properly initialized.");
+      "Recursive SMARTS pattern count (" + std::to_string(requiredCapacity) + ") exceeds pre-allocated capacity (" +
+      std::to_string(patternsAtDepthHostCapacity[bufferIdx]) + "). Ensure buffers are properly initialized.");
   }
-
 };
 
 /**
@@ -280,14 +278,14 @@ class MiniBatchResultsDevice {
    * @param maxMatchesToFind Stop searching after this many matches (-1 = no limit)
    * @param countOnly If true, count matches but don't store them
    */
-  void allocateMiniBatch(int         miniBatchSize,
-                         const int*  miniBatchPairMatchStarts,
-                         int         totalMiniBatchMatchIndices,
-                     int         numQueries,
-                     int         maxTargetAtoms,
-                     int         numBuffersPerBlock,
-                     int         maxMatchesToFind = -1,
-                     bool        countOnly = false);
+  void allocateMiniBatch(int        miniBatchSize,
+                         const int* miniBatchPairMatchStarts,
+                         int        totalMiniBatchMatchIndices,
+                         int        numQueries,
+                         int        maxTargetAtoms,
+                         int        numBuffersPerBlock,
+                         int        maxMatchesToFind = -1,
+                         bool       countOnly        = false);
 
   void setStream(cudaStream_t stream);
 
@@ -303,9 +301,7 @@ class MiniBatchResultsDevice {
    * @param hostReportedCounts Output: reported counts for this mini-batch [miniBatchSize]
    * @param hostMatchIndices Output: match indices for this mini-batch
    */
-  void copyMiniBatchToHost(int*     hostMatchCounts,
-                           int*     hostReportedCounts,
-                           int16_t* hostMatchIndices) const;
+  void copyMiniBatchToHost(int* hostMatchCounts, int* hostReportedCounts, int16_t* hostMatchIndices) const;
 
   /**
    * @brief Copy only match counts to host (for boolean output mode).
@@ -319,27 +315,27 @@ class MiniBatchResultsDevice {
 
   void setQueryAtomCounts(const int* queryAtomCounts, size_t count);
 
-  [[nodiscard]] int miniBatchSize() const { return miniBatchSize_; }
-  [[nodiscard]] int numQueries() const { return numQueries_; }
-  [[nodiscard]] int maxTargetAtoms() const { return maxTargetAtoms_; }
-  [[nodiscard]] int overflowBuffersPerBlock() const { return overflowBuffersPerBlock_; }
-  [[nodiscard]] int maxMatchesToFind() const { return maxMatchesToFind_; }
+  [[nodiscard]] int  miniBatchSize() const { return miniBatchSize_; }
+  [[nodiscard]] int  numQueries() const { return numQueries_; }
+  [[nodiscard]] int  maxTargetAtoms() const { return maxTargetAtoms_; }
+  [[nodiscard]] int  overflowBuffersPerBlock() const { return overflowBuffersPerBlock_; }
+  [[nodiscard]] int  maxMatchesToFind() const { return maxMatchesToFind_; }
   [[nodiscard]] bool countOnly() const { return countOnly_; }
 
-  [[nodiscard]] int* matchCounts() const { return matchCounts_.data(); }
-  [[nodiscard]] int* reportedCounts() const { return reportedCounts_.data(); }
-  [[nodiscard]] int* pairMatchStarts() const { return pairMatchStarts_.data(); }
-  [[nodiscard]] int16_t* matchIndices() const { return matchIndices_.data(); }
-  [[nodiscard]] const int* queryAtomCounts() const { return queryAtomCounts_.data(); }
+  [[nodiscard]] int*          matchCounts() const { return matchCounts_.data(); }
+  [[nodiscard]] int*          reportedCounts() const { return reportedCounts_.data(); }
+  [[nodiscard]] int*          pairMatchStarts() const { return pairMatchStarts_.data(); }
+  [[nodiscard]] int16_t*      matchIndices() const { return matchIndices_.data(); }
+  [[nodiscard]] const int*    queryAtomCounts() const { return queryAtomCounts_.data(); }
   [[nodiscard]] PartialMatch* overflowBuffer() const { return overflowBuffer_.data(); }
-  [[nodiscard]] uint32_t* recursiveMatchBits() const { return recursiveMatchBits_.data(); }
-  [[nodiscard]] uint32_t* labelMatrixBuffer() const { return labelMatrixBuffer_.data(); }
+  [[nodiscard]] uint32_t*     recursiveMatchBits() const { return recursiveMatchBits_.data(); }
+  [[nodiscard]] uint32_t*     labelMatrixBuffer() const { return labelMatrixBuffer_.data(); }
 
  private:
   cudaStream_t stream_ = nullptr;
 
-  int miniBatchSize_    = 0;
-  int numQueries_   = 0;
+  int miniBatchSize_  = 0;
+  int numQueries_     = 0;
   int maxTargetAtoms_ = 0;
 
   AsyncDeviceVector<int>     matchCounts_;
@@ -349,7 +345,7 @@ class MiniBatchResultsDevice {
   AsyncDeviceVector<int>     queryAtomCounts_;
 
   AsyncDeviceVector<PartialMatch> overflowBuffer_;
-  int overflowBuffersPerBlock_ = 0;
+  int                             overflowBuffersPerBlock_ = 0;
 
   AsyncDeviceVector<uint32_t> recursiveMatchBits_;
 
@@ -391,7 +387,7 @@ struct RecursivePipelineContext {
   std::array<AsyncDeviceVector<int>, kMaxRecursionDepth + 1> matchMiniBatchLocalIndices;
 
   /// Pointers to pinned buffers for H2D transfers (allocator-backed views)
-  std::array<int*, kMaxRecursionDepth + 1> matchGlobalPairIndicesHost = {};
+  std::array<int*, kMaxRecursionDepth + 1> matchGlobalPairIndicesHost     = {};
   std::array<int*, kMaxRecursionDepth + 1> matchMiniBatchLocalIndicesHost = {};
 
   /// Counts of pairs per depth level (populated during schedule precomputation)
@@ -406,7 +402,7 @@ struct RecursivePipelineContext {
    *
    * The recursive stream gets high priority (lower numerical value),
    * post-recursion stream gets low priority (higher numerical value).
-   * 
+   *
    * @param executorIdx Executor index for unique stream naming
    */
   explicit RecursivePipelineContext(int executorIdx = 0);
@@ -416,10 +412,10 @@ struct RecursivePipelineContext {
    */
   void setPinnedBuffers(const std::array<int*, kMaxRecursionDepth + 1>& globalPairPtrs,
                         const std::array<int*, kMaxRecursionDepth + 1>& miniBatchLocalPtrs,
-                        int capacity) {
-    matchGlobalPairIndicesHost = globalPairPtrs;
+                        int                                             capacity) {
+    matchGlobalPairIndicesHost     = globalPairPtrs;
     matchMiniBatchLocalIndicesHost = miniBatchLocalPtrs;
-    perDepthCapacity           = capacity;
+    perDepthCapacity               = capacity;
   }
 };
 
@@ -479,7 +475,7 @@ void processWithRDKitFallback(const RDKit::ROMol*       target,
                               SubstructSearchResults&   results,
                               std::mutex&               resultsMutex,
                               int                       maxMatches,
-                              HasSubstructMatchResults* boolResults = nullptr,
+                              HasSubstructMatchResults* boolResults  = nullptr,
                               std::vector<int>*         countResults = nullptr);
 
 /**
@@ -495,7 +491,7 @@ class RDKitFallbackQueue {
                      SubstructSearchResults*                 results,
                      std::mutex*                             resultsMutex,
                      int                                     maxMatches,
-                     HasSubstructMatchResults*               boolResults = nullptr,
+                     HasSubstructMatchResults*               boolResults  = nullptr,
                      std::vector<int>*                       countResults = nullptr);
 
   void enqueue(const std::vector<RDKitFallbackEntry>& entries);
@@ -506,13 +502,12 @@ class RDKitFallbackQueue {
   void shutdown();
   void workerLoop();
 
-  [[nodiscard]] size_t processedCount() const;
+  [[nodiscard]] size_t            processedCount() const;
   std::vector<RDKitFallbackEntry> drainToVector();
-  std::mutex& getResultsMutex();
-  bool tryProcessOne();
+  std::mutex&                     getResultsMutex();
+  bool                            tryProcessOne();
 
-  template <typename Predicate>
-  int processWhileWaiting(Predicate shouldStop) {
+  template <typename Predicate> int processWhileWaiting(Predicate shouldStop) {
     int processed = 0;
     while (!shouldStop()) {
       if (!tryProcessOne()) {
@@ -536,13 +531,13 @@ class RDKitFallbackQueue {
   std::mutex*                             resultsMutex_;
   int                                     maxMatches_;
 
-  mutable std::mutex      mutex_;
-  std::condition_variable cv_;
+  mutable std::mutex             mutex_;
+  std::condition_variable        cv_;
   std::queue<RDKitFallbackEntry> queue_;
-  std::atomic<size_t>     queueSize_{0};
-  bool                    shutdown_;
-  int                     activeProducers_;
-  std::atomic<size_t>     processedCount_{0};
+  std::atomic<size_t>            queueSize_{0};
+  bool                           shutdown_;
+  int                            activeProducers_;
+  std::atomic<size_t>            processedCount_{0};
 };
 
 /**
@@ -551,13 +546,16 @@ class RDKitFallbackQueue {
 class FallbackQueueProducerGuard {
  public:
   explicit FallbackQueueProducerGuard(RDKitFallbackQueue* queue) : queue_(queue) {
-    if (queue_) queue_->registerProducer();
+    if (queue_)
+      queue_->registerProducer();
   }
   ~FallbackQueueProducerGuard() {
-    if (queue_) queue_->unregisterProducer();
+    if (queue_)
+      queue_->unregisterProducer();
   }
-  FallbackQueueProducerGuard(const FallbackQueueProducerGuard&) = delete;
+  FallbackQueueProducerGuard(const FallbackQueueProducerGuard&)            = delete;
   FallbackQueueProducerGuard& operator=(const FallbackQueueProducerGuard&) = delete;
+
  private:
   RDKitFallbackQueue* queue_;
 };
@@ -572,23 +570,22 @@ class FallbackQueueProducerGuard {
  * Contains cached data about queries and targets that's reused across mini-batches.
  */
 struct ThreadWorkerContext {
-  const int* queryAtomCounts = nullptr;
-  const int* queryDepths     = nullptr;
-  const int* queryMaxDepths  = nullptr;
-  const int8_t* queryHasPatterns = nullptr;
-  const std::vector<int>* targetAtomCounts = nullptr;
+  const int*              queryAtomCounts       = nullptr;
+  const int*              queryDepths           = nullptr;
+  const int*              queryMaxDepths        = nullptr;
+  const int8_t*           queryHasPatterns      = nullptr;
+  const std::vector<int>* targetAtomCounts      = nullptr;
   const std::vector<int>* targetOriginalIndices = nullptr;
-  int numTargets     = 0;
-  int numQueries     = 0;
-  int maxTargetAtoms = 0;
-  int maxQueryAtoms  = 0;
-  int maxBondsPerAtom = 0;
-  int maxMatches     = 0;
-  bool countOnly     = false;  ///< If true, count matches only (for hasSubstructMatch)
-  SubstructTemplateConfig templateConfig = SubstructTemplateConfig::Config_T128_Q64_B8;
+  int                     numTargets            = 0;
+  int                     numQueries            = 0;
+  int                     maxTargetAtoms        = 0;
+  int                     maxQueryAtoms         = 0;
+  int                     maxBondsPerAtom       = 0;
+  int                     maxMatches            = 0;
+  bool                    countOnly             = false;  ///< If true, count matches only (for hasSubstructMatch)
+  SubstructTemplateConfig templateConfig        = SubstructTemplateConfig::Config_T128_Q64_B8;
 };
 
 }  // namespace nvMolKit
 
 #endif  // NVMOLKIT_SUBSTRUCTURE_SEARCH_INTERNAL_CUH
-

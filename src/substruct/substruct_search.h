@@ -84,4 +84,3 @@ void hasSubstructMatch(const std::vector<const RDKit::ROMol*>& targets,
 }  // namespace nvMolKit
 
 #endif  // NVMOLKIT_SUBSTRUCTURE_SEARCH_H
-

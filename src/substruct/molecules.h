@@ -305,6 +305,22 @@ void addToBatch(const RDKit::ROMol* mol, MoleculesHost& batch);
 void addQueryToBatch(const RDKit::ROMol* mol, MoleculesHost& batch);
 
 /**
+ * @brief Build a target molecule batch in parallel into existing storage.
+ *
+ * Uses direct parallel writing - each thread writes directly to the result
+ * buffer at computed offsets. Reuses result's existing capacity when possible.
+ *
+ * @param result Output batch (will be overwritten)
+ * @param numThreads Number of OpenMP threads to use
+ * @param molecules Vector of molecule pointers
+ * @param sortOrder Optional sort order (empty = use sequential order)
+ */
+void buildTargetBatchParallelInto(MoleculesHost&                          result,
+                                  int                                     numThreads,
+                                  const std::vector<const RDKit::ROMol*>& molecules,
+                                  const std::vector<int>&                 sortOrder);
+
+/**
  * @brief Add a query molecule with explicit child pattern ID mapping.
  *
  * Used when adding cached recursive patterns. The childPatternIds vector maps
@@ -315,6 +331,21 @@ void addQueryToBatch(const RDKit::ROMol* mol, MoleculesHost& batch);
  * @param childPatternIds Map from local index (0, 1, ...) to global patternId
  */
 void addQueryToBatch(const RDKit::ROMol* mol, MoleculesHost& batch, const std::vector<int>& childPatternIds);
+
+/**
+ * @brief Build a query molecule batch in parallel using OpenMP.
+ *
+ * Processes molecules in parallel when numThreads > 1. The molecules are added
+ * in the order specified by sortOrder (or sequential order if sortOrder is empty).
+ *
+ * @param molecules Vector of molecule pointers
+ * @param sortOrder Optional sort order (empty = use sequential order)
+ * @param numThreads Number of OpenMP threads (1 = serial)
+ * @return Populated MoleculesHost batch
+ */
+MoleculesHost buildQueryBatchParallel(const std::vector<const RDKit::ROMol*>& molecules,
+                                      const std::vector<int>&                 sortOrder,
+                                      int                                     numThreads);
 
 /**
  * @brief Convert RDKit query description string to AtomQuery flags.
@@ -360,6 +391,30 @@ RecursivePatternInfo extractRecursivePatterns(const RDKit::ROMol* mol);
  * @return true if the query contains any recursive SMARTS ($(...))
  */
 bool hasRecursiveSmarts(const RDKit::ROMol* mol);
+
+/**
+ * @brief Check if a target molecule requires RDKit fallback processing.
+ *
+ * Detects molecules with properties that exceed GPU processing limits:
+ * - Atom degree > 8 (hypervalent atoms)
+ * - Atom ring count > 15 (e.g., buckyballs)
+ * - Ring bond count > 15
+ * - Implicit H count > 15
+ * - Heteroatom neighbor count > 15
+ *
+ * @param mol The molecule to check
+ * @return true if the molecule cannot be processed on GPU and needs RDKit fallback
+ */
+bool requiresRDKitFallback(const RDKit::ROMol* mol);
+
+/**
+ * @brief Get the recursion depth for a query in a batch.
+ *
+ * @param queriesHost The host batch containing the query
+ * @param queryIdx Index of the query in the batch
+ * @return 0 if no recursive patterns, otherwise maxDepth + 1
+ */
+int getQueryRecursionDepth(const MoleculesHost& queriesHost, int queryIdx);
 
 }  // namespace nvMolKit
 

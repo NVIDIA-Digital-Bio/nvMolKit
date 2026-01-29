@@ -19,13 +19,26 @@
 #include <string>
 
 #include "nvtx3/nvToolsExt.h"
+#include "nvtx3/nvToolsExtCudaRt.h"
 
 namespace nvMolKit {
 
+namespace NvtxColor {
+constexpr uint32_t kGrey   = 0xFF808080;
+constexpr uint32_t kRed    = 0xFFFF0000;
+constexpr uint32_t kGreen  = 0xFF00FF00;
+constexpr uint32_t kBlue   = 0xFF0000FF;
+constexpr uint32_t kYellow = 0xFFFFFF00;
+constexpr uint32_t kCyan   = 0xFF00FFFF;
+constexpr uint32_t kOrange = 0xFFFFA500;
+}  // namespace NvtxColor
+
 class ScopedNvtxRange {
  public:
-  explicit ScopedNvtxRange(const std::string& name) { nvtxRangePushA(name.c_str()); }
-  explicit ScopedNvtxRange(const char* name) { nvtxRangePushA(name); }
+  explicit ScopedNvtxRange(const std::string& name, uint32_t color = NvtxColor::kGrey) {
+    pushWithColor(name.c_str(), color);
+  }
+  explicit ScopedNvtxRange(const char* name, uint32_t color = NvtxColor::kGrey) { pushWithColor(name, color); }
   ScopedNvtxRange(const ScopedNvtxRange&)            = delete;
   ScopedNvtxRange& operator=(const ScopedNvtxRange&) = delete;
   ScopedNvtxRange(ScopedNvtxRange&&)                 = delete;
@@ -41,6 +54,17 @@ class ScopedNvtxRange {
   ~ScopedNvtxRange() noexcept { pop(); }
 
  private:
+  void pushWithColor(const char* name, uint32_t color) {
+    nvtxEventAttributes_t attrib = {0};
+    attrib.version               = NVTX_VERSION;
+    attrib.size                  = NVTX_EVENT_ATTRIB_STRUCT_SIZE;
+    attrib.colorType             = NVTX_COLOR_ARGB;
+    attrib.color                 = color;
+    attrib.messageType           = NVTX_MESSAGE_TYPE_ASCII;
+    attrib.message.ascii         = name;
+    nvtxRangePushEx(&attrib);
+  }
+
   bool popped_ = false;
 };
 

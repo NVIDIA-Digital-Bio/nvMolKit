@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -47,19 +47,19 @@ using nvMolKit::extractRecursivePatterns;
 using nvMolKit::FlatBitVect;
 using nvMolKit::hasRecursiveSmarts;
 using nvMolKit::kMaxQueryAtoms;
+using nvMolKit::kMaxRecursionDepth;
 using nvMolKit::kMaxTargetAtoms;
+using nvMolKit::LeafSubpatterns;
+using nvMolKit::MiniBatchResultsDevice;
 using nvMolKit::MoleculesDevice;
 using nvMolKit::MoleculesHost;
 using nvMolKit::preprocessRecursiveSmartsBatchedWithEvents;
-using nvMolKit::LeafSubpatterns;
 using nvMolKit::RecursivePatternInfo;
 using nvMolKit::RecursiveScratchBuffers;
-using nvMolKit::kMaxRecursionDepth;
 using nvMolKit::ScopedStream;
 using nvMolKit::SubstructAlgorithm;
 using nvMolKit::SubstructSearchResults;
 using nvMolKit::SubstructTemplateConfig;
-using nvMolKit::MiniBatchResultsDevice;
 
 namespace {
 
@@ -246,25 +246,25 @@ TEST_F(RecursiveInstructionTest, NegatedRecursivePattern) {
 
 class RecursivePaintTest : public ::testing::Test {
  protected:
-  ScopedStream stream_;
+  ScopedStream                            stream_;
   std::unique_ptr<MiniBatchResultsDevice> results_;
-  int maxTargetAtoms_ = 0;
-  int numTargets_ = 0;
-  int numQueries_ = 1;
+  int                                     maxTargetAtoms_ = 0;
+  int                                     numTargets_     = 0;
+  int                                     numQueries_     = 1;
 
   void setupResults(const MoleculesHost& targetsHost, int numQueries = 1) {
     const int numTargets = static_cast<int>(targetsHost.numMolecules());
-    numTargets_ = numTargets;
-    numQueries_ = numQueries;
+    numTargets_          = numTargets;
+    numQueries_          = numQueries;
 
     std::vector<int> queryAtomCounts(numQueries, 1);
     maxTargetAtoms_ = 0;
     for (int t = 0; t < numTargets; ++t) {
-      int atomCount = targetsHost.batchAtomStarts[t + 1] - targetsHost.batchAtomStarts[t];
+      int atomCount   = targetsHost.batchAtomStarts[t + 1] - targetsHost.batchAtomStarts[t];
       maxTargetAtoms_ = std::max(maxTargetAtoms_, atomCount);
     }
 
-    const int miniBatchSize = numTargets * numQueries;
+    const int        miniBatchSize = numTargets * numQueries;
     std::vector<int> miniBatchPairMatchStarts(miniBatchSize + 1, 0);
 
     results_ = std::make_unique<MiniBatchResultsDevice>(stream_.stream());
@@ -273,14 +273,10 @@ class RecursivePaintTest : public ::testing::Test {
     results_->zeroRecursiveBits();
   }
 
-  void verifyRecursiveBitSet(int targetMolIdx,
-                             int targetAtomIdx,
-                             int patternId,
-                             bool expectedSet,
-                             int queryIdx = 0) {
+  void verifyRecursiveBitSet(int targetMolIdx, int targetAtomIdx, int patternId, bool expectedSet, int queryIdx = 0) {
     ASSERT_NE(results_, nullptr) << "Results not initialized - call setupResults first";
 
-    const int pairIdx = targetMolIdx * results_->numQueries() + queryIdx;
+    const int pairIdx   = targetMolIdx * results_->numQueries() + queryIdx;
     const int bufferIdx = pairIdx * maxTargetAtoms_ + targetAtomIdx;
 
     std::vector<uint32_t> hostBits(1);
@@ -292,8 +288,8 @@ class RecursivePaintTest : public ::testing::Test {
     cudaCheckError(cudaStreamSynchronize(stream_.stream()));
 
     bool isSet = (hostBits[0] >> patternId) & 1u;
-    EXPECT_EQ(isSet, expectedSet) << "Target mol " << targetMolIdx << ", atom " << targetAtomIdx
-                                  << ", pattern " << patternId << " expected " << (expectedSet ? "set" : "unset");
+    EXPECT_EQ(isSet, expectedSet) << "Target mol " << targetMolIdx << ", atom " << targetAtomIdx << ", pattern "
+                                  << patternId << " expected " << (expectedSet ? "set" : "unset");
   }
 
   void preprocessRecursive(const MoleculesDevice& targetDevice,
@@ -306,14 +302,23 @@ class RecursivePaintTest : public ::testing::Test {
     leafSubpatterns.buildAllPatterns(queryHost);
     leafSubpatterns.syncToDevice(stream_.stream());
 
-    RecursiveScratchBuffers          scratch(stream_.stream());
+    RecursiveScratchBuffers scratch(stream_.stream());
     scratch.allocateBuffers(256);
     std::vector<BatchedPatternEntry> scratchPatternEntries;
     preprocessRecursiveSmartsBatchedWithEvents(SubstructTemplateConfig::Config_T128_Q64_B8,
-                                               targetDevice, queryHost, leafSubpatterns, *results_,
-                                               numQueries_, 0, numTargets_ * numQueries_,
-                                               SubstructAlgorithm::GSI, stream_.stream(), scratch,
-                                               scratchPatternEntries, nullptr, 0);
+                                               targetDevice,
+                                               queryHost,
+                                               leafSubpatterns,
+                                               *results_,
+                                               numQueries_,
+                                               0,
+                                               numTargets_ * numQueries_,
+                                               SubstructAlgorithm::GSI,
+                                               stream_.stream(),
+                                               scratch,
+                                               scratchPatternEntries,
+                                               nullptr,
+                                               0);
     cudaCheckError(cudaStreamSynchronize(stream_.stream()));
   }
 };
@@ -421,9 +426,9 @@ TEST_F(RecursivePaintTest, MultipleTargetMolecules) {
   // Target 1: CN -> C(0)-N(1)
   // Target 2: CC -> C(0)-C(1), no N
   // Target 3: NCN -> N(0)-C(1)-N(2)
-  auto target1 = makeMolFromSmiles("CN");
-  auto target2 = makeMolFromSmiles("CC");
-  auto target3 = makeMolFromSmiles("NCN");
+  auto target1  = makeMolFromSmiles("CN");
+  auto target2  = makeMolFromSmiles("CC");
+  auto target3  = makeMolFromSmiles("NCN");
   auto queryMol = makeMolFromSmarts("[$(*-N)]");
   ASSERT_NE(target1, nullptr);
   ASSERT_NE(target2, nullptr);
@@ -587,9 +592,8 @@ class RecursiveLabelingTest : public ::testing::Test {
     for (int i = 0; i < numTargetAtoms; ++i) {
       ASSERT_EQ(expectedMatrix[i].size(), numQueryAtoms);
       for (int j = 0; j < numQueryAtoms; ++j) {
-        EXPECT_EQ(gpuMatrix[i][j], expectedMatrix[i][j])
-          << "Mismatch at target atom " << i << ", query atom " << j << " for target=" << targetSmiles
-          << ", query=" << querySmarts;
+        EXPECT_EQ(gpuMatrix[i][j], expectedMatrix[i][j]) << "Mismatch at target atom " << i << ", query atom " << j
+                                                         << " for target=" << targetSmiles << ", query=" << querySmarts;
       }
     }
   }
@@ -609,18 +613,14 @@ class RecursiveLabelingTest : public ::testing::Test {
 TEST_F(RecursiveLabelingTest, SimpleRecursiveMatch) {
   // CN: C(0) has recursive bit (bonded to N), N(1) does not
   std::vector<std::vector<uint8_t>> expected = {
-    {true},   // C has bit set
-    {false}   // N does not have bit set
+    {true},  // C has bit set
+    {false}  // N does not have bit set
   };
   runRecursiveLabelingTest("CN", "[$(*-N)]", expected);
 }
 
 TEST_F(RecursiveLabelingTest, RecursiveNoMatch) {
-  std::vector<std::vector<uint8_t>> expected = {
-    {false},
-    {false},
-    {false}
-  };
+  std::vector<std::vector<uint8_t>> expected = {{false}, {false}, {false}};
   runRecursiveLabelingTest("CCC", "[$(*-N)]", expected);
 }
 
@@ -635,18 +635,12 @@ TEST_F(RecursiveLabelingTest, RecursivePartialMatch) {
 }
 
 TEST_F(RecursiveLabelingTest, RecursiveWithAtomType) {
-  std::vector<std::vector<uint8_t>> expected = {
-    {true},
-    {false}
-  };
+  std::vector<std::vector<uint8_t>> expected = {{true}, {false}};
   runRecursiveLabelingTest("CN", "[C;$(*-N)]", expected);
 }
 
 TEST_F(RecursiveLabelingTest, RecursiveWithAtomTypeNoMatch) {
-  std::vector<std::vector<uint8_t>> expected = {
-    {false},
-    {false}
-  };
+  std::vector<std::vector<uint8_t>> expected = {{false}, {false}};
   runRecursiveLabelingTest("CC", "[C;$(*-N)]", expected);
 }
 
@@ -665,8 +659,8 @@ TEST_F(RecursiveLabelingTest, TwoAtomQueryWithRecursive) {
   // CN: C(0) has bit, N(1) does not
   // Query: q0=[$(*-N)], q1=N
   std::vector<std::vector<uint8_t>> expected = {
-    {true, false},   // C: has bit (matches q0), not N (fails q1)
-    {false, true}    // N: no bit (fails q0), is N (matches q1)
+    { true, false}, // C: has bit (matches q0), not N (fails q1)
+    {false,  true}  // N: no bit (fails q0), is N (matches q1)
   };
   runRecursiveLabelingTest("CN", "[$(*-N)]N", expected);
 }
@@ -675,9 +669,9 @@ TEST_F(RecursiveLabelingTest, RecursiveOrAtomType) {
   // CCN: C(0) no bit, C(1) has bit, N(2) no bit
   // Query [C,$(*-N)] = aliphatic C OR has-recursive-bit
   std::vector<std::vector<uint8_t>> expected = {
-    {true},   // C(0): is C -> matches
-    {true},   // C(1): is C (or has bit) -> matches
-    {false}   // N(2): not C, no bit -> fails
+    {true},  // C(0): is C -> matches
+    {true},  // C(1): is C (or has bit) -> matches
+    {false}  // N(2): not C, no bit -> fails
   };
   runRecursiveLabelingTest("CCN", "[C,$(*-N)]", expected);
 }
@@ -704,9 +698,9 @@ TEST_F(RecursiveLabelingTest, MultipleRecursivePatternsInQuery) {
   // Pattern 1 (*-O): N(1) gets bit 1
   // Query: q0=[$(*-N)] (has p0), q1=[$(*-O)] (has p1)
   std::vector<std::vector<uint8_t>> expected = {
-    {true, false},   // C: has p0 (matches q0), no p1 (fails q1)
-    {false, true},   // N: no p0 (fails q0), has p1 (matches q1)
-    {true, false}    // O: has p0 (matches q0), no p1 (fails q1)
+    { true, false}, // C: has p0 (matches q0), no p1 (fails q1)
+    {false,  true}, // N: no p0 (fails q0), has p1 (matches q1)
+    { true, false}  // O: has p0 (matches q0), no p1 (fails q1)
   };
   runRecursiveLabelingTest("CNO", "[$(*-N)][$(*-O)]", expected);
 }
@@ -742,15 +736,7 @@ TEST_F(RecursiveLabelingTest, ChainedRecursiveOnSameAtom) {
 }
 
 TEST_F(RecursiveLabelingTest, RecursiveWithAromaticity) {
-  std::vector<std::vector<uint8_t>> expected = {
-    {false},
-    {false},
-    {false},
-    {false},
-    {false},
-    {false},
-    {false}
-  };
+  std::vector<std::vector<uint8_t>> expected = {{false}, {false}, {false}, {false}, {false}, {false}, {false}};
   runRecursiveLabelingTest("c1ccccc1N", "[c;$(*-n)]", expected);
 }
 
@@ -844,7 +830,7 @@ TEST(RecursiveLabelerEdgeCases, MaxRecursionDepthThrowsOnPreprocess) {
   const std::string deeplyNested = "[$([*;$([*;$([*;$([*;$(*-N)])])])])]";
 
   auto targetMol = makeMolFromSmiles("CCCCN");
-  auto queryMol = makeMolFromSmarts(deeplyNested);
+  auto queryMol  = makeMolFromSmarts(deeplyNested);
   ASSERT_NE(targetMol, nullptr);
   ASSERT_NE(queryMol, nullptr);
 
@@ -852,14 +838,13 @@ TEST(RecursiveLabelerEdgeCases, MaxRecursionDepthThrowsOnPreprocess) {
   auto info = extractRecursivePatterns(queryMol.get());
   ASSERT_GE(info.maxDepth, kMaxRecursionDepth) << "Test pattern does not exceed depth limit";
 
-  ScopedStream stream;
+  ScopedStream                     stream;
   std::vector<const RDKit::ROMol*> targets = {targetMol.get()};
   std::vector<const RDKit::ROMol*> queries = {queryMol.get()};
 
   nvMolKit::SubstructSearchResults results;
-  EXPECT_THROW(
-    nvMolKit::getSubstructMatches(targets, queries, results, SubstructAlgorithm::GSI, stream.stream()),
-    std::runtime_error);
+  EXPECT_THROW(nvMolKit::getSubstructMatches(targets, queries, results, SubstructAlgorithm::GSI, stream.stream()),
+               std::runtime_error);
 }
 
 // =============================================================================
@@ -872,5 +857,3 @@ TEST_F(RecursiveLabelingTest, NestedRecursiveMatchVsRDKit) {
   runRecursiveLabelingTestVsRDKit("CNOF", "[$([*;$([*;$(*-F)])])]");
   runRecursiveLabelingTestVsRDKit("c1ccccc1N", "[$([c;$(*-N)])]");
 }
-
-
