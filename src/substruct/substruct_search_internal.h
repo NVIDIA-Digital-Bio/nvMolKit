@@ -252,6 +252,51 @@ class FallbackQueueProducerGuard {
   RDKitFallbackQueue* queue_;
 };
 
+// =============================================================================
+// Batch Results Accumulation
+// =============================================================================
+
+class GpuExecutor;
+struct PinnedHostBuffer;
+
+/**
+ * @brief Initiate async D2H copy of full match results.
+ */
+void initiateResultsCopyToHost(GpuExecutor& executor, const PinnedHostBuffer& hostBuffer);
+
+/**
+ * @brief Initiate async D2H copy of match counts only.
+ */
+void initiateCountsOnlyCopyToHost(GpuExecutor& executor, const PinnedHostBuffer& hostBuffer);
+
+/**
+ * @brief Accumulate full match results from a completed mini-batch.
+ */
+void accumulateMiniBatchResults(GpuExecutor&               executor,
+                                const ThreadWorkerContext& ctx,
+                                SubstructSearchResults&    results,
+                                std::mutex&                resultsMutex,
+                                const PinnedHostBuffer&    hostBuffer,
+                                RDKitFallbackQueue*        fallbackQueue = nullptr);
+
+/**
+ * @brief Accumulate boolean match results from a completed mini-batch.
+ */
+void accumulateMiniBatchResultsBoolean(GpuExecutor&               executor,
+                                       const ThreadWorkerContext& ctx,
+                                       HasSubstructMatchResults&  results,
+                                       std::mutex&                resultsMutex,
+                                       const PinnedHostBuffer&    hostBuffer);
+
+/**
+ * @brief Accumulate match count results from a completed mini-batch.
+ */
+void accumulateMiniBatchResultsCounts(GpuExecutor&               executor,
+                                      const ThreadWorkerContext& ctx,
+                                      std::vector<int>&          counts,
+                                      std::mutex&                resultsMutex,
+                                      const PinnedHostBuffer&    hostBuffer);
+
 }  // namespace nvMolKit
 
 #endif  // NVMOLKIT_SUBSTRUCTURE_SEARCH_INTERNAL_H

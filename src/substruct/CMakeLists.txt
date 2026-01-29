@@ -36,7 +36,7 @@ target_include_directories(substruct_definitions
         INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(substructure_search substruct_search.cu gpu_executor.cu recursive_preprocessor.cu
-        minibatch_planner.cpp pinned_buffer_pool.cpp substruct_launch_config.cpp)
+        minibatch_planner.cpp pinned_buffer_pool.cpp substruct_launch_config.cpp batch_results.cpp)
 target_include_directories(substructure_search
         PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(substructure_search PUBLIC molecules device_vector
