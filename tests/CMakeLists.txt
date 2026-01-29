@@ -55,6 +55,9 @@ target_link_libraries(test_flat_bit_vect_device PRIVATE flatBitVect device
 add_executable(test_work_splitting test_work_splitting.cpp)
 target_link_libraries(test_work_splitting PRIVATE work_splitting)
 
+add_executable(test_thread_safe_queue test_thread_safe_queue.cpp)
+target_link_libraries(test_thread_safe_queue PRIVATE thread_safe_queue)
+
 add_executable(test_openmp_helpers test_openmp_helpers.cpp)
 target_link_libraries(test_openmp_helpers PRIVATE openmp_helpers
                                                   OpenMP::OpenMP_CXX)
@@ -235,6 +238,7 @@ set(TEST_LIST
     test_rdkit_comp
     test_rdkit_bounds_matrix
     test_similarity
+    test_thread_safe_queue
     test_work_splitting)
 
 # Auto populate the NVMOLKIT_TESTDATA environment variable for ctest.
