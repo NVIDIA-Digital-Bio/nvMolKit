@@ -239,7 +239,7 @@ __device__ void vf2SearchGPU(const TargetMoleculeView&                          
       --state.depth;
       if (state.depth > 0) {
         ++state.candidateIdx[state.depth];
-      } else if (state.depth == 0) {
+      } else {
         // Exhausted this starting point
         break;
       }
@@ -279,6 +279,8 @@ __device__ void vf2SearchGPU(const TargetMoleculeView&                          
  * @param countOnly If true, count matches but don't store them
  * @param timings Optional timing data collection
  * @param overflowFlag Output: set to 1 if partial or output buffers overflow (nullptr to skip)
+
+ // TODO: Separate out match-writing logic from main BFS logic, as it can only happen on the last step.
  */
 template <std::size_t         MaxTargetAtoms,
           std::size_t         MaxQueryAtoms,
