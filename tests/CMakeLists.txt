@@ -204,6 +204,11 @@ target_link_libraries(test_query PRIVATE molecules device ${RDKit_LIBS})
 add_executable(test_graph_labeler test_graph_labeler.cu)
 target_link_libraries(test_graph_labeler PRIVATE molecules device substruct_validation ${RDKit_LIBS})
 
+add_executable(test_substruct_algos test_substruct_algos.cu)
+target_link_libraries(test_substruct_algos PRIVATE
+        substruct_definitions molecules device flatBitVect device_vector device_timings)
+
+
 set(TEST_LIST
     test_boolean_tree
     test_butina
@@ -238,6 +243,7 @@ set(TEST_LIST
     test_rdkit_comp
     test_rdkit_bounds_matrix
     test_similarity
+    test_substruct_algos
     test_thread_safe_queue
     test_work_splitting)
 
