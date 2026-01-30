@@ -18,7 +18,6 @@
 #include <GraphMol/SmilesParse/SmilesParse.h>
 #include <gtest/gtest.h>
 
-#include <iostream>
 #include <memory>
 #include <vector>
 
@@ -28,25 +27,14 @@
 #include "graph_labeler.cuh"
 #include "molecules.h"
 #include "molecules_device.cuh"
-#include "substruct_types.h"
 #include "testutils/substruct_validation.h"
 
 using nvMolKit::addQueryToBatch;
-using nvMolKit::addToBatch;
-using nvMolKit::AsyncDeviceVector;
 using nvMolKit::AtomQuery;
 using nvMolKit::AtomQueryAtomicNum;
-using nvMolKit::AtomQueryIsAliphatic;
 using nvMolKit::AtomQueryIsAromatic;
-using nvMolKit::BitMatrix2DView;
-using nvMolKit::checkReturnCode;
 using nvMolKit::compareLabelMatrices;
 using nvMolKit::computeGpuLabelMatrix;
-using nvMolKit::computeRDKitLabelMatrix;
-using nvMolKit::FlatBitVect;
-using nvMolKit::kMaxQueryAtoms;
-using nvMolKit::kMaxTargetAtoms;
-using nvMolKit::MoleculesDevice;
 using nvMolKit::MoleculesHost;
 using nvMolKit::ScopedStream;
 
@@ -61,9 +49,6 @@ std::unique_ptr<RDKit::ROMol> makeMolFromSmarts(const std::string& smarts) {
   auto mol = std::unique_ptr<RDKit::ROMol>(RDKit::SmartsToMol(smarts));
   return mol;
 }
-
-using LabelMatrixStorage = FlatBitVect<kMaxTargetAtoms * kMaxQueryAtoms>;
-using LabelMatrixView    = BitMatrix2DView<kMaxTargetAtoms, kMaxQueryAtoms>;
 
 }  // namespace
 
@@ -98,17 +83,6 @@ class GraphLabelerTest : public ::testing::Test {
                                                          << " for target=" << targetSmiles << ", query=" << querySmarts;
       }
     }
-  }
-
-  void runLabelingTestVsRDKit(const std::string& targetSmiles, const std::string& querySmarts) {
-    auto targetMol = makeMolFromSmiles(targetSmiles);
-    auto queryMol  = makeMolFromSmarts(querySmarts);
-    ASSERT_NE(targetMol, nullptr) << "Failed to parse target: " << targetSmiles;
-    ASSERT_NE(queryMol, nullptr) << "Failed to parse query: " << querySmarts;
-
-    auto result = compareLabelMatrices(*targetMol, *queryMol, stream_.stream());
-    EXPECT_TRUE(result.allMatch) << "GPU/RDKit mismatch for target=" << targetSmiles << ", query=" << querySmarts
-                                 << " (FP=" << result.falsePositives << ", FN=" << result.falseNegatives << ")";
   }
 };
 
