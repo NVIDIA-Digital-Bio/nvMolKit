@@ -61,3 +61,6 @@ target_include_directories(cub_helpers INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 add_library(device_timings INTERFACE)
 target_link_libraries(device_timings INTERFACE cuda_error_check)
 target_include_directories(device_timings INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_library(thread_safe_queue INTERFACE)
+target_include_directories(thread_safe_queue INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
