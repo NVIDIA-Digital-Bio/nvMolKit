@@ -18,6 +18,12 @@
 
 #include <cstddef>
 
+#ifdef __CUDACC__
+#define NVMOLKIT_HOST_DEVICE __host__ __device__
+#else
+#define NVMOLKIT_HOST_DEVICE
+#endif
+
 namespace nvMolKit {
 
 /**
@@ -25,10 +31,10 @@ namespace nvMolKit {
  *
  * Values represent the maximum configurable shared memory per SM.
  * Only specific known architectures get their actual limits; others default to 100 KB.
+ *
+ * @param sm Combined SM version (e.g., 86 for SM 8.6, 90 for SM 9.0)
  */
-constexpr int getMaxSharedMemoryPerSM_KB(const int smMajor, const int smMinor = 0) {
-  const int sm = smMajor * 10 + smMinor;
-
+NVMOLKIT_HOST_DEVICE constexpr int getMaxSharedMemoryPerSM_KB(const int sm) {
   if (sm >= 120)
     return 128;  // SM 12.0+ (Blackwell RTX)
   if (sm >= 100)
@@ -42,21 +48,40 @@ constexpr int getMaxSharedMemoryPerSM_KB(const int smMajor, const int smMinor = 
 }
 
 /**
+ * @brief Maximum shared memory per SM in KB for each compute capability.
+ *
+ * @param smMajor SM major version
+ * @param smMinor SM minor version (default 0)
+ */
+NVMOLKIT_HOST_DEVICE constexpr int getMaxSharedMemoryPerSM_KB(const int smMajor, const int smMinor) {
+  return getMaxSharedMemoryPerSM_KB(smMajor * 10 + smMinor);
+}
+
+/**
  * @brief Maximum shared memory per SM in bytes.
  */
-constexpr std::size_t getMaxSharedMemoryPerSM(const int smMajor, const int smMinor = 0) {
+NVMOLKIT_HOST_DEVICE constexpr std::size_t getMaxSharedMemoryPerSM(const int sm) {
+  return static_cast<std::size_t>(getMaxSharedMemoryPerSM_KB(sm)) * 1024;
+}
+
+NVMOLKIT_HOST_DEVICE constexpr std::size_t getMaxSharedMemoryPerSM(const int smMajor, const int smMinor) {
   return static_cast<std::size_t>(getMaxSharedMemoryPerSM_KB(smMajor, smMinor)) * 1024;
 }
 
 /**
  * @brief Calculate shared memory per block for a target number of blocks per SM.
  *
- * @param smMajor SM major version
- * @param smMinor SM minor version
+ * @param sm Combined SM version (e.g., 86 for SM 8.6)
  * @param blocksPerSM Target blocks per SM for occupancy
  * @return Shared memory budget per block in bytes
  */
-constexpr std::size_t getSharedMemoryPerBlock(const int smMajor, const int smMinor, int blocksPerSM) {
+NVMOLKIT_HOST_DEVICE constexpr std::size_t getSharedMemoryPerBlock(const int sm, int blocksPerSM) {
+  return getMaxSharedMemoryPerSM(sm) / blocksPerSM;
+}
+
+NVMOLKIT_HOST_DEVICE constexpr std::size_t getSharedMemoryPerBlock(const int smMajor,
+                                                                   const int smMinor,
+                                                                   int       blocksPerSM) {
   return getMaxSharedMemoryPerSM(smMajor, smMinor) / blocksPerSM;
 }
 
@@ -74,10 +99,10 @@ constexpr std::size_t getSharedMemoryPerBlock(const int smMajor, const int smMin
  * @param usePingPong If true, budget covers 2 buffers; if false, single buffer
  * @return Number of PartialMatch entries per buffer (multiple of 10)
  */
-constexpr int calculateMaxPartials(const std::size_t sharedMemBudget,
-                                   const std::size_t labelMatrixBytes = 1024,
-                                   const std::size_t controlVarsBytes = 32,
-                                   const bool        usePingPong      = true) {
+NVMOLKIT_HOST_DEVICE constexpr int calculateMaxPartials(const std::size_t sharedMemBudget,
+                                                        const std::size_t labelMatrixBytes = 1024,
+                                                        const std::size_t controlVarsBytes = 32,
+                                                        const bool        usePingPong      = true) {
   constexpr std::size_t kPartialMatchSize = 65;  // sizeof(PartialMatch)
 
   const std::size_t available        = (sharedMemBudget * 9 / 10) - labelMatrixBytes - controlVarsBytes;

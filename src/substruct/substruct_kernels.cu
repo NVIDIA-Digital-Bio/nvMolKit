@@ -16,6 +16,7 @@
 #include "flat_bit_vect.h"
 #include "graph_labeler.cuh"
 #include "molecules_device.cuh"
+#include "sm_shared_mem_config.cuh"
 #include "substruct_algos.cuh"
 #include "substruct_debug.h"
 #include "substruct_kernels.h"
@@ -70,21 +71,8 @@ template <std::size_t MaxQueryAtoms = kMaxQueryAtoms> struct SubstructMatchResul
 };
 
 // =============================================================================
-// Architecture-Specific Shared Memory Configuration
+// Architecture-Specific Thread Configuration
 // =============================================================================
-
-/// Shared memory per SM in KiB for each compute capability
-__host__ __device__ constexpr int getSharedMemPerSM_KiB(int sm) {
-  if (sm >= 120)
-    return 128;  // SM 12.0+
-  if (sm >= 100)
-    return 228;  // SM 10.0+ (Blackwell)
-  if (sm >= 90)
-    return 228;  // SM 9.0+ (Hopper)
-  if (sm == 80)
-    return 160;  // SM 8.0 (Ampere A100)
-  return 100;    // SM 8.6/8.9 (Ada), default
-}
 
 /// Max threads per SM for each compute capability
 __host__ __device__ constexpr int getMaxThreadsPerSM(int sm) {
@@ -104,14 +92,14 @@ __host__ __device__ constexpr int getMaxBlocksPerSM(int sm, int blockSize) {
 
 /// Compute max partials that fit in shared memory budget
 template <std::size_t MaxTargetAtoms, std::size_t MaxQueryAtoms>
-__host__ __device__ constexpr int computeMaxPartials(int sharedPerSM_KiB, int blocksPerSM) {
+__host__ __device__ constexpr int computeMaxPartials(int sharedPerSM_KB, int blocksPerSM) {
   constexpr int kLabelMatrixBytes = (MaxTargetAtoms * MaxQueryAtoms) / 8;
   constexpr int kControlVarsBytes = 32;
   constexpr int kPartialMatchSize = sizeof(PartialMatchT<MaxQueryAtoms>);
   constexpr int kTargetBondsBytes = MaxTargetAtoms * sizeof(TargetAtomBonds);
   constexpr int kQueryBondsBytes  = MaxQueryAtoms * sizeof(QueryAtomBonds);
 
-  const int budgetBytes    = (sharedPerSM_KiB * 1024) / blocksPerSM;
+  const int budgetBytes    = (sharedPerSM_KB * 1024) / blocksPerSM;
   const int fixedOverhead  = kLabelMatrixBytes + kControlVarsBytes + kTargetBondsBytes + kQueryBondsBytes;
   const int availableBytes = (budgetBytes * 9 / 10) - fixedOverhead;
   if (availableBytes < kPartialMatchSize * 2) {
@@ -125,7 +113,8 @@ __host__ __device__ constexpr int computeMaxPartials(int sharedPerSM_KiB, int bl
 /// Compute partials for a given SM architecture
 template <std::size_t MaxTargetAtoms, std::size_t MaxQueryAtoms>
 __host__ __device__ constexpr int getMaxPartialsForSM(int sm, int blockSize) {
-  return computeMaxPartials<MaxTargetAtoms, MaxQueryAtoms>(getSharedMemPerSM_KiB(sm), getMaxBlocksPerSM(sm, blockSize));
+  return computeMaxPartials<MaxTargetAtoms, MaxQueryAtoms>(getMaxSharedMemoryPerSM_KB(sm),
+                                                           getMaxBlocksPerSM(sm, blockSize));
 }
 
 // Compute at compile time based on __CUDA_ARCH__
