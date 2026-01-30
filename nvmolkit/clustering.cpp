@@ -14,28 +14,52 @@
 // limitations under the License.
 
 #include <boost/python.hpp>
+#include <boost/python/manage_new_object.hpp>
 #include <memory>
 
 #include "array_helpers.h"
 #include "butina.h"
 
+namespace {
+
+boost::python::object toOwnedPyArray(nvMolKit::PyArray* array) {
+  using Converter = boost::python::manage_new_object::apply<nvMolKit::PyArray*>::type;
+  return boost::python::object(boost::python::handle<>(Converter()(array)));
+}
+
+}  // namespace
+
 BOOST_PYTHON_MODULE(_clustering) {
   boost::python::def(
     "butina",
-    +[](const boost::python::dict& distanceMatrix, const double cutoff, const int neighborlistMaxSize) {
+    +[](const boost::python::dict& distanceMatrix,
+        const double               cutoff,
+        const int                  neighborlistMaxSize,
+        const bool                 returnCentroids) -> boost::python::object {
       // Extract boost::python::tuple from dict['shape']
       boost::python::tuple             shape   = boost::python::extract<boost::python::tuple>(distanceMatrix["shape"]);
       const size_t                     matDim1 = boost::python::extract<size_t>(shape[0]);
       nvMolKit::AsyncDeviceVector<int> clusterIds(matDim1);
+      nvMolKit::AsyncDeviceVector<int> centroids;
 
       boost::python::tuple data        = boost::python::extract<boost::python::tuple>(distanceMatrix["data"]);
       const size_t         dataPointer = boost::python::extract<std::size_t>(data[0]);
       const auto matSpan = nvMolKit::getSpanFromDictElems<double>(reinterpret_cast<void*>(dataPointer), shape);
-      nvMolKit::butinaGpu(matSpan, toSpan(clusterIds), cutoff, neighborlistMaxSize);
-      return nvMolKit::makePyArray(clusterIds, boost::python::make_tuple(matDim1));
+      if (returnCentroids) {
+        centroids.resize(matDim1);
+        const int numClusters =
+          nvMolKit::butinaGpu(matSpan, toSpan(clusterIds), cutoff, neighborlistMaxSize, toSpan(centroids), nullptr);
+        auto clusterArray  = nvMolKit::makePyArray(clusterIds, boost::python::make_tuple(matDim1));
+        auto centroidArray = nvMolKit::makePyArray(centroids, boost::python::make_tuple(numClusters));
+        return boost::python::make_tuple(toOwnedPyArray(clusterArray), toOwnedPyArray(centroidArray));
+      } else {
+        nvMolKit::butinaGpu(matSpan, toSpan(clusterIds), cutoff, neighborlistMaxSize);
+      }
+
+      return toOwnedPyArray(nvMolKit::makePyArray(clusterIds, boost::python::make_tuple(matDim1)));
     },
     (boost::python::arg("distance_matrix"),
      boost::python::arg("cutoff"),
-     boost::python::arg("neighborlist_max_size") = 64),
-    boost::python::return_value_policy<boost::python::manage_new_object>());
+     boost::python::arg("neighborlist_max_size") = 64,
+     boost::python::arg("return_centroids")      = false));
 };

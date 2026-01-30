@@ -37,13 +37,17 @@ namespace nvMolKit {
  * @param neighborlistMaxSize Maximum size of the neighborlist used for small cluster optimization.
  *                            Must be 8, 16, 24, 32, 64, or 128. Larger values allow parallel
  *                            processing of larger clusters but use more memory.
+ * @param centroids Optional output array of size N. If provided, centroids[i] stores the
+ *                  centroid index for cluster i. Must be empty or size N.
  * @param stream CUDA stream to execute operations on. Defaults to stream 0.
+ * @return Number of clusters assigned.
  */
-void butinaGpu(cuda::std::span<const double> distanceMatrix,
-               cuda::std::span<int>          clusters,
-               double                        cutoff,
-               int                           neighborlistMaxSize = 64,
-               cudaStream_t                  stream              = nullptr);
+[[maybe_unused]] int butinaGpu(cuda::std::span<const double> distanceMatrix,
+                               cuda::std::span<int>          clusters,
+                               double                        cutoff,
+                               int                           neighborlistMaxSize = 64,
+                               cuda::std::span<int>          centroids           = {},
+                               cudaStream_t                  stream              = nullptr);
 
 /**
  * @brief Perform Butina clustering on a precomputed hit matrix.
@@ -58,12 +62,16 @@ void butinaGpu(cuda::std::span<const double> distanceMatrix,
  * @param neighborlistMaxSize Maximum size of the neighborlist used for small cluster optimization.
  *                            Must be 8, 16, 24, 32, 64, or 128. Larger values allow parallel
  *                            processing of larger clusters but use more memory.
+ * @param centroids Optional output array of size N. If provided, centroids[i] stores the
+ *                  centroid index for cluster i. Must be empty or size N.
  * @param stream CUDA stream to execute operations on. Defaults to stream 0.
+ * @return Number of clusters assigned.
  */
-void butinaGpu(cuda::std::span<const uint8_t> hitMatrix,
-               cuda::std::span<int>           clusters,
-               int                            neighborlistMaxSize = 64,
-               cudaStream_t                   stream              = nullptr);
+[[maybe_unused]] int butinaGpu(cuda::std::span<const uint8_t> hitMatrix,
+                               cuda::std::span<int>           clusters,
+                               int                            neighborlistMaxSize = 64,
+                               cuda::std::span<int>           centroids           = {},
+                               cudaStream_t                   stream              = nullptr);
 }  // namespace nvMolKit
 
 #endif  // NVMOLKIT_BUTINA_H
