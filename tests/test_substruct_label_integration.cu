@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -175,7 +175,7 @@ __global__ void populateLabelMatrixKernelForIntegration(nvMolKit::TargetMolecule
   nvMolKit::QueryMoleculeView  query  = nvMolKit::getMolecule(queriesView, queryIdx);
 
   BitMatrix2DView<MaxTarget, MaxQuery> view(*output);
-  nvMolKit::populateLabelMatrixOptimized<MaxTarget, MaxQuery>(target, query, view);
+  nvMolKit::populateLabelMatrix<MaxTarget, MaxQuery>(target, query, view);
 }
 
 }  // namespace

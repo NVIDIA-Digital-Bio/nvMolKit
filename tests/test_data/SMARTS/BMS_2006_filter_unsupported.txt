@@ -1,0 +1,36 @@
+# Too many recursive SMARTS patterns (maximum 32 supported)
+[$([Ru]),$([Rh]),$([Se]),$([se]),$([Pd]),$([Sc]),$([Bi]),$([Sb]),$([Ag]),$([Ti]),$([Al]),$([Cd]),$([V]),$([In]),$([Cr]),$([Sn]),$([Mn]),$([La]),$([Fe]),$([Er]),$([Tm]),$([Yb]),$([Lu]),$([Hf]),$([Ta]),$([W]),$([Re]),$([Co]),$([Os]),$([Ni]),$([Ir]),$([Cu]),$([Zn]),$([Ga]),$([Ge]),$([As]),$([as]),$([Y]),$([Zr]),$([Nb]),$([Ce]),$([Pr]),$([Nd]),$([Sm]),$([Eu]),$([Gd]),$([Tb]),$([Dy]),$([Ho]),$([Pt]),$([Au]),$([Hg]),$([Tl]),$([Pb]),$([Ac]),$([Th]),$([Pa]),$([Mo]),$([U]),$([Tc]),$([Te]),$([Po]),$([At])]
+# Fragment queries (disconnected SMARTS patterns) are not supported. Query has 4 disconnected components: C#N.C#N.C#N.C#N
+C#N.C#N.C#N.C#N
+# Fragment queries (disconnected SMARTS patterns) are not supported. Query has 2 disconnected components: [N,n;H0;+;!$(N~O);!$(n~O)].[N,n;H0;+;!$(N~O);!$(n~O)]
+[N,n;H0;+;!$(N~O);!$(n~O)].[N,n;H0;+;!$(N~O);!$(n~O)]
+# Fragment queries (disconnected SMARTS patterns) are not supported. Query has 2 disconnected components: P([O&D1])=O.P([O&D1])=O
+P([O;D1])=O.P([O;D1])=O
+# Fragment queries (disconnected SMARTS patterns) are not supported. Query has 2 disconnected components: [C,c]S(=O)(=O)[O&D1].[C,c]S(=O)(=O)[O&D1]
+[C,c]S(=O)(=O)[O;D1].[C,c]S(=O)(=O)[O;D1]
+# Fragment queries (disconnected SMARTS patterns) are not supported. Query has 3 disconnected components: C(=O)[O&D1].C(=O)[O&D1].C(=O)[O&D1]
+C(=O)[O;D1].C(=O)[O;D1].C(=O)[O;D1]
+# Fragment queries (disconnected SMARTS patterns) are not supported. Query has 3 disconnected components: [#53].[#53].[#53]
+[#53].[#53].[#53]
+# Fragment queries (disconnected SMARTS patterns) are not supported. Query has 4 disconnected components: [N&!$(N=[N,O,S,C])&!$(NS(=O)=O)&!$(NC(F)(F)F)&!$(NC#N)&!$(NC=O)&!$(NC=S)&!$(NC=N)&!$(N#C)&!$(Nc)].[N&!$(N=[N,O,S,C])&!$(NS(=O)=O)&!$(NC(F)(F)F)&!$(NC#N)&!$(NC=O)&!$(NC=S)&!$(NC=N)&!$(N#C)&!$(Nc)].[N&!$(N=[N,O,S,C])&!$(NS(=O)=O)&!$(NC(F)(F)F)&!$(NC#N)&!$(NC=O)&!$(NC=S)&!$(NC=N)&!$(N#C)&!$(Nc)].[N&!$(N=[N,O,S,C])&!$(NS(=O)=O)&!$(NC(F)(F)F)&!$(NC#N)&!$(NC=O)&!$(NC=S)&!$(NC=N)&!$(N#C)&!$(N-c)]
+[N;!$(N(=[N,O,S,C]));!$(N(S(=O)(=O)));!$(N(C(F)(F)(F)));!$(N(C#N));!$(N(C(=O)));!$(N(C(=S)));!$(N(C(=N)));!$(N(#C));!$(Nc)].[N;!$(N(=[N,O,S,C]));!$(N(S(=O)(=O)));!$(N(C(F)(F)(F)));!$(N(C#N));!$(N(C(=O)));!$(N(C(=S)));!$(N(C(=N)));!$(N(#C));!$(Nc)].[N;!$(N(=[N,O,S,C]));!$(N(S(=O)(=O)));!$(N(C(F)(F)(F)));!$(N(C#N));!$(N(C(=O)));!$(N(C(=S)));!$(N(C(=N)));!$(N(#C));!$(Nc)].[N;!$(N(=[N,O,S,C]));!$(N(S(=O)(=O)));!$(N(C(F)(F)(F)));!$(N(C#N));!$(N(C(=O)));!$(N(C(=S)));!$(N(C(=N)));!$(N(#C));!$(N-c)]
+# Fragment queries (disconnected SMARTS patterns) are not supported. Query has 4 disconnected components: [$([N&+](=O)[O&-]),$(N(=O)=O)].[$([N&+](=O)[O&-]),$(N(=O)=O)].[$([N&+](=O)[O&-]),$(N(=O)=O)].[$([N&+](=O)[O&-]),$(N(=O)=O)]
+[$([N+](=O)[O-]),$(N(=O)=O)].[$([N+](=O)[O-]),$(N(=O)=O)].[$([N+](=O)[O-]),$(N(=O)=O)].[$([N+](=O)[O-]),$(N(=O)=O)]
+# Fragment queries (disconnected SMARTS patterns) are not supported. Query has 5 disconnected components: a[O&D1].a[O&D1].a[O&D1].a[O&D1].a[O&D1]
+a[O;D1].a[O;D1].a[O;D1].a[O;D1].a[O;D1]
+# Fragment queries (disconnected SMARTS patterns) are not supported. Query has 7 disconnected components: C[O&D1].C[O&D1].C[O&D1].C[O&D1].C[O&D1].C[O&D1].C[O&D1]
+C[O;D1].C[O;D1].C[O;D1].C[O;D1].C[O;D1].C[O;D1].C[O;D1]
+# Fragment queries (disconnected SMARTS patterns) are not supported. Query has 7 disconnected components: [Cl,Br,I].[Cl,Br,I].[Cl,Br,I].[Cl,Br,I].[Cl,Br,I].[Cl,Br,I].[Cl,Br,I]
+[Cl,Br,I].[Cl,Br,I].[Cl,Br,I].[Cl,Br,I].[Cl,Br,I].[Cl,Br,I].[Cl,Br,I]
+# Fragment queries (disconnected SMARTS patterns) are not supported. Query has 2 disconnected components: c1c([O&D1])c(-[Cl,Br,I])c(-[Cl,Br,I])cc1.c1c([O&D1])c(-[Cl,Br,I])c(-[Cl,Br,I])cc1
+c1c([O;D1])c(-[Cl,Br,I])c(-[Cl,Br,I])cc1.c1c([O;D1])c(-[Cl,Br,I])c(-[Cl,Br,I])cc1
+# Fragment queries (disconnected SMARTS patterns) are not supported. Query has 2 disconnected components: c1c([O&D1])c(-[Cl,Br,I])cc(-[Cl,Br,I])c1.c1c([O&D1])c(-[Cl,Br,I])cc(-[Cl,Br,I])c1
+c1c([O;D1])c(-[Cl,Br,I])cc(-[Cl,Br,I])c1.c1c([O;D1])c(-[Cl,Br,I])cc(-[Cl,Br,I])c1
+# Fragment queries (disconnected SMARTS patterns) are not supported. Query has 2 disconnected components: c1c([O&D1])ccc(-[Cl,Br,I])c1-[Cl,Br,I].c1c([O&D1])ccc(-[Cl,Br,I])c1-[Cl,Br,I]
+c1c([O;D1])ccc(-[Cl,Br,I])c(-[Cl,Br,I])1.c1c([O;D1])ccc(-[Cl,Br,I])c(-[Cl,Br,I])1
+# Fragment queries (disconnected SMARTS patterns) are not supported. Query has 2 disconnected components: c1(-[Cl,Br,I])c([O&D1])c(-[Cl,Br,I])ccc1.c1(-[Cl,Br,I])c([O&D1])c(-[Cl,Br,I])ccc1
+c(-[Cl,Br,I])1c([O;D1])c(-[Cl,Br,I])ccc1.c(-[Cl,Br,I])1c([O;D1])c(-[Cl,Br,I])ccc1
+# Fragment queries (disconnected SMARTS patterns) are not supported. Query has 2 disconnected components: c1c([O&D1])ccc(-[Cl,Br,I])c1-[Cl,Br,I].c1c([O&D1])ccc(-[Cl,Br,I])c1-[Cl,Br,I]
+c1c([O;D1])ccc(-[Cl,Br,I])c(-[Cl,Br,I])1.c1c([O;D1])ccc(-[Cl,Br,I])c(-[Cl,Br,I])1
+# Too many recursive SMARTS patterns (maximum 32 supported)
+[$(O=[C,S]Oc1a([$(S(=O)(=O)),F,$(C(F)(F)(F)),$(C#N),$(N(=O)(=O)),$([N+](=O)[O-]),$(C(=O)O),$(C(=O)N)])a([$(S(=O)(=O)),F,$(C(F)(F)(F)),$(C#N),$(N(=O)(=O)),$([N+](=O)[O-]),$(C(=O)O),$(C(=O)N)])a([$(S(=O)(=O)),F,$(C(F)(F)(F)),$(C#N),$(N(=O)(=O)),$([N+](=O)[O-]),$(C(=O)O),$(C(=O)N)])aa1),$(O=[C,S]Oc1a([$(S(=O)(=O)),F,$(C(F)(F)(F)),$(C#N),$(N(=O)(=O)),$([N+](=O)[O-]),$(C(=O)O),$(C(=O)N)])a([$(S(=O)(=O)),F,$(C(F)(F)(F)),$(C#N),$(N(=O)(=O)),$([N+](=O)[O-]),$(C(=O)O),$(C(=O)N)])aaa([$(S(=O)(=O)),F,$(C(F)(F)(F)),$(C#N),$(N(=O)(=O)),$([N+](=O)[O-]),$(C(=O)O),$(C(=O)N)])1),$(O=[C,S]Oc1a([$(S(=O)(=O)),F,$(C(F)(F)(F)),$(C#N),$(N(=O)(=O)),$([N+](=O)[O-]),$(C(=O)O),$(C(=O)N)])aa([$(S(=O)(=O)),F,$(C(F)(F)(F)),$(C#N),$(N(=O)(=O)),$([N+](=O)[O-]),$(C(=O)O),$(C(=O)N)])a([$(S(=O)(=O)),F,$(C(F)(F)(F)),$(C#N),$(N(=O)(=O)),$([N+](=O)[O-]),$(C(=O)O),$(C(=O)N)])a1),$(O=[C,S]Oc1a([$(S(=O)(=O)),F,$(C(F)(F)(F)),$(C#N),$(N(=O)(=O)),$([N+](=O)[O-]),$(C(=O)O),$(C(=O)N)])aa([$(S(=O)(=O)),F,$(C(F)(F)(F)),$(C#N),$(N(=O)(=O)),$([N+](=O)[O-]),$(C(=O)O),$(C(=O)N)])aa([$(S(=O)(=O)),F,$(C(F)(F)(F)),$(C#N),$(N(=O)(=O)),$([N+](=O)[O-]),$(C(=O)O),$(C(=O)N)])1)]

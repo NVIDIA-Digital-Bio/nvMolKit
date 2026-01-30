@@ -48,6 +48,44 @@ std::pair<std::vector<std::unique_ptr<RDKit::ROMol>>, std::vector<std::string>> 
   size_t                n,
   std::optional<size_t> atomBondSizeCutoff = std::nullopt);
 
+/**
+ * @brief Read SMILES from a file, filtering by atom count.
+ * @param filePath Path to SMILES file (one SMILES per line, may have trailing data after whitespace)
+ * @param maxCount Maximum number of molecules to read
+ * @param maxAtoms Maximum number of atoms per molecule
+ * @return Vector of parsed molecules
+ */
+std::vector<std::unique_ptr<RDKit::ROMol>> readSmilesFile(const std::string& filePath,
+                                                          size_t             maxCount,
+                                                          size_t             maxAtoms);
+
+/**
+ * @brief Read SMILES from a file, filtering by atom count, returning both molecules and strings.
+ * @param filePath Path to SMILES file (one SMILES per line, may have trailing data after whitespace)
+ * @param maxCount Maximum number of molecules to read
+ * @param maxAtoms Maximum number of atoms per molecule
+ * @return Pair of (molecules, SMILES strings)
+ */
+std::pair<std::vector<std::unique_ptr<RDKit::ROMol>>, std::vector<std::string>> readSmilesFileWithStrings(
+  const std::string& filePath,
+  size_t             maxCount,
+  size_t             maxAtoms);
+
+/**
+ * @brief Read SMARTS patterns from a file.
+ * @param filePath Path to SMARTS file (one SMARTS per line, may have trailing data after whitespace)
+ * @return Vector of parsed query molecules
+ */
+std::vector<std::unique_ptr<RDKit::ROMol>> readSmartsFile(const std::string& filePath);
+
+/**
+ * @brief Read SMARTS patterns from a file, returning both molecules and strings.
+ * @param filePath Path to SMARTS file (one SMARTS per line, may have trailing data after whitespace)
+ * @return Pair of (query molecules, SMARTS strings)
+ */
+std::pair<std::vector<std::unique_ptr<RDKit::ROMol>>, std::vector<std::string>> readSmartsFileWithStrings(
+  const std::string& filePath);
+
 }  // namespace nvMolKit::testing
 
 #endif  // NVMOLKIT_MOL_DATA_H

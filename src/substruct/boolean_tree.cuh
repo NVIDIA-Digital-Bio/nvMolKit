@@ -163,7 +163,7 @@ struct AtomQueryTree {
 
 static_assert(sizeof(AtomQueryTree) == 4, "AtomQueryTree must be exactly 4 bytes");
 
-constexpr int kMaxBoolScratchSize = 128;
+constexpr int kMaxBoolScratchSize = 256;
 /**
  * @brief Evaluate a boolean expression tree for atom matching.
  *

@@ -1,0 +1,19 @@
+# Copyright (C) 2013-2020 Greg Landrum and Rational Discovery LLC
+#   This file is part of the RDKit.
+#   The contents are covered by the terms of the BSD license
+#   which is included in the file license.txt, found at the root
+#   of the RDKit source tree.
+[*]~[*]
+[*]~[*]~[*]
+[R]~1~[R]~[R]~1
+[*]~[*](~[*])~[*]
+[R]~1[R]~[R]~[R]~1
+[*]~[*]~[*](~[*])~[*]
+[R]~1~[R]~[R]~[R]~[R]~1
+[R]~1~[R]~[R]~[R]~[R]~[R]~1
+[R](@[R])(@[R])~[R]~[R](@[R])(@[R])
+[R](@[R])(@[R])~[R]@[R]~[R](@[R])(@[R])
+[*]~[R](@[R])@[R](@[R])~[*]
+[*]~[R](@[R])@[R]@[R](@[R])~[*]
+[*]
+

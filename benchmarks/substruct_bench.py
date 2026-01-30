@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,11 +18,16 @@ Substructure search benchmark comparing nvmolkit GPU substructure search against
 
 Compares two approaches:
   1. nvmolkit GPU-accelerated substructure search
-  2. RDKit SubstructMatch API
+  2. RDKit SubstructMatch API (raw or SubstructLibrary mode)
 
-Supports two modes:
+Supports three search modes:
   - hasSubstructMatch: Boolean match detection (faster)
+  - countSubstructMatches: Count of matches per target/query pair
   - getSubstructMatches: Full match enumeration with optional max matches
+
+RDKit matching modes:
+  - raw: Direct mol.HasSubstructMatch/GetSubstructMatches API with multiprocessing
+  - substructlib: rdSubstructLibrary.SubstructLibrary with native multithreading
 
 Usage:
     python substruct_bench.py --smiles <smiles_file> --smarts <smarts_file>
@@ -36,8 +41,11 @@ Usage:
     # Skip nvmolkit (for CPU-only comparison):
     python substruct_bench.py --smiles <smiles_file> --smarts <smarts_file> --no_nvmolkit
 
-    # Use multiprocessing for RDKit with 8 processes:
+    # Use multiprocessing for RDKit raw mode with 8 processes:
     python substruct_bench.py --smiles <smiles_file> --smarts <smarts_file> --rdkit_threads 8
+
+    # Use SubstructLibrary with native threading:
+    python substruct_bench.py --smiles <smiles_file> --smarts <smarts_file> --rdkit_match_mode substructlib --rdkit_threads 8
 
     # Run multiple configurations from a dataframe (smarts, batch_size, workers, prep_threads, mode, num_gpus):
     python substruct_bench.py --smiles <smiles_file> --config <config.csv>
@@ -56,6 +64,7 @@ from typing import Callable
 import nvtx
 import pandas as pd
 from rdkit import Chem, RDLogger
+from rdkit.Chem import rdSubstructLibrary
 from tqdm.contrib.concurrent import process_map
 
 def time_it(func: Callable, runs: int = 1) -> tuple[float, float]:
@@ -269,6 +278,67 @@ def bench_rdkit_substruct(
     return avg_ms, std_ms, results_data
 
 
+@nvtx.annotate("bench_rdkit_substructlib", color="green")
+def bench_rdkit_substructlib(
+    mols: list[Chem.Mol], 
+    queries: list[Chem.Mol], 
+    runs: int,
+    mode: str,
+    max_matches: int,
+    threads: int = 1
+) -> tuple[float, float, list]:
+    """Benchmark RDKit SubstructLibrary API with native multithreading."""
+    num_mols = len(mols)
+    num_queries = len(queries)
+    
+    params = Chem.SubstructMatchParameters()
+    params.uniquify = False
+    if max_matches > 0:
+        params.maxMatches = max_matches
+
+    results_data = [[None] * num_queries for _ in range(num_mols)]
+
+    @nvtx.annotate("substructlib_run", color="yellow")
+    def run():
+        nonlocal results_data
+        
+        mol_holder = rdSubstructLibrary.CachedMolHolder()
+        fp_holder = rdSubstructLibrary.PatternHolder()
+        lib = rdSubstructLibrary.SubstructLibrary(mol_holder, fp_holder)
+        for mol in mols:
+            lib.AddMol(mol)
+        
+        results_data = [[None] * num_queries for _ in range(num_mols)]
+        
+        if mode == "hasSubstructMatch":
+            for q_idx, query in enumerate(queries):
+                matching_indices = lib.GetMatches(query, numThreads=threads)
+                matching_set = set(matching_indices)
+                for m_idx in range(num_mols):
+                    results_data[m_idx][q_idx] = m_idx in matching_set
+        elif mode == "countSubstructMatches":
+            for q_idx, query in enumerate(queries):
+                matching_indices = lib.GetMatches(query, numThreads=threads)
+                matching_set = set(matching_indices)
+                for m_idx in range(num_mols):
+                    if m_idx in matching_set:
+                        results_data[m_idx][q_idx] = len(mols[m_idx].GetSubstructMatches(query, params))
+                    else:
+                        results_data[m_idx][q_idx] = 0
+        else:
+            for q_idx, query in enumerate(queries):
+                matching_indices = lib.GetMatches(query, numThreads=threads)
+                matching_set = set(matching_indices)
+                for m_idx in range(num_mols):
+                    if m_idx in matching_set:
+                        results_data[m_idx][q_idx] = mols[m_idx].GetSubstructMatches(query, params)
+                    else:
+                        results_data[m_idx][q_idx] = ()
+    
+    avg_ms, std_ms = time_it(run, runs)
+    return avg_ms, std_ms, results_data
+
+
 @nvtx.annotate("bench_nvmolkit", color="red")
 def bench_nvmolkit(
     mols: list[Chem.Mol],
@@ -330,7 +400,9 @@ def main():
                         help="Maximum matches per target/query pair, 0 = all (default: 0)")
     parser.add_argument("--no_nvmolkit", action="store_true", help="Skip nvmolkit benchmark")
     parser.add_argument("--no_rdkit", action="store_true", help="Skip RDKit benchmark")
-    parser.add_argument("--rdkit_threads", type=int, default=1, help="RDKit multiprocessing threads (default: 1)")
+    parser.add_argument("--rdkit_match_mode", choices=["raw", "substructlib"], default="raw",
+                        help="RDKit matching mode: raw (direct API) or substructlib (SubstructLibrary) (default: raw)")
+    parser.add_argument("--rdkit_threads", type=int, default=1, help="RDKit threads (multiprocessing for raw, native for substructlib) (default: 1)")
     parser.add_argument("--batch_size", "-b", type=int, default=1024, help="nvmolkit batch size (default: 1024)")
     parser.add_argument("--workers", type=int, default=-1, help="nvmolkit GPU worker threads per GPU (-1 = auto)")
     parser.add_argument("--prep_threads", type=int, default=-1, help="nvmolkit preprocessing threads (-1 = auto)")
@@ -380,6 +452,7 @@ def main():
     print(f"  Run nvmolkit: {not args.no_nvmolkit}")
     print(f"  Run RDKit: {not args.no_rdkit}")
     if not args.no_rdkit:
+        print(f"  RDKit match mode: {args.rdkit_match_mode}")
         print(f"  RDKit threads: {args.rdkit_threads}")
     if args.config:
         print(f"  Config dataframe: {args.config}")
@@ -492,10 +565,16 @@ def main():
                 print(f"  nvmolkit: SKIPPED (import error: {e})")
 
         if not args.no_rdkit:
-            print("\nRunning RDKit SubstructMatch benchmark...")
-            rdkit_avg, rdkit_std, rdkit_results = bench_rdkit_substruct(
-                mols, queries, args.runs, mode, args.max_matches, args.rdkit_threads
-            )
+            if args.rdkit_match_mode == "substructlib":
+                print("\nRunning RDKit SubstructLibrary benchmark...")
+                rdkit_avg, rdkit_std, rdkit_results = bench_rdkit_substructlib(
+                    mols, queries, args.runs, mode, args.max_matches, args.rdkit_threads
+                )
+            else:
+                print("\nRunning RDKit SubstructMatch benchmark...")
+                rdkit_avg, rdkit_std, rdkit_results = bench_rdkit_substruct(
+                    mols, queries, args.runs, mode, args.max_matches, args.rdkit_threads
+                )
             print(f"  RDKit:           {rdkit_avg:10.2f} ms (± {rdkit_std:.2f} ms)")
             results["rdkit"] = (rdkit_avg, rdkit_std, rdkit_results)
 
@@ -564,6 +643,7 @@ def main():
             workers = config_row["workers"] if name == "nvmolkit" else "N/A"
             prep_threads = config_row["prep_threads"] if name == "nvmolkit" else "N/A"
             rdkit_threads = args.rdkit_threads if name == "rdkit" else "N/A"
+            rdkit_match_mode = args.rdkit_match_mode if name == "rdkit" else "N/A"
             csv_rows.append(
                 (
                     name,
@@ -580,6 +660,7 @@ def main():
                     workers,
                     prep_threads,
                     rdkit_threads,
+                    rdkit_match_mode,
                     avg_ms,
                     std_ms,
                 )
@@ -594,7 +675,7 @@ def main():
     print("\n\nCSV Results:")
     print(
         "method,mode,smarts,input_file,input_type,sanitize,num_mols,num_patterns,"
-        "max_matches,batch_size,num_gpus,workers,prep_threads,rdkit_threads,time_ms,std_ms"
+        "max_matches,batch_size,num_gpus,workers,prep_threads,rdkit_threads,rdkit_match_mode,time_ms,std_ms"
     )
     for row in csv_rows:
         (
@@ -612,13 +693,14 @@ def main():
             workers,
             prep_threads,
             rdkit_threads,
+            rdkit_match_mode,
             avg_ms,
             std_ms,
         ) = row
         print(
             f"{name},{mode},{smarts_path},{input_file},{input_type},{sanitize},"
             f"{num_mols},{num_patterns},{max_matches},{batch_size},{num_gpus},{workers},{prep_threads},"
-            f"{rdkit_threads},{avg_ms:.2f},{std_ms:.2f}"
+            f"{rdkit_threads},{rdkit_match_mode},{avg_ms:.2f},{std_ms:.2f}"
         )
 
 
