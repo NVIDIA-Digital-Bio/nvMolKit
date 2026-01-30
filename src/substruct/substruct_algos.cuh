@@ -134,9 +134,9 @@ template <std::size_t MaxQueryAtoms = kMaxQueryAtoms> struct VF2StateT {
  * @param matchCount Output: number of matches found
  * @param reportedCount Output: number of matches written (capped)
  * @param matchIndices Output: match index buffer
- * @param maxMatches Maximum matches to write
+ * @param totalMatchStorageCapacity Output buffer capacity (matches beyond this are counted but not stored)
  * @param matchOffset Offset into matchIndices for this pair
- * @param maxMatchesToFind Stop searching after this many matches (-1 = no limit)
+ * @param maxMatchesToFind Stop searching after finding this many matches (-1 = no limit)
  * @param countOnly If true, count matches but don't store them
  */
 template <std::size_t MaxTargetAtoms, std::size_t MaxQueryAtoms, int MaxBondsPerAtom = kMaxBondsPerAtom>
@@ -148,7 +148,7 @@ __device__ void vf2SearchGPU(const TargetMoleculeView&                          
                              int*                                                  matchCount,
                              int*                                                  reportedCount,
                              int16_t*                                              matchIndices,
-                             int                                                   maxMatches,
+                             int                                                   totalMatchStorageCapacity,
                              int                                                   matchOffset,
                              int                                                   maxMatchesToFind = -1,
                              bool                                                  countOnly        = false) {
@@ -186,7 +186,7 @@ __device__ void vf2SearchGPU(const TargetMoleculeView&                          
       // Complete match found
       const int currentMatchCount = atomicAdd(matchCount, 1);
 
-      if (!countOnly && currentMatchCount < maxMatches) {
+      if (!countOnly && currentMatchCount < totalMatchStorageCapacity) {
         // Write match to output
         const int writeOffset = matchOffset + currentMatchCount * numQueryAtoms;
         for (int q = 0; q < numQueryAtoms; ++q) {
@@ -239,7 +239,7 @@ __device__ void vf2SearchGPU(const TargetMoleculeView&                          
       --state.depth;
       if (state.depth > 0) {
         ++state.candidateIdx[state.depth];
-      } else if (state.depth == 0) {
+      } else {
         // Exhausted this starting point
         break;
       }
@@ -272,13 +272,15 @@ __device__ void vf2SearchGPU(const TargetMoleculeView&                          
  * @param matchCount Output: number of matches found
  * @param reportedCount Output: number of matches written (StoreMatches) or painted (PaintBits)
  * @param matchIndices Output buffer (only used in StoreMatches mode)
- * @param maxMatches Maximum matches to write (only used in StoreMatches mode)
+ * @param totalMatchStorageCapacity Output buffer capacity (only used in StoreMatches mode)
  * @param matchOffset Offset into output (only used in StoreMatches mode)
  * @param paintParams Paint mode parameters (only used in PaintBits mode)
- * @param maxMatchesToFind Stop searching after this many matches (-1 = no limit)
+ * @param maxMatchesToFind Stop searching after finding this many matches (-1 = no limit)
  * @param countOnly If true, count matches but don't store them
  * @param timings Optional timing data collection
  * @param overflowFlag Output: set to 1 if partial or output buffers overflow (nullptr to skip)
+
+ // TODO: Separate out match-writing logic from main BFS logic, as it can only happen on the last step.
  */
 template <std::size_t         MaxTargetAtoms,
           std::size_t         MaxQueryAtoms,
@@ -295,7 +297,7 @@ __device__ void gsiBFSSearchGPU(const TargetMoleculeView&                       
                                 int*                                                  matchCount,
                                 int*                                                  reportedCount,
                                 int16_t*                                              matchIndices,
-                                int                                                   maxMatches,
+                                int                                                   totalMatchStorageCapacity,
                                 int                                                   matchOffset,
                                 PaintModeParams                                       paintParams      = {},
                                 int                                                   maxMatchesToFind = -1,
@@ -339,13 +341,11 @@ __device__ void gsiBFSSearchGPU(const TargetMoleculeView&                       
 
   __shared__ int currentCount;
   __shared__ int nextCount;
-  __shared__ int earlyExitFlag;
   __shared__ int partialOverflowFlag;
 
   if (tid == 0) {
     currentCount        = 0;
     nextCount           = 0;
-    earlyExitFlag       = 0;
     partialOverflowFlag = 0;
   }
   __syncthreads();
@@ -373,18 +373,14 @@ __device__ void gsiBFSSearchGPU(const TargetMoleculeView&                       
 
   for (int t = tid; t < numTargetAtoms; t += blockDim.x) {
     // Check early exit before processing
-    if (hasEarlyExitLimit && earlyExitFlag) {
+    if (hasEarlyExitLimit && *matchCount >= maxMatchesToFind) {
       break;
     }
     if (labelMatrix.get(t, 0)) {
       if (singleAtomQuery) {
         const int matchIdx = atomicAdd(matchCount, 1);
-        // Check if we should signal early exit
-        if (hasEarlyExitLimit && matchIdx + 1 >= maxMatchesToFind) {
-          earlyExitFlag = 1;
-        }
         if constexpr (OutputMode == SubstructOutputMode::StoreMatches) {
-          if (!countOnly && matchIdx < maxMatches) {
+          if (!countOnly && matchIdx < totalMatchStorageCapacity) {
             matchIndices[matchOffset + matchIdx] = static_cast<int16_t>(t);
             atomicAdd(reportedCount, 1);
           }
@@ -459,7 +455,7 @@ __device__ void gsiBFSSearchGPU(const TargetMoleculeView&                       
   // BFS levels
   for (int level = 1; level < numQueryAtoms; ++level) {
     // Check early exit at start of level
-    if (hasEarlyExitLimit && earlyExitFlag) {
+    if (hasEarlyExitLimit && *matchCount >= maxMatchesToFind) {
       break;
     }
 
@@ -545,10 +541,6 @@ __device__ void gsiBFSSearchGPU(const TargetMoleculeView&                       
         if (valid) {
           if (level == numQueryAtoms - 1) {
             const int matchIdx = atomicAdd(matchCount, 1);
-            // Check if we should signal early exit
-            if (hasEarlyExitLimit && matchIdx + 1 >= maxMatchesToFind) {
-              earlyExitFlag = 1;
-            }
             if constexpr (kDebugGSI) {
               printf("[GSI] MATCH FOUND! matchIdx=%d, mapping: ", matchIdx);
               for (int q = 0; q < numQueryAtoms; ++q) {
@@ -557,7 +549,7 @@ __device__ void gsiBFSSearchGPU(const TargetMoleculeView&                       
               printf("\n");
             }
             if constexpr (OutputMode == SubstructOutputMode::StoreMatches) {
-              if (!countOnly && matchIdx < maxMatches) {
+              if (!countOnly && matchIdx < totalMatchStorageCapacity) {
                 const int writeOffset = matchOffset + matchIdx * numQueryAtoms;
                 for (int q = 0; q < numQueryAtoms; ++q) {
                   matchIndices[writeOffset + q] = (q == queryAtom) ? static_cast<int16_t>(t) : partial[q];

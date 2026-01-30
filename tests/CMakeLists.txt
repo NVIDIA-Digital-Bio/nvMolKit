@@ -56,7 +56,7 @@ add_executable(test_work_splitting test_work_splitting.cpp)
 target_link_libraries(test_work_splitting PRIVATE work_splitting)
 
 add_executable(test_thread_safe_queue test_thread_safe_queue.cpp)
-target_include_directories(test_thread_safe_queue PRIVATE ${CMAKE_SOURCE_DIR}/src/utils)
+target_link_libraries(test_thread_safe_queue PRIVATE thread_safe_queue)
 
 add_executable(test_openmp_helpers test_openmp_helpers.cpp)
 target_link_libraries(test_openmp_helpers PRIVATE openmp_helpers
@@ -223,14 +223,14 @@ target_link_libraries(
 
 add_executable(test_substruct_algos test_substruct_algos.cu)
 target_link_libraries(test_substruct_algos PRIVATE
-        substruct_definitions molecules device flatBitVect device_vector)
+        substruct_definitions molecules device flatBitVect device_vector device_timings)
+
 
 set(TEST_LIST
     test_boolean_tree
     test_butina
     test_bfgs_hessian
     test_openmp_helpers
-    test_thread_safe_queue
     test_conformer_checkers
     test_coordgen
     test_cuda_error_check
@@ -265,6 +265,7 @@ set(TEST_LIST
     test_substruct_algos
     test_substructure_search
     test_similarity
+    test_thread_safe_queue
     test_work_splitting)
 
 # Auto populate the NVMOLKIT_TESTDATA environment variable for ctest.
