@@ -20,6 +20,8 @@
 #include <cmath>
 #include <numeric>
 #include <random>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "butina.h"
@@ -52,19 +54,43 @@ std::vector<uint8_t> makeAdjacency(const std::vector<double>& distances, double 
   return adjacency;
 }
 
-std::vector<int> runButina(const std::vector<double>& distances,
-                           const int                  nPts,
-                           const double               cutoff,
-                           const int                  neighborlistMaxSize,
-                           cudaStream_t               stream) {
+std::pair<std::vector<int>, int> runButina(const std::vector<double>& distances,
+                                           const int                  nPts,
+                                           const double               cutoff,
+                                           const int                  neighborlistMaxSize,
+                                           cudaStream_t               stream) {
   AsyncDeviceVector<double> distancesDev(distances.size(), stream);
   AsyncDeviceVector<int>    resultDev(nPts, stream);
   distancesDev.copyFromHost(distances);
-  nvMolKit::butinaGpu(toSpan(distancesDev), toSpan(resultDev), cutoff, neighborlistMaxSize, stream);
+  const int numClusters =
+    nvMolKit::butinaGpu(toSpan(distancesDev), toSpan(resultDev), cutoff, neighborlistMaxSize, {}, stream);
   std::vector<int> got(nPts);
   resultDev.copyToHost(got);
   cudaStreamSynchronize(stream);
-  return got;
+  return {got, numClusters};
+}
+
+std::tuple<std::vector<int>, std::vector<int>, int> runButinaWithCentroids(const std::vector<double>& distances,
+                                                                           const int                  nPts,
+                                                                           const double               cutoff,
+                                                                           const int    neighborlistMaxSize,
+                                                                           cudaStream_t stream) {
+  AsyncDeviceVector<double> distancesDev(distances.size(), stream);
+  AsyncDeviceVector<int>    resultDev(nPts, stream);
+  AsyncDeviceVector<int>    centroidsDev(nPts, stream);
+  distancesDev.copyFromHost(distances);
+  const int        numClusters = nvMolKit::butinaGpu(toSpan(distancesDev),
+                                              toSpan(resultDev),
+                                              cutoff,
+                                              neighborlistMaxSize,
+                                              toSpan(centroidsDev),
+                                              stream);
+  std::vector<int> got(nPts);
+  std::vector<int> centroids(nPts);
+  resultDev.copyToHost(got);
+  centroidsDev.copyToHost(centroids);
+  cudaStreamSynchronize(stream);
+  return {got, centroids, numClusters};
 }
 
 void checkButinaCorrectness(const std::vector<uint8_t>& adjacency, const std::vector<int>& labels) {
@@ -140,11 +166,13 @@ TEST_P(ButinaSinglePointFixture, HandlesSinglePoint) {
   AsyncDeviceVector<int>    resultDev(nPts, stream);
   distancesDev.copyFromHost(std::vector<double>{0.0});
 
-  nvMolKit::butinaGpu(toSpan(distancesDev), toSpan(resultDev), cutoff, neighborlistMaxSize, stream);
+  const int numClusters =
+    nvMolKit::butinaGpu(toSpan(distancesDev), toSpan(resultDev), cutoff, neighborlistMaxSize, {}, stream);
   std::vector<int> got(nPts);
   resultDev.copyToHost(got);
   cudaStreamSynchronize(stream);
   EXPECT_THAT(got, ::testing::ElementsAre(0));
+  EXPECT_EQ(numClusters, 1);
 }
 INSTANTIATE_TEST_SUITE_P(ButinaClusterTest, ButinaSinglePointFixture, ::testing::Values(8, 16, 24, 32, 64, 128));
 
@@ -155,12 +183,13 @@ TEST_P(ButinaClusterTestFixture, ClusteringMatchesReference) {
   std::mt19937                 rng(42);
 
   const auto [nPts, neighborlistMaxSize] = GetParam();
-  constexpr double       cutoff          = 0.1;
-  const auto             distances       = makeSymmetricDifferenceMatrix(nPts, rng);
-  const auto             adjacency       = makeAdjacency(distances, cutoff);
-  const std::vector<int> labels          = runButina(distances, nPts, cutoff, neighborlistMaxSize, stream);
+  constexpr double cutoff                = 0.1;
+  const auto       distances             = makeSymmetricDifferenceMatrix(nPts, rng);
+  const auto       adjacency             = makeAdjacency(distances, cutoff);
+  const auto [labels, numClusters]       = runButina(distances, nPts, cutoff, neighborlistMaxSize, stream);
   SCOPED_TRACE(::testing::Message() << "nPts=" << nPts << " neighborlistMaxSize=" << neighborlistMaxSize);
   checkButinaCorrectness(adjacency, labels);
+  EXPECT_EQ(numClusters, *std::ranges::max_element(labels.begin(), labels.end()) + 1);
 }
 
 INSTANTIATE_TEST_SUITE_P(ButinaClusterTest,
@@ -181,8 +210,9 @@ TEST_P(ButinaEdgeTestFixture, EdgeOneCluster) {
     distances[static_cast<size_t>(i) * nPts + i] = 0.0;
   }
 
-  const std::vector<int> labels = runButina(distances, nPts, cutoff, neighborlistMaxSize, stream);
+  const auto [labels, numClusters] = runButina(distances, nPts, cutoff, neighborlistMaxSize, stream);
   EXPECT_THAT(labels, ::testing::Each(0));
+  EXPECT_EQ(numClusters, 1);
 }
 
 TEST_P(ButinaEdgeTestFixture, EdgeNClusters) {
@@ -197,12 +227,48 @@ TEST_P(ButinaEdgeTestFixture, EdgeNClusters) {
     distances[static_cast<size_t>(i) * nPts + i] = 0.0;
   }
 
-  const std::vector<int> labels = runButina(distances, nPts, cutoff, neighborlistMaxSize, stream);
-  std::vector<int>       sorted = labels;
+  const auto [labels, numClusters] = runButina(distances, nPts, cutoff, neighborlistMaxSize, stream);
+  std::vector<int> sorted          = labels;
   std::ranges::sort(sorted);
   std::vector<int> want(nPts);
   std::iota(want.begin(), want.end(), 0);
   EXPECT_THAT(sorted, ::testing::ElementsAreArray(want));
+  EXPECT_EQ(numClusters, nPts);
 }
 
 INSTANTIATE_TEST_SUITE_P(ButinaClusterEdgeTest, ButinaEdgeTestFixture, ::testing::Values(8, 16, 24, 32, 64, 128));
+
+TEST(ButinaCentroids, ReturnCentroids) {
+  constexpr int                nPts                = 10;
+  constexpr double             cutoff              = 0.1;
+  constexpr int                neighborlistMaxSize = 64;
+  nvMolKit::ScopedStream const scopedStream;
+  cudaStream_t                 stream = scopedStream.stream();
+
+  const std::vector<double> distances = {
+    0.0,  0.05, 0.05, 0.05, 1.0,  1.0,  1.0,  1.0, 1.0, 1.0, 0.05, 0.0, 1.0, 1.0, 1.0,  1.0, 1.0, 1.0, 1.0, 1.0,
+    0.05, 1.0,  0.0,  1.0,  1.0,  1.0,  1.0,  1.0, 1.0, 1.0, 0.05, 1.0, 1.0, 0.0, 1.0,  1.0, 1.0, 1.0, 1.0, 1.0,
+    1.0,  1.0,  1.0,  1.0,  0.0,  0.05, 0.05, 1.0, 1.0, 1.0, 1.0,  1.0, 1.0, 1.0, 0.05, 0.0, 1.0, 1.0, 1.0, 1.0,
+    1.0,  1.0,  1.0,  1.0,  0.05, 1.0,  0.0,  1.0, 1.0, 1.0, 1.0,  1.0, 1.0, 1.0, 1.0,  1.0, 1.0, 0.0, 1.0, 1.0,
+    1.0,  1.0,  1.0,  1.0,  1.0,  1.0,  1.0,  1.0, 0.0, 1.0, 1.0,  1.0, 1.0, 1.0, 1.0,  1.0, 1.0, 1.0, 1.0, 0.0,
+  };
+
+  const auto [labels, centroids, numClusters] =
+    runButinaWithCentroids(distances, nPts, cutoff, neighborlistMaxSize, stream);
+  ASSERT_EQ(numClusters, 5);
+
+  std::vector<std::vector<int>> clusters(numClusters);
+  for (int idx = 0; idx < nPts; ++idx) {
+    clusters[labels[idx]].push_back(idx);
+  }
+
+  EXPECT_THAT(clusters[0], ::testing::UnorderedElementsAre(0, 1, 2, 3));
+  EXPECT_EQ(centroids[0], 0);
+  EXPECT_THAT(clusters[1], ::testing::UnorderedElementsAre(4, 5, 6));
+  EXPECT_EQ(centroids[1], 4);
+
+  for (int clusterId = 2; clusterId < numClusters; ++clusterId) {
+    ASSERT_EQ(clusters[clusterId].size(), 1U);
+    EXPECT_EQ(centroids[clusterId], clusters[clusterId][0]);
+  }
+}

@@ -81,3 +81,25 @@ def test_butina_edge_n_clusters(neighborlist_max_size):
     torch_dists.fill_diagonal_(0)
     nvmol_res = butina(torch_dists, cutoff, neighborlist_max_size=neighborlist_max_size).torch()
     assert torch.all(nvmol_res.sort()[0] == torch.arange(10).to('cuda'))
+
+def test_butina_returns_centroids():
+    n = 25
+    cutoff = 0.2
+    np.random.seed(123)
+    dists = np.random.rand(n, n)
+    dists = np.abs(dists - dists.T)
+    torch_dists = torch.tensor(dists).to('cuda')
+    clusters, centroids = butina(torch_dists, cutoff, return_centroids=True)
+    clusters_tensor = clusters.torch()
+    centroids_tensor = centroids.torch()
+
+    num_clusters = int(clusters_tensor.max().item()) + 1
+    assert centroids_tensor.numel() == num_clusters
+
+    adjacency = torch_dists <= cutoff
+    for cluster_id in range(num_clusters):
+        centroid = int(centroids_tensor[cluster_id].item())
+        assert clusters_tensor[centroid].item() == cluster_id
+        members = torch.nonzero(clusters_tensor == cluster_id, as_tuple=False).flatten()
+        for member in members:
+            assert adjacency[centroid, member].item()

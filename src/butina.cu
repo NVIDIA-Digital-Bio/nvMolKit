@@ -129,6 +129,7 @@ template <int NeighborlistMaxSize>
 __global__ void attemptAssignClustersFromNeighborlist(const cuda::std::span<int>       clusters,
                                                       const cuda::std::span<const int> clusterSizes,
                                                       const cuda::std::span<const int> neighborList,
+                                                      const cuda::std::span<int>       centroids,
                                                       const int*                       designatedMaxIdx,
                                                       int*                             nextClusterIdx) {
   static_assert(NeighborlistMaxSize % kSubTileSize == 0, "NeighborlistMaxSize must be multiple of kSubTileSize");
@@ -221,6 +222,9 @@ __global__ void attemptAssignClustersFromNeighborlist(const cuda::std::span<int>
   if (tid == 0) {
     clusterVal         = atomicAdd(nextClusterIdx, 1);
     clusters[pointIdx] = clusterVal;
+    if (!centroids.empty()) {
+      centroids[clusterVal] = pointIdx;
+    }
   }
   tile8.sync();
   clusterVal = tile8.shfl(clusterVal, 0);
@@ -236,6 +240,7 @@ __global__ void attemptAssignClustersFromNeighborlist(const cuda::std::span<int>
 //! Kernel to write the cluster assignment for the largest cluster found
 __global__ void butinaWriteClusterValue(const cuda::std::span<const uint8_t> hitMatrix,
                                         const cuda::std::span<int>           clusters,
+                                        const cuda::std::span<int>           centroids,
                                         const int*                           centralIdx,
                                         const int*                           clusterIdx,
                                         const int*                           maxClusterSize) {
@@ -258,6 +263,9 @@ __global__ void butinaWriteClusterValue(const cuda::std::span<const uint8_t> hit
       }
     }
   }
+  if (tid == 0 && !centroids.empty()) {
+    centroids[clusterVal] = pointIdx;
+  }
 }
 
 //! Kernel to increment cluster index after assignment. Must be launched with <<<1, 1>>>.
@@ -270,7 +278,9 @@ __global__ void bumpClusterIdxKernel(int* clusterIdx, const int* lastClusterSize
 constexpr int kSingletonBlockSize = 512;
 
 //! Assign all remaining unassigned points their own singleton cluster IDs.
-__global__ void assignSingletonIdsKernel(const cuda::std::span<int> clusters, int* nextClusterIdx) {
+__global__ void assignSingletonIdsKernel(const cuda::std::span<int> clusters,
+                                         const cuda::std::span<int> centroids,
+                                         int*                       nextClusterIdx) {
   __shared__ int sharedClusterIdx;
   const int      tid       = threadIdx.x;
   const int      numPoints = static_cast<int>(clusters.size());
@@ -284,6 +294,9 @@ __global__ void assignSingletonIdsKernel(const cuda::std::span<int> clusters, in
     if (clusters[i] < 0) {
       const int myClusterIdx = atomicAdd(&sharedClusterIdx, 1);
       clusters[i]            = myClusterIdx;
+      if (!centroids.empty()) {
+        centroids[myClusterIdx] = i;
+      }
     }
   }
 
@@ -323,6 +336,17 @@ __global__ void applyNewIndices(const cuda::std::span<int> clusters, const cuda:
   }
 }
 
+__global__ void remapCentroidsKernel(const cuda::std::span<const int> sortedOriginalIds,
+                                     const cuda::std::span<const int> centroids,
+                                     const cuda::std::span<int>       remappedCentroids) {
+  const int numClusters = static_cast<int>(sortedOriginalIds.size());
+  const int idx         = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+  if (idx < numClusters) {
+    const int originalId   = sortedOriginalIds[idx];
+    remappedCentroids[idx] = centroids[originalId];
+  }
+}
+
 //! Setup sort keys for cluster renumbering: keys[i] = -sizes[i] (for descending), ids[i] = i
 __global__ void setupSortKeysKernel(const cuda::std::span<const int> sizes,
                                     const cuda::std::span<int>       keys,
@@ -342,7 +366,10 @@ __global__ void setupSortKeysKernel(const cuda::std::span<const int> sizes,
  * 3. Creates mapping of old ID -> new ID based on sorted order.
  * 4. Applies new IDs to all points.
  */
-void renumberClustersBySize(const cuda::std::span<int> clusters, const int numClusters, cudaStream_t stream) {
+void renumberClustersBySize(const cuda::std::span<int> clusters,
+                            const cuda::std::span<int> centroids,
+                            const int                  numClusters,
+                            cudaStream_t               stream) {
   if (numClusters <= 1) {
     return;
   }
@@ -405,6 +432,19 @@ void renumberClustersBySize(const cuda::std::span<int> clusters, const int numCl
   const int numBlocks = (numPoints + blockSize - 1) / blockSize;
   applyNewIndices<<<numBlocks, blockSize, 0, stream>>>(clusters, remap);
   cudaCheckError(cudaGetLastError());
+
+  if (!centroids.empty()) {
+    AsyncDeviceVector<int> remappedCentroids(numClusters, stream);
+    remapCentroidsKernel<<<numBlocksRenumber, blockSize, 0, stream>>>(toSpan(sortedOriginalIds),
+                                                                      centroids,
+                                                                      toSpan(remappedCentroids));
+    cudaCheckError(cudaGetLastError());
+    cudaCheckError(cudaMemcpyAsync(centroids.data(),
+                                   remappedCentroids.data(),
+                                   numClusters * sizeof(int),
+                                   cudaMemcpyDeviceToDevice,
+                                   stream));
+  }
 }
 
 }  // namespace
@@ -620,6 +660,7 @@ void innerButinaLoop(const int                            numPoints,
                      const cuda::std::span<const uint8_t> hitMatrix,
                      const cuda::std::span<int>           clusters,
                      const cuda::std::span<int>           clusterSizesSpan,
+                     const cuda::std::span<int>           centroids,
                      int*                                 maxIndexPtr,
                      int*                                 maxValuePtr,
                      int*                                 clusterIdxPtr,
@@ -638,6 +679,7 @@ void innerButinaLoop(const int                            numPoints,
 
   butinaWriteClusterValue<<<numBlocksFlat, blockSizeCount, 0, stream>>>(hitMatrix,
                                                                         clusters,
+                                                                        centroids,
                                                                         maxIndexPtr,
                                                                         clusterIdxPtr,
                                                                         maxValuePtr);
@@ -651,6 +693,7 @@ template <int NeighborlistMaxSize>
 void innerButinaLoopWithPruning(const int                  numPoints,
                                 const cuda::std::span<int> clusters,
                                 const cuda::std::span<int> clusterSizesSpan,
+                                const cuda::std::span<int> centroids,
                                 int*                       maxIndexPtr,
                                 int*                       maxValuePtr,
                                 int*                       clusterIdxPtr,
@@ -662,6 +705,7 @@ void innerButinaLoopWithPruning(const int                  numPoints,
     <<<numBlocksAssign, blockSizeAssign, 0, stream>>>(clusters,
                                                       clusterSizesSpan,
                                                       neighborList,
+                                                      centroids,
                                                       maxIndexPtr,
                                                       clusterIdxPtr);
   cudaCheckError(cudaGetLastError());
@@ -690,6 +734,7 @@ class ButinaInnerLoopGraph {
                        const cuda::std::span<const uint8_t> hitMatrix,
                        const cuda::std::span<int>           clusters,
                        const cuda::std::span<int>           clusterSizesSpan,
+                       const cuda::std::span<int>           centroids,
                        int*                                 maxIndexPtr,
                        int*                                 maxValuePtr,
                        int*                                 clusterIdxPtr,
@@ -729,6 +774,7 @@ class ButinaInnerLoopGraph {
                     hitMatrix,
                     clusters,
                     clusterSizesSpan,
+                    centroids,
                     maxIndexPtr,
                     maxValuePtr,
                     clusterIdxPtr,
@@ -771,6 +817,7 @@ template <int NeighborlistMaxSize> class ButinaPruningLoopGraph {
                          const cuda::std::span<int> clusters,
                          const cuda::std::span<int> clusterSizesSpan,
                          const cuda::std::span<int> neighborListSpan,
+                         const cuda::std::span<int> centroids,
                          int*                       maxIndexPtr,
                          int*                       maxValuePtr,
                          int*                       clusterIdxPtr,
@@ -808,6 +855,7 @@ template <int NeighborlistMaxSize> class ButinaPruningLoopGraph {
     innerButinaLoopWithPruning<NeighborlistMaxSize>(numPoints,
                                                     clusters,
                                                     clusterSizesSpan,
+                                                    centroids,
                                                     maxIndexPtr,
                                                     maxValuePtr,
                                                     clusterIdxPtr,
@@ -863,11 +911,16 @@ void buildInitialNeighborlist(const int                            numPoints,
 }
 
 template <int NeighborlistMaxSize>
-void butinaGpuImpl(const cuda::std::span<const uint8_t> hitMatrix,
-                   const cuda::std::span<int>           clusters,
-                   cudaStream_t                         stream) {
+[[maybe_unused]] int butinaGpuImpl(const cuda::std::span<const uint8_t> hitMatrix,
+                                   const cuda::std::span<int>           clusters,
+                                   const cuda::std::span<int>           centroids,
+                                   cudaStream_t                         stream) {
   ScopedNvtxRange setupRange("Butina Setup");
   const size_t    numPoints = clusters.size();
+  if (!centroids.empty() && centroids.size() != numPoints) {
+    throw std::invalid_argument("Centroids size mismatch: " + std::to_string(centroids.size()) +
+                                " != " + std::to_string(numPoints));
+  }
   setAll(clusters, -1, stream);
   if (const size_t matSize = hitMatrix.size(); numPoints * numPoints != matSize) {
     throw std::runtime_error("Butina size mismatch" + std::to_string(numPoints) +
@@ -900,6 +953,7 @@ void butinaGpuImpl(const cuda::std::span<const uint8_t> hitMatrix,
                                         hitMatrix,
                                         clusters,
                                         clusterSizesSpan,
+                                        centroids,
                                         maxIndex.data(),
                                         maxValue.data(),
                                         clusterIdx.data(),
@@ -936,6 +990,7 @@ void butinaGpuImpl(const cuda::std::span<const uint8_t> hitMatrix,
                                                                  clusters,
                                                                  clusterSizesSpan,
                                                                  neighborListSpan,
+                                                                 centroids,
                                                                  maxIndex.data(),
                                                                  maxValue.data(),
                                                                  clusterIdx.data(),
@@ -948,39 +1003,35 @@ void butinaGpuImpl(const cuda::std::span<const uint8_t> hitMatrix,
     cudaCheckError(cudaStreamSynchronize(stream));
   }
 
-  assignSingletonIdsKernel<<<1, kSingletonBlockSize, 0, stream>>>(clusters, clusterIdx.data());
+  assignSingletonIdsKernel<<<1, kSingletonBlockSize, 0, stream>>>(clusters, centroids, clusterIdx.data());
   cudaCheckError(cudaGetLastError());
 
   // Renumber clusters to be in descending order.
   cudaCheckError(cudaMemcpyAsync(maxCluster.data(), clusterIdx.data(), sizeof(int), cudaMemcpyDefault, stream));
   cudaCheckError(cudaStreamSynchronize(stream));
-  renumberClustersBySize(clusters, maxCluster[0], stream);
+  renumberClustersBySize(clusters, centroids, maxCluster[0], stream);
   cudaCheckError(cudaStreamSynchronize(stream));
+  return maxCluster[0];
 }
 
-void butinaGpu(const cuda::std::span<const uint8_t> hitMatrix,
-               const cuda::std::span<int>           clusters,
-               const int                            neighborlistMaxSize,
-               cudaStream_t                         stream) {
+[[maybe_unused]] int butinaGpu(const cuda::std::span<const uint8_t> hitMatrix,
+                               const cuda::std::span<int>           clusters,
+                               const int                            neighborlistMaxSize,
+                               const cuda::std::span<int>           centroids,
+                               cudaStream_t                         stream) {
   switch (neighborlistMaxSize) {
     case 8:
-      butinaGpuImpl<8>(hitMatrix, clusters, stream);
-      break;
+      return butinaGpuImpl<8>(hitMatrix, clusters, centroids, stream);
     case 16:
-      butinaGpuImpl<16>(hitMatrix, clusters, stream);
-      break;
+      return butinaGpuImpl<16>(hitMatrix, clusters, centroids, stream);
     case 24:
-      butinaGpuImpl<24>(hitMatrix, clusters, stream);
-      break;
+      return butinaGpuImpl<24>(hitMatrix, clusters, centroids, stream);
     case 32:
-      butinaGpuImpl<32>(hitMatrix, clusters, stream);
-      break;
+      return butinaGpuImpl<32>(hitMatrix, clusters, centroids, stream);
     case 64:
-      butinaGpuImpl<64>(hitMatrix, clusters, stream);
-      break;
+      return butinaGpuImpl<64>(hitMatrix, clusters, centroids, stream);
     case 128:
-      butinaGpuImpl<128>(hitMatrix, clusters, stream);
-      break;
+      return butinaGpuImpl<128>(hitMatrix, clusters, centroids, stream);
     default:
       throw std::invalid_argument("neighborlistMaxSize must be 8, 16, 24, 32, 64, or 128. Got: " +
                                   std::to_string(neighborlistMaxSize));
@@ -1001,11 +1052,12 @@ __global__ void thresholdDistanceMatrixKernel(const double* __restrict__ matrix,
 
 }  // namespace
 
-void butinaGpu(const cuda::std::span<const double> distanceMatrix,
-               const cuda::std::span<int>          clusters,
-               const double                        cutoff,
-               const int                           neighborlistMaxSize,
-               cudaStream_t                        stream) {
+[[maybe_unused]] int butinaGpu(const cuda::std::span<const double> distanceMatrix,
+                               const cuda::std::span<int>          clusters,
+                               const double                        cutoff,
+                               const int                           neighborlistMaxSize,
+                               const cuda::std::span<int>          centroids,
+                               cudaStream_t                        stream) {
   AsyncDeviceVector<uint8_t> hitMatrix(distanceMatrix.size(), stream);
 
   constexpr int blockSize = 256;
@@ -1015,7 +1067,7 @@ void butinaGpu(const cuda::std::span<const double> distanceMatrix,
                                                                      cutoff,
                                                                      distanceMatrix.size());
   cudaCheckError(cudaGetLastError());
-  butinaGpu(toSpan(hitMatrix), clusters, neighborlistMaxSize, stream);
+  return butinaGpu(toSpan(hitMatrix), clusters, neighborlistMaxSize, centroids, stream);
 }
 
 }  // namespace nvMolKit
