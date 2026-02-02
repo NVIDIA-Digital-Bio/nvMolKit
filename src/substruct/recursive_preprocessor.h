@@ -80,6 +80,13 @@ struct LeafSubpatterns {
   /// Max recursion depth per query (0 if no recursive patterns)
   std::vector<int> perQueryMaxDepth;
 
+  /// Precomputed pattern entries for ALL queries combined, organized by depth.
+  /// Used when a mini-batch contains all queries to avoid redundant per-query iteration.
+  std::array<std::vector<BatchedPatternEntry>, kMaxSmartsNestingDepth + 1> allQueriesPatternsAtDepth;
+
+  /// Max recursion depth across all queries
+  int allQueriesMaxDepth = 0;
+
   LeafSubpatterns() = default;
 
   /**

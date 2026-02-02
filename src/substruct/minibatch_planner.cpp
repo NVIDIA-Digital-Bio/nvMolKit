@@ -58,37 +58,13 @@ void MiniBatchPlanner::prepareRecursiveMiniBatch(MiniBatchPlan&             plan
 
   precomputePipelineSchedule(plan, ctx, buffer);
 
-  for (auto& vec : plan.patternsAtDepth) {
-    vec.clear();
-  }
-
-  const int numUniqueQueries = std::min(plan.numPairsInMiniBatch, ctx.numQueries);
-
-  int maxDepth = 0;
-  int queryIdx = plan.miniBatchPairOffset % ctx.numQueries;
-  for (int i = 0; i < numUniqueQueries; ++i) {
-    if (ctx.queryHasPatterns[queryIdx]) {
-      const int queryMaxDepth = ctx.queryMaxDepths[queryIdx];
-      if (queryMaxDepth > maxDepth) {
-        maxDepth = queryMaxDepth;
-      }
-
-      for (int d = 0; d <= queryMaxDepth; ++d) {
-        const auto& srcEntries  = leafSubpatterns.perQueryPatterns[queryIdx][d];
-        auto&       destEntries = plan.patternsAtDepth[d];
-        destEntries.insert(destEntries.end(), srcEntries.begin(), srcEntries.end());
-      }
-    }
-
-    if (++queryIdx >= ctx.numQueries) {
-      queryIdx = 0;
-    }
-  }
-  plan.recursiveMaxDepth = maxDepth;
-
   plan.firstTargetInMiniBatch     = plan.miniBatchPairOffset / ctx.numQueries;
   const int lastTargetInMiniBatch = (plan.miniBatchPairOffset + plan.numPairsInMiniBatch - 1) / ctx.numQueries;
   plan.numTargetsInMiniBatch      = lastTargetInMiniBatch - plan.firstTargetInMiniBatch + 1;
+
+  // Use precomputed all-queries pattern entries (shared across all mini-batches)
+  plan.patternsAtDepth   = &leafSubpatterns.allQueriesPatternsAtDepth;
+  plan.recursiveMaxDepth = leafSubpatterns.allQueriesMaxDepth;
 }
 
 void MiniBatchPlanner::prepareMiniBatch(MiniBatchPlan&             plan,
