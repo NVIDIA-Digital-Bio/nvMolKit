@@ -29,7 +29,7 @@ size_t alignPinnedOffset(const size_t offset) {
 
 }  // namespace
 
-size_t computePinnedHostBufferBytes(int maxBatchSize, int maxMatchIndicesEstimate, int maxPatternsPerDepth) {
+size_t computeConsolidatedBufferBytes(int maxBatchSize) {
   size_t offset = 0;
 
   auto addBlock = [&](const size_t bytes) {
@@ -37,20 +37,34 @@ size_t computePinnedHostBufferBytes(int maxBatchSize, int maxMatchIndicesEstimat
     offset += bytes;
   };
 
-  addBlock(sizeof(int) * static_cast<size_t>(maxBatchSize));                 // pairIndices
-  addBlock(sizeof(int) * static_cast<size_t>(maxBatchSize + 1));             // miniBatchPairMatchStarts
-  addBlock(sizeof(int) * static_cast<size_t>(maxBatchSize));                 // matchCounts
-  addBlock(sizeof(int) * static_cast<size_t>(maxBatchSize));                 // reportedCounts
-  addBlock(sizeof(int16_t) * static_cast<size_t>(maxMatchIndicesEstimate));  // matchIndices
-  addBlock(sizeof(uint8_t) * static_cast<size_t>(maxBatchSize));             // overflowFlags
+  // Fixed-width buffers (based on maxBatchSize) - consolidated for single memcpy
+  addBlock(sizeof(int) * static_cast<size_t>(maxBatchSize));      // pairIndices
+  addBlock(sizeof(int) * static_cast<size_t>(maxBatchSize + 1));  // miniBatchPairMatchStarts
+  addBlock(sizeof(int) * static_cast<size_t>(maxBatchSize));      // matchCounts
+  addBlock(sizeof(int) * static_cast<size_t>(maxBatchSize));      // reportedCounts
+  addBlock(sizeof(uint8_t) * static_cast<size_t>(maxBatchSize));  // overflowFlags
 
   for (int i = 0; i <= kMaxSmartsNestingDepth; ++i) {
-    addBlock(sizeof(int) * static_cast<size_t>(maxBatchSize));
-    addBlock(sizeof(int) * static_cast<size_t>(maxBatchSize));
+    addBlock(sizeof(int) * static_cast<size_t>(maxBatchSize));  // matchGlobalPairIndicesHost[i]
+    addBlock(sizeof(int) * static_cast<size_t>(maxBatchSize));  // matchBatchLocalIndicesHost[i]
   }
 
+  return offset;
+}
+
+size_t computePinnedHostBufferBytes(int maxBatchSize, int maxMatchIndicesEstimate, int maxPatternsPerDepth) {
+  size_t offset = computeConsolidatedBufferBytes(maxBatchSize);
+
+  auto addBlock = [&](const size_t bytes) {
+    offset = alignPinnedOffset(offset);
+    offset += bytes;
+  };
+
+  // Variable-width buffers - copied separately
+  addBlock(sizeof(int16_t) * static_cast<size_t>(maxMatchIndicesEstimate));  // matchIndices
+
   for (int i = 0; i < 2; ++i) {
-    addBlock(sizeof(BatchedPatternEntry) * static_cast<size_t>(maxPatternsPerDepth));
+    addBlock(sizeof(BatchedPatternEntry) * static_cast<size_t>(maxPatternsPerDepth));  // patternsAtDepthHost
   }
 
   return offset;
@@ -93,18 +107,26 @@ std::unique_ptr<PinnedHostBuffer> PinnedHostBufferPool::createBuffer(int maxBatc
   PinnedHostAllocator allocator(bufferBytes);
   auto                buffer = std::make_unique<PinnedHostBuffer>();
 
+  // Allocate fixed-width buffers first (consolidated region for single H2D copy)
   buffer->pairIndices              = allocator.allocate<int>(static_cast<size_t>(maxBatchSize));
+  buffer->consolidated.basePtr     = reinterpret_cast<std::byte*>(buffer->pairIndices.data());
+  buffer->consolidated.maxBatchSize = maxBatchSize;
+
   buffer->miniBatchPairMatchStarts = allocator.allocate<int>(static_cast<size_t>(maxBatchSize + 1));
   buffer->matchCounts              = allocator.allocate<int>(static_cast<size_t>(maxBatchSize));
   buffer->reportedCounts           = allocator.allocate<int>(static_cast<size_t>(maxBatchSize));
-  if (maxMatchIndicesEstimate > 0) {
-    buffer->matchIndices = allocator.allocate<int16_t>(static_cast<size_t>(maxMatchIndicesEstimate));
-  }
-  buffer->overflowFlags = allocator.allocate<uint8_t>(static_cast<size_t>(maxBatchSize));
+  buffer->overflowFlags            = allocator.allocate<uint8_t>(static_cast<size_t>(maxBatchSize));
 
   for (int i = 0; i <= kMaxSmartsNestingDepth; ++i) {
     buffer->matchGlobalPairIndicesHost[i] = allocator.allocate<int>(static_cast<size_t>(maxBatchSize));
     buffer->matchBatchLocalIndicesHost[i] = allocator.allocate<int>(static_cast<size_t>(maxBatchSize));
+  }
+
+  buffer->consolidated.totalBytes = computeConsolidatedBufferBytes(maxBatchSize);
+
+  // Allocate variable-width buffers (copied separately)
+  if (maxMatchIndicesEstimate > 0) {
+    buffer->matchIndices = allocator.allocate<int16_t>(static_cast<size_t>(maxMatchIndicesEstimate));
   }
 
   for (int i = 0; i < 2; ++i) {

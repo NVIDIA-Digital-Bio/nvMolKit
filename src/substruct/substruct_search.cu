@@ -93,6 +93,8 @@ namespace {
 
 /**
  * @brief Launch label matrix and match kernels for a subset of pairs.
+ *
+ * Data must already be copied to the consolidated device buffer before calling this function.
  */
 void launchLabelAndMatch(int                        numPairsInGroup,
                          GpuExecutor&               executor,
@@ -101,42 +103,26 @@ void launchLabelAndMatch(int                        numPairsInGroup,
                          const MoleculesDevice&     queriesDevice,
                          SubstructAlgorithm         algorithm,
                          cudaStream_t               stream,
-                         int                        depthGroupIdx,
-                         const PinnedHostBuffer&    hostBuffer) {
+                         int                        depthGroupIdx) {
   ScopedNvtxRange launchRange("launchLabelAndMatch depth=" + std::to_string(depthGroupIdx));
 
   if (numPairsInGroup == 0) {
     return;
   }
 
-  const int* globalPairIndicesHost        = hostBuffer.matchGlobalPairIndicesHost[depthGroupIdx].data();
-  const int* miniBatchLocalIndicesHostPtr = hostBuffer.matchBatchLocalIndicesHost[depthGroupIdx].data();
-
-  auto& globalPairIndicesDev     = executor.matchGlobalPairIndices[depthGroupIdx];
-  auto& miniBatchLocalIndicesDev = executor.matchMiniBatchLocalIndices[depthGroupIdx];
-
-  globalPairIndicesDev.setStream(stream);
-  if (globalPairIndicesDev.size() < static_cast<size_t>(numPairsInGroup)) {
-    globalPairIndicesDev.resize(static_cast<size_t>(numPairsInGroup * 1.5));
-  }
-  globalPairIndicesDev.copyFromHost(globalPairIndicesHost, numPairsInGroup);
-
-  miniBatchLocalIndicesDev.setStream(stream);
-  if (miniBatchLocalIndicesDev.size() < static_cast<size_t>(numPairsInGroup)) {
-    miniBatchLocalIndicesDev.resize(static_cast<size_t>(numPairsInGroup * 1.5));
-  }
-  miniBatchLocalIndicesDev.copyFromHost(miniBatchLocalIndicesHostPtr, numPairsInGroup);
+  const int* globalPairIndicesDev     = executor.consolidatedBuffer.matchGlobalPairIndices(depthGroupIdx);
+  const int* miniBatchLocalIndicesDev = executor.consolidatedBuffer.matchBatchLocalIndices(depthGroupIdx);
 
   launchLabelMatrixKernel(ctx.templateConfig,
                           targetsDevice.view<MoleculeType::Target>(),
                           queriesDevice.view<MoleculeType::Query>(),
-                          globalPairIndicesDev.data(),
+                          globalPairIndicesDev,
                           numPairsInGroup,
                           ctx.numQueries,
                           executor.deviceResults.labelMatrixBuffer(),
                           executor.deviceResults.recursiveMatchBits(),
                           executor.deviceResults.maxTargetAtoms(),
-                          miniBatchLocalIndicesDev.data(),
+                          miniBatchLocalIndicesDev,
                           stream);
 
   launchSubstructMatchKernel(ctx.templateConfig,
@@ -144,10 +130,10 @@ void launchLabelAndMatch(int                        numPairsInGroup,
                              targetsDevice.view<MoleculeType::Target>(),
                              queriesDevice.view<MoleculeType::Query>(),
                              executor.deviceResults,
-                             globalPairIndicesDev.data(),
+                             globalPairIndicesDev,
                              numPairsInGroup,
                              ctx.numQueries,
-                             miniBatchLocalIndicesDev.data(),
+                             miniBatchLocalIndicesDev,
                              nullptr,
                              stream);
 }
@@ -157,8 +143,7 @@ void uploadAndLaunchMiniBatch(GpuExecutor&                        executor,
                               MoleculesDevice&                    targetsDevice,
                               const MoleculesDevice&              queriesDevice,
                               const RecursivePatternPreprocessor& recursivePreprocessor,
-                              SubstructAlgorithm                  algorithm,
-                              const PinnedHostBuffer&             hostBuffer) {
+                              SubstructAlgorithm                  algorithm) {
   ScopedNvtxRange uploadRange("uploadAndLaunchMiniBatch");
 
   cudaStream_t executorStream     = executor.stream();
@@ -169,7 +154,7 @@ void uploadAndLaunchMiniBatch(GpuExecutor&                        executor,
 
     const int maxMatchesToFind = ctx.maxMatches > 0 ? ctx.maxMatches : -1;
     executor.deviceResults.allocateMiniBatch(executor.plan.numPairsInMiniBatch,
-                                             hostBuffer.miniBatchPairMatchStarts.data(),
+                                             executor.consolidatedBuffer.miniBatchPairMatchStarts(),
                                              executor.plan.totalMatchIndices,
                                              ctx.numQueries,
                                              ctx.maxTargetAtoms,
@@ -178,15 +163,10 @@ void uploadAndLaunchMiniBatch(GpuExecutor&                        executor,
                                              ctx.countOnly);
     executor.deviceResults.setQueryAtomCounts(ctx.queryAtomCounts, ctx.numQueries);
 
-    if (executor.pairIndicesDev.size() < static_cast<size_t>(executor.plan.numPairsInMiniBatch)) {
-      executor.pairIndicesDev.resize(static_cast<size_t>(executor.plan.numPairsInMiniBatch * 1.5));
-    }
-    executor.pairIndicesDev.copyFromHost(hostBuffer.pairIndices.data(), executor.plan.numPairsInMiniBatch);
-
     launchLabelMatrixKernel(ctx.templateConfig,
                             targetsDevice.view<MoleculeType::Target>(),
                             queriesDevice.view<MoleculeType::Query>(),
-                            executor.pairIndicesDev.data(),
+                            executor.consolidatedBuffer.pairIndices(),
                             executor.plan.numPairsInMiniBatch,
                             ctx.numQueries,
                             executor.deviceResults.labelMatrixBuffer(),
@@ -200,7 +180,7 @@ void uploadAndLaunchMiniBatch(GpuExecutor&                        executor,
                                targetsDevice.view<MoleculeType::Target>(),
                                queriesDevice.view<MoleculeType::Query>(),
                                executor.deviceResults,
-                               executor.pairIndicesDev.data(),
+                               executor.consolidatedBuffer.pairIndices(),
                                executor.plan.numPairsInMiniBatch,
                                ctx.numQueries,
                                nullptr,
@@ -215,7 +195,7 @@ void uploadAndLaunchMiniBatch(GpuExecutor&                        executor,
 
   const int maxMatchesToFind = ctx.maxMatches > 0 ? ctx.maxMatches : -1;
   executor.deviceResults.allocateMiniBatch(executor.plan.numPairsInMiniBatch,
-                                           hostBuffer.miniBatchPairMatchStarts.data(),
+                                           executor.consolidatedBuffer.miniBatchPairMatchStarts(),
                                            executor.plan.totalMatchIndices,
                                            ctx.numQueries,
                                            ctx.maxTargetAtoms,
@@ -261,8 +241,7 @@ void uploadAndLaunchMiniBatch(GpuExecutor&                        executor,
                       queriesDevice,
                       algorithm,
                       executorStream,
-                      0,
-                      hostBuffer);
+                      0);
   depth0Range.pop();
 
   cudaStream_t postStream = executor.postRecursionStream.stream();
@@ -282,8 +261,7 @@ void uploadAndLaunchMiniBatch(GpuExecutor&                        executor,
                         queriesDevice,
                         algorithm,
                         postStream,
-                        depth,
-                        hostBuffer);
+                        depth);
   }
   cudaCheckError(cudaEventRecord(executor.postRecursionDoneEvent.event(), postStream));
 
@@ -378,6 +356,9 @@ void runnerWorkerPipeline(int                                 workerIdx,
       executor->recursiveScratch.setPinnedBuffer(batch->pinnedBuffer->patternsAtDepthHost,
                                                  static_cast<int>(batch->pinnedBuffer->patternsAtDepthHost[0].size()));
 
+      executor->consolidatedBuffer.allocate(batch->pinnedBuffer->consolidated.maxBatchSize, executor->stream());
+      executor->consolidatedBuffer.copyFromHost(*batch->pinnedBuffer, executor->stream());
+
       executor->targetsDevice.copyFromHost(*batch->targetsHost, executor->stream());
       cudaCheckError(cudaEventRecord(executor->targetsReadyEvent.event(), executor->stream()));
       cudaCheckError(cudaStreamWaitEvent(executor->recursiveStream.stream(), executor->targetsReadyEvent.event(), 0));
@@ -390,8 +371,7 @@ void runnerWorkerPipeline(int                                 workerIdx,
                                executor->targetsDevice,
                                queriesDevice,
                                recursivePreprocessor,
-                               algorithm,
-                               *batch->pinnedBuffer);
+                               algorithm);
       initiateCopy(*executor, *batch->pinnedBuffer);
       launchRange.pop();
 

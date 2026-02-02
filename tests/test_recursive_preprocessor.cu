@@ -25,12 +25,14 @@
 
 #include "cuda_error_check.h"
 #include "device.h"
+#include "device_vector.h"
 #include "molecules.h"
 #include "molecules_device.cuh"
 #include "recursive_preprocessor.h"
 #include "substruct_search_internal.h"
 #include "substruct_types.h"
 
+using nvMolKit::AsyncDeviceVector;
 using nvMolKit::BatchedPatternEntry;
 using nvMolKit::checkReturnCode;
 using nvMolKit::kMaxSmartsNestingDepth;
@@ -110,9 +112,10 @@ TEST(RecursivePreprocessorTest, PaintsBitsForSimpleRecursivePattern) {
   const int maxTargetAtoms = maxAtomsPerTarget(targetsHost);
   ASSERT_GT(maxTargetAtoms, 0);
 
-  std::vector<int>       pairMatchStarts(static_cast<size_t>(miniBatchSize + 1), 0);
+  AsyncDeviceVector<int> pairMatchStartsDev(static_cast<size_t>(miniBatchSize + 1), stream.stream());
+  pairMatchStartsDev.zero();
   MiniBatchResultsDevice miniBatchResults(stream.stream());
-  miniBatchResults.allocateMiniBatch(miniBatchSize, pairMatchStarts.data(), 0, numQueries, maxTargetAtoms, 2);
+  miniBatchResults.allocateMiniBatch(miniBatchSize, pairMatchStartsDev.data(), 0, numQueries, maxTargetAtoms, 2);
   const std::vector<int> atomCounts = queryAtomCounts(queriesHost);
   miniBatchResults.setQueryAtomCounts(atomCounts.data(), atomCounts.size());
   miniBatchResults.zeroRecursiveBits();

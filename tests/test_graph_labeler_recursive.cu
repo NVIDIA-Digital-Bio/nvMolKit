@@ -23,6 +23,7 @@
 #include "boolean_tree.cuh"
 #include "cuda_error_check.h"
 #include "device.h"
+#include "device_vector.h"
 #include "graph_labeler.cuh"
 #include "molecules.h"
 #include "molecules_device.cuh"
@@ -247,11 +248,12 @@ TEST_F(RecursiveInstructionTest, NegatedRecursivePattern) {
 
 class RecursivePaintTest : public ::testing::Test {
  protected:
-  ScopedStream                            stream_;
-  std::unique_ptr<MiniBatchResultsDevice> results_;
-  int                                     maxTargetAtoms_ = 0;
-  int                                     numTargets_     = 0;
-  int                                     numQueries_     = 1;
+  ScopedStream                                 stream_;
+  std::unique_ptr<MiniBatchResultsDevice>      results_;
+  std::unique_ptr<AsyncDeviceVector<int>>      pairMatchStartsDev_;
+  int                                          maxTargetAtoms_ = 0;
+  int                                          numTargets_     = 0;
+  int                                          numQueries_     = 1;
 
   void setupResults(const MoleculesHost& targetsHost, int numQueries = 1) {
     const int numTargets = static_cast<int>(targetsHost.numMolecules());
@@ -265,11 +267,12 @@ class RecursivePaintTest : public ::testing::Test {
       maxTargetAtoms_ = std::max(maxTargetAtoms_, atomCount);
     }
 
-    const int        miniBatchSize = numTargets * numQueries;
-    std::vector<int> miniBatchPairMatchStarts(miniBatchSize + 1, 0);
+    const int miniBatchSize = numTargets * numQueries;
+    pairMatchStartsDev_     = std::make_unique<AsyncDeviceVector<int>>(miniBatchSize + 1, stream_.stream());
+    pairMatchStartsDev_->zero();
 
     results_ = std::make_unique<MiniBatchResultsDevice>(stream_.stream());
-    results_->allocateMiniBatch(miniBatchSize, miniBatchPairMatchStarts.data(), 0, numQueries, maxTargetAtoms_, 2);
+    results_->allocateMiniBatch(miniBatchSize, pairMatchStartsDev_->data(), 0, numQueries, maxTargetAtoms_, 2);
     results_->setQueryAtomCounts(queryAtomCounts.data(), queryAtomCounts.size());
     results_->zeroRecursiveBits();
   }

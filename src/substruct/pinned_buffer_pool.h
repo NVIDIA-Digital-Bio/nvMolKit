@@ -28,9 +28,28 @@
 namespace nvMolKit {
 
 /**
- * @brief Compute bytes required for a pinned host buffer.
+ * @brief Compute bytes required for the consolidated (fixed-width) portion of a pinned host buffer.
+ *
+ * This is the size needed for a single H2D memcpy of all maxBatchSize-based buffers.
+ */
+size_t computeConsolidatedBufferBytes(int maxBatchSize);
+
+/**
+ * @brief Compute total bytes required for a pinned host buffer (consolidated + variable).
  */
 size_t computePinnedHostBufferBytes(int maxBatchSize, int maxMatchIndicesEstimate, int maxPatternsPerDepth);
+
+/**
+ * @brief Metadata for the consolidated fixed-width region of a PinnedHostBuffer.
+ *
+ * All fixed-width buffers (based on maxBatchSize) are allocated contiguously
+ * and can be copied to the device in a single memcpy operation.
+ */
+struct ConsolidatedBufferInfo {
+  std::byte* basePtr    = nullptr;  ///< Start of consolidated region
+  size_t     totalBytes = 0;        ///< Total bytes in consolidated region
+  int        maxBatchSize = 0;      ///< Max batch size used to compute offsets
+};
 
 /**
  * @brief Host-side pinned buffer for a mini-batch.
@@ -46,6 +65,8 @@ struct PinnedHostBuffer {
   std::array<PinnedHostView<int>, kMaxSmartsNestingDepth + 1> matchGlobalPairIndicesHost = {};
   std::array<PinnedHostView<int>, kMaxSmartsNestingDepth + 1> matchBatchLocalIndicesHost = {};
   std::array<PinnedHostView<BatchedPatternEntry>, 2>          patternsAtDepthHost        = {};
+
+  ConsolidatedBufferInfo consolidated;  ///< Info for single-copy H2D transfer of fixed-width buffers
 };
 
 /**

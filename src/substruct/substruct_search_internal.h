@@ -68,7 +68,8 @@ class MiniBatchResultsDevice {
    * @brief Allocate mini-batch-local buffers for a specific mini-batch.
    *
    * @param miniBatchSize Number of pairs in this mini-batch
-   * @param miniBatchPairMatchStarts Mini-batch-local offsets into matchIndices [miniBatchSize + 1]
+   * @param pairMatchStartsDevice Device pointer to mini-batch-local offsets into matchIndices [miniBatchSize + 1].
+   *                              Must remain valid until the mini-batch is complete.
    * @param totalMiniBatchMatchIndices Total match indices capacity for this mini-batch
    * @param numQueries Total number of queries (for kernel view)
    * @param maxTargetAtoms Max atoms per target (stride for recursiveMatchBits)
@@ -76,14 +77,14 @@ class MiniBatchResultsDevice {
    * @param maxMatchesToFind Stop searching after this many matches (-1 = no limit)
    * @param countOnly If true, count matches but don't store them
    */
-  void allocateMiniBatch(int        miniBatchSize,
-                         const int* miniBatchPairMatchStarts,
-                         int        totalMiniBatchMatchIndices,
-                         int        numQueries,
-                         int        maxTargetAtoms,
-                         int        numBuffersPerBlock,
-                         int        maxMatchesToFind = -1,
-                         bool       countOnly        = false);
+  void allocateMiniBatch(int  miniBatchSize,
+                         int* pairMatchStartsDevice,
+                         int  totalMiniBatchMatchIndices,
+                         int  numQueries,
+                         int  maxTargetAtoms,
+                         int  numBuffersPerBlock,
+                         int  maxMatchesToFind = -1,
+                         bool countOnly        = false);
 
   void setStream(cudaStream_t stream);
 
@@ -126,7 +127,7 @@ class MiniBatchResultsDevice {
 
   [[nodiscard]] int*          matchCounts() const { return matchCounts_.data(); }
   [[nodiscard]] int*          reportedCounts() const { return reportedCounts_.data(); }
-  [[nodiscard]] int*          pairMatchStarts() const { return pairMatchStarts_.data(); }
+  [[nodiscard]] int*          pairMatchStarts() const { return pairMatchStarts_; }
   [[nodiscard]] int16_t*      matchIndices() const { return matchIndices_.data(); }
   [[nodiscard]] const int*    queryAtomCounts() const { return queryAtomCounts_.data(); }
   [[nodiscard]] PartialMatch* overflowBuffer() const { return overflowBuffer_.data(); }
@@ -143,7 +144,7 @@ class MiniBatchResultsDevice {
 
   AsyncDeviceVector<int>     matchCounts_;
   AsyncDeviceVector<int>     reportedCounts_;
-  AsyncDeviceVector<int>     pairMatchStarts_;
+  int*                       pairMatchStarts_ = nullptr;  ///< External device pointer, not owned
   AsyncDeviceVector<int16_t> matchIndices_;
   AsyncDeviceVector<int>     queryAtomCounts_;
 

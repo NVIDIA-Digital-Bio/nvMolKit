@@ -39,7 +39,6 @@ void MiniBatchResultsDevice::setStream(cudaStream_t stream) {
   stream_ = stream;
   matchCounts_.setStream(stream);
   reportedCounts_.setStream(stream);
-  pairMatchStarts_.setStream(stream);
   matchIndices_.setStream(stream);
   queryAtomCounts_.setStream(stream);
   overflowBuffer_.setStream(stream);
@@ -47,14 +46,14 @@ void MiniBatchResultsDevice::setStream(cudaStream_t stream) {
   labelMatrixBuffer_.setStream(stream);
 }
 
-void MiniBatchResultsDevice::allocateMiniBatch(int        miniBatchSize,
-                                               const int* miniBatchPairMatchStarts,
-                                               int        totalMiniBatchMatchIndices,
-                                               int        numQueries,
-                                               int        maxTargetAtoms,
-                                               int        numBuffersPerBlock,
-                                               int        maxMatchesToFind,
-                                               bool       countOnly) {
+void MiniBatchResultsDevice::allocateMiniBatch(int  miniBatchSize,
+                                               int* pairMatchStartsDevice,
+                                               int  totalMiniBatchMatchIndices,
+                                               int  numQueries,
+                                               int  maxTargetAtoms,
+                                               int  numBuffersPerBlock,
+                                               int  maxMatchesToFind,
+                                               bool countOnly) {
   ScopedNvtxRange allocRange("MiniBatchResultsDevice::allocateMiniBatch");
 
   miniBatchSize_              = miniBatchSize;
@@ -64,6 +63,7 @@ void MiniBatchResultsDevice::allocateMiniBatch(int        miniBatchSize,
   overflowBuffersPerBlock_    = numBuffersPerBlock;
   maxMatchesToFind_           = maxMatchesToFind;
   countOnly_                  = countOnly;
+  pairMatchStarts_            = pairMatchStartsDevice;
 
   if (matchCounts_.size() < static_cast<size_t>(miniBatchSize)) {
     matchCounts_.resize(static_cast<size_t>(miniBatchSize * 1.5));
@@ -73,11 +73,6 @@ void MiniBatchResultsDevice::allocateMiniBatch(int        miniBatchSize,
     if (reportedCounts_.size() < static_cast<size_t>(miniBatchSize)) {
       reportedCounts_.resize(static_cast<size_t>(miniBatchSize * 1.5));
     }
-
-    if (pairMatchStarts_.size() < static_cast<size_t>(miniBatchSize + 1)) {
-      pairMatchStarts_.resize(static_cast<size_t>((miniBatchSize + 1) * 1.5));
-    }
-    pairMatchStarts_.copyFromHost(miniBatchPairMatchStarts, miniBatchSize + 1);
 
     if (matchIndices_.size() < static_cast<size_t>(totalMiniBatchMatchIndices)) {
       matchIndices_.resize(static_cast<size_t>(totalMiniBatchMatchIndices) * 3 / 2);

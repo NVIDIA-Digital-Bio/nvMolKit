@@ -38,12 +38,108 @@ void GpuExecutor::initializeForStream() {
   cudaStream_t s         = computeStream.stream();
   cudaStream_t recStream = recursiveStream.stream();
   deviceResults.setStream(s);
-  pairIndicesDev.setStream(s);
+  consolidatedBuffer.setStream(s);
   recursiveScratch.setStream(recStream);
 }
 
 void GpuExecutor::applyMiniBatchPlan(MiniBatchPlan&& plan) {
   this->plan = std::move(plan);
+}
+
+// =============================================================================
+// ConsolidatedDeviceBuffer Implementation
+// =============================================================================
+
+void ConsolidatedDeviceBuffer::allocate(int maxBatchSize, cudaStream_t stream) {
+  maxBatchSize_ = maxBatchSize;
+  const size_t totalBytes = computeConsolidatedBufferBytes(maxBatchSize);
+  data_.setStream(stream);
+  if (data_.size() < totalBytes) {
+    data_.resize(totalBytes);
+  }
+}
+
+void ConsolidatedDeviceBuffer::copyFromHost(const PinnedHostBuffer& host, cudaStream_t stream) {
+  cudaCheckError(cudaMemcpyAsync(data_.data(),
+                                 host.consolidated.basePtr,
+                                 host.consolidated.totalBytes,
+                                 cudaMemcpyHostToDevice,
+                                 stream));
+}
+
+void ConsolidatedDeviceBuffer::setStream(cudaStream_t stream) {
+  data_.setStream(stream);
+}
+
+size_t ConsolidatedDeviceBuffer::miniBatchPairMatchStartsOffset() const {
+  size_t offset = sizeof(int) * static_cast<size_t>(maxBatchSize_);  // after pairIndices
+  return alignOffset(offset);
+}
+
+size_t ConsolidatedDeviceBuffer::matchCountsOffset() const {
+  size_t offset = miniBatchPairMatchStartsOffset();
+  offset += sizeof(int) * static_cast<size_t>(maxBatchSize_ + 1);
+  return alignOffset(offset);
+}
+
+size_t ConsolidatedDeviceBuffer::reportedCountsOffset() const {
+  size_t offset = matchCountsOffset();
+  offset += sizeof(int) * static_cast<size_t>(maxBatchSize_);
+  return alignOffset(offset);
+}
+
+size_t ConsolidatedDeviceBuffer::overflowFlagsOffset() const {
+  size_t offset = reportedCountsOffset();
+  offset += sizeof(int) * static_cast<size_t>(maxBatchSize_);
+  return alignOffset(offset);
+}
+
+size_t ConsolidatedDeviceBuffer::matchGlobalPairIndicesOffset(int depth) const {
+  size_t offset = overflowFlagsOffset();
+  offset += sizeof(uint8_t) * static_cast<size_t>(maxBatchSize_);
+  offset = alignOffset(offset);
+
+  for (int i = 0; i < depth; ++i) {
+    offset += sizeof(int) * static_cast<size_t>(maxBatchSize_);  // matchGlobalPairIndices[i]
+    offset = alignOffset(offset);
+    offset += sizeof(int) * static_cast<size_t>(maxBatchSize_);  // matchBatchLocalIndices[i]
+    offset = alignOffset(offset);
+  }
+  return offset;
+}
+
+size_t ConsolidatedDeviceBuffer::matchBatchLocalIndicesOffset(int depth) const {
+  size_t offset = matchGlobalPairIndicesOffset(depth);
+  offset += sizeof(int) * static_cast<size_t>(maxBatchSize_);
+  return alignOffset(offset);
+}
+
+int* ConsolidatedDeviceBuffer::pairIndices() const {
+  return reinterpret_cast<int*>(data_.data() + pairIndicesOffset());
+}
+
+int* ConsolidatedDeviceBuffer::miniBatchPairMatchStarts() const {
+  return reinterpret_cast<int*>(data_.data() + miniBatchPairMatchStartsOffset());
+}
+
+int* ConsolidatedDeviceBuffer::matchCounts() const {
+  return reinterpret_cast<int*>(data_.data() + matchCountsOffset());
+}
+
+int* ConsolidatedDeviceBuffer::reportedCounts() const {
+  return reinterpret_cast<int*>(data_.data() + reportedCountsOffset());
+}
+
+uint8_t* ConsolidatedDeviceBuffer::overflowFlags() const {
+  return reinterpret_cast<uint8_t*>(data_.data() + overflowFlagsOffset());
+}
+
+int* ConsolidatedDeviceBuffer::matchGlobalPairIndices(int depth) const {
+  return reinterpret_cast<int*>(data_.data() + matchGlobalPairIndicesOffset(depth));
+}
+
+int* ConsolidatedDeviceBuffer::matchBatchLocalIndices(int depth) const {
+  return reinterpret_cast<int*>(data_.data() + matchBatchLocalIndicesOffset(depth));
 }
 
 }  // namespace nvMolKit
