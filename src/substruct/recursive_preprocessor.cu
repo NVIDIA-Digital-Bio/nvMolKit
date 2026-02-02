@@ -168,6 +168,8 @@ void RecursivePatternPreprocessor::preprocessMiniBatch(
 
   const int maxPaintPairsPerSubBatch = std::max(miniBatchSize, 1024);
 
+  bool isFirstLabelKernel = true;
+
   for (int currentDepth = 0; currentDepth <= maxDepth; ++currentDepth) {
     ScopedNvtxRange depthRange("Process recursive depth level " + std::to_string(currentDepth));
 
@@ -220,6 +222,12 @@ void RecursivePatternPreprocessor::preprocessMiniBatch(
 
       const uint32_t* recursiveBitsForLabel = (currentDepth > 0) ? miniBatchResults.recursiveMatchBits() : nullptr;
 
+      uint32_t* recursiveBitsToZero      = isFirstLabelKernel ? miniBatchResults.recursiveMatchBits() : nullptr;
+      const int recursiveBitsSizeToZero = isFirstLabelKernel ? (miniBatchSize * miniBatchResults.maxTargetAtoms()) : 0;
+      uint8_t*  overflowFlagsToZero     = isFirstLabelKernel ? miniBatchResults.overflowFlags() : nullptr;
+      const int overflowFlagsSizeToZero = isFirstLabelKernel ? miniBatchSize : 0;
+      isFirstLabelKernel                = false;
+
       launchLabelMatrixPaintKernel(templateConfig,
                                    targetsDevice.view<MoleculeType::Target>(),
                                    leafSubpatterns_.view(),
@@ -233,6 +241,10 @@ void RecursivePatternPreprocessor::preprocessMiniBatch(
                                    firstTargetInMiniBatch,
                                    recursiveBitsForLabel,
                                    miniBatchResults.maxTargetAtoms(),
+                                   recursiveBitsToZero,
+                                   recursiveBitsSizeToZero,
+                                   overflowFlagsToZero,
+                                   overflowFlagsSizeToZero,
                                    stream);
 
       launchSubstructPaintKernel(templateConfig,
@@ -343,6 +355,8 @@ void preprocessRecursiveSmarts(SubstructTemplateConfig           templateConfig,
   const int maxPaintPairsPerSubBatch = std::max(miniBatchSize, 1024);
   processRecursiveRangeSetup.pop();
 
+  bool isFirstLabelKernel = true;
+
   for (int currentDepth = 0; currentDepth <= maxDepth; ++currentDepth) {
     ScopedNvtxRange depthRange("Process recursive depth level " + std::to_string(currentDepth));
 
@@ -400,6 +414,12 @@ void preprocessRecursiveSmarts(SubstructTemplateConfig           templateConfig,
 
       const uint32_t* recursiveBitsForLabel = (currentDepth > 0) ? miniBatchResults.recursiveMatchBits() : nullptr;
 
+      uint32_t* recursiveBitsToZero      = isFirstLabelKernel ? miniBatchResults.recursiveMatchBits() : nullptr;
+      const int recursiveBitsSizeToZero = isFirstLabelKernel ? (miniBatchSize * miniBatchResults.maxTargetAtoms()) : 0;
+      uint8_t*  overflowFlagsToZero     = isFirstLabelKernel ? miniBatchResults.overflowFlags() : nullptr;
+      const int overflowFlagsSizeToZero = isFirstLabelKernel ? miniBatchSize : 0;
+      isFirstLabelKernel                = false;
+
       launchLabelMatrixPaintKernel(templateConfig,
                                    targetsDevice.view<MoleculeType::Target>(),
                                    leafSubpatterns.view(),
@@ -413,6 +433,10 @@ void preprocessRecursiveSmarts(SubstructTemplateConfig           templateConfig,
                                    firstTargetInMiniBatch,
                                    recursiveBitsForLabel,
                                    miniBatchResults.maxTargetAtoms(),
+                                   recursiveBitsToZero,
+                                   recursiveBitsSizeToZero,
+                                   overflowFlagsToZero,
+                                   overflowFlagsSizeToZero,
                                    stream);
 
       launchSubstructPaintKernel(templateConfig,

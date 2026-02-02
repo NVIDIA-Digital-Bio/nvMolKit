@@ -80,6 +80,10 @@ void launchLabelMatrixKernel(SubstructTemplateConfig   config,
  * @param firstTargetIdx First target index for block offset calculation
  * @param recursiveMatchBits Per-pair recursive bits (for nested patterns)
  * @param maxTargetAtoms Stride for recursiveMatchBits indexing
+ * @param recursiveBitsToZero Buffer to zero (may be same as recursiveMatchBits), or nullptr
+ * @param recursiveBitsSizeToZero Number of uint32_t elements to zero, or 0 to skip
+ * @param overflowFlagsToZero Overflow flags buffer to zero, or nullptr
+ * @param overflowFlagsSizeToZero Number of uint8_t elements to zero, or 0 to skip
  * @param stream CUDA stream
  */
 void launchLabelMatrixPaintKernel(SubstructTemplateConfig    config,
@@ -95,6 +99,10 @@ void launchLabelMatrixPaintKernel(SubstructTemplateConfig    config,
                                   int                        firstTargetIdx,
                                   const uint32_t*            recursiveMatchBits,
                                   int                        maxTargetAtoms,
+                                  uint32_t*                  recursiveBitsToZero,
+                                  int                        recursiveBitsSizeToZero,
+                                  uint8_t*                   overflowFlagsToZero,
+                                  int                        overflowFlagsSizeToZero,
                                   cudaStream_t               stream);
 
 /**

@@ -93,7 +93,6 @@ void MiniBatchResultsDevice::allocateMiniBatch(int        miniBatchSize,
   if (recursiveMatchBits_.size() < recursiveBitsSize) {
     recursiveMatchBits_.resize(static_cast<size_t>(recursiveBitsSize * 1.5));
   }
-  recursiveMatchBits_.zero();
 
   const size_t labelMatrixSize = static_cast<size_t>(miniBatchSize) * kLabelMatrixWords;
   if (labelMatrixBuffer_.size() < labelMatrixSize) {
@@ -103,7 +102,6 @@ void MiniBatchResultsDevice::allocateMiniBatch(int        miniBatchSize,
   if (overflowFlags_.size() < static_cast<size_t>(miniBatchSize)) {
     overflowFlags_.resize(static_cast<size_t>(miniBatchSize * 1.5));
   }
-  overflowFlags_.zero();
 }
 
 void MiniBatchResultsDevice::setQueryAtomCounts(const int* queryAtomCounts, size_t count) {

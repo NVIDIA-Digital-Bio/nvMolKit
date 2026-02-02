@@ -249,7 +249,27 @@ __global__ void labelMatrixPaintKernelT(TargetMoleculesDeviceView  targets,
                                         uint32_t*                  labelMatrixBuffer,
                                         int                        firstTargetIdx,
                                         const uint32_t*            recursiveMatchBits,
-                                        int                        maxTargetAtoms) {
+                                        int                        maxTargetAtoms,
+                                        uint32_t*                  recursiveBitsToZero,
+                                        int                        recursiveBitsSizeToZero,
+                                        uint8_t*                   overflowFlagsToZero,
+                                        int                        overflowFlagsSizeToZero) {
+  // Zero buffers using grid-stride loop (only on first label kernel launch)
+  const int tid    = blockIdx.x * blockDim.x + threadIdx.x;
+  const int stride = gridDim.x * blockDim.x;
+
+  if (recursiveBitsSizeToZero > 0 && recursiveBitsToZero != nullptr) {
+    for (int i = tid; i < recursiveBitsSizeToZero; i += stride) {
+      recursiveBitsToZero[i] = 0;
+    }
+  }
+
+  if (overflowFlagsSizeToZero > 0 && overflowFlagsToZero != nullptr) {
+    for (int i = tid; i < overflowFlagsSizeToZero; i += stride) {
+      overflowFlagsToZero[i] = 0;
+    }
+  }
+
   constexpr std::size_t kLabelMatrixBitsT = MaxTargetAtoms * MaxQueryAtoms;
   using LabelMatrixStorageT               = FlatBitVect<kLabelMatrixBitsT>;
 
@@ -432,6 +452,9 @@ __global__ void substructMatchKernelT(TargetMoleculesDeviceView                 
     __shared__ PartialMatchT<MaxQueryAtoms> gsiPartials[kMaxPartialsT * 2];
 
     uint8_t* pairOverflowFlag = results.overflowFlags ? &results.overflowFlags[miniBatchIdx] : nullptr;
+    if (pairOverflowFlag != nullptr && threadIdx.x == 0) {
+      *pairOverflowFlag = 0;
+    }
     gsiBFSSearchGPU<MaxTargetAtoms, MaxQueryAtoms, MaxBondsPerAtom>(target,
                                                                     query,
                                                                     labelMatrix,
@@ -702,6 +725,10 @@ INSTANTIATE_SUBSTRUCT_KERNELS(128, 64, 8)
                                                                uint32_t*,                  \
                                                                int,                        \
                                                                const uint32_t*,            \
+                                                               int,                        \
+                                                               uint32_t*,                  \
+                                                               int,                        \
+                                                               uint8_t*,                   \
                                                                int);
 
 INSTANTIATE_LABEL_MATRIX_KERNEL(32, 16)
@@ -868,6 +895,10 @@ void launchLabelMatrixPaintKernelForConfig(TargetMoleculesDeviceView  targets,
                                            int                        firstTargetIdx,
                                            const uint32_t*            recursiveMatchBits,
                                            int                        maxTargetAtoms,
+                                           uint32_t*                  recursiveBitsToZero,
+                                           int                        recursiveBitsSizeToZero,
+                                           uint8_t*                   overflowFlagsToZero,
+                                           int                        overflowFlagsSizeToZero,
                                            cudaStream_t               stream) {
   constexpr int kBlockSize = getBlockSizeForConfig<MaxTargetAtoms>();
   labelMatrixPaintKernelT<MaxTargetAtoms, MaxQueryAtoms><<<numBlocks, kBlockSize, 0, stream>>>(targets,
@@ -880,7 +911,11 @@ void launchLabelMatrixPaintKernelForConfig(TargetMoleculesDeviceView  targets,
                                                                                                labelMatrixBuffer,
                                                                                                firstTargetIdx,
                                                                                                recursiveMatchBits,
-                                                                                               maxTargetAtoms);
+                                                                                               maxTargetAtoms,
+                                                                                               recursiveBitsToZero,
+                                                                                               recursiveBitsSizeToZero,
+                                                                                               overflowFlagsToZero,
+                                                                                               overflowFlagsSizeToZero);
 }
 
 }  // namespace
@@ -898,6 +933,10 @@ void launchLabelMatrixPaintKernel(SubstructTemplateConfig    config,
                                   int                        firstTargetIdx,
                                   const uint32_t*            recursiveMatchBits,
                                   int                        maxTargetAtoms,
+                                  uint32_t*                  recursiveBitsToZero,
+                                  int                        recursiveBitsSizeToZero,
+                                  uint8_t*                   overflowFlagsToZero,
+                                  int                        overflowFlagsSizeToZero,
                                   cudaStream_t               stream) {
   DISPATCH_BY_TQ_CONFIG(config,
                         launchLabelMatrixPaintKernelForConfig,
@@ -913,6 +952,10 @@ void launchLabelMatrixPaintKernel(SubstructTemplateConfig    config,
                         firstTargetIdx,
                         recursiveMatchBits,
                         maxTargetAtoms,
+                        recursiveBitsToZero,
+                        recursiveBitsSizeToZero,
+                        overflowFlagsToZero,
+                        overflowFlagsSizeToZero,
                         stream);
 }
 
