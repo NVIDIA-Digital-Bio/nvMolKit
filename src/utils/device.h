@@ -50,7 +50,7 @@ class WithDevice {
 //! Creates and holds a CUDA stream on the current device
 class ScopedStream {
  public:
-  explicit ScopedStream();
+  explicit ScopedStream(const char* name = nullptr);
   ScopedStream(const ScopedStream&)            = delete;
   ScopedStream& operator=(const ScopedStream&) = delete;
   ~ScopedStream() noexcept;
@@ -61,6 +61,27 @@ class ScopedStream {
 
  private:
   cudaStream_t original_stream_ = nullptr;
+};
+
+/**
+ * @brief RAII stream with explicit priority.
+ *
+ * Creates a non-blocking stream with the specified priority.
+ * Lower numerical priority means higher execution priority.
+ */
+class ScopedStreamWithPriority {
+ public:
+  explicit ScopedStreamWithPriority(int priority, const char* name = nullptr);
+  ScopedStreamWithPriority(const ScopedStreamWithPriority&)            = delete;
+  ScopedStreamWithPriority& operator=(const ScopedStreamWithPriority&) = delete;
+  ~ScopedStreamWithPriority() noexcept;
+
+  ScopedStreamWithPriority(ScopedStreamWithPriority&& other) noexcept;
+  ScopedStreamWithPriority& operator=(ScopedStreamWithPriority&& other) noexcept;
+  cudaStream_t              stream() const noexcept { return stream_; }
+
+ private:
+  cudaStream_t stream_ = nullptr;
 };
 
 class ScopedCudaEvent {

@@ -16,19 +16,32 @@
 #ifndef NVMOLKIT_SUBSTRUCT_TYPES_H
 #define NVMOLKIT_SUBSTRUCT_TYPES_H
 
+#include <cstdint>
+
+#include "substruct_constants.h"
+#include "substruct_results.h"
+#include "substruct_template_config.h"
+
 namespace nvMolKit {
 
-//! Maximum size for GPU substruct path
-constexpr int kMaxTargetAtoms = 128;
-constexpr int kMaxQueryAtoms  = 64;
-
 /**
- * @brief Algorithm choice for substructure matching.
+ * @brief Per-pattern metadata for batched recursive preprocessing kernel.
+ *
+ * Each entry describes one recursive pattern in the combined batch:
+ * which main query it belongs to, what bit to paint, and where the
+ * pattern data starts in the combined pattern batch.
  */
-enum class SubstructAlgorithm {
-  VF2,  ///< VF2 iterative stack-based DFS
-  GSI   ///< GSI-inspired BFS level-by-level join
+struct BatchedPatternEntry {
+  int mainQueryIdx;     ///< Index of the main query this pattern belongs to
+  int patternId;        ///< Bit position (0-31) to paint for this pattern
+  int patternMolIdx;    ///< Index into the combined patterns MoleculesDevice
+  int depth;            ///< Nesting depth (0=leaf, higher=parent of children)
+  int localIdInParent;  ///< Bit position in parent's input (for nested patterns)
 };
+
+// =============================================================================
+// Partial Match Structure (for GSI algorithm queue)
+// =============================================================================
 
 /**
  * @brief Partial match for BFS-style algorithms.
@@ -50,6 +63,25 @@ template <std::size_t MaxQueryAtoms = kMaxQueryAtoms> struct PartialMatchT {
 /// Type alias for max-sized partial match (backward compatibility)
 using PartialMatch = PartialMatchT<kMaxQueryAtoms>;
 static_assert(sizeof(PartialMatch) == kMaxQueryAtoms, "PartialMatch must be kMaxQueryAtoms bytes");
+
+/**
+ * @brief Entry representing a (target, query) pair that needs RDKit fallback processing.
+ *
+ * Used when GPU processing cannot handle a pair, either due to:
+ * - Target molecule exceeding kMaxTargetAtoms
+ * - Output buffer overflow during GPU matching
+ */
+struct RDKitFallbackEntry {
+  int originalTargetIdx;  ///< Index in the original input targets vector
+  int originalQueryIdx;   ///< Index in the original input queries vector
+
+  bool operator<(const RDKitFallbackEntry& other) const {
+    if (originalTargetIdx != other.originalTargetIdx) {
+      return originalTargetIdx < other.originalTargetIdx;
+    }
+    return originalQueryIdx < other.originalQueryIdx;
+  }
+};
 
 }  // namespace nvMolKit
 

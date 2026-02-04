@@ -204,6 +204,23 @@ target_link_libraries(test_query PRIVATE molecules device ${RDKit_LIBS})
 add_executable(test_graph_labeler test_graph_labeler.cu)
 target_link_libraries(test_graph_labeler PRIVATE molecules device substruct_validation ${RDKit_LIBS})
 
+add_executable(test_graph_labeler_recursive test_graph_labeler_recursive.cu)
+target_link_libraries(test_graph_labeler_recursive PRIVATE substructure_search
+        molecules device
+        substruct_validation
+        ${RDKit_LIBS})
+
+add_executable(test_minibatch_planner test_minibatch_planner.cpp)
+target_link_libraries(test_minibatch_planner PRIVATE substructure_search molecules ${RDKit_LIBS})
+
+add_executable(test_recursive_preprocessor test_recursive_preprocessor.cu)
+target_link_libraries(test_recursive_preprocessor PRIVATE substructure_search molecules device ${RDKit_LIBS})
+
+add_executable(test_substructure_search test_substruct_search.cu)
+target_link_libraries(
+        test_substructure_search PRIVATE substructure_search molecules device
+        substruct_validation ${RDKit_LIBS})
+
 add_executable(test_substruct_algos test_substruct_algos.cu)
 target_link_libraries(test_substruct_algos PRIVATE
         substruct_definitions molecules device flatBitVect device_vector device_timings)
@@ -229,6 +246,9 @@ set(TEST_LIST
     test_flat_bit_vect_device
     test_flattened_builder
     test_graph_labeler
+    test_graph_labeler_recursive
+    test_minibatch_planner
+    test_recursive_preprocessor
     test_host_vector
     test_bfgs_minimizer
     test_etkdg_result_tracker
@@ -242,8 +262,9 @@ set(TEST_LIST
     test_query
     test_rdkit_comp
     test_rdkit_bounds_matrix
-    test_similarity
     test_substruct_algos
+    test_substructure_search
+    test_similarity
     test_thread_safe_queue
     test_work_splitting)
 

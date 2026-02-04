@@ -18,12 +18,93 @@
 #include <cuda_runtime.h>
 #include <GraphMol/ROMol.h>
 
+#include <cstdint>
+#include <memory>
+#include <string>
 #include <tuple>
 #include <vector>
 
 #include "substruct_types.h"
 
 namespace nvMolKit {
+
+/**
+ * @brief Get substructure matches using RDKit.
+ *
+ * @param target Target molecule
+ * @param query Query molecule (typically from SMARTS)
+ * @param uniquify If true, return only unique matches
+ * @return Vector of matches, where each match is a vector of target atom indices
+ *         indexed by query atom position
+ */
+std::vector<std::vector<int>> getRDKitSubstructMatches(const RDKit::ROMol& target,
+                                                       const RDKit::ROMol& query,
+                                                       bool                uniquify = true);
+
+/**
+ * @brief Get a string name for a substruct algorithm.
+ * @param algo The algorithm enum value
+ * @return Human-readable name for the algorithm
+ */
+std::string algorithmName(SubstructAlgorithm algo);
+
+/**
+ * @brief Validation results from comparing GPU matches to RDKit ground truth.
+ */
+struct SubstructValidationResult {
+  int  totalPairs        = 0;
+  int  matchingPairs     = 0;
+  int  mismatchedPairs   = 0;
+  int  wrongMappingPairs = 0;  ///< Pairs where count matches but mappings differ
+  bool allMatch          = false;
+
+  /// Details about count mismatches: (targetIdx, queryIdx, gpuCount, rdkitCount)
+  std::vector<std::tuple<int, int, int, int>> mismatches;
+
+  /// Details about mapping mismatches: (targetIdx, queryIdx)
+  std::vector<std::pair<int, int>> mappingMismatches;
+};
+
+/**
+ * @brief Compare GPU substructure match results against RDKit ground truth.
+ *
+ * Uses uniquify=false to match our non-uniquifying GPU algorithm.
+ *
+ * @param results GPU results from getSubstructMatches
+ * @param targetMols Target molecules (parallel to results.numTargets)
+ * @param queryMols Query molecules (parallel to results.numQueries)
+ * @return Validation result with mismatch details
+ */
+SubstructValidationResult validateAgainstRDKit(const SubstructSearchResults&                     results,
+                                               const std::vector<std::unique_ptr<RDKit::ROMol>>& targetMols,
+                                               const std::vector<std::unique_ptr<RDKit::ROMol>>& queryMols);
+
+/**
+ * @brief Print validation results to stdout.
+ * @param result The validation result to print
+ * @param algorithmName Optional algorithm name to include in output
+ */
+void printValidationResult(const SubstructValidationResult& result, const std::string& algorithmName = "");
+
+/**
+ * @brief Print detailed validation results including SMILES/SMARTS strings and actual matches.
+ * @param result The validation result to print
+ * @param gpuResults GPU match results for extracting actual matches
+ * @param targetMols Target molecules for RDKit matching
+ * @param queryMols Query molecules for RDKit matching
+ * @param targetSmiles Target SMILES strings
+ * @param querySmarts Query SMARTS strings
+ * @param algorithmName Optional algorithm name to include in output
+ * @param maxDetails Maximum number of detailed mismatches to print (default 5)
+ */
+void printValidationResultDetailed(const SubstructValidationResult&                  result,
+                                   const SubstructSearchResults&                     gpuResults,
+                                   const std::vector<std::unique_ptr<RDKit::ROMol>>& targetMols,
+                                   const std::vector<std::unique_ptr<RDKit::ROMol>>& queryMols,
+                                   const std::vector<std::string>&                   targetSmiles,
+                                   const std::vector<std::string>&                   querySmarts,
+                                   const std::string&                                algorithmName = "",
+                                   int                                               maxDetails    = 5);
 
 /**
  * @brief Compute the expected label matrix using RDKit atom matching.
@@ -48,6 +129,7 @@ struct LabelMatrixComparisonResult {
   int  falseNegatives   = 0;  ///< GPU says no match, RDKit says yes
   bool allMatch         = false;
 
+  /// Details: (targetAtomIdx, queryAtomIdx, gpuResult, rdkitResult)
   std::vector<std::tuple<int, int, bool, bool>> mismatches;
 };
 

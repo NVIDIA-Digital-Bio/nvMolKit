@@ -24,6 +24,25 @@ target_link_libraries(
         PUBLIC device_vector flatBitVect OpenMP::OpenMP_CXX packed_bonds device
         PRIVATE ${RDKit_LIBS} nvtx)
 
+add_library(substruct_kernels substruct_kernels.cu)
+target_include_directories(substruct_kernels
+        PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(substruct_kernels PUBLIC molecules device_vector
+        flatBitVect cuda_error_check
+        device_timings)
+
 add_library(substruct_definitions INTERFACE)
 target_include_directories(substruct_definitions
         INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_library(substructure_search substruct_search.cu gpu_executor.cu recursive_preprocessor.cu
+        minibatch_planner.cpp pinned_buffer_pool.cpp substruct_launch_config.cpp substruct_search_internal.cpp)
+target_include_directories(substructure_search
+        PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(substructure_search PUBLIC molecules device_vector
+        flatBitVect cuda_error_check
+        pinned_host_allocator device_timings
+        device substruct_kernels OpenMP::OpenMP_CXX
+        PRIVATE ${RDKit_LIBS})
+target_compile_options(substructure_search PRIVATE
+        $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-fopenmp>)

@@ -20,6 +20,7 @@
 #include <GraphMol/QueryOps.h>
 #include <GraphMol/ROMol.h>
 #include <GraphMol/SmilesParse/SmartsWrite.h>
+#include <omp.h>
 #include <RDGeneral/versions.h>
 
 #include <algorithm>
@@ -1934,6 +1935,283 @@ RecursivePatternInfo extractRecursivePatterns(const RDKit::ROMol* mol) {
   }
 
   return info;
+}
+
+/**
+ * @brief Merge a source batch into destination, adjusting all offsets.
+ *
+ * Works for both target and query batches. Query-specific fields are only
+ * copied if non-empty in the source.
+ */
+void mergeBatch(MoleculesHost& dest, const MoleculesHost& src) {
+  ScopedNvtxRange range("mergeBatch");
+  if (src.numMolecules() == 0)
+    return;
+
+  const int atomOffset     = static_cast<int>(dest.atomDataPacked.size());
+  const int instrOffset    = static_cast<int>(dest.queryInstructions.size());
+  const int leafMaskOffset = static_cast<int>(dest.queryLeafMasks.size());
+
+  dest.atomDataPacked.insert(dest.atomDataPacked.end(), src.atomDataPacked.begin(), src.atomDataPacked.end());
+  dest.bondTypeCounts.insert(dest.bondTypeCounts.end(), src.bondTypeCounts.begin(), src.bondTypeCounts.end());
+  dest.targetAtomBonds.insert(dest.targetAtomBonds.end(), src.targetAtomBonds.begin(), src.targetAtomBonds.end());
+  dest.queryAtomBonds.insert(dest.queryAtomBonds.end(), src.queryAtomBonds.begin(), src.queryAtomBonds.end());
+
+  dest.atomQueryMasks.insert(dest.atomQueryMasks.end(), src.atomQueryMasks.begin(), src.atomQueryMasks.end());
+  dest.atomQueryTrees.insert(dest.atomQueryTrees.end(), src.atomQueryTrees.begin(), src.atomQueryTrees.end());
+  dest.queryInstructions.insert(dest.queryInstructions.end(),
+                                src.queryInstructions.begin(),
+                                src.queryInstructions.end());
+  dest.queryLeafMasks.insert(dest.queryLeafMasks.end(), src.queryLeafMasks.begin(), src.queryLeafMasks.end());
+  dest.queryLeafBondCounts.insert(dest.queryLeafBondCounts.end(),
+                                  src.queryLeafBondCounts.begin(),
+                                  src.queryLeafBondCounts.end());
+
+  for (int start : src.atomInstrStarts) {
+    dest.atomInstrStarts.push_back(start + instrOffset);
+  }
+  for (int start : src.atomLeafMaskStarts) {
+    dest.atomLeafMaskStarts.push_back(start + leafMaskOffset);
+  }
+
+  for (size_t i = 1; i < src.batchAtomStarts.size(); ++i) {
+    dest.batchAtomStarts.push_back(src.batchAtomStarts[i] + atomOffset);
+  }
+
+  dest.recursivePatterns.insert(dest.recursivePatterns.end(),
+                                src.recursivePatterns.begin(),
+                                src.recursivePatterns.end());
+}
+
+void buildTargetBatchParallelInto(MoleculesHost&                          result,
+                                  int                                     numThreads,
+                                  const std::vector<const RDKit::ROMol*>& molecules,
+                                  const std::vector<int>&                 sortOrder) {
+  ScopedNvtxRange range("buildTargetBatchParallelInto");
+
+  const int numMols = static_cast<int>(molecules.size());
+
+  if (numMols == 0) {
+    result.clear();
+    return;
+  }
+
+  const bool useSortOrder = !sortOrder.empty();
+
+  if (numThreads <= 1) {
+    result.clear();
+    for (int i = 0; i < numMols; ++i) {
+      const int molIdx = useSortOrder ? sortOrder[i] : i;
+      addToBatch(molecules[molIdx], result);
+    }
+    return;
+  }
+
+  // Compute per-molecule atom offsets for direct writing
+  std::vector<int>& atomStarts = result.batchAtomStarts;
+  atomStarts.resize(numMols + 1);
+  atomStarts[0] = 0;
+  for (int i = 0; i < numMols; ++i) {
+    const int molIdx  = useSortOrder ? sortOrder[i] : i;
+    atomStarts[i + 1] = atomStarts[i] + static_cast<int>(molecules[molIdx]->getNumAtoms());
+  }
+  const size_t totalAtoms = atomStarts[numMols];
+
+  // Resize result vectors (reuses capacity if sufficient)
+  result.atomDataPacked.resize(totalAtoms);
+  result.bondTypeCounts.resize(totalAtoms);
+  result.targetAtomBonds.resize(totalAtoms);
+
+  // Direct parallel write - each thread writes to its molecules' positions in result
+#pragma omp parallel num_threads(numThreads)
+  {
+    ScopedNvtxRange threadRange("Preprocess direct write");
+
+#pragma omp for schedule(static)
+    for (int i = 0; i < numMols; ++i) {
+      const int           molIdx     = useSortOrder ? sortOrder[i] : i;
+      const RDKit::ROMol* mol        = molecules[molIdx];
+      const int           atomOffset = atomStarts[i];
+      const auto*         ringInfo   = mol->getRingInfo();
+
+      int localAtomIdx = 0;
+      for (const RDKit::Atom* atom : mol->atoms()) {
+        const int destIdx = atomOffset + localAtomIdx;
+
+        AtomDataPacked&  packed     = result.atomDataPacked[destIdx];
+        BondTypeCounts&  bondCounts = result.bondTypeCounts[destIdx];
+        TargetAtomBonds& tab        = result.targetAtomBonds[destIdx];
+
+        packed     = AtomDataPacked{};
+        bondCounts = BondTypeCounts{};
+        tab        = TargetAtomBonds{};
+
+        populateAtomScalars(atom, packed, ringInfo);
+
+        const unsigned int atomIdx            = atom->getIdx();
+        int                ringBondCount      = 0;
+        int                numHeteroNeighbors = 0;
+        int                totalBonds         = 0;
+        tab.degree                            = 0;
+
+        auto [beg, bondEnd] = mol->getAtomBonds(atom);
+        while (beg != bondEnd) {
+          const auto*        bond        = (*mol)[*beg];
+          const unsigned int bondIdx     = bond->getIdx();
+          const int          bondType    = bond->getBondType();
+          const int          otherAtomId = bond->getOtherAtomIdx(atomIdx);
+          const bool         isInRing    = ringInfo->numBondRings(bondIdx) > 0;
+
+          incrementBondTypeCount(bondCounts, bondType);
+          ringBondCount += isInRing;
+
+          const int neighborAtomicNum = mol->getAtomWithIdx(otherAtomId)->getAtomicNum();
+          numHeteroNeighbors += (neighborAtomicNum != 6 && neighborAtomicNum != 1);
+
+          if (tab.degree < kMaxBondsPerAtom) {
+            tab.neighborIdx[tab.degree] = static_cast<uint8_t>(otherAtomId);
+            tab.bondInfo[tab.degree]    = packTargetBondInfo(bondType, isInRing);
+            ++tab.degree;
+          }
+          ++totalBonds;
+          ++beg;
+        }
+
+        if (totalBonds > kMaxBondsPerAtom) {
+          throw std::runtime_error("Atom has more than " + std::to_string(kMaxBondsPerAtom) + " bonds");
+        }
+        if (ringBondCount > AtomDataPacked::kMax4BitValue) {
+          throw std::runtime_error("Ring bond count exceeds maximum");
+        }
+        if (numHeteroNeighbors > AtomDataPacked::kMax4BitValue) {
+          throw std::runtime_error("Heteroatom neighbor count exceeds maximum");
+        }
+
+        packed.setRingBondCount(ringBondCount);
+        packed.setNumHeteroatomNeighbors(numHeteroNeighbors);
+
+        ++localAtomIdx;
+      }
+    }
+  }
+}
+
+MoleculesHost buildQueryBatchParallel(const std::vector<const RDKit::ROMol*>& molecules,
+                                      const std::vector<int>&                 sortOrder,
+                                      int                                     numThreads) {
+  ScopedNvtxRange range("buildQueryBatchParallel");
+
+  const int numMols = static_cast<int>(molecules.size());
+  if (numMols == 0) {
+    return MoleculesHost();
+  }
+
+  const bool useSortOrder = !sortOrder.empty();
+
+  if (numThreads <= 1) {
+    MoleculesHost batch;
+    for (int i = 0; i < numMols; ++i) {
+      const int molIdx = useSortOrder ? sortOrder[i] : i;
+      addQueryToBatch(molecules[molIdx], batch);
+    }
+    return batch;
+  }
+
+  // Compute total atoms to estimate per-thread capacity
+  size_t totalAtoms = 0;
+  for (int i = 0; i < numMols; ++i) {
+    totalAtoms += molecules[i]->getNumAtoms();
+  }
+  const size_t atomsPerThread = (totalAtoms + numThreads - 1) / numThreads;
+  const size_t molsPerThread  = (numMols + numThreads - 1) / numThreads;
+
+  std::vector<MoleculesHost> threadBatches(numThreads);
+
+  // Pre-reserve to avoid allocator contention during parallel phase
+  for (int t = 0; t < numThreads; ++t) {
+    threadBatches[t].reserve(molsPerThread, atomsPerThread);
+  }
+
+#pragma omp parallel num_threads(numThreads)
+  {
+    const int       tid = omp_get_thread_num();
+    ScopedNvtxRange threadRange("Query preprocess thread " + std::to_string(tid));
+    MoleculesHost&  localBatch = threadBatches[tid];
+
+#pragma omp for schedule(static)
+    for (int i = 0; i < numMols; ++i) {
+      const int molIdx = useSortOrder ? sortOrder[i] : i;
+      addQueryToBatch(molecules[molIdx], localBatch);
+    }
+  }
+
+  MoleculesHost result;
+  {
+    ScopedNvtxRange mergeRange("Merge thread batches");
+    for (int t = 0; t < numThreads; ++t) {
+      mergeBatch(result, threadBatches[t]);
+    }
+  }
+
+  return result;
+}
+
+int getQueryPipelineDepth(const MoleculesHost& queriesHost, int queryIdx) {
+  if (queryIdx >= static_cast<int>(queriesHost.recursivePatterns.size())) {
+    return 0;
+  }
+  const auto& recursiveInfo = queriesHost.recursivePatterns[queryIdx];
+  if (recursiveInfo.empty()) {
+    return 0;
+  }
+  return recursiveInfo.maxDepth + 1;
+}
+
+bool requiresRDKitFallback(const RDKit::ROMol* mol) {
+  const auto* ringInfo = mol->getRingInfo();
+  if (!ringInfo->isSymmSssr()) {
+    throw std::runtime_error("Molecule ring info not initialized - call RDKit::MolOps::symmetrizeSSSR first");
+  }
+
+  for (const RDKit::Atom* atom : mol->atoms()) {
+    const int idx = atom->getIdx();
+
+    if (atom->getDegree() > kMaxBondsPerAtom) {
+      return true;
+    }
+
+    if (ringInfo->numAtomRings(idx) > AtomDataPacked::kMax4BitValue) {
+      return true;
+    }
+
+    if (atom->getNumImplicitHs() > AtomDataPacked::kMax4BitValue) {
+      return true;
+    }
+
+    int ringBondCount      = 0;
+    int numHeteroNeighbors = 0;
+    auto [beg, bondEnd]    = mol->getAtomBonds(atom);
+    while (beg != bondEnd) {
+      const auto* bond = (*mol)[*beg];
+      if (ringInfo->numBondRings(bond->getIdx()) > 0) {
+        ++ringBondCount;
+      }
+      const int otherAtomIdx      = bond->getOtherAtomIdx(idx);
+      const int neighborAtomicNum = mol->getAtomWithIdx(otherAtomIdx)->getAtomicNum();
+      if (neighborAtomicNum != 6 && neighborAtomicNum != 1) {
+        ++numHeteroNeighbors;
+      }
+      ++beg;
+    }
+    if (ringBondCount > AtomDataPacked::kMax4BitValue) {
+      return true;
+    }
+    if (numHeteroNeighbors > AtomDataPacked::kMax4BitValue) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 }  // namespace nvMolKit
