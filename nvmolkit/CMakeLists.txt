@@ -66,4 +66,3 @@ target_include_directories(
 target_link_libraries(_clustering PUBLIC ${Boost_LIBRARIES} ${PYTHON_LIBRARIES}
                                          device_vector butina)
 installpythontarget(_clustering ./)
-

@@ -43,10 +43,6 @@ python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test"]
 python_functions = ["test"]
 xfail_strict = true
-markers = [
-    "long: marks tests as long-running tests",
-]
-
 
 [tool.ruff]
 line-length = 119

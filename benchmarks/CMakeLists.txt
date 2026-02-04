@@ -13,9 +13,9 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-add_library(benchmark_utils benchmark_utils.cpp)
+add_library(benchmark_utils STATIC benchmark_utils.cpp)
 target_link_libraries(benchmark_utils PRIVATE ${RDKit_LIBS} test_utils
-        OpenMP::OpenMP_CXX)
+                                              OpenMP::OpenMP_CXX)
 
 add_executable(MorganFpBench morgan_fp.cpp)
 target_link_libraries(
@@ -74,16 +74,3 @@ target_link_libraries(
 add_executable(UpdateInverseHessianBench updateInverseHessianBench.cu)
 target_link_libraries(UpdateInverseHessianBench
                       PRIVATE CUDA::cudart cuda_error_check device_vector bfgs)
-
-add_executable(SubstructBench substruct_bench.cu)
-target_link_libraries(
-        SubstructBench
-        PRIVATE
-        benchmark_utils
-        nanobench
-        ${RDKit_LIBS}
-        substructure_search
-        substruct_validation
-        device
-        cuda_error_check
-        CUDA::cublas)
