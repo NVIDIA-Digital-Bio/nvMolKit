@@ -196,6 +196,16 @@ class SubstructureSearchTest : public ::testing::TestWithParam<SubstructAlgorith
 // Instantiate parameterized tests for all algorithms
 INSTANTIATE_TEST_SUITE_P(AllAlgorithms,
                          SubstructureSearchTest,
+                         ::testing::Values(SubstructAlgorithm::GSI, SubstructAlgorithm::VF2),
+                         [](const ::testing::TestParamInfo<SubstructAlgorithm>& info) {
+                           return algorithmName(info.param);
+                         });
+
+// Fixture for recursive SMARTS tests - VF2 doesn't support recursion
+class RecursiveSubstructureSearchTest : public SubstructureSearchTest {};
+
+INSTANTIATE_TEST_SUITE_P(GSIOnly,
+                         RecursiveSubstructureSearchTest,
                          ::testing::Values(SubstructAlgorithm::GSI),
                          [](const ::testing::TestParamInfo<SubstructAlgorithm>& info) {
                            return algorithmName(info.param);
@@ -1395,7 +1405,7 @@ TEST_P(SubstructureSearchTest, SingleMolSingleQueryForDebugging) {
 // Nested Recursive SMARTS Integration Tests
 // =============================================================================
 
-TEST_P(SubstructureSearchTest, NestedRecursiveSimple) {
+TEST_P(RecursiveSubstructureSearchTest, NestedRecursiveSimple) {
   std::vector<std::unique_ptr<RDKit::ROMol>> targetMols;
   std::vector<std::unique_ptr<RDKit::ROMol>> queryMols;
 
@@ -1409,7 +1419,7 @@ TEST_P(SubstructureSearchTest, NestedRecursiveSimple) {
   expectMatchesRDKit(results, *targetMols[2], *queryMols[0], 2, 0, "[$([C;$(*-N)])] in CCC");
 }
 
-TEST_P(SubstructureSearchTest, NestedRecursiveWithNegation) {
+TEST_P(RecursiveSubstructureSearchTest, NestedRecursiveWithNegation) {
   std::vector<std::unique_ptr<RDKit::ROMol>> targetMols;
   std::vector<std::unique_ptr<RDKit::ROMol>> queryMols;
 
@@ -1422,7 +1432,7 @@ TEST_P(SubstructureSearchTest, NestedRecursiveWithNegation) {
   expectMatchesRDKit(results, *targetMols[1], *queryMols[0], 1, 0);
 }
 
-TEST_P(SubstructureSearchTest, NestedRecursiveBatchProcessing) {
+TEST_P(RecursiveSubstructureSearchTest, NestedRecursiveBatchProcessing) {
   std::vector<std::unique_ptr<RDKit::ROMol>> targetMols;
   std::vector<std::unique_ptr<RDKit::ROMol>> queryMols;
 
@@ -1934,7 +1944,7 @@ TEST_P(SubstructureSearchTest, HypervalentAtomFallback) {
   }
 }
 
-TEST_P(SubstructureSearchTest, DeepRecursionDepthFallback) {
+TEST_P(RecursiveSubstructureSearchTest, DeepRecursionDepthFallback) {
   std::vector<std::unique_ptr<RDKit::ROMol>> targetMols;
   std::vector<std::unique_ptr<RDKit::ROMol>> queryMols;
 
@@ -1956,7 +1966,7 @@ TEST_P(SubstructureSearchTest, DeepRecursionDepthFallback) {
   }
 }
 
-TEST_P(SubstructureSearchTest, DeepRecursionMixedWithNormalQueries) {
+TEST_P(RecursiveSubstructureSearchTest, DeepRecursionMixedWithNormalQueries) {
   std::vector<std::unique_ptr<RDKit::ROMol>> targetMols;
   std::vector<std::unique_ptr<RDKit::ROMol>> queryMols;
 
