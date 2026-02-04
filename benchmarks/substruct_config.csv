@@ -1,6 +1,0 @@
-smarts,batch_size,workers,prep_threads,mode,num_gpus
-/nvmolkit/tests/test_data/SMARTS/rdkit_fragment_descriptors_supported.txt,8192,4,10,countSubstructMatches,1
-/nvmolkit/tests/test_data/SMARTS/wehi_pains_supported.txt,8192,6,8,hasSubstructMatch,1
-/nvmolkit/tests/test_data/SMARTS/BMS_2006_filter_supported.txt,8192,6,8,hasSubstructMatch,1
-/nvmolkit/tests/test_data/SMARTS/rdkit_tautomer_transforms_supported.txt,8192,4,10,getSubstructMatches,1
-/nvmolkit/tests/test_data/SMARTS/rdkit_torsionPreferences_v2_supported.txt,8192,4,10,getSubstructMatches,1
