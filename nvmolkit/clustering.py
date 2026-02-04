@@ -21,7 +21,12 @@ from nvmolkit import _clustering
 from nvmolkit._arrayHelpers import *  # noqa: F403
 from nvmolkit.types import AsyncGpuResult
 
-def butina(distance_matrix: AsyncGpuResult | torch.Tensor, cutoff: float, neighborlist_max_size: int = 64) -> AsyncGpuResult:
+def butina(
+    distance_matrix: AsyncGpuResult | torch.Tensor,
+    cutoff: float,
+    neighborlist_max_size: int = 64,
+    return_centroids: bool = False,
+) -> AsyncGpuResult | tuple[AsyncGpuResult, AsyncGpuResult]:
     """
     Perform Butina clustering on a distance matrix.
     
@@ -41,13 +46,25 @@ def butina(distance_matrix: AsyncGpuResult | torch.Tensor, cutoff: float, neighb
                               optimization. Must be 8, 16, 24, 32, 64, or 128. Larger values
                               allow parallel processing of larger clusters but use more
                               shared memory.
+        return_centroids: Whether to return centroid indices for each cluster.
     
     Returns:
-        AsyncGpuResult containing cluster assignments as integers. Each element i
-        contains the cluster ID for item i. Cluster IDs are sequential integers
-        starting from 0, with cluster 0 being the largest.
+        - if return_centroids == False: clusters
+          AsyncGpuResult of shape (N,) with cluster IDs. Cluster 0 is the largest.
+        - if return_centroids == True: (clusters, centroids)
+          centroids is an AsyncGpuResult of shape (num_clusters,) containing the
+          centroid index for each cluster ID.
     
     Note:
         The distance matrix should be symmetric and have zeros on the diagonal.
     """
-    return AsyncGpuResult(_clustering.butina(distance_matrix.__cuda_array_interface__, cutoff, neighborlist_max_size))
+    result = _clustering.butina(
+        distance_matrix.__cuda_array_interface__,
+        cutoff,
+        neighborlist_max_size,
+        return_centroids,
+    )
+    if return_centroids:
+        clusters, centroids = result
+        return AsyncGpuResult(clusters), AsyncGpuResult(centroids)
+    return AsyncGpuResult(result)
