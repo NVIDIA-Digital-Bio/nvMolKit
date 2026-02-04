@@ -151,12 +151,13 @@ std::pair<std::vector<std::unique_ptr<RDKit::ROMol>>, std::vector<std::string>> 
 
 }  // namespace
 
-std::pair<std::vector<std::unique_ptr<RDKit::ROMol>>, std::vector<std::string>> readSmilesFileWithStrings(
-  const std::string& filePath,
-  size_t             maxCount,
-  size_t             maxAtoms) {
+std::pair<std::vector<std::unique_ptr<RDKit::ROMol>>, std::vector<std::string>>
+readSmilesFileWithStrings(const std::string& filePath, size_t maxCount, size_t maxAtoms) {
   return readMolFileWithStrings(
-    filePath, [](const std::string& s) { return RDKit::SmilesToMol(s); }, maxCount, maxAtoms);
+    filePath,
+    [](const std::string& s) { return RDKit::SmilesToMol(s); },
+    maxCount,
+    maxAtoms);
 }
 
 std::pair<std::vector<std::unique_ptr<RDKit::ROMol>>, std::vector<std::string>> readSmartsFileWithStrings(

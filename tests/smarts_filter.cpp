@@ -53,8 +53,8 @@ enum class SmartsStatus {
  *   - "SMARTS   description   # comment" (pattern + description + comment)
  */
 std::string extractSmarts(const std::string& line) {
-  const char* ws = " \t\n\r";
-  size_t start = line.find_first_not_of(ws);
+  const char* ws    = " \t\n\r";
+  size_t      start = line.find_first_not_of(ws);
   if (start == std::string::npos) {
     return "";
   }
@@ -121,10 +121,10 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  const std::string inputFile = argv[1];
-  const std::string supportedFile = argv[2];
+  const std::string inputFile       = argv[1];
+  const std::string supportedFile   = argv[2];
   const std::string unsupportedFile = argv[3];
-  const std::string invalidFile = argv[4];
+  const std::string invalidFile     = argv[4];
 
   std::ifstream input(inputFile);
   if (!input) {
@@ -150,11 +150,11 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  int totalCount = 0;
-  int supportedCount = 0;
-  int unsupportedCount = 0;
-  int invalidCount = 0;
-  int emptyCount = 0;
+  int                        totalCount       = 0;
+  int                        supportedCount   = 0;
+  int                        unsupportedCount = 0;
+  int                        invalidCount     = 0;
+  int                        emptyCount       = 0;
   std::map<std::string, int> reasonCounts;
 
   std::string line;
@@ -204,4 +204,3 @@ int main(int argc, char* argv[]) {
 
   return 0;
 }
-

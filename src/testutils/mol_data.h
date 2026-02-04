@@ -66,10 +66,8 @@ std::vector<std::unique_ptr<RDKit::ROMol>> readSmilesFile(const std::string& fil
  * @param maxAtoms Maximum number of atoms per molecule
  * @return Pair of (molecules, SMILES strings)
  */
-std::pair<std::vector<std::unique_ptr<RDKit::ROMol>>, std::vector<std::string>> readSmilesFileWithStrings(
-  const std::string& filePath,
-  size_t             maxCount,
-  size_t             maxAtoms);
+std::pair<std::vector<std::unique_ptr<RDKit::ROMol>>, std::vector<std::string>>
+readSmilesFileWithStrings(const std::string& filePath, size_t maxCount, size_t maxAtoms);
 
 /**
  * @brief Read SMARTS patterns from a file.

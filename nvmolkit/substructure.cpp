@@ -58,15 +58,14 @@ namespace {
 using namespace boost::python;
 
 struct SubstructMatchesCSR {
-  std::vector<int32_t> atomIndices;   // concatenated atom indices for all matches
-  std::vector<int32_t> matchIndptr;   // offsets into atomIndices, length = numMatches + 1
-  std::vector<int32_t> pairIndptr;    // offsets into matchIndptr (match index), length = numPairs + 1
-  int                 numTargets = 0;
-  int                 numQueries = 0;
+  std::vector<int32_t> atomIndices;  // concatenated atom indices for all matches
+  std::vector<int32_t> matchIndptr;  // offsets into atomIndices, length = numMatches + 1
+  std::vector<int32_t> pairIndptr;   // offsets into matchIndptr (match index), length = numPairs + 1
+  int                  numTargets = 0;
+  int                  numQueries = 0;
 };
 
-template <typename T>
-list vectorToList(const std::vector<T>& vec) {
+template <typename T> list vectorToList(const std::vector<T>& vec) {
   list result;
   for (const auto& value : vec) {
     result.append(value);
@@ -74,8 +73,7 @@ list vectorToList(const std::vector<T>& vec) {
   return result;
 }
 
-template <typename T>
-std::vector<T> listFromIterable(const object& iterable) {
+template <typename T> std::vector<T> listFromIterable(const object& iterable) {
   std::vector<T> converted;
   if (PySequence_Check(iterable.ptr())) {
     Py_ssize_t n = PySequence_Size(iterable.ptr());
@@ -117,10 +115,8 @@ BOOST_PYTHON_MODULE(_substructure) {
 
   def(
     "getSubstructMatches",
-    +[](const list& targets,
-        const list& queries,
-        const nvMolKit::SubstructSearchConfig& config) {
-      nvMolKit::ScopedNvtxRange extractRange("Python: extract mol pointers", nvMolKit::NvtxColor::kYellow);
+    +[](const list& targets, const list& queries, const nvMolKit::SubstructSearchConfig& config) {
+      nvMolKit::ScopedNvtxRange        extractRange("Python: extract mol pointers", nvMolKit::NvtxColor::kYellow);
       std::vector<const RDKit::ROMol*> targetsVec;
       std::vector<const RDKit::ROMol*> queriesVec;
 
@@ -144,18 +140,22 @@ BOOST_PYTHON_MODULE(_substructure) {
       extractRange.pop();
 
       nvMolKit::SubstructSearchResults results;
-      nvMolKit::getSubstructMatches(targetsVec, queriesVec, results,
-                                    nvMolKit::SubstructAlgorithm::GSI, nullptr, config);
+      nvMolKit::getSubstructMatches(targetsVec,
+                                    queriesVec,
+                                    results,
+                                    nvMolKit::SubstructAlgorithm::GSI,
+                                    nullptr,
+                                    config);
 
-      auto csrPtr = std::make_unique<SubstructMatchesCSR>();
+      auto csrPtr        = std::make_unique<SubstructMatchesCSR>();
       csrPtr->numTargets = results.numTargets;
       csrPtr->numQueries = results.numQueries;
 
       nvMolKit::ScopedNvtxRange csrBuildRange("Python: build CSR buffers", nvMolKit::NvtxColor::kOrange);
 
-      const int numTargets = csrPtr->numTargets;
-      const int numQueries = csrPtr->numQueries;
-      const int64_t numPairs = static_cast<int64_t>(numTargets) * static_cast<int64_t>(numQueries);
+      const int     numTargets = csrPtr->numTargets;
+      const int     numQueries = csrPtr->numQueries;
+      const int64_t numPairs   = static_cast<int64_t>(numTargets) * static_cast<int64_t>(numQueries);
 
       csrPtr->pairIndptr.resize(static_cast<size_t>(numPairs) + 1, 0);
       csrPtr->matchIndptr.clear();
@@ -167,7 +167,7 @@ BOOST_PYTHON_MODULE(_substructure) {
       int32_t atomCount  = 0;
       for (int t = 0; t < numTargets; ++t) {
         for (int q = 0; q < numQueries; ++q) {
-          const int64_t pairIdx = static_cast<int64_t>(t) * numQueries + q;
+          const int64_t pairIdx                            = static_cast<int64_t>(t) * numQueries + q;
           csrPtr->pairIndptr[static_cast<size_t>(pairIdx)] = matchCount;
 
           const auto& matches = results.getMatches(t, q);
@@ -183,52 +183,43 @@ BOOST_PYTHON_MODULE(_substructure) {
       csrBuildRange.pop();
 
       nvMolKit::ScopedNvtxRange csrWrapRange("Python: wrap CSR numpy arrays", nvMolKit::NvtxColor::kGreen);
-      auto deleter = [](PyObject* cap) {
-        auto* r = reinterpret_cast<SubstructMatchesCSR*>(
-            PyCapsule_GetPointer(cap, "nvmolkit.substruct_csr"));
+      auto                      deleter = [](PyObject* cap) {
+        auto* r = reinterpret_cast<SubstructMatchesCSR*>(PyCapsule_GetPointer(cap, "nvmolkit.substruct_csr"));
         delete r;
       };
-      PyObject* cap = PyCapsule_New(static_cast<void*>(csrPtr.get()),
-                                    "nvmolkit.substruct_csr", deleter);
+      PyObject* cap = PyCapsule_New(static_cast<void*>(csrPtr.get()), "nvmolkit.substruct_csr", deleter);
       if (cap == nullptr) {
         throw std::runtime_error("Failed to create PyCapsule for getSubstructMatches CSR results");
       }
       object owner{handle<>(cap)};
       csrPtr.release();
 
-      auto* csr = reinterpret_cast<SubstructMatchesCSR*>(
-          PyCapsule_GetPointer(cap, "nvmolkit.substruct_csr"));
+      auto* csr = reinterpret_cast<SubstructMatchesCSR*>(PyCapsule_GetPointer(cap, "nvmolkit.substruct_csr"));
 
-      const Py_intptr_t atomShape    = static_cast<Py_intptr_t>(csr->atomIndices.size());
-      const Py_intptr_t matchShape   = static_cast<Py_intptr_t>(csr->matchIndptr.size());
-      const Py_intptr_t pairShape    = static_cast<Py_intptr_t>(csr->pairIndptr.size());
-      const Py_intptr_t stride32     = static_cast<Py_intptr_t>(sizeof(int32_t));
+      const Py_intptr_t atomShape  = static_cast<Py_intptr_t>(csr->atomIndices.size());
+      const Py_intptr_t matchShape = static_cast<Py_intptr_t>(csr->matchIndptr.size());
+      const Py_intptr_t pairShape  = static_cast<Py_intptr_t>(csr->pairIndptr.size());
+      const Py_intptr_t stride32   = static_cast<Py_intptr_t>(sizeof(int32_t));
 
-      numpy::ndarray atomIndicesArr = numpy::from_data(
-          csr->atomIndices.data(),
-          numpy::dtype::get_builtin<int32_t>(),
-          make_tuple(atomShape),
-          make_tuple(stride32),
-          owner);
-      numpy::ndarray matchIndptrArr = numpy::from_data(
-          csr->matchIndptr.data(),
-          numpy::dtype::get_builtin<int32_t>(),
-          make_tuple(matchShape),
-          make_tuple(stride32),
-          owner);
-      numpy::ndarray pairIndptrArr = numpy::from_data(
-          csr->pairIndptr.data(),
-          numpy::dtype::get_builtin<int32_t>(),
-          make_tuple(pairShape),
-          make_tuple(stride32),
-          owner);
+      numpy::ndarray atomIndicesArr = numpy::from_data(csr->atomIndices.data(),
+                                                       numpy::dtype::get_builtin<int32_t>(),
+                                                       make_tuple(atomShape),
+                                                       make_tuple(stride32),
+                                                       owner);
+      numpy::ndarray matchIndptrArr = numpy::from_data(csr->matchIndptr.data(),
+                                                       numpy::dtype::get_builtin<int32_t>(),
+                                                       make_tuple(matchShape),
+                                                       make_tuple(stride32),
+                                                       owner);
+      numpy::ndarray pairIndptrArr  = numpy::from_data(csr->pairIndptr.data(),
+                                                      numpy::dtype::get_builtin<int32_t>(),
+                                                      make_tuple(pairShape),
+                                                      make_tuple(stride32),
+                                                      owner);
 
-      return make_tuple(atomIndicesArr, matchIndptrArr, pairIndptrArr,
-                        make_tuple(csr->numTargets, csr->numQueries));
+      return make_tuple(atomIndicesArr, matchIndptrArr, pairIndptrArr, make_tuple(csr->numTargets, csr->numQueries));
     },
-    (arg("targets"),
-     arg("queries"),
-     arg("config") = nvMolKit::SubstructSearchConfig()),
+    (arg("targets"), arg("queries"), arg("config") = nvMolKit::SubstructSearchConfig()),
     "Perform batch substructure matching on GPU.\n"
     "\n"
     "Args:\n"
@@ -242,10 +233,8 @@ BOOST_PYTHON_MODULE(_substructure) {
 
   def(
     "countSubstructMatches",
-    +[](const list& targets,
-        const list& queries,
-        const nvMolKit::SubstructSearchConfig& config) {
-      nvMolKit::ScopedNvtxRange extractRange("Python: extract mol pointers", nvMolKit::NvtxColor::kYellow);
+    +[](const list& targets, const list& queries, const nvMolKit::SubstructSearchConfig& config) {
+      nvMolKit::ScopedNvtxRange        extractRange("Python: extract mol pointers", nvMolKit::NvtxColor::kYellow);
       std::vector<const RDKit::ROMol*> targetsVec;
       std::vector<const RDKit::ROMol*> queriesVec;
 
@@ -272,27 +261,28 @@ BOOST_PYTHON_MODULE(_substructure) {
       const int numQueries = static_cast<int>(queriesVec.size());
 
       auto countsPtr = std::make_unique<std::vector<int>>();
-      nvMolKit::countSubstructMatches(targetsVec, queriesVec, *countsPtr,
-                                      nvMolKit::SubstructAlgorithm::GSI, nullptr, config);
+      nvMolKit::countSubstructMatches(targetsVec,
+                                      queriesVec,
+                                      *countsPtr,
+                                      nvMolKit::SubstructAlgorithm::GSI,
+                                      nullptr,
+                                      config);
 
       nvMolKit::ScopedNvtxRange wrapRange("Python: wrap numpy array", nvMolKit::NvtxColor::kGreen);
-      int* dataPtr = countsPtr->data();
+      int*                      dataPtr = countsPtr->data();
 
       auto deleter = [](PyObject* cap) {
-        auto* r = reinterpret_cast<std::vector<int>*>(
-            PyCapsule_GetPointer(cap, "nvmolkit.countsubstruct_results"));
+        auto* r = reinterpret_cast<std::vector<int>*>(PyCapsule_GetPointer(cap, "nvmolkit.countsubstruct_results"));
         delete r;
       };
-      PyObject* cap = PyCapsule_New(static_cast<void*>(countsPtr.get()),
-                                    "nvmolkit.countsubstruct_results", deleter);
+      PyObject* cap = PyCapsule_New(static_cast<void*>(countsPtr.get()), "nvmolkit.countsubstruct_results", deleter);
       if (cap == nullptr) {
         throw std::runtime_error("Failed to create PyCapsule for countSubstructMatches results");
       }
       object owner{handle<>(cap)};
       countsPtr.release();
 
-      const Py_intptr_t shape_arr[2] = {static_cast<Py_intptr_t>(numTargets),
-                                        static_cast<Py_intptr_t>(numQueries)};
+      const Py_intptr_t shape_arr[2]   = {static_cast<Py_intptr_t>(numTargets), static_cast<Py_intptr_t>(numQueries)};
       const Py_intptr_t strides_arr[2] = {static_cast<Py_intptr_t>(numQueries * sizeof(int)),
                                           static_cast<Py_intptr_t>(sizeof(int))};
 
@@ -302,9 +292,7 @@ BOOST_PYTHON_MODULE(_substructure) {
                               make_tuple(strides_arr[0], strides_arr[1]),
                               owner);
     },
-    (arg("targets"),
-     arg("queries"),
-     arg("config") = nvMolKit::SubstructSearchConfig()),
+    (arg("targets"), arg("queries"), arg("config") = nvMolKit::SubstructSearchConfig()),
     "Count substructure matches per target/query pair.\n"
     "\n"
     "Args:\n"
@@ -317,10 +305,8 @@ BOOST_PYTHON_MODULE(_substructure) {
 
   def(
     "hasSubstructMatch",
-    +[](const list& targets,
-        const list& queries,
-        const nvMolKit::SubstructSearchConfig& config) {
-      nvMolKit::ScopedNvtxRange extractRange("Python: extract mol pointers", nvMolKit::NvtxColor::kYellow);
+    +[](const list& targets, const list& queries, const nvMolKit::SubstructSearchConfig& config) {
+      nvMolKit::ScopedNvtxRange        extractRange("Python: extract mol pointers", nvMolKit::NvtxColor::kYellow);
       std::vector<const RDKit::ROMol*> targetsVec;
       std::vector<const RDKit::ROMol*> queriesVec;
 
@@ -344,29 +330,31 @@ BOOST_PYTHON_MODULE(_substructure) {
       extractRange.pop();
 
       auto resultsPtr = std::make_unique<nvMolKit::HasSubstructMatchResults>();
-      nvMolKit::hasSubstructMatch(targetsVec, queriesVec, *resultsPtr,
-                                  nvMolKit::SubstructAlgorithm::GSI, nullptr, config);
+      nvMolKit::hasSubstructMatch(targetsVec,
+                                  queriesVec,
+                                  *resultsPtr,
+                                  nvMolKit::SubstructAlgorithm::GSI,
+                                  nullptr,
+                                  config);
 
       nvMolKit::ScopedNvtxRange wrapRange("Python: wrap numpy array", nvMolKit::NvtxColor::kGreen);
-      const int numTargets = resultsPtr->numTargets;
-      const int numQueries = resultsPtr->numQueries;
-      uint8_t* dataPtr = resultsPtr->hasMatch.data();
+      const int                 numTargets = resultsPtr->numTargets;
+      const int                 numQueries = resultsPtr->numQueries;
+      uint8_t*                  dataPtr    = resultsPtr->hasMatch.data();
 
       auto deleter = [](PyObject* cap) {
         auto* r = reinterpret_cast<nvMolKit::HasSubstructMatchResults*>(
-            PyCapsule_GetPointer(cap, "nvmolkit.hassubstruct_results"));
+          PyCapsule_GetPointer(cap, "nvmolkit.hassubstruct_results"));
         delete r;
       };
-      PyObject* cap = PyCapsule_New(static_cast<void*>(resultsPtr.get()),
-                                    "nvmolkit.hassubstruct_results", deleter);
+      PyObject* cap = PyCapsule_New(static_cast<void*>(resultsPtr.get()), "nvmolkit.hassubstruct_results", deleter);
       if (cap == nullptr) {
         throw std::runtime_error("Failed to create PyCapsule for hasSubstructMatch results");
       }
       object owner{handle<>(cap)};
       resultsPtr.release();
 
-      const Py_intptr_t shape_arr[2] = {static_cast<Py_intptr_t>(numTargets),
-                                        static_cast<Py_intptr_t>(numQueries)};
+      const Py_intptr_t shape_arr[2]   = {static_cast<Py_intptr_t>(numTargets), static_cast<Py_intptr_t>(numQueries)};
       const Py_intptr_t strides_arr[2] = {static_cast<Py_intptr_t>(numQueries * sizeof(uint8_t)),
                                           static_cast<Py_intptr_t>(sizeof(uint8_t))};
 
@@ -376,9 +364,7 @@ BOOST_PYTHON_MODULE(_substructure) {
                               make_tuple(strides_arr[0], strides_arr[1]),
                               owner);
     },
-    (arg("targets"),
-     arg("queries"),
-     arg("config") = nvMolKit::SubstructSearchConfig()),
+    (arg("targets"), arg("queries"), arg("config") = nvMolKit::SubstructSearchConfig()),
     "Check if targets contain query substructures (boolean results).\n"
     "\n"
     "More efficient than getSubstructMatches when only existence is needed.\n"
@@ -391,4 +377,3 @@ BOOST_PYTHON_MODULE(_substructure) {
     "Returns:\n"
     "    2D numpy array of uint8: results[target_idx, query_idx] = 1 if match exists, 0 otherwise");
 }
-

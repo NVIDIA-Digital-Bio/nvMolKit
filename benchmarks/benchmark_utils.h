@@ -75,8 +75,7 @@ struct TimingResult {
  * @param warmups Number of warmup runs
  * @return TimingResult with average and standard deviation in milliseconds
  */
-template <typename Func>
-TimingResult timeIt(Func&& func, int runs = 3, int warmups = 1) {
+template <typename Func> TimingResult timeIt(Func&& func, int runs = 3, int warmups = 1) {
   for (int i = 0; i < warmups; ++i) {
     func();
   }
@@ -87,7 +86,7 @@ TimingResult timeIt(Func&& func, int runs = 3, int warmups = 1) {
   for (int i = 0; i < runs; ++i) {
     auto start = std::chrono::high_resolution_clock::now();
     func();
-    auto end = std::chrono::high_resolution_clock::now();
+    auto end      = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
     times.push_back(static_cast<double>(duration) / 1.0e6);
   }
@@ -107,6 +106,5 @@ TimingResult timeIt(Func&& func, int runs = 3, int warmups = 1) {
 
   return TimingResult{avgMs, stdMs};
 }
-
 
 }  // namespace BenchUtils

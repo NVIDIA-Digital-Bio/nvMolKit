@@ -61,17 +61,17 @@ struct DatasetConfig {
 };
 
 constexpr DatasetConfig kDatasets[] = {
-  {"pwalters_alert_collection_supported.txt", "PwaltersAlertCollection"},
-  {"openbabel_functional_groups_supported.txt", "OpenBabelFunctionalGroups"},
-  {"BMS_2006_filter_supported.txt", "BMS2006Filter"},
-  {"rdkit_fragment_descriptors_supported.txt", "RDKitFragmentDescriptors"},
-  {"rdkit_tautomer_transforms_supported.txt", "RDKitTautomerTransforms"},
-  {"rdkit_torsionPreferences_v2_supported.txt", "RDKitTorsionPreferencesV2"},
-  {"rdkit_torsionPreferences_smallrings_supported.txt", "RDKitTorsionPreferencesSmallRings"},
-  {"rdkit_pattern_fingerprint_supported.txt", "RDKitPatternFingerprints"},
+  {           "pwalters_alert_collection_supported.txt",            "PwaltersAlertCollection"},
+  {         "openbabel_functional_groups_supported.txt",          "OpenBabelFunctionalGroups"},
+  {                     "BMS_2006_filter_supported.txt",                      "BMS2006Filter"},
+  {          "rdkit_fragment_descriptors_supported.txt",           "RDKitFragmentDescriptors"},
+  {           "rdkit_tautomer_transforms_supported.txt",            "RDKitTautomerTransforms"},
+  {         "rdkit_torsionPreferences_v2_supported.txt",          "RDKitTorsionPreferencesV2"},
+  { "rdkit_torsionPreferences_smallrings_supported.txt",  "RDKitTorsionPreferencesSmallRings"},
+  {           "rdkit_pattern_fingerprint_supported.txt",           "RDKitPatternFingerprints"},
   {"rdkit_torsionPreferences_macrocycles_supported.txt", "RDKitTorsionPreferencesMacrocycles"},
-  {"RLewis_smarts_supported.txt", "RLewisSMARTS"},
-  {"wehi_pains_supported.txt", "WEHIPAINS"},
+  {                       "RLewis_smarts_supported.txt",                       "RLewisSMARTS"},
+  {                          "wehi_pains_supported.txt",                          "WEHIPAINS"},
 };
 
 struct SmallestRepro {
@@ -85,8 +85,8 @@ struct SmallestRepros {
   SmallestRepro smallestT;
 
   bool allSame() const {
-    return smallestSum.t == smallestQ.t && smallestSum.q == smallestQ.q &&
-           smallestSum.t == smallestT.t && smallestSum.q == smallestT.q;
+    return smallestSum.t == smallestQ.t && smallestSum.q == smallestQ.q && smallestSum.t == smallestT.t &&
+           smallestSum.q == smallestT.q;
   }
 
   bool hasAny() const { return smallestSum.t >= 0; }
@@ -105,16 +105,16 @@ SmallestRepros findSmallestRepros(const PairContainer& pairs, GetT getT, GetQ ge
     const int sum = t + q;
 
     if (sum < minSum) {
-      minSum              = sum;
-      result.smallestSum  = {t, q};
+      minSum             = sum;
+      result.smallestSum = {t, q};
     }
     if (q < minQ) {
-      minQ              = q;
-      result.smallestQ  = {t, q};
+      minQ             = q;
+      result.smallestQ = {t, q};
     }
     if (t < minT) {
-      minT              = t;
-      result.smallestT  = {t, q};
+      minT             = t;
+      result.smallestT = {t, q};
     }
   }
   return result;
@@ -138,7 +138,8 @@ void printSmallestReprosSimple(const SmallestRepros&           repros,
                                const std::vector<std::string>& querySmarts,
                                const std::string&              category,
                                GetFPFN                         getFPFN) {
-  if (!repros.hasAny()) return;
+  if (!repros.hasAny())
+    return;
 
   std::cout << "\n=== Smallest " << category << " repros ===\n";
 
@@ -167,10 +168,10 @@ using LabelMatrixView    = BitMatrix2DView<kMaxTargetAtoms, kMaxQueryAtoms>;
 
 template <std::size_t MaxTarget, std::size_t MaxQuery>
 __global__ void populateLabelMatrixKernelForIntegration(nvMolKit::TargetMoleculesDeviceView targetsView,
-                                                        int                                targetIdx,
+                                                        int                                 targetIdx,
                                                         nvMolKit::QueryMoleculesDeviceView  queriesView,
-                                                        int                                queryIdx,
-                                                        LabelMatrixStorage*                output) {
+                                                        int                                 queryIdx,
+                                                        LabelMatrixStorage*                 output) {
   nvMolKit::TargetMoleculeView target = nvMolKit::getMolecule(targetsView, targetIdx);
   nvMolKit::QueryMoleculeView  query  = nvMolKit::getMolecule(queriesView, queryIdx);
 
@@ -190,13 +191,12 @@ class LabelMatrixIntegrationTest : public ::testing::TestWithParam<DatasetConfig
   const DatasetConfig& dataset() const { return GetParam(); }
 };
 
-INSTANTIATE_TEST_SUITE_P(
-  AllDatasets,
-  LabelMatrixIntegrationTest,
-  ::testing::ValuesIn(kDatasets),
-  [](const ::testing::TestParamInfo<DatasetConfig>& info) {
-    return std::string(info.param.name);
-  });
+INSTANTIATE_TEST_SUITE_P(AllDatasets,
+                         LabelMatrixIntegrationTest,
+                         ::testing::ValuesIn(kDatasets),
+                         [](const ::testing::TestParamInfo<DatasetConfig>& info) {
+                           return std::string(info.param.name);
+                         });
 
 TEST_P(LabelMatrixIntegrationTest, ChemblVsSmartsLabelMatrix) {
   const std::string smilesPath = testDataPath_ + "/chembl_1k.smi";
@@ -231,12 +231,12 @@ TEST_P(LabelMatrixIntegrationTest, ChemblVsSmartsLabelMatrix) {
   const int numTargets = static_cast<int>(targetMols.size());
   const int numQueries = static_cast<int>(queryMols.size());
 
-  int totalPairs = 0;
-  int totalMismatches = 0;
+  int totalPairs          = 0;
+  int totalMismatches     = 0;
   int totalFalsePositives = 0;
   int totalFalseNegatives = 0;
 
-  std::vector<std::tuple<int, int, int, int>> fpPairs;
+  std::vector<std::tuple<int, int, int, int>>                       fpPairs;
   std::vector<std::tuple<int, int, int, int, int, int, bool, bool>> fpDetails;
 
   for (int t = 0; t < numTargets; ++t) {
@@ -263,7 +263,7 @@ TEST_P(LabelMatrixIntegrationTest, ChemblVsSmartsLabelMatrix) {
       const int numTargetAtoms = static_cast<int>(targetMols[t]->getNumAtoms());
       const int numQueryAtoms  = static_cast<int>(queryMols[q]->getNumAtoms());
 
-      int pairMismatches = 0;
+      int pairMismatches     = 0;
       int pairFalsePositives = 0;
       int pairFalseNegatives = 0;
 
@@ -285,7 +285,10 @@ TEST_P(LabelMatrixIntegrationTest, ChemblVsSmartsLabelMatrix) {
             ++pairFalsePositives;
             ++pairMismatches;
             if (fpDetails.size() < 20) {
-              fpDetails.push_back({t, q, ta, qa,
+              fpDetails.push_back({t,
+                                   q,
+                                   ta,
+                                   qa,
                                    targetAtom->getAtomicNum(),
                                    queryAtom->getAtomicNum(),
                                    targetAtom->getIsAromatic(),
@@ -317,8 +320,7 @@ TEST_P(LabelMatrixIntegrationTest, ChemblVsSmartsLabelMatrix) {
   if (!fpPairs.empty()) {
     std::cout << "  Pairs with FALSE POSITIVES:\n";
     for (const auto& [t, q, fp, fn] : fpPairs) {
-      std::cout << "    Target[" << t << "] x Query[" << q << "]: "
-                << fp << " false positives\n"
+      std::cout << "    Target[" << t << "] x Query[" << q << "]: " << fp << " false positives\n"
                 << "      Target: " << targetSmiles[t].substr(0, 80) << "...\n"
                 << "      Query: " << querySmarts[q] << "\n";
     }
@@ -341,14 +343,16 @@ TEST_P(LabelMatrixIntegrationTest, ChemblVsSmartsLabelMatrix) {
       fpPairs,
       [](const auto& p) { return std::get<0>(p); },
       [](const auto& p) { return std::get<1>(p); });
-    printSmallestReprosSimple(repros, targetSmiles, querySmarts, "false positive",
-      [&](int t, int q) -> std::pair<int, int> {
-        auto it = fpInfo.find({t, q});
-        return it != fpInfo.end() ? it->second : std::pair{0, 0};
-      });
+    printSmallestReprosSimple(repros,
+                              targetSmiles,
+                              querySmarts,
+                              "false positive",
+                              [&](int t, int q) -> std::pair<int, int> {
+                                auto it = fpInfo.find({t, q});
+                                return it != fpInfo.end() ? it->second : std::pair{0, 0};
+                              });
   }
 
   EXPECT_EQ(totalFalsePositives, 0)
     << "GPU label matrix has false positives (marks atoms as compatible when RDKit says no)";
 }
-
