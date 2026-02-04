@@ -1045,14 +1045,14 @@ void getSubstructMatchesImpl(const std::vector<const RDKit::ROMol*>& targets,
   queryContext.queryPipelineDepths.resize(numQueries);
   queryContext.queryMaxDepths.resize(numQueries);
   queryContext.queryHasPatterns.resize(numQueries);
+  queryContext.queryNeedsFallback.resize(numQueries, 0);
 
   const int precomputedSize      = static_cast<int>(leafSubpatterns.perQueryPatterns.size());
   const int perQueryMaxDepthSize = static_cast<int>(leafSubpatterns.perQueryMaxDepth.size());
 
   int maxQueryAtoms = 0;
-  int maxDepthSeen  = 0;
 
-#pragma omp parallel num_threads(effectivePreprocessingThreads) reduction(max : maxQueryAtoms, maxDepthSeen)
+#pragma omp parallel num_threads(effectivePreprocessingThreads) reduction(max : maxQueryAtoms)
   {
 #pragma omp for nowait
     for (int q = 0; q < numQueries; ++q) {
@@ -1061,25 +1061,27 @@ void getSubstructMatchesImpl(const std::vector<const RDKit::ROMol*>& targets,
       const int atomCount             = atomEnd - atomStart;
       queryContext.queryAtomCounts[q] = atomCount;
 
-      const int depth                     = getQueryPipelineDepth(queriesHost, q);
-      queryContext.queryPipelineDepths[q] = depth;
-      maxDepthSeen                        = std::max(maxDepthSeen, depth);
+      const int maxDepth = (q < perQueryMaxDepthSize) ? leafSubpatterns.perQueryMaxDepth[q] : 0;
 
-      const int maxDepth             = (q < perQueryMaxDepthSize) ? leafSubpatterns.perQueryMaxDepth[q] : 0;
-      queryContext.queryMaxDepths[q] = maxDepth;
+      if (maxDepth >= kMaxSmartsNestingDepth) {
+        queryContext.queryNeedsFallback[q]  = 1;
+        queryContext.queryPipelineDepths[q] = 0;
+        queryContext.queryMaxDepths[q]      = 0;
+        queryContext.queryHasPatterns[q]    = 0;
+      } else {
+        const int depth                     = getQueryPipelineDepth(queriesHost, q);
+        queryContext.queryPipelineDepths[q] = depth;
+        queryContext.queryMaxDepths[q]      = maxDepth;
 
-      const bool hasPatterns =
-        (q < precomputedSize) && (maxDepth > 0 || !leafSubpatterns.perQueryPatterns[q][0].empty());
-      queryContext.queryHasPatterns[q] = hasPatterns ? 1 : 0;
+        const bool hasPatterns =
+          (q < precomputedSize) && (maxDepth > 0 || !leafSubpatterns.perQueryPatterns[q][0].empty());
+        queryContext.queryHasPatterns[q] = hasPatterns ? 1 : 0;
+      }
 
       maxQueryAtoms = std::max(maxQueryAtoms, atomCount);
     }
   }
 
-  if (maxDepthSeen > kMaxSmartsNestingDepth) {
-    throw std::runtime_error("Recursive SMARTS depth " + std::to_string(maxDepthSeen) +
-                             " exceeds maximum supported depth of " + std::to_string(kMaxSmartsNestingDepth));
-  }
   queryContext.maxQueryAtoms = maxQueryAtoms;
 
   // Mutex shared between GPU batch accumulation and fallback queue processing
@@ -1088,6 +1090,21 @@ void getSubstructMatchesImpl(const std::vector<const RDKit::ROMol*>& targets,
   // Create fallback queue to collect overflow and oversized targets.
   RDKitFallbackQueue
     fallbackQueue(&targets, &queries, &results, &resultsMutex, config.maxMatches, boolResults, countResults);
+
+  // Enqueue all (target, query) pairs for queries that exceed recursion depth limit.
+  {
+    std::vector<RDKitFallbackEntry> depthFallbackEntries;
+    for (int q = 0; q < numQueries; ++q) {
+      if (queryContext.queryNeedsFallback[q]) {
+        for (int t = 0; t < numTargets; ++t) {
+          depthFallbackEntries.push_back({t, q});
+        }
+      }
+    }
+    if (!depthFallbackEntries.empty()) {
+      fallbackQueue.enqueue(depthFallbackEntries);
+    }
+  }
 
   runPipelinedSubstructSearch(targets,
                               queriesHost,

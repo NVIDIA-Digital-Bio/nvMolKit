@@ -178,6 +178,7 @@ struct QueryPreprocessContext {
   std::vector<int>      queryPipelineDepths;  ///< Pipeline stage depth (maxRecursiveDepth + 1, 0 if none)
   std::vector<int>      queryMaxDepths;
   std::vector<int8_t>   queryHasPatterns;
+  std::vector<int8_t>   queryNeedsFallback;  ///< 1 if query exceeds limits and needs RDKit fallback
   int                   numQueries    = 0;
   int                   maxQueryAtoms = 0;
 };

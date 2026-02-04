@@ -1933,3 +1933,49 @@ TEST_P(SubstructureSearchTest, HypervalentAtomFallback) {
     EXPECT_EQ(results.matchCount(t, 0), static_cast<int>(rdkitMatches.size()));
   }
 }
+
+TEST_P(SubstructureSearchTest, DeepRecursionDepthFallback) {
+  std::vector<std::unique_ptr<RDKit::ROMol>> targetMols;
+  std::vector<std::unique_ptr<RDKit::ROMol>> queryMols;
+
+  // Deeply nested recursive SMARTS that exceeds kMaxSmartsNestingDepth (4)
+  // Pattern has depth 4: [$([*;$([*;$([*;$([*;$(*-N)])])])])]
+  const std::string deepQuery = "[$([*;$([*;$([*;$([*;$(*-N)])])])])]";
+
+  parseMolecules({"CCN", "CCCCN", "CCC"}, {deepQuery}, targetMols, queryMols);
+
+  SubstructSearchResults results;
+  EXPECT_NO_THROW(
+    getSubstructMatches(getRawPtrs(targetMols), getRawPtrs(queryMols), results, algorithm(), stream_.stream()))
+    << "Deep recursion query should be handled via RDKit fallback without throwing";
+
+  for (int t = 0; t < results.numTargets; ++t) {
+    auto rdkitMatches = getRDKitSubstructMatches(*targetMols[t], *queryMols[0], false);
+    EXPECT_EQ(results.matchCount(t, 0), static_cast<int>(rdkitMatches.size()))
+      << "Target " << t << " should match RDKit results via fallback";
+  }
+}
+
+TEST_P(SubstructureSearchTest, DeepRecursionMixedWithNormalQueries) {
+  std::vector<std::unique_ptr<RDKit::ROMol>> targetMols;
+  std::vector<std::unique_ptr<RDKit::ROMol>> queryMols;
+
+  // Mix of normal queries and deep recursive query that needs fallback
+  const std::string deepQuery = "[$([*;$([*;$([*;$([*;$(*-N)])])])])]";
+
+  parseMolecules({"CCN", "CCCCN"}, {"C", deepQuery, "N"}, targetMols, queryMols);
+
+  SubstructSearchResults results;
+  EXPECT_NO_THROW(
+    getSubstructMatches(getRawPtrs(targetMols), getRawPtrs(queryMols), results, algorithm(), stream_.stream()))
+    << "Mixed queries should handle deep recursion via RDKit fallback";
+
+  // Verify all results match RDKit
+  for (int t = 0; t < results.numTargets; ++t) {
+    for (int q = 0; q < results.numQueries; ++q) {
+      auto rdkitMatches = getRDKitSubstructMatches(*targetMols[t], *queryMols[q], false);
+      EXPECT_EQ(results.matchCount(t, q), static_cast<int>(rdkitMatches.size()))
+        << "Target " << t << ", Query " << q << " should match RDKit results";
+    }
+  }
+}

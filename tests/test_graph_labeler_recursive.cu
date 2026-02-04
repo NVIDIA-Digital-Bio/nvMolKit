@@ -45,6 +45,7 @@ using nvMolKit::compareLabelMatrices;
 using nvMolKit::computeGpuLabelMatrix;
 using nvMolKit::extractRecursivePatterns;
 using nvMolKit::FlatBitVect;
+using nvMolKit::getRDKitSubstructMatches;
 using nvMolKit::hasRecursiveSmarts;
 using nvMolKit::kMaxQueryAtoms;
 using nvMolKit::kMaxSmartsNestingDepth;
@@ -824,9 +825,9 @@ TEST(RecursiveLabelerEdgeCases, MaxRecursionDepthLimit) {
   EXPECT_GE(info.maxDepth, kMaxSmartsNestingDepth);
 }
 
-TEST(RecursiveLabelerEdgeCases, MaxRecursionDepthThrowsOnPreprocess) {
-  // Create a pattern that exceeds kMaxSmartsNestingDepth and verify it throws
-  // during preprocessing when run through the full pipeline
+TEST(RecursiveLabelerEdgeCases, MaxRecursionDepthFallsBackToRDKit) {
+  // Create a pattern that exceeds kMaxSmartsNestingDepth and verify it falls back
+  // to RDKit instead of throwing
   const std::string deeplyNested = "[$([*;$([*;$([*;$([*;$(*-N)])])])])]";
 
   auto targetMol = makeMolFromSmiles("CCCCN");
@@ -843,8 +844,13 @@ TEST(RecursiveLabelerEdgeCases, MaxRecursionDepthThrowsOnPreprocess) {
   std::vector<const RDKit::ROMol*> queries = {queryMol.get()};
 
   nvMolKit::SubstructSearchResults results;
-  EXPECT_THROW(nvMolKit::getSubstructMatches(targets, queries, results, SubstructAlgorithm::GSI, stream.stream()),
-               std::runtime_error);
+  EXPECT_NO_THROW(nvMolKit::getSubstructMatches(targets, queries, results, SubstructAlgorithm::GSI, stream.stream()))
+    << "Deep recursion should fall back to RDKit instead of throwing";
+
+  // Verify we got the correct result from RDKit fallback
+  auto rdkitMatches = getRDKitSubstructMatches(*targetMol, *queryMol, false);
+  EXPECT_EQ(results.matchCount(0, 0), static_cast<int>(rdkitMatches.size()))
+    << "Fallback should produce same results as RDKit";
 }
 
 // =============================================================================

@@ -74,6 +74,15 @@ template <std::size_t MaxQueryAtoms = kMaxQueryAtoms> struct SubstructMatchResul
 // Architecture-Specific Thread Configuration
 // =============================================================================
 
+/// Returns SM version for compile-time configuration (device code uses __CUDA_ARCH__, host defaults to 86)
+__host__ __device__ constexpr int getComputeCapability() {
+#ifdef __CUDA_ARCH__
+  return __CUDA_ARCH__ / 10;
+#else
+  return 86;
+#endif
+}
+
 /// Max threads per SM for each compute capability
 __host__ __device__ constexpr int getMaxThreadsPerSM(int sm) {
   if (sm >= 90)
@@ -415,8 +424,9 @@ __global__ void substructMatchKernelT(TargetMoleculesDeviceView                 
     }
 
   } else if constexpr (Algo == SubstructAlgorithm::GSI) {
-    constexpr int kBlockSizeT   = getBlockSizeForConfig<MaxTargetAtoms>();
-    constexpr int kMaxPartialsT = getMaxPartialsForSM<MaxTargetAtoms, MaxQueryAtoms>(86, kBlockSizeT);
+    constexpr int kBlockSizeT = getBlockSizeForConfig<MaxTargetAtoms>();
+    constexpr int kMaxPartialsT =
+      getMaxPartialsForSM<MaxTargetAtoms, MaxQueryAtoms>(getComputeCapability(), kBlockSizeT);
     static_assert(kMaxPartialsT > 0,
                   "Insufficient shared memory for GSI partials - check block size for MaxTargetAtoms/MaxQueryAtoms");
     __shared__ PartialMatchT<MaxQueryAtoms> gsiPartials[kMaxPartialsT * 2];
@@ -562,8 +572,9 @@ __global__ void substructPaintKernelT(TargetMoleculesDeviceView     targets,
   constexpr int gsiBuffersPerBlock = 2;
 
   if constexpr (Algo == SubstructAlgorithm::GSI) {
-    constexpr int kBlockSizeT   = getBlockSizeForConfig<MaxTargetAtoms>();
-    constexpr int kMaxPartialsT = getMaxPartialsForSM<MaxTargetAtoms, MaxQueryAtoms>(86, kBlockSizeT);
+    constexpr int kBlockSizeT = getBlockSizeForConfig<MaxTargetAtoms>();
+    constexpr int kMaxPartialsT =
+      getMaxPartialsForSM<MaxTargetAtoms, MaxQueryAtoms>(getComputeCapability(), kBlockSizeT);
     static_assert(kMaxPartialsT > 0,
                   "Insufficient shared memory for GSI partials - check block size for MaxTargetAtoms/MaxQueryAtoms");
     __shared__ PartialMatchT<MaxQueryAtoms> gsiPartials[kMaxPartialsT * 2];
