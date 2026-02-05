@@ -15,7 +15,7 @@
 
 add_library(benchmark_utils STATIC benchmark_utils.cpp)
 target_link_libraries(benchmark_utils PRIVATE ${RDKit_LIBS} test_utils
-                                              OpenMP::OpenMP_CXX)
+        OpenMP::OpenMP_CXX)
 
 add_executable(MorganFpBench morgan_fp.cpp)
 target_link_libraries(

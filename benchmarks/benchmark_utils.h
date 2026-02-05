@@ -60,4 +60,12 @@ void embedOneConfThenDuplicate(std::vector<RDKit::ROMol*>& mols,
                                int                         rdkitNumThreads,
                                int                         maxIterations = 1000);
 
+/**
+ * @brief Timing result containing average and standard deviation in milliseconds.
+ */
+struct TimingResult {
+  double avgMs;
+  double stdMs;
+};
+
 }  // namespace BenchUtils
