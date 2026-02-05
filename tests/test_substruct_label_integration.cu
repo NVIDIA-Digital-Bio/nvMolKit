@@ -32,6 +32,7 @@
 #include "flat_bit_vect.h"
 #include "graph_labeler.cuh"
 #include "mol_data.h"
+#include "molecules.h"
 #include "molecules_device.cuh"
 #include "substruct_search.h"
 #include "test_utils.h"
@@ -231,17 +232,25 @@ TEST_P(LabelMatrixIntegrationTest, ChemblVsSmartsLabelMatrix) {
   const int numTargets = static_cast<int>(targetMols.size());
   const int numQueries = static_cast<int>(queryMols.size());
 
+  std::vector<bool> queryHasRecursive(static_cast<size_t>(numQueries), false);
+  for (int q = 0; q < numQueries; ++q) {
+    queryHasRecursive[static_cast<size_t>(q)] = nvMolKit::hasRecursiveSmarts(queryMols[q].get());
+  }
+
   int totalPairs          = 0;
   int totalMismatches     = 0;
   int totalFalsePositives = 0;
   int totalFalseNegatives = 0;
 
   std::vector<std::tuple<int, int, int, int>>                       fpPairs;
+  std::vector<std::tuple<int, int, int, int>>                       fnPairs;
   std::vector<std::tuple<int, int, int, int, int, int, bool, bool>> fpDetails;
+  std::vector<std::tuple<int, int, int, int, int, int, bool, bool>> fnDetails;
 
   for (int t = 0; t < numTargets; ++t) {
     for (int q = 0; q < numQueries; ++q) {
       ++totalPairs;
+      const bool isRecursive = queryHasRecursive[static_cast<size_t>(q)];
 
       LabelMatrixStorage hostMatrix(false);
       matrixDev.setFromVector(std::vector<LabelMatrixStorage>{hostMatrix});
@@ -294,9 +303,19 @@ TEST_P(LabelMatrixIntegrationTest, ChemblVsSmartsLabelMatrix) {
                                    targetAtom->getIsAromatic(),
                                    queryAtom->getIsAromatic()});
             }
-          } else if (!gpuResult && rdkitResult) {
+          } else if (!gpuResult && rdkitResult && !isRecursive) {
             ++pairFalseNegatives;
             ++pairMismatches;
+            if (fnDetails.size() < 20) {
+              fnDetails.push_back({t,
+                                   q,
+                                   ta,
+                                   qa,
+                                   targetAtom->getAtomicNum(),
+                                   queryAtom->getAtomicNum(),
+                                   targetAtom->getIsAromatic(),
+                                   queryAtom->getIsAromatic()});
+            }
           }
         }
       }
@@ -307,6 +326,9 @@ TEST_P(LabelMatrixIntegrationTest, ChemblVsSmartsLabelMatrix) {
 
       if (pairFalsePositives > 0 && fpPairs.size() < 10) {
         fpPairs.emplace_back(t, q, pairFalsePositives, pairFalseNegatives);
+      }
+      if (pairFalseNegatives > 0 && fnPairs.size() < 10) {
+        fnPairs.emplace_back(t, q, pairFalsePositives, pairFalseNegatives);
       }
     }
   }
@@ -326,9 +348,26 @@ TEST_P(LabelMatrixIntegrationTest, ChemblVsSmartsLabelMatrix) {
     }
   }
 
+  if (!fnPairs.empty()) {
+    std::cout << "  Pairs with FALSE NEGATIVES:\n";
+    for (const auto& [t, q, fp, fn] : fnPairs) {
+      std::cout << "    Target[" << t << "] x Query[" << q << "]: " << fn << " false negatives\n"
+                << "      Target: " << targetSmiles[t].substr(0, 80) << "...\n"
+                << "      Query: " << querySmarts[q] << "\n";
+    }
+  }
+
   if (!fpDetails.empty()) {
     std::cout << "  False positive atom details:\n";
     for (const auto& [t, q, ta, qa, tAtomNum, qAtomNum, tArom, qArom] : fpDetails) {
+      std::cout << "    T[" << t << "].atom" << ta << " (Z=" << tAtomNum << ",arom=" << tArom << ")"
+                << " vs Q[" << q << "].atom" << qa << " (Z=" << qAtomNum << ",arom=" << qArom << ")\n";
+    }
+  }
+
+  if (!fnDetails.empty()) {
+    std::cout << "  False negative atom details:\n";
+    for (const auto& [t, q, ta, qa, tAtomNum, qAtomNum, tArom, qArom] : fnDetails) {
       std::cout << "    T[" << t << "].atom" << ta << " (Z=" << tAtomNum << ",arom=" << tArom << ")"
                 << " vs Q[" << q << "].atom" << qa << " (Z=" << qAtomNum << ",arom=" << qArom << ")\n";
     }
@@ -353,6 +392,27 @@ TEST_P(LabelMatrixIntegrationTest, ChemblVsSmartsLabelMatrix) {
                               });
   }
 
+  if (!fnPairs.empty()) {
+    std::map<std::pair<int, int>, std::pair<int, int>> fnInfo;
+    for (const auto& [t, q, fp, fn] : fnPairs) {
+      fnInfo[{t, q}] = {fp, fn};
+    }
+    auto repros = findSmallestRepros(
+      fnPairs,
+      [](const auto& p) { return std::get<0>(p); },
+      [](const auto& p) { return std::get<1>(p); });
+    printSmallestReprosSimple(repros,
+                              targetSmiles,
+                              querySmarts,
+                              "false negative",
+                              [&](int t, int q) -> std::pair<int, int> {
+                                auto it = fnInfo.find({t, q});
+                                return it != fnInfo.end() ? it->second : std::pair{0, 0};
+                              });
+  }
+
   EXPECT_EQ(totalFalsePositives, 0)
     << "GPU label matrix has false positives (marks atoms as compatible when RDKit says no)";
+  EXPECT_EQ(totalFalseNegatives, 0)
+    << "GPU label matrix has false negatives for non-recursive queries (misses atoms that RDKit marks compatible)";
 }

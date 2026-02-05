@@ -50,6 +50,18 @@ std::vector<std::vector<int>> getRDKitSubstructMatches(const RDKit::ROMol& targe
   return result;
 }
 
+bool matchSetsEqual(const std::vector<std::vector<int>>& gpuMatches,
+                    const std::vector<std::vector<int>>& rdkitMatches) {
+  if (gpuMatches.size() != rdkitMatches.size()) {
+    return false;
+  }
+
+  std::set<std::vector<int>> gpuSet(gpuMatches.begin(), gpuMatches.end());
+  std::set<std::vector<int>> rdkitSet(rdkitMatches.begin(), rdkitMatches.end());
+
+  return gpuSet == rdkitSet;
+}
+
 std::string algorithmName(SubstructAlgorithm algo) {
   switch (algo) {
     case SubstructAlgorithm::VF2:
@@ -70,21 +82,6 @@ std::vector<std::vector<int>> extractGpuMatches(const SubstructSearchResults& re
                                                 int                           queryIdx,
                                                 int /* numQueryAtoms */) {
   return results.getMatches(targetIdx, queryIdx);
-}
-
-/**
- * @brief Compare two sets of matches (order-independent).
- */
-bool matchSetsEqual(const std::vector<std::vector<int>>& gpuMatches,
-                    const std::vector<std::vector<int>>& rdkitMatches) {
-  if (gpuMatches.size() != rdkitMatches.size()) {
-    return false;
-  }
-
-  std::set<std::vector<int>> gpuSet(gpuMatches.begin(), gpuMatches.end());
-  std::set<std::vector<int>> rdkitSet(rdkitMatches.begin(), rdkitMatches.end());
-
-  return gpuSet == rdkitSet;
 }
 
 }  // namespace

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -40,23 +40,16 @@ using nvMolKit::countSubstructMatches;
 using nvMolKit::getSubstructMatches;
 using nvMolKit::hasSubstructMatch;
 using nvMolKit::HasSubstructMatchResults;
+using nvMolKit::matchSetsEqual;
 using nvMolKit::printValidationResultDetailed;
 using nvMolKit::ScopedStream;
 using nvMolKit::SubstructAlgorithm;
 using nvMolKit::SubstructSearchConfig;
 using nvMolKit::SubstructSearchResults;
 using nvMolKit::validateAgainstRDKit;
+using nvMolKit::testing::makeMolsView;
 using nvMolKit::testing::readSmartsFileWithStrings;
 using nvMolKit::testing::readSmilesFileWithStrings;
-
-std::vector<const RDKit::ROMol*> getRawPtrs(const std::vector<std::unique_ptr<RDKit::ROMol>>& mols) {
-  std::vector<const RDKit::ROMol*> ptrs;
-  ptrs.reserve(mols.size());
-  for (const auto& m : mols) {
-    ptrs.push_back(m.get());
-  }
-  return ptrs;
-}
 
 namespace {
 
@@ -330,8 +323,8 @@ TEST_P(SubstructureIntegrationTest, ChemblVsSmarts) {
 
   if (mode() == SubstructMode::HasMatch) {
     HasSubstructMatchResults boolResults;
-    hasSubstructMatch(getRawPtrs(targetMols),
-                      getRawPtrs(queryMols),
+    hasSubstructMatch(makeMolsView(targetMols),
+                      makeMolsView(queryMols),
                       boolResults,
                       algorithm(),
                       stream_.stream(),
@@ -384,8 +377,8 @@ TEST_P(SubstructureIntegrationTest, ChemblVsSmarts) {
                              << algorithmName(algorithm());
   } else if (mode() == SubstructMode::CountMatches) {
     std::vector<int> counts;
-    countSubstructMatches(getRawPtrs(targetMols),
-                          getRawPtrs(queryMols),
+    countSubstructMatches(makeMolsView(targetMols),
+                          makeMolsView(queryMols),
                           counts,
                           algorithm(),
                           stream_.stream(),
@@ -434,8 +427,8 @@ TEST_P(SubstructureIntegrationTest, ChemblVsSmarts) {
                              << algorithmName(algorithm());
   } else {
     SubstructSearchResults results;
-    getSubstructMatches(getRawPtrs(targetMols),
-                        getRawPtrs(queryMols),
+    getSubstructMatches(makeMolsView(targetMols),
+                        makeMolsView(queryMols),
                         results,
                         algorithm(),
                         stream_.stream(),
@@ -548,8 +541,8 @@ TEST_F(MultiGpuSubstructTest, MultiGpuMatchesSingleGpu) {
   ASSERT_FALSE(targetMols.empty()) << "No target molecules loaded";
   ASSERT_FALSE(queryMols.empty()) << "No query patterns loaded";
 
-  auto targetPtrs = getRawPtrs(targetMols);
-  auto queryPtrs  = getRawPtrs(queryMols);
+  auto targetPtrs = makeMolsView(targetMols);
+  auto queryPtrs  = makeMolsView(queryMols);
 
   // Run single-GPU
   SubstructSearchConfig singleGpuConfig;
@@ -585,9 +578,10 @@ TEST_F(MultiGpuSubstructTest, MultiGpuMatchesSingleGpu) {
   EXPECT_EQ(singleGpuResults.numTargets, multiGpuResults.numTargets);
   EXPECT_EQ(singleGpuResults.numQueries, multiGpuResults.numQueries);
 
-  int64_t singleGpuTotal = 0;
-  int64_t multiGpuTotal  = 0;
-  int     mismatches     = 0;
+  int64_t singleGpuTotal    = 0;
+  int64_t multiGpuTotal     = 0;
+  int     mismatches        = 0;
+  int     mappingMismatches = 0;
 
   for (int t = 0; t < singleGpuResults.numTargets; ++t) {
     for (int q = 0; q < singleGpuResults.numQueries; ++q) {
@@ -597,6 +591,13 @@ TEST_F(MultiGpuSubstructTest, MultiGpuMatchesSingleGpu) {
       multiGpuTotal += multiCount;
       if (singleCount != multiCount) {
         ++mismatches;
+      } else if (singleCount > 0) {
+        const int  numQueryAtoms = static_cast<int>(queryMols[q]->getNumAtoms());
+        const auto singleMatches = extractGpuMatches(singleGpuResults, t, q, numQueryAtoms);
+        const auto multiMatches  = extractGpuMatches(multiGpuResults, t, q, numQueryAtoms);
+        if (!matchSetsEqual(singleMatches, multiMatches)) {
+          ++mappingMismatches;
+        }
       }
     }
   }
@@ -604,9 +605,11 @@ TEST_F(MultiGpuSubstructTest, MultiGpuMatchesSingleGpu) {
   std::cout << "[MultiGPU] Single-GPU total matches: " << singleGpuTotal << "\n";
   std::cout << "[MultiGPU] Multi-GPU total matches: " << multiGpuTotal << "\n";
   std::cout << "[MultiGPU] Mismatched pairs: " << mismatches << "\n";
+  std::cout << "[MultiGPU] Mapping mismatched pairs: " << mappingMismatches << "\n";
 
   EXPECT_EQ(singleGpuTotal, multiGpuTotal) << "Total match counts differ between single and multi-GPU";
   EXPECT_EQ(mismatches, 0) << "Some pairs have different match counts";
+  EXPECT_EQ(mappingMismatches, 0) << "Some pairs have different match mappings";
 }
 
 // =============================================================================
