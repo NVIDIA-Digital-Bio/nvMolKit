@@ -35,6 +35,7 @@
 #include <string>
 
 #include "molecules.h"
+#include "testutils/mol_data.h"
 
 namespace {
 
@@ -43,27 +44,6 @@ enum class SmartsStatus {
   Unsupported,  // Valid SMARTS, nvMolKit cannot process
   Invalid       // RDKit cannot parse
 };
-
-/**
- * @brief Extract the first whitespace-delimited token from a line.
- *
- * Handles formats like:
- *   - "SMARTS" (just the pattern)
- *   - "SMARTS   description" (pattern + description)
- *   - "SMARTS   description   # comment" (pattern + description + comment)
- */
-std::string extractSmarts(const std::string& line) {
-  const char* ws    = " \t\n\r";
-  size_t      start = line.find_first_not_of(ws);
-  if (start == std::string::npos) {
-    return "";
-  }
-  size_t end = line.find_first_of(ws, start);
-  if (end == std::string::npos) {
-    return line.substr(start);
-  }
-  return line.substr(start, end - start);
-}
 
 /**
  * @brief Test if a SMARTS pattern is supported by nvMolKit.
@@ -159,7 +139,7 @@ int main(int argc, char* argv[]) {
 
   std::string line;
   while (std::getline(input, line)) {
-    std::string smarts = extractSmarts(line);
+    std::string smarts = nvMolKit::testing::extractFirstToken(line);
 
     // Skip empty lines and comments
     if (smarts.empty() || smarts[0] == '#') {

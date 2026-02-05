@@ -1405,7 +1405,6 @@ TEST_P(SubstructureSearchTest, SingleMolSingleQueryForDebugging) {
 // Nested Recursive SMARTS Integration Tests
 // =============================================================================
 
-
 TEST_P(RecursiveSubstructureSearchTest, NestedRecursiveSimple) {
   std::vector<std::unique_ptr<RDKit::ROMol>> targetMols;
   std::vector<std::unique_ptr<RDKit::ROMol>> queryMols;
