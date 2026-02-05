@@ -41,6 +41,16 @@ std::pair<std::vector<std::unique_ptr<RDKit::ROMol>>, std::vector<std::string>> 
 //! Utility to get raw pointers from a unique pointer vec.
 std::vector<const RDKit::ROMol*> makeMolsView(const std::vector<std::unique_ptr<RDKit::ROMol>>& mols);
 
+/**
+ * @brief Extract the first whitespace-delimited token from a line.
+ *
+ * Skips leading whitespace and ignores comment-only lines that start with '#'.
+ *
+ * @param line Input line
+ * @return First token, or empty string if none
+ */
+std::string extractFirstToken(const std::string& line);
+
 //! Queries NVMOLKIT_CHEMBL29_SMILES_PATH environment variable for the path to the chembl29 smiles file
 std::string getCheml29SmilesPath();
 

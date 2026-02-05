@@ -68,7 +68,8 @@ target_link_libraries(
                      GTest::gmock_main)
 
 add_executable(smarts_filter smarts_filter.cpp)
-target_link_libraries(smarts_filter PRIVATE molecules ${RDKit_LIBS})
+target_link_libraries(smarts_filter PRIVATE molecules molData ${RDKit_LIBS})
+target_include_directories(smarts_filter PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
 add_executable(test_flattened_builder test_flattened_builder.cu)
 target_link_libraries(
