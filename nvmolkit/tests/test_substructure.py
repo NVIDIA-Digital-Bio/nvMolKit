@@ -896,7 +896,10 @@ class TestIntegrationChemblSmarts:
         if not queries:
             pytest.skip(f"No valid queries in {smarts_file}")
 
-        results = getSubstructMatches(chembl_mols, queries)
+        config = SubstructSearchConfig()
+        config.batchSize = 128
+
+        results = getSubstructMatches(chembl_mols, queries, config)
 
         assert len(results) == len(chembl_mols)
         for t_idx in range(len(chembl_mols)):
@@ -940,7 +943,10 @@ class TestIntegrationChemblSmarts:
         ]
         queries = [Chem.MolFromSmarts(s) for s in smarts_strings]
 
-        results = getSubstructMatches(chembl_mols, queries)
+        config = SubstructSearchConfig()
+        config.batchSize = 128
+
+        results = getSubstructMatches(chembl_mols, queries, config)
 
         validation = validate_against_rdkit(chembl_mols, queries, results, smarts_strings)
 
@@ -963,7 +969,10 @@ class TestIntegrationChemblSmarts:
             Chem.MolFromSmarts("[OX2H]"),
         ]
 
-        results = hasSubstructMatch(chembl_mols, queries)
+        config = SubstructSearchConfig()
+        config.batchSize = 128
+
+        results = hasSubstructMatch(chembl_mols, queries, config)
 
         assert results.shape == (len(chembl_mols), len(queries))
         for t_idx, target in enumerate(chembl_mols):
