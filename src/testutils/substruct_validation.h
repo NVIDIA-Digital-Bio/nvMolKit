@@ -42,6 +42,15 @@ std::vector<std::vector<int>> getRDKitSubstructMatches(const RDKit::ROMol& targe
                                                        bool                uniquify = true);
 
 /**
+ * @brief Compare two sets of matches (order-independent).
+ *
+ * @param gpuMatches Matches from GPU results
+ * @param rdkitMatches Matches from RDKit or another source
+ * @return true if the match sets are identical
+ */
+bool matchSetsEqual(const std::vector<std::vector<int>>& gpuMatches, const std::vector<std::vector<int>>& rdkitMatches);
+
+/**
  * @brief Get a string name for a substruct algorithm.
  * @param algo The algorithm enum value
  * @return Human-readable name for the algorithm

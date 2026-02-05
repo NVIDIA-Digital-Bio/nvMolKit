@@ -1965,7 +1965,6 @@ TEST_P(RecursiveSubstructureSearchTest, DeepRecursionDepthFallback) {
       << "Target " << t << " should match RDKit results via fallback";
   }
 }
-
 TEST_P(RecursiveSubstructureSearchTest, DeepRecursionMixedWithNormalQueries) {
   std::vector<std::unique_ptr<RDKit::ROMol>> targetMols;
   std::vector<std::unique_ptr<RDKit::ROMol>> queryMols;

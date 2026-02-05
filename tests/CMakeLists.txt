@@ -67,6 +67,10 @@ target_link_libraries(
   test_utils PRIVATE ${RDKit_LIBS} GTest::gtest GTest::gtest_main GTest::gmock
                      GTest::gmock_main)
 
+add_executable(smarts_filter smarts_filter.cpp)
+target_link_libraries(smarts_filter PRIVATE molecules molData ${RDKit_LIBS})
+target_include_directories(smarts_filter PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
 add_executable(test_flattened_builder test_flattened_builder.cu)
 target_link_libraries(
   test_flattened_builder
@@ -225,6 +229,16 @@ add_executable(test_substruct_algos test_substruct_algos.cu)
 target_link_libraries(test_substruct_algos PRIVATE
         substruct_definitions molecules device flatBitVect device_vector device_timings)
 
+add_executable(test_substructure_integration test_substruct_integration.cu)
+target_link_libraries(
+        test_substructure_integration PRIVATE substructure_search molecules device
+        substruct_validation test_utils molData
+        ${RDKit_LIBS})
+
+add_executable(test_substruct_label_integration test_substruct_label_integration.cu)
+target_link_libraries(
+        test_substruct_label_integration PRIVATE substructure_search molecules device
+        test_utils molData ${RDKit_LIBS})
 
 set(TEST_LIST
     test_boolean_tree
@@ -264,6 +278,8 @@ set(TEST_LIST
     test_rdkit_bounds_matrix
     test_substruct_algos
     test_substructure_search
+    test_substructure_integration
+    test_substruct_label_integration
     test_similarity
     test_thread_safe_queue
     test_work_splitting)
