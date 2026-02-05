@@ -68,43 +68,4 @@ struct TimingResult {
   double stdMs;
 };
 
-/**
- * @brief Time a callable function with warmups and multiple runs.
- * @param func Callable to benchmark
- * @param runs Number of timing runs
- * @param warmups Number of warmup runs
- * @return TimingResult with average and standard deviation in milliseconds
- */
-template <typename Func> TimingResult timeIt(Func&& func, int runs = 3, int warmups = 1) {
-  for (int i = 0; i < warmups; ++i) {
-    func();
-  }
-
-  std::vector<double> times;
-  times.reserve(runs);
-
-  for (int i = 0; i < runs; ++i) {
-    auto start = std::chrono::high_resolution_clock::now();
-    func();
-    auto end      = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
-    times.push_back(static_cast<double>(duration) / 1.0e6);
-  }
-
-  double sum = 0.0;
-  for (double t : times) {
-    sum += t;
-  }
-  const double avgMs = sum / runs;
-
-  double variance = 0.0;
-  for (double t : times) {
-    const double diff = t - avgMs;
-    variance += diff * diff;
-  }
-  const double stdMs = std::sqrt(variance / runs);
-
-  return TimingResult{avgMs, stdMs};
-}
-
 }  // namespace BenchUtils
