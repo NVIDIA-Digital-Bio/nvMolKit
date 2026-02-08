@@ -66,3 +66,13 @@ target_include_directories(
 target_link_libraries(_clustering PUBLIC ${Boost_LIBRARIES} ${PYTHON_LIBRARIES}
                                          device_vector butina)
 installpythontarget(_clustering ./)
+
+add_library(_substructure MODULE substructure.cpp)
+target_include_directories(
+        _substructure PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils ${Boost_INCLUDE_DIRS}
+        ${Python_INCLUDE_DIRS}
+        ${CMAKE_SOURCE_DIR}/src/substruct)
+target_link_libraries(_substructure PUBLIC ${Boost_LIBRARIES}
+        ${PYTHON_LIBRARIES})
+target_link_libraries(_substructure PRIVATE ${RDKit_LIBS} substructure_search pinned_host_allocator)
+installpythontarget(_substructure ./)
