@@ -77,14 +77,14 @@ class MiniBatchResultsDevice {
    * @param maxMatchesToFind Stop searching after this many matches (-1 = no limit)
    * @param countOnly If true, count matches but don't store them
    */
-  void allocateMiniBatch(int  miniBatchSize,
-                         int* pairMatchStartsDevice,
-                         int  totalMiniBatchMatchIndices,
-                         int  numQueries,
-                         int  maxTargetAtoms,
-                         int  numBuffersPerBlock,
-                         int  maxMatchesToFind = -1,
-                         bool countOnly        = false);
+  void allocateMiniBatch(int        miniBatchSize,
+                         const int* pairMatchStartsDevice,
+                         int        totalMiniBatchMatchIndices,
+                         int        numQueries,
+                         int        maxTargetAtoms,
+                         int        numBuffersPerBlock,
+                         int        maxMatchesToFind = -1,
+                         bool       countOnly        = false);
 
   void setStream(cudaStream_t stream);
 
@@ -127,7 +127,7 @@ class MiniBatchResultsDevice {
 
   [[nodiscard]] int*          matchCounts() const { return matchCounts_.data(); }
   [[nodiscard]] int*          reportedCounts() const { return reportedCounts_.data(); }
-  [[nodiscard]] int*          pairMatchStarts() const { return pairMatchStarts_; }
+  [[nodiscard]] const int*    pairMatchStarts() const { return pairMatchStarts_; }
   [[nodiscard]] int16_t*      matchIndices() const { return matchIndices_.data(); }
   [[nodiscard]] const int*    queryAtomCounts() const { return queryAtomCounts_.data(); }
   [[nodiscard]] PartialMatch* overflowBuffer() const { return overflowBuffer_.data(); }
@@ -144,7 +144,7 @@ class MiniBatchResultsDevice {
 
   AsyncDeviceVector<int>     matchCounts_;
   AsyncDeviceVector<int>     reportedCounts_;
-  int*                       pairMatchStarts_ = nullptr;  ///< External device pointer, not owned
+  const int*                 pairMatchStarts_ = nullptr;  ///< External device pointer, not owned
   AsyncDeviceVector<int16_t> matchIndices_;
   AsyncDeviceVector<int>     queryAtomCounts_;
 

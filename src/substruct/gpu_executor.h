@@ -43,22 +43,20 @@ class ConsolidatedDeviceBuffer {
   void copyFromHost(const PinnedHostBuffer& host, cudaStream_t stream);
   void setStream(cudaStream_t stream);
 
-  [[nodiscard]] int* pairIndices() const;
-  [[nodiscard]] int* miniBatchPairMatchStarts() const;
-  [[nodiscard]] int* matchCounts() const;
-  [[nodiscard]] int* reportedCounts() const;
-  [[nodiscard]] uint8_t* overflowFlags() const;
-  [[nodiscard]] int* matchGlobalPairIndices(int depth) const;
-  [[nodiscard]] int* matchBatchLocalIndices(int depth) const;
+  [[nodiscard]] int*       pairIndices() const;
+  [[nodiscard]] int*       miniBatchPairMatchStarts() const;
+  [[nodiscard]] int*       matchCounts() const;
+  [[nodiscard]] int*       reportedCounts() const;
+  [[nodiscard]] uint8_t*   overflowFlags() const;
+  [[nodiscard]] const int* matchGlobalPairIndices(int depth) const;
+  [[nodiscard]] const int* matchBatchLocalIndices(int depth) const;
 
   [[nodiscard]] int maxBatchSize() const { return maxBatchSize_; }
 
  private:
   static constexpr size_t kAlignment = 256;
 
-  [[nodiscard]] size_t alignOffset(size_t offset) const {
-    return (offset + kAlignment - 1) & ~(kAlignment - 1);
-  }
+  [[nodiscard]] size_t alignOffset(size_t offset) const { return (offset + kAlignment - 1) & ~(kAlignment - 1); }
 
   [[nodiscard]] size_t pairIndicesOffset() const { return 0; }
   [[nodiscard]] size_t miniBatchPairMatchStartsOffset() const;

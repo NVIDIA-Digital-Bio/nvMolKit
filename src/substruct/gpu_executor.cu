@@ -51,7 +51,7 @@ void GpuExecutor::applyMiniBatchPlan(MiniBatchPlan&& plan) {
 // =============================================================================
 
 void ConsolidatedDeviceBuffer::allocate(int maxBatchSize, cudaStream_t stream) {
-  maxBatchSize_ = maxBatchSize;
+  maxBatchSize_           = maxBatchSize;
   const size_t totalBytes = computeConsolidatedBufferBytes(maxBatchSize);
   data_.setStream(stream);
   if (data_.size() < totalBytes) {
@@ -134,12 +134,12 @@ uint8_t* ConsolidatedDeviceBuffer::overflowFlags() const {
   return reinterpret_cast<uint8_t*>(data_.data() + overflowFlagsOffset());
 }
 
-int* ConsolidatedDeviceBuffer::matchGlobalPairIndices(int depth) const {
-  return reinterpret_cast<int*>(data_.data() + matchGlobalPairIndicesOffset(depth));
+const int* ConsolidatedDeviceBuffer::matchGlobalPairIndices(int depth) const {
+  return reinterpret_cast<const int*>(data_.data() + matchGlobalPairIndicesOffset(depth));
 }
 
-int* ConsolidatedDeviceBuffer::matchBatchLocalIndices(int depth) const {
-  return reinterpret_cast<int*>(data_.data() + matchBatchLocalIndicesOffset(depth));
+const int* ConsolidatedDeviceBuffer::matchBatchLocalIndices(int depth) const {
+  return reinterpret_cast<const int*>(data_.data() + matchBatchLocalIndicesOffset(depth));
 }
 
 }  // namespace nvMolKit

@@ -46,14 +46,14 @@ void MiniBatchResultsDevice::setStream(cudaStream_t stream) {
   labelMatrixBuffer_.setStream(stream);
 }
 
-void MiniBatchResultsDevice::allocateMiniBatch(int  miniBatchSize,
-                                               int* pairMatchStartsDevice,
-                                               int  totalMiniBatchMatchIndices,
-                                               int  numQueries,
-                                               int  maxTargetAtoms,
-                                               int  numBuffersPerBlock,
-                                               int  maxMatchesToFind,
-                                               bool countOnly) {
+void MiniBatchResultsDevice::allocateMiniBatch(int        miniBatchSize,
+                                               const int* pairMatchStartsDevice,
+                                               int        totalMiniBatchMatchIndices,
+                                               int        numQueries,
+                                               int        maxTargetAtoms,
+                                               int        numBuffersPerBlock,
+                                               int        maxMatchesToFind,
+                                               bool       countOnly) {
   ScopedNvtxRange allocRange("MiniBatchResultsDevice::allocateMiniBatch");
 
   miniBatchSize_              = miniBatchSize;
