@@ -24,6 +24,7 @@ from rdkit import Chem
 
 from nvmolkit.substructure import (
     SubstructSearchConfig,
+    countSubstructMatches,
     getSubstructMatches,
     hasSubstructMatch,
 )
@@ -634,6 +635,142 @@ class TestHasSubstructMatch:
 
 
 # =============================================================================
+# countSubstructMatches Tests
+# =============================================================================
+
+class TestCountSubstructMatch:
+    """Tests for countSubstructMatches count API."""
+
+    def test_basic_count(self):
+        """Test basic countSubstructMatches functionality."""
+        targets = [
+            Chem.MolFromSmiles("CCO"),
+            Chem.MolFromSmiles("CCCC"),
+            Chem.MolFromSmiles("c1ccccc1"),
+        ]
+        queries = [
+            Chem.MolFromSmarts("C"),
+            Chem.MolFromSmarts("O"),
+            Chem.MolFromSmarts("N"),
+        ]
+
+        results = countSubstructMatches(targets, queries)
+
+        assert results.shape == (3, 3)
+
+        for t_idx, target in enumerate(targets):
+            for q_idx, query in enumerate(queries):
+                rdkit_count = len(target.GetSubstructMatches(query, uniquify=False))
+                assert results[t_idx, q_idx] == rdkit_count, \
+                    f"Mismatch at target {t_idx}, query {q_idx}: " \
+                    f"GPU={results[t_idx, q_idx]}, RDKit={rdkit_count}"
+
+        assert (results == 0).any(), "Test data should include zero-count pairs"
+        assert (results > 0).any(), "Test data should include nonzero-count pairs"
+        assert (results > 1).any(), "Test data should include multi-match pairs"
+
+    def test_count_matches_get_length(self):
+        """Test that count results match len(getSubstructMatches) results."""
+        targets = [
+            Chem.MolFromSmiles("CCO"),
+            Chem.MolFromSmiles("CCOCC"),
+            Chem.MolFromSmiles("c1ccc(O)cc1"),
+        ]
+        queries = [
+            Chem.MolFromSmarts("C"),
+            Chem.MolFromSmarts("CC"),
+            Chem.MolFromSmarts("O"),
+        ]
+
+        counts = countSubstructMatches(targets, queries)
+        matches = getSubstructMatches(targets, queries)
+
+        for t_idx in range(len(targets)):
+            for q_idx in range(len(queries)):
+                assert counts[t_idx, q_idx] == len(matches[t_idx][q_idx]), \
+                    f"Count/get mismatch at target {t_idx}, query {q_idx}"
+
+    def test_count_multi_atom_query(self):
+        """Test countSubstructMatches with multi-atom queries."""
+        targets = [
+            Chem.MolFromSmiles("CCO"),
+            Chem.MolFromSmiles("CCC"),
+        ]
+        queries = [
+            Chem.MolFromSmarts("CO"),
+            Chem.MolFromSmarts("CC"),
+        ]
+
+        results = countSubstructMatches(targets, queries)
+
+        for t_idx, target in enumerate(targets):
+            for q_idx, query in enumerate(queries):
+                rdkit_count = len(target.GetSubstructMatches(query, uniquify=False))
+                assert results[t_idx, q_idx] == rdkit_count
+
+    def test_count_no_match(self):
+        """Test countSubstructMatches when no match exists."""
+        targets = [Chem.MolFromSmiles("CCCC")]
+        queries = [Chem.MolFromSmarts("N")]
+
+        results = countSubstructMatches(targets, queries)
+
+        assert results[0, 0] == 0
+
+    def test_count_empty_targets(self):
+        """Test countSubstructMatches with empty targets."""
+        targets = []
+        queries = [Chem.MolFromSmarts("C")]
+
+        results = countSubstructMatches(targets, queries)
+
+        assert results.shape == (0, 1)
+
+    def test_count_empty_queries(self):
+        """Test countSubstructMatches with empty queries."""
+        targets = [Chem.MolFromSmiles("CCO")]
+        queries = []
+
+        results = countSubstructMatches(targets, queries)
+
+        assert results.shape == (1, 0)
+
+    def test_count_symmetric_query(self):
+        """Test count with symmetric query that produces non-unique matches."""
+        target = Chem.MolFromSmiles("C1CCCCC1")  # cyclohexane
+        query = Chem.MolFromSmarts("CCC")
+
+        results = countSubstructMatches([target], [query])
+        rdkit_count = len(target.GetSubstructMatches(query, uniquify=False))
+
+        assert rdkit_count == 12
+        assert results[0, 0] == rdkit_count
+
+    def test_count_batch(self):
+        """Test countSubstructMatches with batch of molecules."""
+        targets = [
+            Chem.MolFromSmiles("CCO"),
+            Chem.MolFromSmiles("c1ccccc1"),
+            Chem.MolFromSmiles("CCN"),
+            Chem.MolFromSmiles("CCOCC"),
+        ]
+        queries = [
+            Chem.MolFromSmarts("C"),
+            Chem.MolFromSmarts("O"),
+            Chem.MolFromSmarts("c"),
+        ]
+
+        results = countSubstructMatches(targets, queries)
+
+        assert results.shape == (4, 3)
+        for t_idx, target in enumerate(targets):
+            for q_idx, query in enumerate(queries):
+                rdkit_count = len(target.GetSubstructMatches(query, uniquify=False))
+                assert results[t_idx, q_idx] == rdkit_count, \
+                    f"Mismatch at target {t_idx}, query {q_idx}"
+
+
+# =============================================================================
 # SubstructSearchConfig Tests
 # =============================================================================
 
@@ -980,6 +1117,27 @@ class TestIntegrationChemblSmarts:
                 rdkit_has_match = target.HasSubstructMatch(query)
                 assert bool(results[t_idx, q_idx]) == rdkit_has_match, \
                     f"Mismatch at target {t_idx}, query {q_idx}"
+
+    def test_chembl_count_substruct_matches(self, chembl_mols: list[Chem.Mol]):
+        """Test countSubstructMatches on ChEMBL molecules."""
+        queries = [
+            Chem.MolFromSmarts("[CX3]=[OX1]"),
+            Chem.MolFromSmarts("[NX3]"),
+            Chem.MolFromSmarts("[OX2H]"),
+        ]
+
+        config = SubstructSearchConfig()
+        config.batchSize = 128
+
+        results = countSubstructMatches(chembl_mols, queries, config)
+
+        assert results.shape == (len(chembl_mols), len(queries))
+        for t_idx, target in enumerate(chembl_mols):
+            for q_idx, query in enumerate(queries):
+                rdkit_count = len(target.GetSubstructMatches(query, uniquify=False))
+                assert results[t_idx, q_idx] == rdkit_count, \
+                    f"Mismatch at target {t_idx}, query {q_idx}: " \
+                    f"GPU={results[t_idx, q_idx]}, RDKit={rdkit_count}"
 
 
 @pytest.mark.long
