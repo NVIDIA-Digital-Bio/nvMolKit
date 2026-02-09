@@ -98,23 +98,22 @@ __global__ void tfdMatrixKernel(const int    totalWorkItems,
 
 }  // namespace
 
-void launchDihedralKernel(const TFDKernelParams& params,
-                          const float*           positions,
-                          const int*             confPositionStarts,
-                          const int*             torsionAtoms,
-                          const int*             dihedralConfIdx,
-                          const int*             dihedralTorsIdx,
-                          const int*             dihedralOutIdx,
-                          float*                 dihedralAngles,
-                          cudaStream_t           stream) {
-  if (params.totalDihedralWorkItems == 0) {
+void launchDihedralKernel(int          totalWorkItems,
+                          const float* positions,
+                          const int*   confPositionStarts,
+                          const int*   torsionAtoms,
+                          const int*   dihedralConfIdx,
+                          const int*   dihedralTorsIdx,
+                          const int*   dihedralOutIdx,
+                          float*       dihedralAngles,
+                          cudaStream_t stream) {
+  if (totalWorkItems == 0) {
     return;
   }
 
-  // One thread per work item
-  int gridSize = (params.totalDihedralWorkItems + kTFDBlockSize - 1) / kTFDBlockSize;
+  int gridSize = (totalWorkItems + kTFDBlockSize - 1) / kTFDBlockSize;
 
-  dihedralKernel<<<gridSize, kTFDBlockSize, 0, stream>>>(params.totalDihedralWorkItems,
+  dihedralKernel<<<gridSize, kTFDBlockSize, 0, stream>>>(totalWorkItems,
                                                          positions,
                                                          confPositionStarts,
                                                          torsionAtoms,
@@ -126,25 +125,24 @@ void launchDihedralKernel(const TFDKernelParams& params,
   cudaCheckError(cudaGetLastError());
 }
 
-void launchTFDMatrixKernel(const TFDKernelParams& params,
-                           const float*           dihedralAngles,
-                           const float*           torsionWeights,
-                           const float*           torsionMaxDevs,
-                           const int*             tfdAnglesI,
-                           const int*             tfdAnglesJ,
-                           const int*             tfdTorsStart,
-                           const int*             tfdNumTorsions,
-                           const int*             tfdOutIdx,
-                           float*                 tfdOutput,
-                           cudaStream_t           stream) {
-  if (params.totalTFDWorkItems == 0) {
+void launchTFDMatrixKernel(int          totalWorkItems,
+                           const float* dihedralAngles,
+                           const float* torsionWeights,
+                           const float* torsionMaxDevs,
+                           const int*   tfdAnglesI,
+                           const int*   tfdAnglesJ,
+                           const int*   tfdTorsStart,
+                           const int*   tfdNumTorsions,
+                           const int*   tfdOutIdx,
+                           float*       tfdOutput,
+                           cudaStream_t stream) {
+  if (totalWorkItems == 0) {
     return;
   }
 
-  // One thread per conformer pair
-  int gridSize = (params.totalTFDWorkItems + kTFDBlockSize - 1) / kTFDBlockSize;
+  int gridSize = (totalWorkItems + kTFDBlockSize - 1) / kTFDBlockSize;
 
-  tfdMatrixKernel<<<gridSize, kTFDBlockSize, 0, stream>>>(params.totalTFDWorkItems,
+  tfdMatrixKernel<<<gridSize, kTFDBlockSize, 0, stream>>>(totalWorkItems,
                                                           dihedralAngles,
                                                           torsionWeights,
                                                           torsionMaxDevs,
