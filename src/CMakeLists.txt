@@ -160,3 +160,16 @@ target_link_libraries(
   PRIVATE cuda_error_check
   PUBLIC device_vector)
 target_include_directories(tfd_kernels PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+# TFD GPU orchestration
+add_library(tfd_gpu tfd_gpu.cpp)
+target_link_libraries(
+  tfd_gpu
+  PRIVATE tfd_kernels tfd_cpu ${RDKit_LIBS}
+  PUBLIC device_vector device)
+target_include_directories(tfd_gpu PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+# TFD unified public API
+add_library(tfd tfd.cpp)
+target_link_libraries(tfd PUBLIC tfd_cpu tfd_gpu ${RDKit_LIBS})
+target_include_directories(tfd PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

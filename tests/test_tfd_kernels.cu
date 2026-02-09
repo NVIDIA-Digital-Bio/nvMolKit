@@ -37,14 +37,6 @@ void generateConformers(RDKit::ROMol& mol, int numConformers, int seed = 42) {
   RDKit::DGeomHelpers::EmbedMultipleConfs(mol, numConformers, params);
 }
 
-//! Build TFDKernelParams from a TFDSystemHost
-nvMolKit::TFDKernelParams makeKernelParams(const nvMolKit::TFDSystemHost& system) {
-  nvMolKit::TFDKernelParams params;
-  params.totalDihedralWorkItems = system.totalDihedralWorkItems();
-  params.totalTFDWorkItems      = system.totalTFDWorkItems();
-  return params;
-}
-
 }  // namespace
 
 // Global check for CUDA availability
@@ -115,9 +107,8 @@ TEST_F(TFDKernelsTest, DihedralKernelBasic) {
   {
     nvMolKit::TFDSystemDevice device;
     nvMolKit::transferToDevice(system, device, stream);
-    auto params = makeKernelParams(system);
 
-    nvMolKit::launchDihedralKernel(params,
+    nvMolKit::launchDihedralKernel(system.totalDihedralWorkItems(),
                                    device.positions.data(),
                                    device.confPositionStarts.data(),
                                    device.torsionAtoms.data(),
@@ -172,10 +163,9 @@ TEST_F(TFDKernelsTest, TFDMatrixKernelMatchesCPU) {
   {
     nvMolKit::TFDSystemDevice device;
     nvMolKit::transferToDevice(system, device, stream);
-    auto params = makeKernelParams(system);
 
     // Compute dihedral angles first
-    nvMolKit::launchDihedralKernel(params,
+    nvMolKit::launchDihedralKernel(system.totalDihedralWorkItems(),
                                    device.positions.data(),
                                    device.confPositionStarts.data(),
                                    device.torsionAtoms.data(),
@@ -186,7 +176,7 @@ TEST_F(TFDKernelsTest, TFDMatrixKernelMatchesCPU) {
                                    stream);
 
     // Compute TFD matrix
-    nvMolKit::launchTFDMatrixKernel(params,
+    nvMolKit::launchTFDMatrixKernel(system.totalTFDWorkItems(),
                                     device.dihedralAngles.data(),
                                     device.torsionWeights.data(),
                                     device.torsionMaxDevs.data(),
@@ -254,10 +244,9 @@ TEST_F(TFDKernelsTest, BatchMultipleMolecules) {
   {
     nvMolKit::TFDSystemDevice device;
     nvMolKit::transferToDevice(system, device, stream);
-    auto params = makeKernelParams(system);
 
     // Launch dihedral kernel
-    nvMolKit::launchDihedralKernel(params,
+    nvMolKit::launchDihedralKernel(system.totalDihedralWorkItems(),
                                    device.positions.data(),
                                    device.confPositionStarts.data(),
                                    device.torsionAtoms.data(),
@@ -268,7 +257,7 @@ TEST_F(TFDKernelsTest, BatchMultipleMolecules) {
                                    stream);
 
     // Launch TFD matrix kernel
-    nvMolKit::launchTFDMatrixKernel(params,
+    nvMolKit::launchTFDMatrixKernel(system.totalTFDWorkItems(),
                                     device.dihedralAngles.data(),
                                     device.torsionWeights.data(),
                                     device.torsionMaxDevs.data(),
@@ -378,9 +367,8 @@ TEST_F(TFDKernelsTest, CompareWithRDKitReference) {
     {
       nvMolKit::TFDSystemDevice device;
       nvMolKit::transferToDevice(system, device, stream);
-      auto params = makeKernelParams(system);
 
-      nvMolKit::launchDihedralKernel(params,
+      nvMolKit::launchDihedralKernel(system.totalDihedralWorkItems(),
                                      device.positions.data(),
                                      device.confPositionStarts.data(),
                                      device.torsionAtoms.data(),
@@ -390,7 +378,7 @@ TEST_F(TFDKernelsTest, CompareWithRDKitReference) {
                                      device.dihedralAngles.data(),
                                      stream);
 
-      nvMolKit::launchTFDMatrixKernel(params,
+      nvMolKit::launchTFDMatrixKernel(system.totalTFDWorkItems(),
                                       device.dihedralAngles.data(),
                                       device.torsionWeights.data(),
                                       device.torsionMaxDevs.data(),
@@ -445,9 +433,8 @@ TEST_F(TFDKernelsTest, TwoConformers) {
   {
     nvMolKit::TFDSystemDevice device;
     nvMolKit::transferToDevice(system, device, stream);
-    auto params = makeKernelParams(system);
 
-    nvMolKit::launchDihedralKernel(params,
+    nvMolKit::launchDihedralKernel(system.totalDihedralWorkItems(),
                                    device.positions.data(),
                                    device.confPositionStarts.data(),
                                    device.torsionAtoms.data(),
@@ -457,7 +444,7 @@ TEST_F(TFDKernelsTest, TwoConformers) {
                                    device.dihedralAngles.data(),
                                    stream);
 
-    nvMolKit::launchTFDMatrixKernel(params,
+    nvMolKit::launchTFDMatrixKernel(system.totalTFDWorkItems(),
                                     device.dihedralAngles.data(),
                                     device.torsionWeights.data(),
                                     device.torsionMaxDevs.data(),
@@ -510,9 +497,8 @@ TEST_F(TFDKernelsTest, BatchWithZeroTorsionMolecule) {
   {
     nvMolKit::TFDSystemDevice device;
     nvMolKit::transferToDevice(system, device, stream);
-    auto params = makeKernelParams(system);
 
-    nvMolKit::launchDihedralKernel(params,
+    nvMolKit::launchDihedralKernel(system.totalDihedralWorkItems(),
                                    device.positions.data(),
                                    device.confPositionStarts.data(),
                                    device.torsionAtoms.data(),
@@ -522,7 +508,7 @@ TEST_F(TFDKernelsTest, BatchWithZeroTorsionMolecule) {
                                    device.dihedralAngles.data(),
                                    stream);
 
-    nvMolKit::launchTFDMatrixKernel(params,
+    nvMolKit::launchTFDMatrixKernel(system.totalTFDWorkItems(),
                                     device.dihedralAngles.data(),
                                     device.torsionWeights.data(),
                                     device.torsionMaxDevs.data(),

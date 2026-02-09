@@ -23,59 +23,51 @@ namespace nvMolKit {
 //! Block size for TFD kernels
 constexpr int kTFDBlockSize = 256;
 
-//! Parameters for TFD kernel launch (POD type for easy device copy)
-struct TFDKernelParams {
-  //! Total number of dihedral work items (one per conformer-torsion pair)
-  int totalDihedralWorkItems;
-  //! Total number of TFD pair work items (one per conformer pair)
-  int totalTFDWorkItems;
-};
-
 //! Launch kernel to compute dihedral angles for all conformers
 //! One thread per (conformer, torsion) work item using flattened indexing
-//! @param params Kernel parameters
+//! @param totalWorkItems Total number of work items to process
 //! @param positions Tightly packed coordinates (no padding)
 //! @param confPositionStarts Position offset per conformer [totalConformers]
 //! @param torsionAtoms Torsion atom indices [totalTorsions * 4]
-//! @param dihedralConfIdx Global conformer index per work item [totalDihedralWorkItems]
-//! @param dihedralTorsIdx Global torsion index per work item [totalDihedralWorkItems]
-//! @param dihedralOutIdx Output index per work item [totalDihedralWorkItems]
+//! @param dihedralConfIdx Global conformer index per work item [totalWorkItems]
+//! @param dihedralTorsIdx Global torsion index per work item [totalWorkItems]
+//! @param dihedralOutIdx Output index per work item [totalWorkItems]
 //! @param dihedralAngles Output: angles in degrees [totalDihedrals]
 //! @param stream CUDA stream
-void launchDihedralKernel(const TFDKernelParams& params,
-                          const float*           positions,
-                          const int*             confPositionStarts,
-                          const int*             torsionAtoms,
-                          const int*             dihedralConfIdx,
-                          const int*             dihedralTorsIdx,
-                          const int*             dihedralOutIdx,
-                          float*                 dihedralAngles,
-                          cudaStream_t           stream);
+void launchDihedralKernel(int          totalWorkItems,
+                          const float* positions,
+                          const int*   confPositionStarts,
+                          const int*   torsionAtoms,
+                          const int*   dihedralConfIdx,
+                          const int*   dihedralTorsIdx,
+                          const int*   dihedralOutIdx,
+                          float*       dihedralAngles,
+                          cudaStream_t stream);
 
 //! Launch kernel to compute TFD matrix for all conformer pairs
 //! One thread per conformer pair using flattened indexing
-//! @param params Kernel parameters
+//! @param totalWorkItems Total number of work items to process
 //! @param dihedralAngles Computed dihedral angles [totalDihedrals]
 //! @param torsionWeights Weights per torsion [totalTorsions]
 //! @param torsionMaxDevs Max deviation per torsion [totalTorsions]
-//! @param tfdAnglesI Offset into dihedralAngles for conformer i [totalTFDWorkItems]
-//! @param tfdAnglesJ Offset into dihedralAngles for conformer j [totalTFDWorkItems]
-//! @param tfdTorsStart Global torsion start per work item [totalTFDWorkItems]
-//! @param tfdNumTorsions Number of torsions per work item [totalTFDWorkItems]
-//! @param tfdOutIdx Output index per work item [totalTFDWorkItems]
+//! @param tfdAnglesI Offset into dihedralAngles for conformer i [totalWorkItems]
+//! @param tfdAnglesJ Offset into dihedralAngles for conformer j [totalWorkItems]
+//! @param tfdTorsStart Global torsion start per work item [totalWorkItems]
+//! @param tfdNumTorsions Number of torsions per work item [totalWorkItems]
+//! @param tfdOutIdx Output index per work item [totalWorkItems]
 //! @param tfdOutput Output: TFD matrix values
 //! @param stream CUDA stream
-void launchTFDMatrixKernel(const TFDKernelParams& params,
-                           const float*           dihedralAngles,
-                           const float*           torsionWeights,
-                           const float*           torsionMaxDevs,
-                           const int*             tfdAnglesI,
-                           const int*             tfdAnglesJ,
-                           const int*             tfdTorsStart,
-                           const int*             tfdNumTorsions,
-                           const int*             tfdOutIdx,
-                           float*                 tfdOutput,
-                           cudaStream_t           stream);
+void launchTFDMatrixKernel(int          totalWorkItems,
+                           const float* dihedralAngles,
+                           const float* torsionWeights,
+                           const float* torsionMaxDevs,
+                           const int*   tfdAnglesI,
+                           const int*   tfdAnglesJ,
+                           const int*   tfdTorsStart,
+                           const int*   tfdNumTorsions,
+                           const int*   tfdOutIdx,
+                           float*       tfdOutput,
+                           cudaStream_t stream);
 
 }  // namespace nvMolKit
 
