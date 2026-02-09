@@ -146,9 +146,17 @@ target_include_directories(conformer_rmsd_mol
                            PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # TFD (Torsion Fingerprint Deviation) CPU implementation
-add_library(tfd_cpu tfd_common.cpp tfd_cpu.cpp)
+add_library(tfd_cpu tfd_common.cpp tfd_cpu.cpp tfd_transfer.cu)
 target_link_libraries(
   tfd_cpu
   PRIVATE ${RDKit_LIBS} OpenMP::OpenMP_CXX openmp_helpers
   PUBLIC device_vector)
 target_include_directories(tfd_cpu PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+# TFD GPU kernels
+add_library(tfd_kernels tfd_kernels.cu)
+target_link_libraries(
+  tfd_kernels
+  PRIVATE cuda_error_check
+  PUBLIC device_vector)
+target_include_directories(tfd_kernels PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

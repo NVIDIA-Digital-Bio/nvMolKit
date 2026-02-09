@@ -283,11 +283,17 @@ target_link_libraries(
 add_executable(test_tfd_cpu test_tfd_cpu.cpp)
 target_link_libraries(test_tfd_cpu PRIVATE ${RDKit_LIBS} tfd_cpu test_utils)
 
+add_executable(test_tfd_kernels test_tfd_kernels.cu)
+target_link_libraries(
+  test_tfd_kernels PRIVATE ${RDKit_LIBS} tfd_cpu tfd_kernels device_vector
+                           test_utils)
+
 set(TEST_LIST
     test_boolean_tree
     test_butina
     test_bfgs_hessian
     test_tfd_cpu
+    test_tfd_kernels
     test_openmp_helpers
     test_conformer_checkers
     test_coordgen
