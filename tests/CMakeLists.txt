@@ -280,10 +280,14 @@ target_link_libraries(
   test_substruct_label_integration PRIVATE substructure_search molecules device
                                            test_utils molData ${RDKit_LIBS})
 
+add_executable(test_tfd_cpu test_tfd_cpu.cpp)
+target_link_libraries(test_tfd_cpu PRIVATE ${RDKit_LIBS} tfd_cpu test_utils)
+
 set(TEST_LIST
     test_boolean_tree
     test_butina
     test_bfgs_hessian
+    test_tfd_cpu
     test_openmp_helpers
     test_conformer_checkers
     test_coordgen

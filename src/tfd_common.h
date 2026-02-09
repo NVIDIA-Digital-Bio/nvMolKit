@@ -1,0 +1,225 @@
+// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#ifndef NVMOLKIT_TFD_COMMON_H
+#define NVMOLKIT_TFD_COMMON_H
+
+#include <GraphMol/ROMol.h>
+
+#include <vector>
+
+#include "device_vector.h"
+
+namespace nvMolKit {
+
+//! Device to run TFD computation on
+enum class TFDComputeBackend {
+  CPU,
+  GPU,
+};
+
+//! Maximum deviation mode for torsion normalization
+enum class TFDMaxDevMode {
+  Equal,  //!< All torsions normalized by 180.0
+  Spec,   //!< Each torsion normalized by its specific max deviation
+};
+
+//! A single torsion definition: four atom indices and normalization factor
+struct TorsionDef {
+  //! Atom indices defining the torsion (a-b-c-d dihedral)
+  //! For symmetric cases, multiple quartets may define equivalent torsions
+  std::vector<std::array<int, 4>> atomQuartets;
+  //! Maximum deviation for normalization (180.0 for equal mode, or specific value)
+  float                           maxDev = 180.0f;
+};
+
+//! Torsion list for a single molecule (non-ring and ring torsions)
+struct TorsionList {
+  std::vector<TorsionDef> nonRingTorsions;
+  std::vector<TorsionDef> ringTorsions;
+
+  //! Total number of torsions (non-ring + ring)
+  size_t totalCount() const { return nonRingTorsions.size() + ringTorsions.size(); }
+};
+
+//! Performance and algorithm options for TFD computation
+struct TFDComputeOptions {
+  //! Whether to use distance-based weights for torsions
+  bool              useWeights          = true;
+  //! Maximum deviation mode
+  TFDMaxDevMode     maxDevMode          = TFDMaxDevMode::Equal;
+  //! Radius for Morgan fingerprint atom invariants (for symmetry detection)
+  int               symmRadius          = 2;
+  //! Whether to ignore single bonds adjacent to triple bonds
+  bool              ignoreColinearBonds = true;
+  //! Backend selection
+  TFDComputeBackend backend             = TFDComputeBackend::GPU;
+};
+
+//! Flattened system data on host for a batch of molecules
+struct TFDSystemHost {
+  //! CSR index: conformer boundaries per molecule [nMols + 1]
+  //! molConformerStarts[i] to molConformerStarts[i+1] are conformer indices for molecule i
+  std::vector<int> molConformerStarts = {0};
+
+  //! CSR index: torsion boundaries per molecule [nMols + 1]
+  std::vector<int> molTorsionStarts = {0};
+
+  //! CSR index: dihedral angle storage boundaries per molecule [nMols + 1]
+  //! Each molecule stores numConformers * numTorsions angles contiguously
+  std::vector<int> molDihedralStarts = {0};
+
+  //! Flattened 3D coordinates, tightly packed (no padding)
+  //! Stored as: conf0_atom0_xyz, conf0_atom1_xyz, ..., conf1_atom0_xyz, ...
+  std::vector<float> positions;
+
+  //! Position start offset per conformer [totalConformers]
+  //! confPositionStarts[i] = float offset into positions for conformer i
+  std::vector<int> confPositionStarts;
+
+  //! Flattened torsion atom indices: [totalTorsions][4]
+  //! Each torsion stores (a, b, c, d) atom indices within the molecule
+  std::vector<std::array<int, 4>> torsionAtoms;
+
+  //! Weight per torsion [totalTorsions]
+  std::vector<float> torsionWeights;
+
+  //! Maximum deviation per torsion [totalTorsions]
+  std::vector<float> torsionMaxDevs;
+
+  //! CSR index: TFD output boundaries per molecule [nMols + 1]
+  //! Each molecule with C conformers produces C*(C-1)/2 TFD values
+  std::vector<int> tfdOutputStarts = {0};
+
+  // ========== Flattened work items for GPU dihedral kernel ==========
+
+  //! One per (conformer, torsion) pair across all molecules
+  std::vector<int> dihedralConfIdx;  //!< Global conformer index for positions lookup
+  std::vector<int> dihedralTorsIdx;  //!< Global torsion index (into torsionAtoms)
+  std::vector<int> dihedralOutIdx;   //!< Output index in dihedralAngles array
+
+  // ========== Flattened work items for GPU TFD matrix kernel ==========
+
+  //! One per conformer pair (i > j) across all molecules
+  std::vector<int> tfdAnglesI;      //!< Offset into dihedralAngles for conformer i
+  std::vector<int> tfdAnglesJ;      //!< Offset into dihedralAngles for conformer j
+  std::vector<int> tfdTorsStart;    //!< Global torsion start (for weights/maxDevs)
+  std::vector<int> tfdNumTorsions;  //!< Number of torsions for this molecule
+  std::vector<int> tfdOutIdx;       //!< Output index in tfdOutput
+
+  //! Total number of molecules
+  int numMolecules() const { return static_cast<int>(molConformerStarts.size()) - 1; }
+
+  //! Total number of conformers across all molecules
+  int totalConformers() const { return molConformerStarts.empty() ? 0 : molConformerStarts.back(); }
+
+  //! Total number of torsions across all molecules
+  int totalTorsions() const { return molTorsionStarts.empty() ? 0 : molTorsionStarts.back(); }
+
+  //! Total number of TFD output values
+  int totalTFDOutputs() const { return tfdOutputStarts.empty() ? 0 : tfdOutputStarts.back(); }
+
+  //! Total number of dihedral angle values to store
+  int totalDihedrals() const { return molDihedralStarts.empty() ? 0 : molDihedralStarts.back(); }
+
+  //! Total number of dihedral work items (for kernel launch)
+  int totalDihedralWorkItems() const { return static_cast<int>(dihedralConfIdx.size()); }
+
+  //! Total number of TFD pair work items (for kernel launch)
+  int totalTFDWorkItems() const { return static_cast<int>(tfdAnglesI.size()); }
+};
+
+//! Flattened system data on GPU device
+//! Mirrors TFDSystemHost for device-side storage.
+//! TODO: Extend with multi-quartet fields when commit 6 is picked,
+//!       and use this to replace TFDGpuBuffers in tfd_gpu.cpp.
+struct TFDSystemDevice {
+  // ========== Dihedral kernel inputs ==========
+
+  //! Flattened 3D coordinates (tightly packed, no padding)
+  AsyncDeviceVector<float> positions;
+  //! Position start offset per conformer [totalConformers]
+  AsyncDeviceVector<int>   confPositionStarts;
+  //! Flattened torsion atom indices [totalTorsions * 4]
+  AsyncDeviceVector<int>   torsionAtoms;
+
+  //! Flattened dihedral work items - one per (conformer, torsion) pair
+  AsyncDeviceVector<int> dihedralConfIdx;
+  AsyncDeviceVector<int> dihedralTorsIdx;
+  AsyncDeviceVector<int> dihedralOutIdx;
+
+  // ========== TFD matrix kernel inputs ==========
+
+  //! Weight per torsion
+  AsyncDeviceVector<float> torsionWeights;
+  //! Maximum deviation per torsion
+  AsyncDeviceVector<float> torsionMaxDevs;
+
+  //! Flattened TFD pair work items - one per conformer pair (i > j)
+  AsyncDeviceVector<int> tfdAnglesI;
+  AsyncDeviceVector<int> tfdAnglesJ;
+  AsyncDeviceVector<int> tfdTorsStart;
+  AsyncDeviceVector<int> tfdNumTorsions;
+  AsyncDeviceVector<int> tfdOutIdx;
+
+  // ========== Output buffers ==========
+
+  //! Output: computed dihedral angles [totalDihedrals]
+  AsyncDeviceVector<float> dihedralAngles;
+  //! Output: TFD matrix values
+  AsyncDeviceVector<float> tfdOutput;
+
+  //! Set CUDA stream for all buffers
+  void setStream(cudaStream_t stream);
+};
+
+//! Extract torsion list from an RDKit molecule
+//! @param mol The molecule to analyze
+//! @param maxDevMode How to determine max deviation for normalization
+//! @param symmRadius Radius for Morgan fingerprint (symmetry detection)
+//! @param ignoreColinearBonds Whether to skip bonds adjacent to triple bonds
+//! @return TorsionList containing non-ring and ring torsions
+TorsionList extractTorsionList(const RDKit::ROMol& mol,
+                               TFDMaxDevMode       maxDevMode          = TFDMaxDevMode::Equal,
+                               int                 symmRadius          = 2,
+                               bool                ignoreColinearBonds = true);
+
+//! Calculate distance-based weights for torsions
+//! @param mol The molecule
+//! @param torsionList Previously extracted torsion list
+//! @param ignoreColinearBonds Must match the value used in extractTorsionList
+//! @return Vector of weights (size = total torsion count)
+std::vector<float> computeTorsionWeights(const RDKit::ROMol& mol,
+                                         const TorsionList&  torsionList,
+                                         bool                ignoreColinearBonds = true);
+
+//! Transfer host system data to device, resizing and allocating output buffers
+//! @param host Source host data
+//! @param device Destination device data (resized as needed)
+//! @param stream CUDA stream for async transfers
+void transferToDevice(const TFDSystemHost& host, TFDSystemDevice& device, cudaStream_t stream);
+
+//! Build TFDSystemHost from a batch of molecules
+//! @param mols Vector of molecules (each may have multiple conformers)
+//! @param options Computation options
+//! @return Populated TFDSystemHost ready for GPU transfer or CPU computation
+TFDSystemHost buildTFDSystem(const std::vector<const RDKit::ROMol*>& mols, const TFDComputeOptions& options);
+
+//! Build TFDSystemHost from a single molecule (convenience wrapper)
+TFDSystemHost buildTFDSystem(const RDKit::ROMol& mol, const TFDComputeOptions& options);
+
+}  // namespace nvMolKit
+
+#endif  // NVMOLKIT_TFD_COMMON_H

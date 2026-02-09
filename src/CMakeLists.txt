@@ -144,3 +144,11 @@ target_link_libraries(
   PRIVATE ${RDKit_LIBS})
 target_include_directories(conformer_rmsd_mol
                            PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+# TFD (Torsion Fingerprint Deviation) CPU implementation
+add_library(tfd_cpu tfd_common.cpp tfd_cpu.cpp)
+target_link_libraries(
+  tfd_cpu
+  PRIVATE ${RDKit_LIBS} OpenMP::OpenMP_CXX openmp_helpers
+  PUBLIC device_vector)
+target_include_directories(tfd_cpu PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
