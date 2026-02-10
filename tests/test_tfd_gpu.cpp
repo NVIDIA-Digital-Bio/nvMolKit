@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include <GraphMol/DistGeomHelpers/Embedder.h>
+#include <GraphMol/MolOps.h>
 #include <GraphMol/ROMol.h>
 #include <GraphMol/SmilesParse/SmilesParse.h>
 #include <gtest/gtest.h>
@@ -123,7 +124,16 @@ TEST_F(TFDGpuTest, MatchesCPUReferenceUnweighted) {
 }
 
 TEST_F(TFDGpuTest, BatchMultipleMolecules) {
-  std::vector<std::string> smilesList = {"CCCC", "CCCCC", "CCCCCC", "CCO", "CC(C)C", "CC(=O)O"};
+  // Mix of single-quartet and multi-quartet molecules in a single batch
+  std::vector<std::string> smilesList = {
+    "CCCC",        // n-butane (single-quartet)
+    "CCCCC",       // n-pentane (single-quartet)
+    "CC(C)CC",     // isopentane (symmetric, 2 quartets)
+    "C1CCCCC1",    // cyclohexane (ring, 6 quartets)
+    "c1ccccc1CC",  // ethylbenzene (ring + symmetric)
+    "CCO",         // ethanol
+    "CC(=O)O",     // acetic acid
+  };
 
   std::vector<std::unique_ptr<RDKit::RWMol>> mols;
   std::vector<const RDKit::ROMol*>           molPtrs;
@@ -284,6 +294,35 @@ TEST_F(TFDGpuTest, GpuResultExtractionOutOfRange) {
   EXPECT_NO_THROW(gpuResult.extractMolecule(0));
   EXPECT_THROW(gpuResult.extractMolecule(-1), std::out_of_range);
   EXPECT_THROW(gpuResult.extractMolecule(1), std::out_of_range);
+}
+
+TEST_F(TFDGpuTest, AddHsMatchesCPU) {
+  // Test with explicit hydrogens (AddHs) — produces more multi-quartet torsions.
+  // Verifies GPU generator matches CPU for molecules with hydrogen atoms.
+  const std::vector<std::string> testSmiles = {"CCCCC", "CC(C)CC"};
+
+  for (const auto& smiles : testSmiles) {
+    SCOPED_TRACE(std::string(smiles) + " (AddHs)");
+
+    auto mol = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol(smiles));
+    ASSERT_NE(mol, nullptr);
+
+    RDKit::MolOps::addHs(*mol);
+    generateConformers(*mol, 4, 42);
+    ASSERT_EQ(mol->getNumConformers(), 4);
+
+    nvMolKit::TFDComputeOptions options;
+
+    auto cpuTFD = cpuGenerator_.GetTFDMatrix(*mol, options);
+    ASSERT_FALSE(cpuTFD.empty());
+
+    auto gpuTFD = gpuGenerator_->GetTFDMatrix(*mol, options);
+
+    ASSERT_EQ(gpuTFD.size(), cpuTFD.size());
+    for (size_t i = 0; i < cpuTFD.size(); ++i) {
+      EXPECT_NEAR(gpuTFD[i], cpuTFD[i], kTolerance) << "Mismatch at TFD index " << i;
+    }
+  }
 }
 
 // ========== Unified TFDGenerator API Tests ==========

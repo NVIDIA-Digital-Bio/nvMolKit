@@ -29,6 +29,8 @@ void TFDSystemDevice::setStream(cudaStream_t stream) {
   // TFD matrix kernel inputs
   torsionWeights.setStream(stream);
   torsionMaxDevs.setStream(stream);
+  quartetStarts.setStream(stream);
+  torsionTypes.setStream(stream);
   tfdAnglesI.setStream(stream);
   tfdAnglesJ.setStream(stream);
   tfdTorsStart.setStream(stream);
@@ -66,6 +68,15 @@ void transferToDevice(const TFDSystemHost& host, TFDSystemDevice& device, cudaSt
   // TFD matrix kernel inputs
   device.torsionWeights.setFromVector(host.torsionWeights);
   device.torsionMaxDevs.setFromVector(host.torsionMaxDevs);
+
+  // Multi-quartet support
+  device.quartetStarts.setFromVector(host.quartetStarts);
+  std::vector<uint8_t> types(host.torsionTypes.size());
+  for (size_t i = 0; i < host.torsionTypes.size(); ++i) {
+    types[i] = static_cast<uint8_t>(host.torsionTypes[i]);
+  }
+  device.torsionTypes.setFromVector(types);
+
   device.tfdAnglesI.setFromVector(host.tfdAnglesI);
   device.tfdAnglesJ.setFromVector(host.tfdAnglesJ);
   device.tfdTorsStart.setFromVector(host.tfdTorsStart);

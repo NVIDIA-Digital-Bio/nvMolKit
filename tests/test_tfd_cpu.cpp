@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include <GraphMol/DistGeomHelpers/Embedder.h>
+#include <GraphMol/MolOps.h>
 #include <GraphMol/ROMol.h>
 #include <GraphMol/SmilesParse/SmilesParse.h>
 #include <gtest/gtest.h>
@@ -181,6 +182,54 @@ TEST_F(TFDCpuTest, BuildTFDSystem) {
 
   // TFD output size: 5 conformers = 5*4/2 = 10 pairs
   EXPECT_EQ(system.totalTFDOutputs(), 10);
+
+  // Single-quartet molecule: totalQuartets == totalTorsions
+  EXPECT_EQ(system.totalQuartets(), system.totalTorsions());
+  EXPECT_FALSE(system.hasMultiQuartet);
+}
+
+TEST_F(TFDCpuTest, BuildTFDSystemMultiQuartet) {
+  // Verify multi-quartet fields for CC(C)CC (isopentane)
+  auto mol = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol("CC(C)CC"));
+  ASSERT_NE(mol, nullptr);
+  generateConformers(*mol, 3);
+
+  nvMolKit::TFDComputeOptions options;
+  auto                        system = nvMolKit::buildTFDSystem(*mol, options);
+
+  EXPECT_EQ(system.numMolecules(), 1);
+  EXPECT_EQ(system.totalTorsions(), 1);  // 1 torsion
+  EXPECT_EQ(system.totalQuartets(), 2);  // 2 quartets
+  EXPECT_TRUE(system.hasMultiQuartet);
+
+  // Verify torsion type
+  ASSERT_EQ(system.torsionTypes.size(), 1u);
+  EXPECT_EQ(system.torsionTypes[0], nvMolKit::TorsionType::Symmetric);
+
+  // Verify quartetStarts CSR
+  ASSERT_EQ(system.quartetStarts.size(), 2u);  // 1 torsion + 1
+  EXPECT_EQ(system.quartetStarts[0], 0);
+  EXPECT_EQ(system.quartetStarts[1], 2);
+
+  // Verify 2 quartets in torsionAtoms
+  ASSERT_EQ(system.torsionAtoms.size(), 2u);
+}
+
+TEST_F(TFDCpuTest, BuildTFDSystemRingTorsion) {
+  // Verify multi-quartet fields for C1CCCCC1 (cyclohexane)
+  auto mol = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol("C1CCCCC1"));
+  ASSERT_NE(mol, nullptr);
+  generateConformers(*mol, 3);
+
+  nvMolKit::TFDComputeOptions options;
+  auto                        system = nvMolKit::buildTFDSystem(*mol, options);
+
+  EXPECT_EQ(system.totalTorsions(), 1);  // 1 ring torsion
+  EXPECT_EQ(system.totalQuartets(), 6);  // 6 quartets in the ring
+  EXPECT_TRUE(system.hasMultiQuartet);
+
+  ASSERT_EQ(system.torsionTypes.size(), 1u);
+  EXPECT_EQ(system.torsionTypes[0], nvMolKit::TorsionType::Ring);
 }
 
 // =============================================================================
@@ -435,12 +484,125 @@ TEST_F(TFDCpuTest, MaxDevModes) {
   }
 }
 
+TEST_F(TFDCpuTest, MaxDevModesMultiQuartet) {
+  // Spec maxDev mode uses torsion-specific normalization for non-ring torsions:
+  //   - CC(C)CC symmetric torsion: maxDev=90 (Spec) vs 180 (Equal)
+  // Ring torsions always use the ring-specific formula (matching RDKit),
+  // so Equal vs Spec produces identical results for ring-only molecules.
+
+  // --- CC(C)CC: Spec and Equal should differ ---
+  {
+    SCOPED_TRACE("CC(C)CC");
+
+    auto mol = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol("CC(C)CC"));
+    ASSERT_NE(mol, nullptr);
+
+    generateConformers(*mol, 4);
+    ASSERT_GE(mol->getNumConformers(), 2);
+
+    nvMolKit::TFDComputeOptions optionsEqual;
+    optionsEqual.maxDevMode = nvMolKit::TFDMaxDevMode::Equal;
+
+    nvMolKit::TFDComputeOptions optionsSpec;
+    optionsSpec.maxDevMode = nvMolKit::TFDMaxDevMode::Spec;
+
+    auto tfdEqual = generator_.GetTFDMatrix(*mol, optionsEqual);
+    auto tfdSpec  = generator_.GetTFDMatrix(*mol, optionsSpec);
+
+    ASSERT_EQ(tfdEqual.size(), tfdSpec.size());
+    ASSERT_GT(tfdEqual.size(), 0u);
+
+    for (size_t i = 0; i < tfdEqual.size(); ++i) {
+      EXPECT_TRUE(std::isfinite(tfdEqual[i]));
+      EXPECT_TRUE(std::isfinite(tfdSpec[i]));
+      EXPECT_GE(tfdEqual[i], 0.0);
+      EXPECT_GE(tfdSpec[i], 0.0);
+    }
+
+    // Symmetric non-ring torsion: maxDev=90 (Spec) vs 180 (Equal)
+    bool anyDifferent = false;
+    for (size_t i = 0; i < tfdEqual.size(); ++i) {
+      if (std::abs(tfdEqual[i] - tfdSpec[i]) > 1e-6) {
+        anyDifferent = true;
+        break;
+      }
+    }
+    EXPECT_TRUE(anyDifferent) << "Spec and Equal should differ for symmetric non-ring torsion";
+  }
+
+  // --- C1CCCCC1: Spec and Equal should be identical (ring maxDev is always formula-based) ---
+  {
+    SCOPED_TRACE("C1CCCCC1");
+
+    auto mol = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol("C1CCCCC1"));
+    ASSERT_NE(mol, nullptr);
+
+    generateConformers(*mol, 4);
+    ASSERT_GE(mol->getNumConformers(), 2);
+
+    nvMolKit::TFDComputeOptions optionsEqual;
+    optionsEqual.maxDevMode = nvMolKit::TFDMaxDevMode::Equal;
+
+    nvMolKit::TFDComputeOptions optionsSpec;
+    optionsSpec.maxDevMode = nvMolKit::TFDMaxDevMode::Spec;
+
+    auto tfdEqual = generator_.GetTFDMatrix(*mol, optionsEqual);
+    auto tfdSpec  = generator_.GetTFDMatrix(*mol, optionsSpec);
+
+    ASSERT_EQ(tfdEqual.size(), tfdSpec.size());
+    ASSERT_GT(tfdEqual.size(), 0u);
+
+    for (size_t i = 0; i < tfdEqual.size(); ++i) {
+      EXPECT_TRUE(std::isfinite(tfdEqual[i]));
+      EXPECT_GE(tfdEqual[i], 0.0);
+      // Ring-only molecule: maxDev mode has no effect
+      EXPECT_NEAR(tfdEqual[i], tfdSpec[i], 1e-10) << "Ring torsion maxDev should be identical for Equal and Spec modes";
+    }
+  }
+}
+
+TEST_F(TFDCpuTest, IgnoreColinearBondsFalse) {
+  // Test ignoreColinearBonds=false with a molecule containing a triple bond.
+  // With ignoreColinearBonds=true (default), bonds adjacent to triple bonds are skipped.
+  // With false, alternative atoms are found and torsions are included.
+  auto mol = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol("CCCC#CCC"));
+  ASSERT_NE(mol, nullptr);
+
+  generateConformers(*mol, 4);
+  ASSERT_GE(mol->getNumConformers(), 2);
+
+  nvMolKit::TFDComputeOptions optionsIgnore;
+  optionsIgnore.ignoreColinearBonds = true;
+
+  nvMolKit::TFDComputeOptions optionsKeep;
+  optionsKeep.ignoreColinearBonds = false;
+
+  auto torsionsIgnore = nvMolKit::extractTorsionList(*mol, nvMolKit::TFDMaxDevMode::Equal, 2, true);
+  auto torsionsKeep   = nvMolKit::extractTorsionList(*mol, nvMolKit::TFDMaxDevMode::Equal, 2, false);
+
+  // With ignoreColinearBonds=false, we should get more (or at least as many) torsions
+  EXPECT_GE(torsionsKeep.totalCount(), torsionsIgnore.totalCount());
+
+  auto tfdIgnore = generator_.GetTFDMatrix(*mol, optionsIgnore);
+  auto tfdKeep   = generator_.GetTFDMatrix(*mol, optionsKeep);
+
+  // Both should produce valid results
+  for (double val : tfdIgnore) {
+    EXPECT_TRUE(std::isfinite(val));
+    EXPECT_GE(val, 0.0);
+  }
+  for (double val : tfdKeep) {
+    EXPECT_TRUE(std::isfinite(val));
+    EXPECT_GE(val, 0.0);
+  }
+}
+
 TEST_F(TFDCpuTest, CompareWithRDKitReference) {
   // Compare full TFD pipeline against pre-computed RDKit reference values.
-  // No AddHs to avoid multi-quartet symmetric torsions (added in a later commit).
+  // Includes both single-quartet and multi-quartet (ring, symmetric) molecules.
   //
   // Reference values generated with RDKit Python:
-  //   mol = Chem.MolFromSmiles(smiles)  # No AddHs
+  //   mol = Chem.MolFromSmiles(smiles)
   //   params = AllChem.ETKDGv3()
   //   params.randomSeed = 42
   //   AllChem.EmbedMultipleConfs(mol, 4, params)
@@ -477,9 +639,30 @@ TEST_F(TFDCpuTest, CompareWithRDKitReference) {
       0.6111014381,  // TFD[4]
       0.6111123144   // TFD[5]
     }},
-    // TODO: Add these back once multi-quartet torsion support is implemented (commit 6):
-    //   "CC(C)CC"    - isopentane: 2 quartets due to branching symmetry
-    //   "c1ccccc1CC" - ethylbenzene: 2 quartets on non-ring, 6 on ring torsion
+    {"CC(C)CC", {                   // isopentane, 1 symmetric torsion (2 quartets)
+      0.0000045777,  // TFD[0]
+      0.0433253929,  // TFD[1]
+      0.0433299706,  // TFD[2]
+      0.0000027031,  // TFD[3]
+      0.0000072808,  // TFD[4]
+      0.0433226898   // TFD[5]
+    }},
+    {"C1CCCCC1", {                  // cyclohexane, 1 ring torsion (6 quartets)
+      0.1343662730,  // TFD[0]
+      0.3653621455,  // TFD[1]
+      0.2309958724,  // TFD[2]
+      0.1017138867,  // TFD[3]
+      0.2360801597,  // TFD[4]
+      0.4670760321   // TFD[5]
+    }},
+    {"c1ccccc1CC", {                // ethylbenzene, 1 symmetric non-ring + 1 ring torsion
+      0.0000114982,  // TFD[0]
+      0.0000104863,  // TFD[1]
+      0.0000020789,  // TFD[2]
+      0.0000100311,  // TFD[3]
+      0.0000018047,  // TFD[4]
+      0.0000013199   // TFD[5]
+    }},
   };
 
   nvMolKit::TFDComputeOptions options;
@@ -504,6 +687,71 @@ TEST_F(TFDCpuTest, CompareWithRDKitReference) {
     for (size_t i = 0; i < tfdMatrix.size(); ++i) {
       EXPECT_NEAR(tfdMatrix[i], tc.reference[i], kRDKitTolerance)
           << "TFD[" << i << "] mismatch with RDKit reference";
+    }
+  }
+}
+
+TEST_F(TFDCpuTest, CompareWithRDKitReferenceAddHs) {
+  // Compare TFD with explicit hydrogens (AddHs) against RDKit reference values.
+  // AddHs produces more quartets per torsion, exercising multi-quartet handling
+  // on molecules that would otherwise be single-quartet.
+  //
+  // Reference values generated with RDKit Python:
+  //   mol = Chem.AddHs(Chem.MolFromSmiles(smiles))
+  //   params = AllChem.ETKDGv3()
+  //   params.randomSeed = 42
+  //   AllChem.EmbedMultipleConfs(mol, 4, params)
+  //   tfd = TorsionFingerprints.GetTFDMatrix(mol, useWeights=True, maxDev='equal', symmRadius=2)
+
+  struct TestCase {
+    const char*         smiles;
+    std::vector<double> reference;
+  };
+
+  // clang-format off
+  std::vector<TestCase> cases = {
+    {"CCCCC", {                   // n-pentane with AddHs (symmetric torsions from H)
+      0.6666346588,
+      0.0606342077,
+      0.6666024841,
+      0.6666717499,
+      0.6666935913,
+      0.6061117327
+    }},
+    {"CC(C)CC", {                 // isopentane with AddHs
+      0.0155798214,
+      0.0118319001,
+      0.0180816216,
+      0.0000140670,
+      0.0091265530,
+      0.0336755100
+    }},
+  };
+  // clang-format on
+
+  nvMolKit::TFDComputeOptions options;
+  options.useWeights          = true;
+  options.maxDevMode          = nvMolKit::TFDMaxDevMode::Equal;
+  options.symmRadius          = 2;
+  options.ignoreColinearBonds = true;
+
+  for (const auto& tc : cases) {
+    SCOPED_TRACE(std::string(tc.smiles) + " (AddHs)");
+
+    auto mol = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol(tc.smiles));
+    ASSERT_NE(mol, nullptr);
+
+    RDKit::MolOps::addHs(*mol);
+
+    generateConformers(*mol, 4, 42);
+    ASSERT_EQ(mol->getNumConformers(), 4);
+
+    auto tfdMatrix = generator_.GetTFDMatrix(*mol, options);
+
+    ASSERT_EQ(tfdMatrix.size(), tc.reference.size());
+    constexpr double kRDKitTolerance = 5e-4;
+    for (size_t i = 0; i < tfdMatrix.size(); ++i) {
+      EXPECT_NEAR(tfdMatrix[i], tc.reference[i], kRDKitTolerance) << "TFD[" << i << "] mismatch with RDKit reference";
     }
   }
 }

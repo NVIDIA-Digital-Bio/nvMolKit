@@ -523,10 +523,8 @@ TFDSystemHost buildTFDSystem(const std::vector<const RDKit::ROMol*>& mols, const
     int numTorsions = static_cast<int>(torsionList.totalCount());
     system.molTorsionStarts.push_back(torsStart + numTorsions);
 
-    // Dihedral storage: numConformers * numTorsions per molecule
-    int dihedStart   = system.molDihedralStarts.back();
-    int numDihedrals = numConformers * numTorsions;
-    system.molDihedralStarts.push_back(dihedStart + numDihedrals);
+    // Remember quartet start for this molecule (before adding quartets)
+    int quartetStartForMol = system.totalQuartets();
 
     int numTFDOutputs = numConformers * (numConformers - 1) / 2;
     system.tfdOutputStarts.push_back(system.tfdOutputStarts.back() + numTFDOutputs);
@@ -543,20 +541,28 @@ TFDSystemHost buildTFDSystem(const std::vector<const RDKit::ROMol*>& mols, const
       }
     }
 
-    // Add torsion definitions (flatten to first quartet for GPU, store maxDev)
+    // Add torsion definitions (store ALL quartets, classify type)
     int torsionIdx = 0;
 
     // Non-ring torsions
     for (const auto& torsion : torsionList.nonRingTorsions) {
-      // Skip torsions with no quartets (should not happen, but guard against it)
       if (torsion.atomQuartets.empty()) {
         torsionIdx++;
         continue;
       }
 
-      // For GPU, we use the first quartet (simplest case)
-      // TODO: Handle multiple quartets for symmetric cases
-      system.torsionAtoms.push_back(torsion.atomQuartets[0]);
+      for (const auto& q : torsion.atomQuartets) {
+        system.torsionAtoms.push_back(q);
+      }
+      system.quartetStarts.push_back(static_cast<int>(system.torsionAtoms.size()));
+
+      if (torsion.atomQuartets.size() > 1) {
+        system.torsionTypes.push_back(TorsionType::Symmetric);
+        system.hasMultiQuartet = true;
+      } else {
+        system.torsionTypes.push_back(TorsionType::Single);
+      }
+
       system.torsionMaxDevs.push_back(torsion.maxDev);
 
       if (options.useWeights && torsionIdx < static_cast<int>(weights.size())) {
@@ -567,15 +573,25 @@ TFDSystemHost buildTFDSystem(const std::vector<const RDKit::ROMol*>& mols, const
       torsionIdx++;
     }
 
-    // Ring torsions (averaged, so we pick representative quartet)
+    // Ring torsions
     for (const auto& torsion : torsionList.ringTorsions) {
-      // Skip torsions with no quartets (should not happen, but guard against it)
       if (torsion.atomQuartets.empty()) {
         torsionIdx++;
         continue;
       }
 
-      system.torsionAtoms.push_back(torsion.atomQuartets[0]);
+      for (const auto& q : torsion.atomQuartets) {
+        system.torsionAtoms.push_back(q);
+      }
+      system.quartetStarts.push_back(static_cast<int>(system.torsionAtoms.size()));
+
+      if (torsion.atomQuartets.size() > 1) {
+        system.torsionTypes.push_back(TorsionType::Ring);
+        system.hasMultiQuartet = true;
+      } else {
+        system.torsionTypes.push_back(TorsionType::Single);
+      }
+
       system.torsionMaxDevs.push_back(torsion.maxDev);
 
       if (options.useWeights && torsionIdx < static_cast<int>(weights.size())) {
@@ -585,24 +601,32 @@ TFDSystemHost buildTFDSystem(const std::vector<const RDKit::ROMol*>& mols, const
       }
       torsionIdx++;
     }
+
+    // Dihedral storage: numConformers * totalQuartetsForMol per molecule
+    int quartetEndForMol    = system.totalQuartets();
+    int totalQuartetsForMol = quartetEndForMol - quartetStartForMol;
+    int dihedStart          = system.molDihedralStarts.back();
+    int numDihedrals        = numConformers * totalQuartetsForMol;
+    system.molDihedralStarts.push_back(dihedStart + numDihedrals);
 
     // Build flattened dihedral work items for this molecule
-    // One work item per (conformer, torsion) pair
+    // One work item per (conformer, quartet) pair
     for (int c = 0; c < numConformers; ++c) {
-      for (int t = 0; t < numTorsions; ++t) {
+      for (int q = 0; q < totalQuartetsForMol; ++q) {
         system.dihedralConfIdx.push_back(confStart + c);
-        system.dihedralTorsIdx.push_back(torsStart + t);
-        system.dihedralOutIdx.push_back(dihedStart + c * numTorsions + t);
+        system.dihedralTorsIdx.push_back(quartetStartForMol + q);
+        system.dihedralOutIdx.push_back(dihedStart + c * totalQuartetsForMol + q);
       }
     }
 
     // Build flattened TFD pair work items for this molecule
     // One work item per conformer pair (i > j), lower triangular order
+    // tfdAnglesI/J point to the start of the quartet-angle block for each conformer
     int outBase = system.tfdOutputStarts[system.tfdOutputStarts.size() - 2];
     for (int i = 1; i < numConformers; ++i) {
       for (int j = 0; j < i; ++j) {
-        system.tfdAnglesI.push_back(dihedStart + i * numTorsions);
-        system.tfdAnglesJ.push_back(dihedStart + j * numTorsions);
+        system.tfdAnglesI.push_back(dihedStart + i * totalQuartetsForMol);
+        system.tfdAnglesJ.push_back(dihedStart + j * totalQuartetsForMol);
         system.tfdTorsStart.push_back(torsStart);
         system.tfdNumTorsions.push_back(numTorsions);
         system.tfdOutIdx.push_back(outBase + i * (i - 1) / 2 + j);

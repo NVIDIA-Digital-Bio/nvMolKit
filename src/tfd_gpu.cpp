@@ -131,6 +131,8 @@ TFDGpuResult TFDGpuGenerator::GetTFDMatricesGpuBuffer(const std::vector<const RD
                         device_.dihedralAngles.data(),
                         device_.torsionWeights.data(),
                         device_.torsionMaxDevs.data(),
+                        device_.quartetStarts.data(),
+                        device_.torsionTypes.data(),
                         device_.tfdAnglesI.data(),
                         device_.tfdAnglesJ.data(),
                         device_.tfdTorsStart.data(),

@@ -18,6 +18,7 @@
 
 #include <GraphMol/ROMol.h>
 
+#include <cstdint>
 #include <vector>
 
 #include "device_vector.h"
@@ -34,6 +35,13 @@ enum class TFDComputeBackend {
 enum class TFDMaxDevMode {
   Equal,  //!< All torsions normalized by 180.0
   Spec,   //!< Each torsion normalized by its specific max deviation
+};
+
+//! Torsion type for multi-quartet handling
+enum class TorsionType : uint8_t {
+  Single,     //!< 1 quartet: direct circularDifference
+  Ring,       //!< N quartets: average abs(signed), compare averages
+  Symmetric,  //!< N quartets: min circularDiff across all (qi,qj) pairs
 };
 
 //! A single torsion definition: four atom indices and normalization factor
@@ -78,7 +86,7 @@ struct TFDSystemHost {
   std::vector<int> molTorsionStarts = {0};
 
   //! CSR index: dihedral angle storage boundaries per molecule [nMols + 1]
-  //! Each molecule stores numConformers * numTorsions angles contiguously
+  //! Each molecule stores numConformers * totalQuartetsForMol angles contiguously
   std::vector<int> molDihedralStarts = {0};
 
   //! Flattened 3D coordinates, tightly packed (no padding)
@@ -89,8 +97,9 @@ struct TFDSystemHost {
   //! confPositionStarts[i] = float offset into positions for conformer i
   std::vector<int> confPositionStarts;
 
-  //! Flattened torsion atom indices: [totalTorsions][4]
-  //! Each torsion stores (a, b, c, d) atom indices within the molecule
+  //! Flattened torsion atom indices: [totalQuartets][4]
+  //! When hasMultiQuartet is false, totalQuartets == totalTorsions.
+  //! When hasMultiQuartet is true, multiple quartets per torsion are stored contiguously.
   std::vector<std::array<int, 4>> torsionAtoms;
 
   //! Weight per torsion [totalTorsions]
@@ -99,15 +108,25 @@ struct TFDSystemHost {
   //! Maximum deviation per torsion [totalTorsions]
   std::vector<float> torsionMaxDevs;
 
+  //! Type per torsion [totalTorsions] - Single, Ring, or Symmetric
+  std::vector<TorsionType> torsionTypes;
+
+  //! CSR index: quartet boundaries per torsion [totalTorsions + 1]
+  //! quartetStarts[t] to quartetStarts[t+1] are indices into torsionAtoms for torsion t
+  std::vector<int> quartetStarts = {0};
+
+  //! Whether any torsion has more than one quartet
+  bool hasMultiQuartet = false;
+
   //! CSR index: TFD output boundaries per molecule [nMols + 1]
   //! Each molecule with C conformers produces C*(C-1)/2 TFD values
   std::vector<int> tfdOutputStarts = {0};
 
   // ========== Flattened work items for GPU dihedral kernel ==========
 
-  //! One per (conformer, torsion) pair across all molecules
+  //! One per (conformer, quartet) pair across all molecules
   std::vector<int> dihedralConfIdx;  //!< Global conformer index for positions lookup
-  std::vector<int> dihedralTorsIdx;  //!< Global torsion index (into torsionAtoms)
+  std::vector<int> dihedralTorsIdx;  //!< Global quartet index (into torsionAtoms)
   std::vector<int> dihedralOutIdx;   //!< Output index in dihedralAngles array
 
   // ========== Flattened work items for GPU TFD matrix kernel ==========
@@ -128,6 +147,9 @@ struct TFDSystemHost {
   //! Total number of torsions across all molecules
   int totalTorsions() const { return molTorsionStarts.empty() ? 0 : molTorsionStarts.back(); }
 
+  //! Total number of quartets across all molecules
+  int totalQuartets() const { return quartetStarts.empty() ? 0 : quartetStarts.back(); }
+
   //! Total number of TFD output values
   int totalTFDOutputs() const { return tfdOutputStarts.empty() ? 0 : tfdOutputStarts.back(); }
 
@@ -143,8 +165,6 @@ struct TFDSystemHost {
 
 //! Flattened system data on GPU device
 //! Mirrors TFDSystemHost for device-side storage.
-//! TODO: Extend with multi-quartet fields when commit 6 is picked,
-//!       and use this to replace TFDGpuBuffers in tfd_gpu.cpp.
 struct TFDSystemDevice {
   // ========== Dihedral kernel inputs ==========
 
@@ -152,7 +172,7 @@ struct TFDSystemDevice {
   AsyncDeviceVector<float> positions;
   //! Position start offset per conformer [totalConformers]
   AsyncDeviceVector<int>   confPositionStarts;
-  //! Flattened torsion atom indices [totalTorsions * 4]
+  //! Flattened torsion atom indices [totalQuartets * 4]
   AsyncDeviceVector<int>   torsionAtoms;
 
   //! Flattened dihedral work items - one per (conformer, torsion) pair
@@ -166,6 +186,11 @@ struct TFDSystemDevice {
   AsyncDeviceVector<float> torsionWeights;
   //! Maximum deviation per torsion
   AsyncDeviceVector<float> torsionMaxDevs;
+
+  //! CSR index: quartet boundaries per torsion [totalTorsions + 1]
+  AsyncDeviceVector<int>     quartetStarts;
+  //! Type per torsion [totalTorsions]
+  AsyncDeviceVector<uint8_t> torsionTypes;
 
   //! Flattened TFD pair work items - one per conformer pair (i > j)
   AsyncDeviceVector<int> tfdAnglesI;

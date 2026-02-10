@@ -25,21 +25,56 @@
 
 namespace nvMolKit {
 
-double TFDCpuGenerator::computeTFD(const float* angles1,
-                                   const float* angles2,
-                                   const float* weights,
-                                   const float* maxDevs,
-                                   int          numTorsions) {
+double TFDCpuGenerator::computeTFDPair(const float*         anglesI,
+                                       const float*         anglesJ,
+                                       const TFDSystemHost& system,
+                                       int                  molIdx) {
+  int torsStart   = system.molTorsionStarts[molIdx];
+  int torsEnd     = system.molTorsionStarts[molIdx + 1];
+  int numTorsions = torsEnd - torsStart;
+  int molQBase    = system.quartetStarts[torsStart];
+
   double sumWeightedDev = 0.0;
   double sumWeights     = 0.0;
 
   for (int t = 0; t < numTorsions; ++t) {
-    float diff      = detail::circularDifference(angles1[t], angles2[t]);
-    float deviation = diff / maxDevs[t];
-    float weight    = weights[t];
+    int         globalT = torsStart + t;
+    int         qLocal  = system.quartetStarts[globalT] - molQBase;
+    int         numQ    = system.quartetStarts[globalT + 1] - system.quartetStarts[globalT];
+    TorsionType type    = system.torsionTypes[globalT];
 
-    sumWeightedDev += deviation * weight;
-    sumWeights += weight;
+    double deviation;
+    if (type == TorsionType::Single) {
+      float diff = detail::circularDifference(anglesI[qLocal], anglesJ[qLocal]);
+      deviation  = diff / system.torsionMaxDevs[globalT];
+    } else if (type == TorsionType::Ring) {
+      // Average abs(signed dihedral) for each conformer, then compare averages
+      double avgI = 0.0;
+      double avgJ = 0.0;
+      for (int q = 0; q < numQ; ++q) {
+        float ai = anglesI[qLocal + q];
+        float aj = anglesJ[qLocal + q];
+        // Convert [0,360) to abs(signed) = min(angle, 360 - angle) giving [0,180]
+        avgI += std::min(static_cast<double>(ai), 360.0 - ai);
+        avgJ += std::min(static_cast<double>(aj), 360.0 - aj);
+      }
+      avgI /= numQ;
+      avgJ /= numQ;
+      deviation = std::abs(avgI - avgJ) / system.torsionMaxDevs[globalT];
+    } else {
+      // Symmetric: minimum circular difference across all (qi, qj) cross-product pairs
+      double minDiff = 180.0;
+      for (int qi = 0; qi < numQ; ++qi) {
+        for (int qj = 0; qj < numQ; ++qj) {
+          float diff = detail::circularDifference(anglesI[qLocal + qi], anglesJ[qLocal + qj]);
+          minDiff    = std::min(minDiff, static_cast<double>(diff));
+        }
+      }
+      deviation = minDiff / system.torsionMaxDevs[globalT];
+    }
+
+    sumWeightedDev += deviation * system.torsionWeights[globalT];
+    sumWeights += system.torsionWeights[globalT];
   }
 
   if (sumWeights < 1e-10) {
@@ -60,9 +95,11 @@ std::vector<float> TFDCpuGenerator::computeDihedralAngles(const TFDSystemHost& s
 
   int torsStart   = system.molTorsionStarts[molIdx];
   int torsEnd     = system.molTorsionStarts[molIdx + 1];
-  int numTorsions = torsEnd - torsStart;
+  int molQStart   = system.quartetStarts[torsStart];
+  int molQEnd     = system.quartetStarts[torsEnd];
+  int numQuartets = molQEnd - molQStart;
 
-  std::vector<float> angles(numConformers * numTorsions);
+  std::vector<float> angles(numConformers * numQuartets);
 
 // Parallel over conformers
 #ifdef _OPENMP
@@ -71,9 +108,8 @@ std::vector<float> TFDCpuGenerator::computeDihedralAngles(const TFDSystemHost& s
   for (int c = 0; c < numConformers; ++c) {
     int globalConfIdx = confStart + c;
 
-    for (int t = 0; t < numTorsions; ++t) {
-      int         globalTorsIdx = torsStart + t;
-      const auto& quartet       = system.torsionAtoms[globalTorsIdx];
+    for (int q = 0; q < numQuartets; ++q) {
+      const auto& quartet = system.torsionAtoms[molQStart + q];
 
       // Get position base for this conformer (tightly packed)
       const float* posBase = system.positions.data() + system.confPositionStarts[globalConfIdx];
@@ -82,18 +118,23 @@ std::vector<float> TFDCpuGenerator::computeDihedralAngles(const TFDSystemHost& s
                                                  posBase + quartet[1] * 3,
                                                  posBase + quartet[2] * 3,
                                                  posBase + quartet[3] * 3);
-      angles[c * numTorsions + t] = angle;
+      angles[c * numQuartets + q] = angle;
     }
   }
 
   return angles;
 }
 
-std::vector<double> TFDCpuGenerator::computeTFDMatrixFromAngles(const std::vector<float>& angles,
-                                                                const std::vector<float>& weights,
-                                                                const std::vector<float>& maxDevs,
-                                                                int                       numConformers,
-                                                                int                       numTorsions) {
+std::vector<double> TFDCpuGenerator::computeTFDMatrixFromAngles(const TFDSystemHost&      system,
+                                                                int                       molIdx,
+                                                                const std::vector<float>& angles) {
+  int numConformers = system.molConformerStarts[molIdx + 1] - system.molConformerStarts[molIdx];
+  int torsStart     = system.molTorsionStarts[molIdx];
+  int torsEnd       = system.molTorsionStarts[molIdx + 1];
+  int molQStart     = system.quartetStarts[torsStart];
+  int molQEnd       = system.quartetStarts[torsEnd];
+  int numQuartets   = molQEnd - molQStart;
+
   int                 numPairs = numConformers * (numConformers - 1) / 2;
   std::vector<double> tfdMatrix(numPairs);
 
@@ -105,11 +146,7 @@ std::vector<double> TFDCpuGenerator::computeTFDMatrixFromAngles(const std::vecto
     for (int j = 0; j < i; ++j) {
       int pairIdx = i * (i - 1) / 2 + j;  // Lower triangular index
 
-      double tfd = computeTFD(angles.data() + i * numTorsions,
-                              angles.data() + j * numTorsions,
-                              weights.data(),
-                              maxDevs.data(),
-                              numTorsions);
+      double tfd = computeTFDPair(angles.data() + i * numQuartets, angles.data() + j * numQuartets, system, molIdx);
 
       tfdMatrix[pairIdx] = tfd;
     }
@@ -144,12 +181,8 @@ std::vector<double> TFDCpuGenerator::GetTFDMatrix(const RDKit::ROMol& mol, const
   // Compute dihedral angles
   std::vector<float> angles = computeDihedralAngles(system, 0);
 
-  // Extract weights and maxDevs for this molecule
-  std::vector<float> weights(system.torsionWeights.begin() + torsStart, system.torsionWeights.begin() + torsEnd);
-  std::vector<float> maxDevs(system.torsionMaxDevs.begin() + torsStart, system.torsionMaxDevs.begin() + torsEnd);
-
   // Compute TFD matrix
-  return computeTFDMatrixFromAngles(angles, weights, maxDevs, numConformers, numTorsions);
+  return computeTFDMatrixFromAngles(system, 0, angles);
 }
 
 std::vector<std::vector<double>> TFDCpuGenerator::GetTFDMatrices(const std::vector<const RDKit::ROMol*>& mols,
