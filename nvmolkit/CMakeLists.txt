@@ -116,3 +116,12 @@ target_link_libraries(_substructure PUBLIC ${Boost_LIBRARIES}
 target_link_libraries(_substructure PRIVATE ${RDKit_LIBS} substructure_search
                                             pinned_host_allocator)
 installpythontarget(_substructure ./)
+
+add_library(_TFD MODULE tfd.cpp)
+target_include_directories(
+  _TFD PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils ${Boost_INCLUDE_DIRS}
+              ${Python_INCLUDE_DIRS})
+target_link_libraries(_TFD PUBLIC ${Boost_LIBRARIES} ${PYTHON_LIBRARIES}
+                                  device_vector)
+target_link_libraries(_TFD PRIVATE ${RDKit_LIBS} tfd CUDA::cudart)
+installpythontarget(_TFD ./)
