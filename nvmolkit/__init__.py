@@ -26,6 +26,7 @@ Currently supported functionality:
 - ETKDG conformer generation for multiple molecules
 - MMFF optimization for multiple molecules and conformers
 - UFF optimization for multiple molecules and conformers
+- TFD (Torsion Fingerprint Deviation) calculation for conformer comparison
 """
 
 VERSION = "0.4.0"
