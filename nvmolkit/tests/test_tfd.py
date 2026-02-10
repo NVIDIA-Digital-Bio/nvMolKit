@@ -23,8 +23,7 @@ from rdkit.Chem import AllChem, TorsionFingerprints
 import nvmolkit.tfd as tfd
 
 # Tolerance for comparing GPU vs RDKit results
-# Note: nvMolKit uses simplified quartet handling, so some differences are expected
-TOLERANCE = 0.1
+TOLERANCE = 0.01
 
 
 def generate_conformers(mol, num_confs, seed=42):
@@ -250,27 +249,18 @@ class TestGpuResidentOutput:
 
 
 class TestCompareWithRDKit:
-    """Tests comparing nvMolKit TFD with RDKit TFD.
-
-    Note: Due to simplifications in nvMolKit (single quartet for symmetric
-    torsions, single quartet for rings), results may differ from RDKit
-    for molecules with high symmetry or rings.
-    """
+    """Tests comparing nvMolKit TFD with RDKit TFD."""
 
     def test_simple_chain_molecule(self):
         """Test simple chain molecule against RDKit."""
         mol = Chem.MolFromSmiles("CCCCC")
         generate_conformers(mol, 4)
 
-        # nvMolKit result
         nvmolkit_result = tfd.GetTFDMatrix(mol, useWeights=True, maxDev="equal")
-
-        # RDKit result
         rdkit_result = TorsionFingerprints.GetTFDMatrix(mol, useWeights=True, maxDev="equal")
 
         assert len(nvmolkit_result) == len(rdkit_result)
 
-        # Compare values (with tolerance for algorithmic differences)
         for nv, rd in zip(nvmolkit_result, rdkit_result):
             assert abs(nv - rd) < TOLERANCE, f"nvMolKit={nv}, RDKit={rd}"
 
@@ -287,33 +277,69 @@ class TestCompareWithRDKit:
         for nv, rd in zip(nvmolkit_result, rdkit_result):
             assert abs(nv - rd) < TOLERANCE
 
-    def test_branched_molecule_gpu_cpu_consistency(self):
-        """Test branched molecule gives consistent results across backends.
+    def test_ring_molecule(self):
+        """Test ring molecule (multi-quartet) against RDKit."""
+        mol = Chem.MolFromSmiles("C1CCCCC1")  # cyclohexane
+        generate_conformers(mol, 4)
 
-        Note: CC(C)CC has symmetric torsions where nvMolKit (single quartet)
-        differs from RDKit (multi-quartet averaging). Multi-quartet support
-        is planned for a later commit. Here we only verify GPU/CPU consistency.
-        """
+        nvmolkit_result = tfd.GetTFDMatrix(mol, useWeights=True, maxDev="equal")
+        rdkit_result = TorsionFingerprints.GetTFDMatrix(mol, useWeights=True, maxDev="equal")
+
+        assert len(nvmolkit_result) == len(rdkit_result)
+
+        for nv, rd in zip(nvmolkit_result, rdkit_result):
+            assert abs(nv - rd) < TOLERANCE, f"nvMolKit={nv}, RDKit={rd}"
+
+    def test_ring_with_substituent(self):
+        """Test molecule with both ring and non-ring torsions against RDKit."""
+        mol = Chem.MolFromSmiles("c1ccccc1CC")  # ethylbenzene
+        generate_conformers(mol, 4)
+
+        nvmolkit_result = tfd.GetTFDMatrix(mol, useWeights=True, maxDev="equal")
+        rdkit_result = TorsionFingerprints.GetTFDMatrix(mol, useWeights=True, maxDev="equal")
+
+        assert len(nvmolkit_result) == len(rdkit_result)
+
+        for nv, rd in zip(nvmolkit_result, rdkit_result):
+            assert abs(nv - rd) < TOLERANCE, f"nvMolKit={nv}, RDKit={rd}"
+
+    @pytest.mark.parametrize("backend", ["gpu", "cpu"])
+    @pytest.mark.parametrize(
+        "smiles",
+        ["CCCCC", "CC(C)CC"],
+    )
+    def test_add_hs(self, backend, smiles):
+        """Test molecules with explicit hydrogens against RDKit."""
+        mol = Chem.AddHs(Chem.MolFromSmiles(smiles))
+        generate_conformers(mol, 4)
+
+        nvmolkit_result = tfd.GetTFDMatrix(mol, useWeights=True, maxDev="equal", backend=backend)
+        rdkit_result = TorsionFingerprints.GetTFDMatrix(mol, useWeights=True, maxDev="equal")
+
+        assert len(nvmolkit_result) == len(rdkit_result)
+
+        for nv, rd in zip(nvmolkit_result, rdkit_result):
+            assert abs(nv - rd) < TOLERANCE, f"AddHs({smiles}), backend={backend}: nvMolKit={nv}, RDKit={rd}"
+
+    @pytest.mark.parametrize("backend", ["gpu", "cpu"])
+    def test_symmetric_molecule_gpu_cpu_consistency(self, backend):
+        """Test branched molecule gives consistent results across backends."""
         mol = Chem.MolFromSmiles("CC(C)CC")  # isopentane
         generate_conformers(mol, 4)
 
-        gpu_result = tfd.GetTFDMatrix(mol, backend="gpu")
-        cpu_result = tfd.GetTFDMatrix(mol, backend="cpu")
+        result = tfd.GetTFDMatrix(mol, backend=backend)
+        rdkit_result = TorsionFingerprints.GetTFDMatrix(mol)
 
-        assert len(gpu_result) == len(cpu_result)
+        assert len(result) == len(rdkit_result)
 
-        for gpu_val, cpu_val in zip(gpu_result, cpu_result):
-            assert abs(gpu_val - cpu_val) < 1e-4
+        for nv, rd in zip(result, rdkit_result):
+            assert abs(nv - rd) < TOLERANCE, f"backend={backend}: nvMolKit={nv}, RDKit={rd}"
 
     @pytest.mark.parametrize("backend", ["gpu", "cpu"])
     @pytest.mark.parametrize("symm_radius", [0, 1, 3])
     def test_symm_radius(self, backend, symm_radius):
-        """Test different symmRadius values against RDKit on both backends.
-
-        Uses a linear chain molecule (no symmetric torsions) so results
-        are directly comparable with RDKit.
-        """
-        mol = Chem.MolFromSmiles("CCCCCC")  # hexane - no symmetry issues
+        """Test different symmRadius values against RDKit on both backends."""
+        mol = Chem.MolFromSmiles("CC(C)CC")
         generate_conformers(mol, 4)
 
         nvmolkit_result = tfd.GetTFDMatrix(
@@ -334,7 +360,6 @@ class TestCompareWithRDKit:
     @pytest.mark.parametrize("backend", ["gpu", "cpu"])
     def test_ignore_colinear_bonds_false(self, backend):
         """Test ignoreColinearBonds=False against RDKit on both backends."""
-        # Use a molecule with a triple bond adjacent to a single bond
         mol = Chem.MolFromSmiles("CCCC#CCC")
         generate_conformers(mol, 4)
 

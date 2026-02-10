@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include <GraphMol/DistGeomHelpers/Embedder.h>
+#include <GraphMol/MolOps.h>
 #include <GraphMol/ROMol.h>
 #include <GraphMol/SmilesParse/SmilesParse.h>
 #include <gtest/gtest.h>
@@ -180,6 +181,8 @@ TEST_F(TFDKernelsTest, TFDMatrixKernelMatchesCPU) {
                                     device.dihedralAngles.data(),
                                     device.torsionWeights.data(),
                                     device.torsionMaxDevs.data(),
+                                    device.quartetStarts.data(),
+                                    device.torsionTypes.data(),
                                     device.tfdAnglesI.data(),
                                     device.tfdAnglesJ.data(),
                                     device.tfdTorsStart.data(),
@@ -203,11 +206,13 @@ TEST_F(TFDKernelsTest, TFDMatrixKernelMatchesCPU) {
 }
 
 TEST_F(TFDKernelsTest, BatchMultipleMolecules) {
+  // Mix of single-quartet and multi-quartet molecules in a single batch
   const std::vector<std::string> testSmiles = {
-    "CCCC",         // n-butane
-    "CCCCC",        // n-pentane
-    "CCCCCC",       // n-hexane
-    "c1ccccc1",     // benzene
+    "CCCC",         // n-butane (single-quartet)
+    "CCCCC",        // n-pentane (single-quartet)
+    "CC(C)CC",      // isopentane (symmetric, 2 quartets)
+    "c1ccccc1",     // benzene (ring, 6 quartets)
+    "c1ccccc1CC",   // ethylbenzene (ring + symmetric)
     "CCO",          // ethanol
     "c1ccc(cc1)O",  // phenol
   };
@@ -261,6 +266,8 @@ TEST_F(TFDKernelsTest, BatchMultipleMolecules) {
                                     device.dihedralAngles.data(),
                                     device.torsionWeights.data(),
                                     device.torsionMaxDevs.data(),
+                                    device.quartetStarts.data(),
+                                    device.torsionTypes.data(),
                                     device.tfdAnglesI.data(),
                                     device.tfdAnglesJ.data(),
                                     device.tfdTorsStart.data(),
@@ -298,11 +305,10 @@ TEST_F(TFDKernelsTest, BatchMultipleMolecules) {
 
 TEST_F(TFDKernelsTest, CompareWithRDKitReference) {
   // Compare GPU TFD output directly against pre-computed RDKit reference values.
-  // Same reference values as test_tfd_cpu.cpp CompareWithRDKitReference.
-  // No AddHs to avoid multi-quartet symmetric torsions (added in a later commit).
+  // Includes both single-quartet and multi-quartet (ring, symmetric) molecules.
   //
   // Reference generated with RDKit Python:
-  //   mol = Chem.MolFromSmiles(smiles)  # No AddHs
+  //   mol = Chem.MolFromSmiles(smiles)
   //   params = AllChem.ETKDGv3()
   //   params.randomSeed = 42
   //   AllChem.EmbedMultipleConfs(mol, 4, params)
@@ -338,6 +344,30 @@ TEST_F(TFDKernelsTest, CompareWithRDKitReference) {
       0.5555532106,  // TFD[3]
       0.6111014381,  // TFD[4]
       0.6111123144   // TFD[5]
+    }},
+    {"CC(C)CC", {                 // isopentane, 1 symmetric torsion (2 quartets)
+      0.0000045777,
+      0.0433253929,
+      0.0433299706,
+      0.0000027031,
+      0.0000072808,
+      0.0433226898
+    }},
+    {"C1CCCCC1", {                // cyclohexane, 1 ring torsion (6 quartets)
+      0.1343662730,
+      0.3653621455,
+      0.2309958724,
+      0.1017138867,
+      0.2360801597,
+      0.4670760321
+    }},
+    {"c1ccccc1CC", {              // ethylbenzene, 1 symmetric non-ring + 1 ring
+      0.0000114982,
+      0.0000104863,
+      0.0000020789,
+      0.0000100311,
+      0.0000018047,
+      0.0000013199
     }},
   };
   // clang-format on
@@ -382,6 +412,8 @@ TEST_F(TFDKernelsTest, CompareWithRDKitReference) {
                                       device.dihedralAngles.data(),
                                       device.torsionWeights.data(),
                                       device.torsionMaxDevs.data(),
+                                      device.quartetStarts.data(),
+                                      device.torsionTypes.data(),
                                       device.tfdAnglesI.data(),
                                       device.tfdAnglesJ.data(),
                                       device.tfdTorsStart.data(),
@@ -448,6 +480,8 @@ TEST_F(TFDKernelsTest, TwoConformers) {
                                     device.dihedralAngles.data(),
                                     device.torsionWeights.data(),
                                     device.torsionMaxDevs.data(),
+                                    device.quartetStarts.data(),
+                                    device.torsionTypes.data(),
                                     device.tfdAnglesI.data(),
                                     device.tfdAnglesJ.data(),
                                     device.tfdTorsStart.data(),
@@ -512,6 +546,8 @@ TEST_F(TFDKernelsTest, BatchWithZeroTorsionMolecule) {
                                     device.dihedralAngles.data(),
                                     device.torsionWeights.data(),
                                     device.torsionMaxDevs.data(),
+                                    device.quartetStarts.data(),
+                                    device.torsionTypes.data(),
                                     device.tfdAnglesI.data(),
                                     device.tfdAnglesJ.data(),
                                     device.tfdTorsStart.data(),
@@ -544,4 +580,108 @@ TEST_F(TFDKernelsTest, BatchWithZeroTorsionMolecule) {
   }
 
   cudaStreamDestroy(stream);
+}
+
+TEST_F(TFDKernelsTest, CompareWithRDKitReferenceAddHs) {
+  // Compare GPU TFD output with AddHs against RDKit reference values.
+  // AddHs produces more quartets per torsion, exercising multi-quartet handling
+  // on molecules that would otherwise be single-quartet.
+  //
+  // Reference generated with RDKit Python:
+  //   mol = Chem.AddHs(Chem.MolFromSmiles(smiles))
+  //   params = AllChem.ETKDGv3()
+  //   params.randomSeed = 42
+  //   AllChem.EmbedMultipleConfs(mol, 4, params)
+  //   tfd = TorsionFingerprints.GetTFDMatrix(mol, useWeights=True, maxDev='equal', symmRadius=2)
+
+  struct TestCase {
+    const char*         smiles;
+    std::vector<double> reference;
+  };
+
+  // clang-format off
+  std::vector<TestCase> cases = {
+    {"CCCCC", {
+      0.6666346588,
+      0.0606342077,
+      0.6666024841,
+      0.6666717499,
+      0.6666935913,
+      0.6061117327
+    }},
+    {"CC(C)CC", {
+      0.0155798214,
+      0.0118319001,
+      0.0180816216,
+      0.0000140670,
+      0.0091265530,
+      0.0336755100
+    }},
+  };
+  // clang-format on
+
+  nvMolKit::TFDComputeOptions options;
+  options.useWeights          = true;
+  options.maxDevMode          = nvMolKit::TFDMaxDevMode::Equal;
+  options.symmRadius          = 2;
+  options.ignoreColinearBonds = true;
+
+  for (const auto& tc : cases) {
+    SCOPED_TRACE(std::string(tc.smiles) + " (AddHs)");
+
+    auto mol = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol(tc.smiles));
+    ASSERT_NE(mol, nullptr);
+
+    RDKit::MolOps::addHs(*mol);
+
+    generateConformers(*mol, 4, 42);
+    ASSERT_EQ(mol->getNumConformers(), 4);
+
+    auto system = nvMolKit::buildTFDSystem(*mol, options);
+
+    cudaStream_t stream;
+    cudaStreamCreate(&stream);
+
+    std::vector<float> gpuTFD;
+
+    {
+      nvMolKit::TFDSystemDevice device;
+      nvMolKit::transferToDevice(system, device, stream);
+
+      nvMolKit::launchDihedralKernel(system.totalDihedralWorkItems(),
+                                     device.positions.data(),
+                                     device.confPositionStarts.data(),
+                                     device.torsionAtoms.data(),
+                                     device.dihedralConfIdx.data(),
+                                     device.dihedralTorsIdx.data(),
+                                     device.dihedralOutIdx.data(),
+                                     device.dihedralAngles.data(),
+                                     stream);
+
+      nvMolKit::launchTFDMatrixKernel(system.totalTFDWorkItems(),
+                                      device.dihedralAngles.data(),
+                                      device.torsionWeights.data(),
+                                      device.torsionMaxDevs.data(),
+                                      device.quartetStarts.data(),
+                                      device.torsionTypes.data(),
+                                      device.tfdAnglesI.data(),
+                                      device.tfdAnglesJ.data(),
+                                      device.tfdTorsStart.data(),
+                                      device.tfdNumTorsions.data(),
+                                      device.tfdOutIdx.data(),
+                                      device.tfdOutput.data(),
+                                      stream);
+
+      gpuTFD.resize(device.tfdOutput.size());
+      device.tfdOutput.copyToHost(gpuTFD.data(), gpuTFD.size());
+      cudaStreamSynchronize(stream);
+    }
+
+    ASSERT_EQ(gpuTFD.size(), tc.reference.size());
+    for (size_t i = 0; i < gpuTFD.size(); ++i) {
+      EXPECT_NEAR(gpuTFD[i], tc.reference[i], kTolerance) << "TFD[" << i << "] mismatch with RDKit reference";
+    }
+
+    cudaStreamDestroy(stream);
+  }
 }
