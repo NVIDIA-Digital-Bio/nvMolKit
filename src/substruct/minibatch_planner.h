@@ -38,8 +38,11 @@ struct MiniBatchPlan {
   int firstTargetInMiniBatch      = 0;
   int numTargetsInMiniBatch       = 0;
   int maxPipelineDepthInMiniBatch = 0;  ///< Max pipeline stage depth in batch
-  std::array<std::vector<BatchedPatternEntry>, kMaxSmartsNestingDepth + 1> patternsAtDepth;
-  std::array<int, kMaxSmartsNestingDepth + 1>                              matchPairsCounts = {};
+
+  /// Pointer to precomputed all-queries pattern entries (shared across all mini-batches)
+  const std::array<std::vector<BatchedPatternEntry>, kMaxSmartsNestingDepth + 1>* patternsAtDepth = nullptr;
+
+  std::array<int, kMaxSmartsNestingDepth + 1> matchPairsCounts = {};
 };
 
 /**

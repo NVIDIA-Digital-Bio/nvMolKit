@@ -194,7 +194,7 @@ TEST(MiniBatchPlannerTest, BuildsScheduleAndRecursiveEntries) {
       }
       expectedCount += leafSubpatterns.perQueryPatterns[q][depth].size();
     }
-    EXPECT_EQ(plan.patternsAtDepth[depth].size(), expectedCount);
+    EXPECT_EQ((*plan.patternsAtDepth)[depth].size(), expectedCount);
   }
 
   pool.release(buffer);

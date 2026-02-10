@@ -115,6 +115,10 @@ void LeafSubpatterns::buildAllPatterns(const MoleculesHost& queriesHost) {
         continue;
       }
 
+      if (entry.depth > kMaxSmartsNestingDepth) {
+        continue;
+      }
+
       BatchedPatternEntry batchEntry;
       batchEntry.mainQueryIdx    = queryIdx;
       batchEntry.patternId       = entry.patternId;
@@ -123,6 +127,28 @@ void LeafSubpatterns::buildAllPatterns(const MoleculesHost& queriesHost) {
       batchEntry.localIdInParent = entry.localIdInParent;
 
       perQueryPatterns[queryIdx][entry.depth].push_back(batchEntry);
+    }
+  }
+
+  // Build combined all-queries pattern entries for mini-batches that contain all queries
+  for (auto& vec : allQueriesPatternsAtDepth) {
+    vec.clear();
+  }
+  allQueriesMaxDepth = 0;
+
+  for (int queryIdx = 0; queryIdx < numQueries; ++queryIdx) {
+    if (queryIdx >= static_cast<int>(perQueryMaxDepth.size())) {
+      continue;
+    }
+    const int queryMaxDepth = std::min(perQueryMaxDepth[queryIdx], kMaxSmartsNestingDepth);
+    if (queryMaxDepth > allQueriesMaxDepth) {
+      allQueriesMaxDepth = queryMaxDepth;
+    }
+
+    for (int d = 0; d <= queryMaxDepth; ++d) {
+      const auto& srcEntries = perQueryPatterns[queryIdx][d];
+      auto&       destEntries = allQueriesPatternsAtDepth[d];
+      destEntries.insert(destEntries.end(), srcEntries.begin(), srcEntries.end());
     }
   }
 }
