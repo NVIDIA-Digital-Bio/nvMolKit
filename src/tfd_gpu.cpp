@@ -94,7 +94,7 @@ TFDGpuResult TFDGpuGenerator::GetTFDMatricesGpuBuffer(const std::vector<const RD
     return result;
   }
 
-  // Build host system data (CPU preprocessing)
+  // Build host system data (CPU preprocessing, parallelized across molecules)
   TFDSystemHost system = buildTFDSystem(mols, options);
 
   // Store metadata for result extraction

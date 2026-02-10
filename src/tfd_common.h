@@ -245,6 +245,12 @@ TFDSystemHost buildTFDSystem(const std::vector<const RDKit::ROMol*>& mols, const
 //! Build TFDSystemHost from a single molecule (convenience wrapper)
 TFDSystemHost buildTFDSystem(const RDKit::ROMol& mol, const TFDComputeOptions& options);
 
+//! Merge multiple single-molecule TFDSystemHost structs into one batched system.
+//! Concatenates all data arrays and adjusts CSR indices / work-item offsets.
+//! @param systems Vector of per-molecule systems (each with exactly 1 molecule)
+//! @return Single merged TFDSystemHost covering all molecules
+TFDSystemHost mergeTFDSystems(std::vector<TFDSystemHost>& systems);
+
 }  // namespace nvMolKit
 
 #endif  // NVMOLKIT_TFD_COMMON_H
