@@ -21,6 +21,7 @@
 #include <set>
 
 #include "cuda_error_check.h"
+#include "device_vector.h"
 #include "graph_labeler.cuh"
 #include "molecules_device.cuh"
 #include "substruct_search_internal.h"
@@ -323,11 +324,12 @@ std::vector<std::vector<uint8_t>> computeGpuLabelMatrix(const RDKit::ROMol& targ
   const int numTargetAtoms = static_cast<int>(targetHost.totalAtoms());
   const int numQueryAtoms  = static_cast<int>(queryHost.totalAtoms());
 
-  std::vector<int> queryAtomCounts          = {numQueryAtoms};
-  std::vector<int> miniBatchPairMatchStarts = {0, 0};
+  std::vector<int>       queryAtomCounts = {numQueryAtoms};
+  AsyncDeviceVector<int> pairMatchStartsDev(2, stream);
+  pairMatchStartsDev.zero();
 
   MiniBatchResultsDevice miniBatchResults(stream);
-  miniBatchResults.allocateMiniBatch(1, miniBatchPairMatchStarts.data(), 0, 1, numTargetAtoms, 2);
+  miniBatchResults.allocateMiniBatch(1, pairMatchStartsDev.data(), 0, 1, numTargetAtoms, 2);
   miniBatchResults.setQueryAtomCounts(queryAtomCounts.data(), queryAtomCounts.size());
   miniBatchResults.zeroRecursiveBits();
 

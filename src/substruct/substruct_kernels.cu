@@ -34,7 +34,7 @@ namespace {
 template <std::size_t MaxQueryAtoms = kMaxQueryAtoms> struct SubstructMatchResultsDeviceViewT {
   int*                          matchCounts;
   int*                          reportedCounts;
-  int*                          pairMatchStarts;
+  const int*                    pairMatchStarts;
   int16_t*                      matchIndices;
   int                           numQueries;
   const int*                    queryAtomCounts;
