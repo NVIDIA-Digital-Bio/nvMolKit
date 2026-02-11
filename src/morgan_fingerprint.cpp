@@ -66,15 +66,17 @@ std::vector<std::unique_ptr<ExplicitBitVect>> MorganFingerprintGenerator::GetFin
 template <int nBits>
 AsyncDeviceVector<FlatBitVect<nBits>> MorganFingerprintGenerator::GetFingerprintsGpuBuffer(
   const std::vector<const RDKit::ROMol*>&  mols,
+  cudaStream_t                             stream,
   std::optional<FingerprintComputeOptions> options) {
   const FingerprintComputeOptions computeOptions = options.value_or(FingerprintComputeOptions());
   initializeBackendIfNeeded(computeOptions.backend);
-  return gpuGenerator_->GetFingerprintsGpuBuffer<nBits>(mols, options);
+  return gpuGenerator_->GetFingerprintsGpuBuffer<nBits>(mols, stream, options);
 }
 
 #define DEFINE_TEMPLATE(fpSize)                                                                                   \
   template AsyncDeviceVector<FlatBitVect<(fpSize)>> MorganFingerprintGenerator::GetFingerprintsGpuBuffer<fpSize>( \
     const std::vector<const RDKit::ROMol*>&  mols,                                                                \
+    cudaStream_t                             stream,                                                              \
     std::optional<FingerprintComputeOptions> options);
 DEFINE_TEMPLATE(128)
 DEFINE_TEMPLATE(256)

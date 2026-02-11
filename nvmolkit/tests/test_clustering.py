@@ -103,3 +103,21 @@ def test_butina_returns_centroids():
         members = torch.nonzero(clusters_tensor == cluster_id, as_tuple=False).flatten()
         for member in members:
             assert adjacency[centroid, member].item()
+
+
+def test_butina_on_explicit_stream():
+    n = 50
+    cutoff = 0.1
+    np.random.seed(42)
+    dists = np.random.rand(n, n)
+    dists = np.abs(dists - dists.T)
+    torch_dists = torch.tensor(dists).to('cuda')
+
+    s = torch.cuda.Stream()
+    result = butina(torch_dists, cutoff, stream=s).torch()
+    s.synchronize()
+
+    assert result.shape == (n,)
+    assert result.dtype == torch.int32
+
+

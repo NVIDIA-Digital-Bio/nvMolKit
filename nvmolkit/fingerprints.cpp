@@ -19,6 +19,7 @@
 #include <boost/python.hpp>
 
 #include "array_helpers.h"
+#include "device.h"
 #include "morgan_fingerprint.h"
 
 namespace {
@@ -59,7 +60,10 @@ BOOST_PYTHON_MODULE(_Fingerprints) {
       return_value_policy<manage_new_object>())
     .def(
       "GetFingerprintsDevice",
-      +[](nvMolKit::MorganFingerprintGenerator& selfref, boost::python::list& mols, int numThreads) {
+      +[](nvMolKit::MorganFingerprintGenerator& selfref,
+          boost::python::list&                  mols,
+          int                                   numThreads,
+          std::uintptr_t                        streamPtr) {
         std::vector<const RDKit::ROMol*> molsVec;
         molsVec.reserve(len(mols));
         for (int i = 0; i < len(mols); i++) {
@@ -71,26 +75,31 @@ BOOST_PYTHON_MODULE(_Fingerprints) {
         nvMolKit::FingerprintComputeOptions computeOptions;
         computeOptions.backend       = nvMolKit::FingerprintComputeBackend::GPU;
         computeOptions.numCpuThreads = numThreads;
-        const auto& options          = selfref.GetOptions();
+        auto streamOpt               = nvMolKit::acquireExternalStream(streamPtr);
+        if (!streamOpt) {
+          throw std::invalid_argument("Invalid CUDA stream");
+        }
+        auto        stream  = *streamOpt;
+        const auto& options = selfref.GetOptions();
         switch (options.fpSize) {
           case 128: {
-            auto array = selfref.GetFingerprintsGpuBuffer<128>(molsVec, computeOptions);
+            auto array = selfref.GetFingerprintsGpuBuffer<128>(molsVec, stream, computeOptions);
             return makePyArrayFromFlatBitVects<128>(array);
           }
           case 256: {
-            auto array = selfref.GetFingerprintsGpuBuffer<256>(molsVec, computeOptions);
+            auto array = selfref.GetFingerprintsGpuBuffer<256>(molsVec, stream, computeOptions);
             return makePyArrayFromFlatBitVects<256>(array);
           }
           case 512: {
-            auto array = selfref.GetFingerprintsGpuBuffer<512>(molsVec, computeOptions);
+            auto array = selfref.GetFingerprintsGpuBuffer<512>(molsVec, stream, computeOptions);
             return makePyArrayFromFlatBitVects<512>(array);
           }
           case 1024: {
-            auto array = selfref.GetFingerprintsGpuBuffer<1024>(molsVec, computeOptions);
+            auto array = selfref.GetFingerprintsGpuBuffer<1024>(molsVec, stream, computeOptions);
             return makePyArrayFromFlatBitVects<1024>(array);
           }
           case 2048: {
-            auto array = selfref.GetFingerprintsGpuBuffer<2048>(molsVec, computeOptions);
+            auto array = selfref.GetFingerprintsGpuBuffer<2048>(molsVec, stream, computeOptions);
             return makePyArrayFromFlatBitVects<2048>(array);
           }
           default:
@@ -99,5 +108,5 @@ BOOST_PYTHON_MODULE(_Fingerprints) {
         }
       },
       return_value_policy<manage_new_object>(),
-      (boost::python::arg("mols"), boost::python::arg("num_threads") = 0));
+      (boost::python::arg("mols"), boost::python::arg("num_threads") = 0, boost::python::arg("stream") = 0));
 }

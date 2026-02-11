@@ -83,3 +83,37 @@ TEST(DeviceTest, ScopedStreamMove) {
   EXPECT_EQ(stream.stream(), nullptr);
   EXPECT_NE(stream2.stream(), nullptr);
 }
+
+TEST(DeviceTest, AcquireExternalStreamZeroIsDefaultStream) {
+  auto result = acquireExternalStream(0);
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(*result, nullptr);
+}
+
+TEST(DeviceTest, AcquireExternalStreamValidStream) {
+  ScopedStream scoped;
+  auto         streamPtr = reinterpret_cast<std::uintptr_t>(scoped.stream());
+  auto         result    = acquireExternalStream(streamPtr);
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(*result, scoped.stream());
+}
+
+TEST(DeviceTest, AcquireExternalStreamWrongDevice) {
+  int nDevices = 0;
+  cudaCheckError(cudaGetDeviceCount(&nDevices));
+  if (nDevices < 2) {
+    GTEST_SKIP() << "Need at least 2 GPUs to test cross-device stream rejection";
+  }
+  // Create a stream on device 1
+  cudaStream_t foreignStream = nullptr;
+  cudaCheckError(cudaSetDevice(1));
+  cudaCheckError(cudaStreamCreate(&foreignStream));
+  // Switch back to device 0 and try to acquire
+  cudaCheckError(cudaSetDevice(0));
+  auto result = acquireExternalStream(reinterpret_cast<std::uintptr_t>(foreignStream));
+  EXPECT_FALSE(result.has_value());
+  // Cleanup
+  cudaCheckError(cudaSetDevice(1));
+  cudaCheckError(cudaStreamDestroy(foreignStream));
+  cudaCheckError(cudaSetDevice(0));
+}

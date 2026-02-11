@@ -317,3 +317,36 @@ def test_memory_constrained_segmented_path_large_cross(metric):
     else:
         want = (row_5_union.sum(axis=1) / torch.sqrt((row_5_N.sum() * bool_fps_b.sum(axis=1)))).cpu().numpy()
     np.testing.assert_allclose(got[5, :], want, rtol=1e-5, atol=1e-5)
+
+
+# --------------------------------
+# Stream tests
+# --------------------------------
+
+def test_tanimoto_similarity_on_explicit_stream(size_limited_mols):
+    nvmolkit_fpgen = MorganFingerprintGenerator(radius=3, fpSize=1024)
+    fps = nvmolkit_fpgen.GetFingerprints(size_limited_mols).torch()
+    torch.cuda.synchronize()
+
+    s = torch.cuda.Stream()
+    result = crossTanimotoSimilarity(fps, stream=s).torch()
+    s.synchronize()
+
+    n = len(size_limited_mols)
+    assert result.shape == (n, n)
+    assert result.dtype == torch.float64
+
+
+def test_cosine_similarity_on_explicit_stream(size_limited_mols):
+    nvmolkit_fpgen = MorganFingerprintGenerator(radius=3, fpSize=1024)
+    fps = nvmolkit_fpgen.GetFingerprints(size_limited_mols).torch()
+    torch.cuda.synchronize()
+
+    s = torch.cuda.Stream()
+    result = crossCosineSimilarity(fps, stream=s).torch()
+    s.synchronize()
+
+    n = len(size_limited_mols)
+    assert result.shape == (n, n)
+    assert result.dtype == torch.float64
+

@@ -19,6 +19,7 @@
 
 #include "array_helpers.h"
 #include "butina.h"
+#include "device.h"
 
 namespace {
 
@@ -35,11 +36,17 @@ BOOST_PYTHON_MODULE(_clustering) {
     +[](const boost::python::dict& distanceMatrix,
         const double               cutoff,
         const int                  neighborlistMaxSize,
-        const bool                 returnCentroids) -> boost::python::object {
+        const bool                 returnCentroids,
+        std::uintptr_t             streamPtr) -> boost::python::object {
+      auto streamOpt = nvMolKit::acquireExternalStream(streamPtr);
+      if (!streamOpt) {
+        throw std::invalid_argument("Invalid CUDA stream");
+      }
+      auto                             stream  = *streamOpt;
       // Extract boost::python::tuple from dict['shape']
       boost::python::tuple             shape   = boost::python::extract<boost::python::tuple>(distanceMatrix["shape"]);
       const size_t                     matDim1 = boost::python::extract<size_t>(shape[0]);
-      nvMolKit::AsyncDeviceVector<int> clusterIds(matDim1);
+      nvMolKit::AsyncDeviceVector<int> clusterIds(matDim1, stream);
       nvMolKit::AsyncDeviceVector<int> centroids;
 
       boost::python::tuple data        = boost::python::extract<boost::python::tuple>(distanceMatrix["data"]);
@@ -47,13 +54,14 @@ BOOST_PYTHON_MODULE(_clustering) {
       const auto matSpan = nvMolKit::getSpanFromDictElems<double>(reinterpret_cast<void*>(dataPointer), shape);
       if (returnCentroids) {
         centroids.resize(matDim1);
+        centroids.setStream(stream);
         const int numClusters =
-          nvMolKit::butinaGpu(matSpan, toSpan(clusterIds), cutoff, neighborlistMaxSize, toSpan(centroids), nullptr);
+          nvMolKit::butinaGpu(matSpan, toSpan(clusterIds), cutoff, neighborlistMaxSize, toSpan(centroids), stream);
         auto clusterArray  = nvMolKit::makePyArray(clusterIds, boost::python::make_tuple(matDim1));
         auto centroidArray = nvMolKit::makePyArray(centroids, boost::python::make_tuple(numClusters));
         return boost::python::make_tuple(toOwnedPyArray(clusterArray), toOwnedPyArray(centroidArray));
       } else {
-        nvMolKit::butinaGpu(matSpan, toSpan(clusterIds), cutoff, neighborlistMaxSize);
+        nvMolKit::butinaGpu(matSpan, toSpan(clusterIds), cutoff, neighborlistMaxSize, {}, stream);
       }
 
       return toOwnedPyArray(nvMolKit::makePyArray(clusterIds, boost::python::make_tuple(matDim1)));
@@ -61,5 +69,6 @@ BOOST_PYTHON_MODULE(_clustering) {
     (boost::python::arg("distance_matrix"),
      boost::python::arg("cutoff"),
      boost::python::arg("neighborlist_max_size") = 64,
-     boost::python::arg("return_centroids")      = false));
+     boost::python::arg("return_centroids")      = false,
+     boost::python::arg("stream")                = 0));
 };

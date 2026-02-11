@@ -37,9 +37,11 @@ class MorganFingerprintGpuGenerator {
   std::vector<std::unique_ptr<ExplicitBitVect>> GetFingerprints(
     const std::vector<const RDKit::ROMol*>&  mols,
     std::optional<FingerprintComputeOptions> computeOptions = std::nullopt);
+  //! @param stream CUDA stream to use for output allocation and ordering.
   template <int nBits>
   AsyncDeviceVector<FlatBitVect<nBits>> GetFingerprintsGpuBuffer(
     const std::vector<const RDKit::ROMol*>&  mols,
+    cudaStream_t                             stream         = nullptr,
     std::optional<FingerprintComputeOptions> computeOptions = std::nullopt);
 
  private:
