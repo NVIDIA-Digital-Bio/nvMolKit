@@ -222,11 +222,14 @@ void RecursivePatternPreprocessor::preprocessMiniBatch(
 
       const uint32_t* recursiveBitsForLabel = (currentDepth > 0) ? miniBatchResults.recursiveMatchBits() : nullptr;
 
-      uint32_t* recursiveBitsToZero      = isFirstLabelKernel ? miniBatchResults.recursiveMatchBits() : nullptr;
-      const int recursiveBitsSizeToZero = isFirstLabelKernel ? (miniBatchSize * miniBatchResults.maxTargetAtoms()) : 0;
-      uint8_t*  overflowFlagsToZero     = isFirstLabelKernel ? miniBatchResults.overflowFlags() : nullptr;
-      const int overflowFlagsSizeToZero = isFirstLabelKernel ? miniBatchSize : 0;
-      isFirstLabelKernel                = false;
+      std::optional<ZeroBuffersSpec> zeroBuffers;
+      if (isFirstLabelKernel) {
+        zeroBuffers = ZeroBuffersSpec{miniBatchResults.recursiveMatchBits(),
+                                      miniBatchSize * miniBatchResults.maxTargetAtoms(),
+                                      miniBatchResults.overflowFlags(),
+                                      miniBatchSize};
+      }
+      isFirstLabelKernel = false;
 
       launchLabelMatrixPaintKernel(templateConfig,
                                    targetsDevice.view<MoleculeType::Target>(),
@@ -241,10 +244,7 @@ void RecursivePatternPreprocessor::preprocessMiniBatch(
                                    firstTargetInMiniBatch,
                                    recursiveBitsForLabel,
                                    miniBatchResults.maxTargetAtoms(),
-                                   recursiveBitsToZero,
-                                   recursiveBitsSizeToZero,
-                                   overflowFlagsToZero,
-                                   overflowFlagsSizeToZero,
+                                   zeroBuffers,
                                    stream);
 
       launchSubstructPaintKernel(templateConfig,
@@ -414,11 +414,14 @@ void preprocessRecursiveSmarts(SubstructTemplateConfig           templateConfig,
 
       const uint32_t* recursiveBitsForLabel = (currentDepth > 0) ? miniBatchResults.recursiveMatchBits() : nullptr;
 
-      uint32_t* recursiveBitsToZero      = isFirstLabelKernel ? miniBatchResults.recursiveMatchBits() : nullptr;
-      const int recursiveBitsSizeToZero = isFirstLabelKernel ? (miniBatchSize * miniBatchResults.maxTargetAtoms()) : 0;
-      uint8_t*  overflowFlagsToZero     = isFirstLabelKernel ? miniBatchResults.overflowFlags() : nullptr;
-      const int overflowFlagsSizeToZero = isFirstLabelKernel ? miniBatchSize : 0;
-      isFirstLabelKernel                = false;
+      std::optional<ZeroBuffersSpec> zeroBuffers;
+      if (isFirstLabelKernel) {
+        zeroBuffers = ZeroBuffersSpec{miniBatchResults.recursiveMatchBits(),
+                                      miniBatchSize * miniBatchResults.maxTargetAtoms(),
+                                      miniBatchResults.overflowFlags(),
+                                      miniBatchSize};
+      }
+      isFirstLabelKernel = false;
 
       launchLabelMatrixPaintKernel(templateConfig,
                                    targetsDevice.view<MoleculeType::Target>(),
@@ -433,10 +436,7 @@ void preprocessRecursiveSmarts(SubstructTemplateConfig           templateConfig,
                                    firstTargetInMiniBatch,
                                    recursiveBitsForLabel,
                                    miniBatchResults.maxTargetAtoms(),
-                                   recursiveBitsToZero,
-                                   recursiveBitsSizeToZero,
-                                   overflowFlagsToZero,
-                                   overflowFlagsSizeToZero,
+                                   zeroBuffers,
                                    stream);
 
       launchSubstructPaintKernel(templateConfig,

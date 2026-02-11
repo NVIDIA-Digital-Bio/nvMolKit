@@ -250,23 +250,20 @@ __global__ void labelMatrixPaintKernelT(TargetMoleculesDeviceView  targets,
                                         int                        firstTargetIdx,
                                         const uint32_t*            recursiveMatchBits,
                                         int                        maxTargetAtoms,
-                                        uint32_t*                  recursiveBitsToZero,
-                                        int                        recursiveBitsSizeToZero,
-                                        uint8_t*                   overflowFlagsToZero,
-                                        int                        overflowFlagsSizeToZero) {
+                                        ZeroBuffersSpec            zeroBuffers) {
   // Zero buffers using grid-stride loop (only on first label kernel launch)
   const int tid    = blockIdx.x * blockDim.x + threadIdx.x;
   const int stride = gridDim.x * blockDim.x;
 
-  if (recursiveBitsSizeToZero > 0 && recursiveBitsToZero != nullptr) {
-    for (int i = tid; i < recursiveBitsSizeToZero; i += stride) {
-      recursiveBitsToZero[i] = 0;
+  if (zeroBuffers.recursiveBitsSize > 0 && zeroBuffers.recursiveBits != nullptr) {
+    for (int i = tid; i < zeroBuffers.recursiveBitsSize; i += stride) {
+      zeroBuffers.recursiveBits[i] = 0;
     }
   }
 
-  if (overflowFlagsSizeToZero > 0 && overflowFlagsToZero != nullptr) {
-    for (int i = tid; i < overflowFlagsSizeToZero; i += stride) {
-      overflowFlagsToZero[i] = 0;
+  if (zeroBuffers.overflowFlagsSize > 0 && zeroBuffers.overflowFlags != nullptr) {
+    for (int i = tid; i < zeroBuffers.overflowFlagsSize; i += stride) {
+      zeroBuffers.overflowFlags[i] = 0;
     }
   }
 
@@ -726,10 +723,7 @@ INSTANTIATE_SUBSTRUCT_KERNELS(128, 64, 8)
                                                                int,                        \
                                                                const uint32_t*,            \
                                                                int,                        \
-                                                               uint32_t*,                  \
-                                                               int,                        \
-                                                               uint8_t*,                   \
-                                                               int);
+                                                               ZeroBuffersSpec);
 
 INSTANTIATE_LABEL_MATRIX_KERNEL(32, 16)
 INSTANTIATE_LABEL_MATRIX_KERNEL(32, 32)
@@ -895,10 +889,7 @@ void launchLabelMatrixPaintKernelForConfig(TargetMoleculesDeviceView  targets,
                                            int                        firstTargetIdx,
                                            const uint32_t*            recursiveMatchBits,
                                            int                        maxTargetAtoms,
-                                           uint32_t*                  recursiveBitsToZero,
-                                           int                        recursiveBitsSizeToZero,
-                                           uint8_t*                   overflowFlagsToZero,
-                                           int                        overflowFlagsSizeToZero,
+                                           ZeroBuffersSpec            zeroBuffers,
                                            cudaStream_t               stream) {
   constexpr int kBlockSize = getBlockSizeForConfig<MaxTargetAtoms>();
   labelMatrixPaintKernelT<MaxTargetAtoms, MaxQueryAtoms><<<numBlocks, kBlockSize, 0, stream>>>(targets,
@@ -912,32 +903,26 @@ void launchLabelMatrixPaintKernelForConfig(TargetMoleculesDeviceView  targets,
                                                                                                firstTargetIdx,
                                                                                                recursiveMatchBits,
                                                                                                maxTargetAtoms,
-                                                                                               recursiveBitsToZero,
-                                                                                               recursiveBitsSizeToZero,
-                                                                                               overflowFlagsToZero,
-                                                                                               overflowFlagsSizeToZero);
+                                                                                               zeroBuffers);
 }
 
 }  // namespace
 
-void launchLabelMatrixPaintKernel(SubstructTemplateConfig    config,
-                                  TargetMoleculesDeviceView  targets,
-                                  QueryMoleculesDeviceView   patterns,
-                                  const BatchedPatternEntry* patternEntries,
-                                  int                        numPatterns,
-                                  int                        numBlocks,
-                                  int                        numQueries,
-                                  int                        miniBatchPairOffset,
-                                  int                        miniBatchSize,
-                                  uint32_t*                  labelMatrixBuffer,
-                                  int                        firstTargetIdx,
-                                  const uint32_t*            recursiveMatchBits,
-                                  int                        maxTargetAtoms,
-                                  uint32_t*                  recursiveBitsToZero,
-                                  int                        recursiveBitsSizeToZero,
-                                  uint8_t*                   overflowFlagsToZero,
-                                  int                        overflowFlagsSizeToZero,
-                                  cudaStream_t               stream) {
+void launchLabelMatrixPaintKernel(SubstructTemplateConfig        config,
+                                  TargetMoleculesDeviceView      targets,
+                                  QueryMoleculesDeviceView       patterns,
+                                  const BatchedPatternEntry*     patternEntries,
+                                  int                            numPatterns,
+                                  int                            numBlocks,
+                                  int                            numQueries,
+                                  int                            miniBatchPairOffset,
+                                  int                            miniBatchSize,
+                                  uint32_t*                      labelMatrixBuffer,
+                                  int                            firstTargetIdx,
+                                  const uint32_t*                recursiveMatchBits,
+                                  int                            maxTargetAtoms,
+                                  std::optional<ZeroBuffersSpec> zeroBuffers,
+                                  cudaStream_t                   stream) {
   DISPATCH_BY_TQ_CONFIG(config,
                         launchLabelMatrixPaintKernelForConfig,
                         targets,
@@ -952,10 +937,7 @@ void launchLabelMatrixPaintKernel(SubstructTemplateConfig    config,
                         firstTargetIdx,
                         recursiveMatchBits,
                         maxTargetAtoms,
-                        recursiveBitsToZero,
-                        recursiveBitsSizeToZero,
-                        overflowFlagsToZero,
-                        overflowFlagsSizeToZero,
+                        zeroBuffers.value_or(ZeroBuffersSpec{}),
                         stream);
 }
 
