@@ -106,7 +106,7 @@ def test_butina_returns_centroids():
 
 
 def test_butina_on_explicit_stream():
-    n = 50
+    n = 100
     cutoff = 0.1
     np.random.seed(42)
     dists = np.random.rand(n, n)
@@ -117,7 +117,13 @@ def test_butina_on_explicit_stream():
     result = butina(torch_dists, cutoff, stream=s).torch()
     s.synchronize()
 
-    assert result.shape == (n,)
-    assert result.dtype == torch.int32
+    nvmol_clusts = [tuple(torch.argwhere(result == i).flatten().tolist()) for i in range(result.max() + 1)]
+    check_butina_correctness(torch_dists <= cutoff, nvmol_clusts)
 
+
+def test_butina_invalid_stream_type():
+    n = 10
+    dists = torch.zeros(n, n, device='cuda', dtype=torch.float64)
+    with pytest.raises(TypeError):
+        butina(dists, 0.1, stream=42)
 

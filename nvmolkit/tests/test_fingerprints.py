@@ -119,6 +119,12 @@ def test_fingerprints_on_explicit_stream(size_limited_mols):
             assert got_bit == ref_fps[i].GetBit(j)
 
 
+def test_fingerprints_invalid_stream_type(size_limited_mols):
+    gen = MorganFingerprintGenerator(radius=3, fpSize=2048)
+    with pytest.raises(TypeError):
+        gen.GetFingerprints(size_limited_mols, stream=42)
+
+
 def test_gh_issue_84():
     """Regression test for https://github.com/NVIDIA/nvMolKit/issues/84."""
     mol = Chem.MolFromSmiles(

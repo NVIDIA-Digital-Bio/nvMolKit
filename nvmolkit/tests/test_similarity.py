@@ -324,29 +324,56 @@ def test_memory_constrained_segmented_path_large_cross(metric):
 # --------------------------------
 
 def test_tanimoto_similarity_on_explicit_stream(size_limited_mols):
+    fpgen = rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=1024)
     nvmolkit_fpgen = MorganFingerprintGenerator(radius=3, fpSize=1024)
-    fps = nvmolkit_fpgen.GetFingerprints(size_limited_mols).torch()
+
+    fps = [fpgen.GetFingerprint(mol) for mol in size_limited_mols]
+    nvmolkit_fps_torch = nvmolkit_fpgen.GetFingerprints(size_limited_mols, num_threads=1).torch()
     torch.cuda.synchronize()
 
+    ref_sims = torch.empty(len(fps), len(fps), dtype=torch.float64)
+    for i in range(len(fps)):
+        ref_sims[i] = torch.tensor(BulkTanimotoSimilarity(fps[i], fps))
+    ref_sims = ref_sims.to('cuda')
+
     s = torch.cuda.Stream()
-    result = crossTanimotoSimilarity(fps, stream=s).torch()
+    nvmolkit_sims = crossTanimotoSimilarity(nvmolkit_fps_torch, stream=s).torch()
     s.synchronize()
 
-    n = len(size_limited_mols)
-    assert result.shape == (n, n)
-    assert result.dtype == torch.float64
+    torch.testing.assert_close(nvmolkit_sims, ref_sims)
 
 
 def test_cosine_similarity_on_explicit_stream(size_limited_mols):
+    fpgen = rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=1024)
+    nvmolkit_fpgen = MorganFingerprintGenerator(radius=3, fpSize=1024)
+
+    fps = [fpgen.GetFingerprint(mol) for mol in size_limited_mols]
+    nvmolkit_fps_torch = nvmolkit_fpgen.GetFingerprints(size_limited_mols, num_threads=1).torch()
+    torch.cuda.synchronize()
+
+    ref_sims = torch.empty(len(fps), len(fps), dtype=torch.float64)
+    for i in range(len(fps)):
+        ref_sims[i] = torch.tensor(BulkCosineSimilarity(fps[i], fps))
+    ref_sims = ref_sims.to('cuda')
+
+    s = torch.cuda.Stream()
+    nvmolkit_sims = crossCosineSimilarity(nvmolkit_fps_torch, stream=s).torch()
+    s.synchronize()
+
+    torch.testing.assert_close(nvmolkit_sims, ref_sims)
+
+
+def test_tanimoto_similarity_invalid_stream_type(size_limited_mols):
     nvmolkit_fpgen = MorganFingerprintGenerator(radius=3, fpSize=1024)
     fps = nvmolkit_fpgen.GetFingerprints(size_limited_mols).torch()
     torch.cuda.synchronize()
+    with pytest.raises(TypeError):
+        crossTanimotoSimilarity(fps, stream=42)
 
-    s = torch.cuda.Stream()
-    result = crossCosineSimilarity(fps, stream=s).torch()
-    s.synchronize()
 
-    n = len(size_limited_mols)
-    assert result.shape == (n, n)
-    assert result.dtype == torch.float64
-
+def test_cosine_similarity_invalid_stream_type(size_limited_mols):
+    nvmolkit_fpgen = MorganFingerprintGenerator(radius=3, fpSize=1024)
+    fps = nvmolkit_fpgen.GetFingerprints(size_limited_mols).torch()
+    torch.cuda.synchronize()
+    with pytest.raises(TypeError):
+        crossCosineSimilarity(fps, stream=42)

@@ -52,6 +52,8 @@ def crossTanimotoSimilarity(fingerprint_group_one: AsyncGpuResult | torch.Tensor
         fingerprint_group_two. If fingerprint_group_two is None, computes all-to-all
         similarity within fingerprint_group_one.
     """
+    if stream is not None and not isinstance(stream, torch.cuda.Stream):
+        raise TypeError(f"stream must be a torch.cuda.Stream or None, got {type(stream).__name__}")
     bits_two_interface = fingerprint_group_two.__cuda_array_interface__ if fingerprint_group_two is not None else fingerprint_group_one.__cuda_array_interface__
     stream_ptr = (stream if stream is not None else torch.cuda.current_stream()).cuda_stream
     return AsyncGpuResult(_DataStructs.CrossTanimotoSimilarityRawBuffers(fingerprint_group_one.__cuda_array_interface__,
@@ -110,6 +112,8 @@ def crossCosineSimilarity(fingerprint_group_one: AsyncGpuResult | torch.Tensor,
         An AsyncGpuResult object containing the Cosine similarities, with index [i, j] corresponding to the similarity between
         fingerprint i in fingerprint_group_one and fingerprint j in fingerprint_group_two.
     """
+    if stream is not None and not isinstance(stream, torch.cuda.Stream):
+        raise TypeError(f"stream must be a torch.cuda.Stream or None, got {type(stream).__name__}")
     stream_ptr = (stream if stream is not None else torch.cuda.current_stream()).cuda_stream
     if fingerprint_group_two is not None:
         return AsyncGpuResult(_DataStructs.CrossCosineSimilarityRawBuffers(fingerprint_group_one.__cuda_array_interface__,

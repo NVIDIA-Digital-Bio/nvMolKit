@@ -94,5 +94,7 @@ class MorganFingerprintGenerator:
             AsyncGpuResult wrapping a torch.Tensor of shape (len(mols), fpSize / 32) containing the fingerprints.
             Each row is a fingerprint for the corresponding molecule.
         """
+        if stream is not None and not isinstance(stream, torch.cuda.Stream):
+            raise TypeError(f"stream must be a torch.cuda.Stream or None, got {type(stream).__name__}")
         stream_ptr = (stream if stream is not None else torch.cuda.current_stream()).cuda_stream
         return AsyncGpuResult(self._internal.GetFingerprintsDevice(mols, num_threads, stream_ptr))
