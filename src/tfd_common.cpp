@@ -33,6 +33,8 @@
 #include <omp.h>
 #endif
 
+#include "nvtx.h"
+
 namespace nvMolKit {
 
 namespace {
@@ -637,6 +639,8 @@ static TFDSystemHost buildTFDSystemImpl(const RDKit::ROMol& mol, const TFDComput
 }
 
 TFDSystemHost buildTFDSystem(const std::vector<const RDKit::ROMol*>& mols, const TFDComputeOptions& options) {
+  ScopedNvtxRange range("buildTFDSystem (" + std::to_string(mols.size()) + " mols)", NvtxColor::kCyan);
+
   if (mols.empty()) {
     return {};
   }
@@ -647,14 +651,18 @@ TFDSystemHost buildTFDSystem(const std::vector<const RDKit::ROMol*>& mols, const
   // Build per-molecule systems in parallel (RDKit extraction — the expensive part)
   std::vector<TFDSystemHost> perMol(mols.size());
 
+  {
+    ScopedNvtxRange buildRange("Parallel RDKit extraction", NvtxColor::kCyan);
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic)
 #endif
-  for (size_t i = 0; i < mols.size(); ++i) {
-    perMol[i] = buildTFDSystemImpl(*mols[i], options);
+    for (size_t i = 0; i < mols.size(); ++i) {
+      perMol[i] = buildTFDSystemImpl(*mols[i], options);
+    }
   }
 
   // Merge into single batched system (index arithmetic only — fast)
+  ScopedNvtxRange mergeRange("mergeTFDSystems", NvtxColor::kCyan);
   return mergeTFDSystems(perMol);
 }
 
