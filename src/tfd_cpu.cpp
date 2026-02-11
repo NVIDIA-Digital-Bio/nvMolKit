@@ -23,6 +23,8 @@
 #include <omp.h>
 #endif
 
+#include "nvtx.h"
+
 namespace nvMolKit {
 
 double TFDCpuGenerator::computeTFDPair(const float*         anglesI,
@@ -179,14 +181,20 @@ std::vector<double> TFDCpuGenerator::GetTFDMatrix(const RDKit::ROMol& mol, const
   }
 
   // Compute dihedral angles
-  std::vector<float> angles = computeDihedralAngles(system, 0);
+  std::vector<float> angles;
+  {
+    ScopedNvtxRange range("CPU: computeDihedralAngles", NvtxColor::kGreen);
+    angles = computeDihedralAngles(system, 0);
+  }
 
   // Compute TFD matrix
+  ScopedNvtxRange range("CPU: computeTFDMatrix", NvtxColor::kGreen);
   return computeTFDMatrixFromAngles(system, 0, angles);
 }
 
 std::vector<std::vector<double>> TFDCpuGenerator::GetTFDMatrices(const std::vector<const RDKit::ROMol*>& mols,
                                                                  const TFDComputeOptions&                options) {
+  ScopedNvtxRange range("CPU: GetTFDMatrices (" + std::to_string(mols.size()) + " mols)", NvtxColor::kGreen);
   std::vector<std::vector<double>> results(mols.size());
 
 // Parallelize at molecule level for larger batches

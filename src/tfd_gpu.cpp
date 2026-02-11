@@ -19,6 +19,7 @@
 
 #include <stdexcept>
 
+#include "nvtx.h"
 #include "tfd_kernels.h"
 
 namespace nvMolKit {
@@ -26,6 +27,7 @@ namespace nvMolKit {
 // ========== TFDGpuResult ==========
 
 std::vector<double> TFDGpuResult::extractMolecule(int molIdx) const {
+  ScopedNvtxRange range("GPU: extractMolecule", NvtxColor::kRed);
   if (molIdx < 0 || molIdx >= static_cast<int>(conformerCounts.size())) {
     throw std::out_of_range("Invalid molecule index: " + std::to_string(molIdx));
   }
@@ -53,6 +55,8 @@ std::vector<double> TFDGpuResult::extractMolecule(int molIdx) const {
 }
 
 std::vector<std::vector<double>> TFDGpuResult::extractAll() const {
+  ScopedNvtxRange range("GPU: extractAll (D2H)", NvtxColor::kRed);
+
   int                              numMolecules = static_cast<int>(conformerCounts.size());
   std::vector<std::vector<double>> results(numMolecules);
 
@@ -88,6 +92,9 @@ TFDGpuGenerator::TFDGpuGenerator() : stream_() {
 
 TFDGpuResult TFDGpuGenerator::GetTFDMatricesGpuBuffer(const std::vector<const RDKit::ROMol*>& mols,
                                                       const TFDComputeOptions&                options) {
+  ScopedNvtxRange outerRange("GPU: GetTFDMatricesGpuBuffer (" + std::to_string(mols.size()) + " mols)",
+                             NvtxColor::kBlue);
+
   TFDGpuResult result;
 
   if (mols.empty()) {
@@ -113,33 +120,42 @@ TFDGpuResult TFDGpuGenerator::GetTFDMatricesGpuBuffer(const std::vector<const RD
   cudaStream_t stream = stream_.stream();
 
   // Transfer to device (handles resize + copy + output buffer allocation)
-  transferToDevice(system, device_, stream);
+  {
+    ScopedNvtxRange range("GPU: transferToDevice (H2D)", NvtxColor::kYellow);
+    transferToDevice(system, device_, stream);
+  }
 
   // Launch dihedral kernel
-  launchDihedralKernel(system.totalDihedralWorkItems(),
-                       device_.positions.data(),
-                       device_.confPositionStarts.data(),
-                       device_.torsionAtoms.data(),
-                       device_.dihedralConfIdx.data(),
-                       device_.dihedralTorsIdx.data(),
-                       device_.dihedralOutIdx.data(),
-                       device_.dihedralAngles.data(),
-                       stream);
+  {
+    ScopedNvtxRange range("GPU: launchDihedralKernel", NvtxColor::kOrange);
+    launchDihedralKernel(system.totalDihedralWorkItems(),
+                         device_.positions.data(),
+                         device_.confPositionStarts.data(),
+                         device_.torsionAtoms.data(),
+                         device_.dihedralConfIdx.data(),
+                         device_.dihedralTorsIdx.data(),
+                         device_.dihedralOutIdx.data(),
+                         device_.dihedralAngles.data(),
+                         stream);
+  }
 
   // Launch TFD matrix kernel
-  launchTFDMatrixKernel(system.totalTFDWorkItems(),
-                        device_.dihedralAngles.data(),
-                        device_.torsionWeights.data(),
-                        device_.torsionMaxDevs.data(),
-                        device_.quartetStarts.data(),
-                        device_.torsionTypes.data(),
-                        device_.tfdAnglesI.data(),
-                        device_.tfdAnglesJ.data(),
-                        device_.tfdTorsStart.data(),
-                        device_.tfdNumTorsions.data(),
-                        device_.tfdOutIdx.data(),
-                        device_.tfdOutput.data(),
-                        stream);
+  {
+    ScopedNvtxRange range("GPU: launchTFDMatrixKernel", NvtxColor::kOrange);
+    launchTFDMatrixKernel(system.totalTFDWorkItems(),
+                          device_.dihedralAngles.data(),
+                          device_.torsionWeights.data(),
+                          device_.torsionMaxDevs.data(),
+                          device_.quartetStarts.data(),
+                          device_.torsionTypes.data(),
+                          device_.tfdAnglesI.data(),
+                          device_.tfdAnglesJ.data(),
+                          device_.tfdTorsStart.data(),
+                          device_.tfdNumTorsions.data(),
+                          device_.tfdOutIdx.data(),
+                          device_.tfdOutput.data(),
+                          stream);
+  }
 
   // Move output to result (transfer ownership of GPU memory)
   result.tfdValues = std::move(device_.tfdOutput);
@@ -153,7 +169,8 @@ TFDGpuResult TFDGpuGenerator::GetTFDMatricesGpuBuffer(const std::vector<const RD
 
 std::vector<std::vector<double>> TFDGpuGenerator::GetTFDMatrices(const std::vector<const RDKit::ROMol*>& mols,
                                                                  const TFDComputeOptions&                options) {
-  TFDGpuResult gpuResult = GetTFDMatricesGpuBuffer(mols, options);
+  ScopedNvtxRange range("GPU: GetTFDMatrices (" + std::to_string(mols.size()) + " mols)", NvtxColor::kBlue);
+  TFDGpuResult    gpuResult = GetTFDMatricesGpuBuffer(mols, options);
   return gpuResult.extractAll();
 }
 
