@@ -170,7 +170,7 @@ void uploadAndLaunchMiniBatch(GpuExecutor&                        executor,
                             executor.plan.numPairsInMiniBatch,
                             ctx.numQueries,
                             executor.deviceResults.labelMatrixBuffer(),
-                            executor.deviceResults.recursiveMatchBits(),
+                            nullptr,
                             executor.deviceResults.maxTargetAtoms(),
                             nullptr,
                             executorStream);

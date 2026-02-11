@@ -25,6 +25,19 @@
 namespace nvMolKit {
 
 /**
+ * @brief Buffers to zero on the first label matrix kernel launch in a mini-batch.
+ *
+ * Passed as an optional parameter to launchLabelMatrixPaintKernel; when absent
+ * (std::nullopt), no zeroing is performed.
+ */
+struct ZeroBuffersSpec {
+  uint32_t* recursiveBits     = nullptr;
+  int       recursiveBitsSize = 0;
+  uint8_t*  overflowFlags     = nullptr;
+  int       overflowFlagsSize = 0;
+};
+
+/**
  * @brief Per-pattern metadata for batched recursive preprocessing kernel.
  *
  * Each entry describes one recursive pattern in the combined batch:

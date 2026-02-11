@@ -18,6 +18,8 @@
 
 #include <cuda_runtime.h>
 
+#include <optional>
+
 #include "molecules.h"
 #include "substruct_types.h"
 
@@ -80,22 +82,24 @@ void launchLabelMatrixKernel(SubstructTemplateConfig   config,
  * @param firstTargetIdx First target index for block offset calculation
  * @param recursiveMatchBits Per-pair recursive bits (for nested patterns)
  * @param maxTargetAtoms Stride for recursiveMatchBits indexing
+ * @param zeroBuffers Buffers to zero on first launch (nullopt to skip)
  * @param stream CUDA stream
  */
-void launchLabelMatrixPaintKernel(SubstructTemplateConfig    config,
-                                  TargetMoleculesDeviceView  targets,
-                                  QueryMoleculesDeviceView   patterns,
-                                  const BatchedPatternEntry* patternEntries,
-                                  int                        numPatterns,
-                                  int                        numBlocks,
-                                  int                        numQueries,
-                                  int                        miniBatchPairOffset,
-                                  int                        miniBatchSize,
-                                  uint32_t*                  labelMatrixBuffer,
-                                  int                        firstTargetIdx,
-                                  const uint32_t*            recursiveMatchBits,
-                                  int                        maxTargetAtoms,
-                                  cudaStream_t               stream);
+void launchLabelMatrixPaintKernel(SubstructTemplateConfig        config,
+                                  TargetMoleculesDeviceView      targets,
+                                  QueryMoleculesDeviceView       patterns,
+                                  const BatchedPatternEntry*     patternEntries,
+                                  int                            numPatterns,
+                                  int                            numBlocks,
+                                  int                            numQueries,
+                                  int                            miniBatchPairOffset,
+                                  int                            miniBatchSize,
+                                  uint32_t*                      labelMatrixBuffer,
+                                  int                            firstTargetIdx,
+                                  const uint32_t*                recursiveMatchBits,
+                                  int                            maxTargetAtoms,
+                                  std::optional<ZeroBuffersSpec> zeroBuffers,
+                                  cudaStream_t                   stream);
 
 /**
  * @brief Launch substructure matching kernel with template configuration dispatch.
