@@ -302,22 +302,22 @@ int main(const int argc, char* argv[]) {
     runOrOnce(useNanobench, title, [&] {
       switch (fpSize) {
         case 128:
-          ankerl::nanobench::doNotOptimizeAway(nvmolkitGen.GetFingerprintsGpuBuffer<128>(mols, options));
+          ankerl::nanobench::doNotOptimizeAway(nvmolkitGen.GetFingerprintsGpuBuffer<128>(mols, nullptr, options));
           break;
         case 256:
-          ankerl::nanobench::doNotOptimizeAway(nvmolkitGen.GetFingerprintsGpuBuffer<256>(mols, options));
+          ankerl::nanobench::doNotOptimizeAway(nvmolkitGen.GetFingerprintsGpuBuffer<256>(mols, nullptr, options));
           break;
         case 512:
-          ankerl::nanobench::doNotOptimizeAway(nvmolkitGen.GetFingerprintsGpuBuffer<512>(mols, options));
+          ankerl::nanobench::doNotOptimizeAway(nvmolkitGen.GetFingerprintsGpuBuffer<512>(mols, nullptr, options));
           break;
         case 1024:
-          ankerl::nanobench::doNotOptimizeAway(nvmolkitGen.GetFingerprintsGpuBuffer<1024>(mols, options));
+          ankerl::nanobench::doNotOptimizeAway(nvmolkitGen.GetFingerprintsGpuBuffer<1024>(mols, nullptr, options));
           break;
         case 2048:
-          ankerl::nanobench::doNotOptimizeAway(nvmolkitGen.GetFingerprintsGpuBuffer<2048>(mols, options));
+          ankerl::nanobench::doNotOptimizeAway(nvmolkitGen.GetFingerprintsGpuBuffer<2048>(mols, nullptr, options));
           break;
         case 4096:
-          ankerl::nanobench::doNotOptimizeAway(nvmolkitGen.GetFingerprintsGpuBuffer<4096>(mols, options));
+          ankerl::nanobench::doNotOptimizeAway(nvmolkitGen.GetFingerprintsGpuBuffer<4096>(mols, nullptr, options));
           break;
         default:
           throw std::runtime_error("Unsupported fp_size. Must be one of {128,256,512,1024,2048,4096}");
