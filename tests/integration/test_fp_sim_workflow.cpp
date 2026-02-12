@@ -50,7 +50,7 @@ TEST(FingerprintSimIntegrationTest, Basics) {
   // Compute fingerprints
   nvMolKit::FingerprintComputeOptions options;
   options.backend      = nvMolKit::FingerprintComputeBackend::GPU;
-  auto gpuFingerprints = generator.GetFingerprintsGpuBuffer<fpSize>(molsView, options);
+  auto gpuFingerprints = generator.GetFingerprintsGpuBuffer<fpSize>(molsView, nullptr, options);
   std::vector<std::unique_ptr<ExplicitBitVect>> refFingerprints;
   for (size_t i = 0; i < mols.size(); i++) {
     const auto& mol            = mols[i];

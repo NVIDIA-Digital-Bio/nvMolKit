@@ -246,7 +246,7 @@ TEST(MorganFingerprintGpuTest, ThrowsRequestingCpuBackendGpuBuffer) {
   auto                                generator = nvMolKit::MorganFingerprintGenerator(radius, fpSize);
   nvMolKit::FingerprintComputeOptions options;
   options.backend = nvMolKit::FingerprintComputeBackend::CPU;
-  ASSERT_THROW(generator.GetFingerprintsGpuBuffer<1024>({Singlemol.get()}, options), std::runtime_error);
+  ASSERT_THROW(generator.GetFingerprintsGpuBuffer<1024>({Singlemol.get()}, nullptr, options), std::runtime_error);
 }
 
 TEST(MorganFingerprintGpuTest, GpuBufferSameResult) {
@@ -259,7 +259,7 @@ TEST(MorganFingerprintGpuTest, GpuBufferSameResult) {
   nvMolKit::FingerprintComputeOptions options;
   options.backend = nvMolKit::FingerprintComputeBackend::GPU;
 
-  auto gpuResults = generator.GetFingerprintsGpuBuffer<fpSize>(molsView, options);
+  auto gpuResults = generator.GetFingerprintsGpuBuffer<fpSize>(molsView, nullptr, options);
   cudaDeviceSynchronize();
 
   std::vector<nvMolKit::FlatBitVect<fpSize>> gpuResultsHost(gpuResults.size());
@@ -324,8 +324,8 @@ TEST_P(MorganFingerprintParametrizedTest, MultipleCallsWithDifferenThreads) {
   }
 
   if (backend == nvMolKit::FingerprintComputeBackend::GPU) {
-    auto gpuResultsTry1 = generator.GetFingerprintsGpuBuffer<1024>(molsView, options);
-    auto gpuResultsTry2 = generator.GetFingerprintsGpuBuffer<1024>(molsView, options);
+    auto gpuResultsTry1 = generator.GetFingerprintsGpuBuffer<1024>(molsView, nullptr, options);
+    auto gpuResultsTry2 = generator.GetFingerprintsGpuBuffer<1024>(molsView, nullptr, options);
     cudaDeviceSynchronize();
     std::vector<nvMolKit::FlatBitVect<fpSize>> gpuResultsHost(gpuResultsTry2.size());
     gpuResultsTry2.copyToHost(gpuResultsHost);
