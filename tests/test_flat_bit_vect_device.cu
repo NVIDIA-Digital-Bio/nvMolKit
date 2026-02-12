@@ -263,7 +263,7 @@ TEST(BitMatrix2DViewDevice, Clear) {
   deviceStorage.copyToHost(hostResult);
   cudaCheckError(cudaStreamSynchronize(stream.stream()));
 
-  for (int i = 0; i < kRows * kCols; ++i) {
+  for (size_t i = 0; i < kRows * kCols; ++i) {
     EXPECT_FALSE(hostResult[0][i]) << "Bit " << i << " should be cleared";
   }
 }
@@ -329,8 +329,8 @@ TEST(BitMatrix2DViewDevice, LargeMatrix) {
   deviceStorage.setFromVector(std::vector<FlatBitVect<kRows * kCols>>{hostStorage});
 
   // Set a pattern: every (row, col) where row == col * 2
-  for (int col = 0; col < kCols; ++col) {
-    int row = col * 2;
+  for (size_t col = 0; col < kCols; ++col) {
+    size_t row = col * 2;
     if (row < kRows) {
       setMatrix2DKernel<kRows, kCols><<<1, 1, 0, stream.stream()>>>(deviceStorage.data(), row, col, true);
     }
@@ -343,8 +343,8 @@ TEST(BitMatrix2DViewDevice, LargeMatrix) {
   cudaCheckError(cudaStreamSynchronize(stream.stream()));
 
   BitMatrix2DView<kRows, kCols> view(hostResult[0]);
-  for (int row = 0; row < kRows; ++row) {
-    for (int col = 0; col < kCols; ++col) {
+  for (size_t row = 0; row < kRows; ++row) {
+    for (size_t col = 0; col < kCols; ++col) {
       bool expected = (row == col * 2);
       EXPECT_EQ(view.get(row, col), expected) << "Mismatch at (" << row << ", " << col << ")";
     }

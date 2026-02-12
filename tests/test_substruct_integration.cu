@@ -82,11 +82,13 @@ std::vector<int> getAllGpuIds() {
   return ids;
 }
 
+// clang-format off
 const ThreadingConfig kThreadingConfigs[] = {
-  {nvMolKit::SubstructSearchConfig{.batchSize = 1024, .workerThreads = 1, .preprocessingThreads = 1}, "SingleThreaded"},
-  { nvMolKit::SubstructSearchConfig{.batchSize = 256, .workerThreads = 2, .preprocessingThreads = 4},  "MultiThreaded"},
-  {                                                nvMolKit::SubstructSearchConfig{.batchSize = 256},     "Autoselect"},
+  {nvMolKit::SubstructSearchConfig{.batchSize = 1024, .workerThreads = 1, .preprocessingThreads = 1, .executorsPerRunner = -1, .gpuIds = {}}, "SingleThreaded"},
+  {nvMolKit::SubstructSearchConfig{.batchSize = 256,  .workerThreads = 2, .preprocessingThreads = 4, .executorsPerRunner = -1, .gpuIds = {}}, "MultiThreaded"},
+  {nvMolKit::SubstructSearchConfig{.batchSize = 256,                                                  .executorsPerRunner = -1, .gpuIds = {}}, "Autoselect"},
 };
+// clang-format on
 
 constexpr DatasetConfig kDatasets[] = {
   {           "pwalters_alert_collection_supported.txt",            "PwaltersAlertCollection"},

@@ -1129,20 +1129,6 @@ AtomDataPacked makeAtomWithMinRingSize(uint8_t ringSize) {
   return atom;
 }
 
-AtomDataPacked makeAtomWithNumRings(uint8_t numRings) {
-  AtomDataPacked atom;
-  atom.setAtomicNum(6);
-  atom.setNumRings(numRings);
-  return atom;
-}
-
-AtomDataPacked makeAtomWithTotalValence(uint8_t valence) {
-  AtomDataPacked atom;
-  atom.setAtomicNum(6);
-  atom.setTotalValence(valence);
-  return atom;
-}
-
 }  // namespace
 
 TEST(EvaluateBoolTreeTest, GreaterThanDegreeTrue) {

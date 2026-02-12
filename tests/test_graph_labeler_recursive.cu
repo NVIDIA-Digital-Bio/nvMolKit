@@ -248,12 +248,12 @@ TEST_F(RecursiveInstructionTest, NegatedRecursivePattern) {
 
 class RecursivePaintTest : public ::testing::Test {
  protected:
-  ScopedStream                                 stream_;
-  std::unique_ptr<MiniBatchResultsDevice>      results_;
-  std::unique_ptr<AsyncDeviceVector<int>>      pairMatchStartsDev_;
-  int                                          maxTargetAtoms_ = 0;
-  int                                          numTargets_     = 0;
-  int                                          numQueries_     = 1;
+  ScopedStream                            stream_;
+  std::unique_ptr<MiniBatchResultsDevice> results_;
+  std::unique_ptr<AsyncDeviceVector<int>> pairMatchStartsDev_;
+  int                                     maxTargetAtoms_ = 0;
+  int                                     numTargets_     = 0;
+  int                                     numQueries_     = 1;
 
   void setupResults(const MoleculesHost& targetsHost, int numQueries = 1) {
     const int numTargets = static_cast<int>(targetsHost.numMolecules());
@@ -297,8 +297,8 @@ class RecursivePaintTest : public ::testing::Test {
   }
 
   void preprocessRecursive(const MoleculesDevice& targetDevice,
-                           const MoleculesHost&   targetHost,
-                           const RDKit::ROMol*    queryMol) {
+                           const MoleculesHost& /* targetHost */,
+                           const RDKit::ROMol* queryMol) {
     MoleculesHost queryHost;
     addQueryToBatch(queryMol, queryHost);
 
