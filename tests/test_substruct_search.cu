@@ -1103,7 +1103,7 @@ TEST_P(SubstructureSearchTest, ImpossibleAtomConstraint) {
   // This is contradictory and should never match anything
   const std::string query = "[C;a]";
 
-  for (const std::string& target : {"CCCCC", "c1ccccc1"}) {
+  for (const auto& target : {"CCCCC", "c1ccccc1"}) {
     std::vector<std::unique_ptr<RDKit::ROMol>> targetMols;
     std::vector<std::unique_ptr<RDKit::ROMol>> queryMols;
 
@@ -1125,7 +1125,7 @@ TEST_P(SubstructureSearchTest, ImpossibleChargeConstraint) {
   // [OX1;+0;-1] has charge +0 AND charge -1 in an AND, which is contradictory
   const std::string query = "[OX1;+0;-1]";
 
-  for (const std::string& target : {"O=S(=O)(CCO)c1ccccc1", "[O-]C"}) {
+  for (const auto& target : {"O=S(=O)(CCO)c1ccccc1", "[O-]C"}) {
     std::vector<std::unique_ptr<RDKit::ROMol>> targetMols;
     std::vector<std::unique_ptr<RDKit::ROMol>> queryMols;
 

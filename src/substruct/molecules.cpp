@@ -1832,9 +1832,9 @@ int collectPatternsFromMolecule(const RDKit::ROMol*                 mol,
                                 std::vector<RecursivePatternEntry>& patterns,
                                 int&                                nextPatternId,
                                 int                                 parentIdx,
-                                int                                 parentAtomIdx,
-                                int                                 currentDepth,
-                                int&                                nextLocalId) {
+                                int /* parentAtomIdx */,
+                                int  currentDepth,
+                                int& nextLocalId) {
   int                                maxDepth = 0;
   std::vector<PendingRecursiveChild> pendingChildren;
   for (const auto* atom : mol->atoms()) {

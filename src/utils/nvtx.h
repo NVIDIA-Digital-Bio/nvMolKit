@@ -55,7 +55,7 @@ class ScopedNvtxRange {
 
  private:
   void pushWithColor(const char* name, uint32_t color) {
-    nvtxEventAttributes_t attrib = {0};
+    nvtxEventAttributes_t attrib = {};
     attrib.version               = NVTX_VERSION;
     attrib.size                  = NVTX_EVENT_ATTRIB_STRUCT_SIZE;
     attrib.colorType             = NVTX_COLOR_ARGB;

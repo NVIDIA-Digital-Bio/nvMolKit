@@ -277,7 +277,7 @@ class FallbackQueueProducerGuard {
 // Batch Results Accumulation
 // =============================================================================
 
-class GpuExecutor;
+struct GpuExecutor;
 struct PinnedHostBuffer;
 
 /**
