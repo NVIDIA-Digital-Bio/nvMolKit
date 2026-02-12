@@ -135,23 +135,43 @@ class SyntheticMoleculeBuilder {
     }
   }
 
-  TargetMoleculeView buildTargetView() {
+  TargetMoleculeView buildTargetView(cudaStream_t stream) {
+    d_atomDataPacked_  = AsyncDeviceVector<AtomDataPacked>(numAtoms_, stream);
+    d_bondTypeCounts_  = AsyncDeviceVector<BondTypeCounts>(numAtoms_, stream);
+    d_targetAtomBonds_ = AsyncDeviceVector<TargetAtomBonds>(numAtoms_, stream);
+
+    d_atomDataPacked_.copyFromHost(atomDataPacked_);
+    d_bondTypeCounts_.copyFromHost(bondTypeCounts_);
+    d_targetAtomBonds_.copyFromHost(targetAtomBonds_);
+
     TargetMoleculeView view;
     view.numAtoms        = numAtoms_;
-    view.atomDataPacked  = atomDataPacked_.data();
-    view.bondTypeCounts  = bondTypeCounts_.data();
-    view.targetAtomBonds = targetAtomBonds_.data();
+    view.atomDataPacked  = d_atomDataPacked_.data();
+    view.bondTypeCounts  = d_bondTypeCounts_.data();
+    view.targetAtomBonds = d_targetAtomBonds_.data();
     return view;
   }
 
-  QueryMoleculeView buildQueryView() {
+  QueryMoleculeView buildQueryView(cudaStream_t stream) {
+    d_atomDataPacked_ = AsyncDeviceVector<AtomDataPacked>(numAtoms_, stream);
+    d_atomQueryMasks_ = AsyncDeviceVector<AtomQueryMask>(numAtoms_, stream);
+    d_bondTypeCounts_ = AsyncDeviceVector<BondTypeCounts>(numAtoms_, stream);
+    d_queryAtomBonds_ = AsyncDeviceVector<QueryAtomBonds>(numAtoms_, stream);
+    d_atomQueryTrees_ = AsyncDeviceVector<AtomQueryTree>(numAtoms_, stream);
+
+    d_atomDataPacked_.copyFromHost(atomDataPacked_);
+    d_atomQueryMasks_.copyFromHost(atomQueryMasks_);
+    d_bondTypeCounts_.copyFromHost(bondTypeCounts_);
+    d_queryAtomBonds_.copyFromHost(queryAtomBonds_);
+    d_atomQueryTrees_.copyFromHost(atomQueryTrees_);
+
     QueryMoleculeView view;
     view.numAtoms            = numAtoms_;
-    view.atomDataPacked      = atomDataPacked_.data();
-    view.atomQueryMasks      = atomQueryMasks_.data();
-    view.bondTypeCounts      = bondTypeCounts_.data();
-    view.queryAtomBonds      = queryAtomBonds_.data();
-    view.atomQueryTrees      = atomQueryTrees_.data();
+    view.atomDataPacked      = d_atomDataPacked_.data();
+    view.atomQueryMasks      = d_atomQueryMasks_.data();
+    view.bondTypeCounts      = d_bondTypeCounts_.data();
+    view.queryAtomBonds      = d_queryAtomBonds_.data();
+    view.atomQueryTrees      = d_atomQueryTrees_.data();
     view.queryInstructions   = nullptr;
     view.queryLeafMasks      = nullptr;
     view.queryLeafBondCounts = nullptr;
@@ -168,6 +188,13 @@ class SyntheticMoleculeBuilder {
   std::vector<QueryAtomBonds>  queryAtomBonds_;
   std::vector<AtomQueryMask>   atomQueryMasks_;
   std::vector<AtomQueryTree>   atomQueryTrees_;
+
+  AsyncDeviceVector<AtomDataPacked>  d_atomDataPacked_;
+  AsyncDeviceVector<BondTypeCounts>  d_bondTypeCounts_;
+  AsyncDeviceVector<TargetAtomBonds> d_targetAtomBonds_;
+  AsyncDeviceVector<QueryAtomBonds>  d_queryAtomBonds_;
+  AsyncDeviceVector<AtomQueryMask>   d_atomQueryMasks_;
+  AsyncDeviceVector<AtomQueryTree>   d_atomQueryTrees_;
 };
 
 // =============================================================================
@@ -342,8 +369,8 @@ TEST_P(VF2AlgoTest, SingleAtomMatch) {
   queryBuilder.setAtomicNum(0, 6);
   queryBuilder.setDegree(0, 0);
 
-  auto target = targetBuilder.buildTargetView();
-  auto query  = queryBuilder.buildQueryView();
+  auto target = targetBuilder.buildTargetView(stream_.stream());
+  auto query  = queryBuilder.buildQueryView(stream_.stream());
 
   using LabelStorage = typename BitMatrix2DView<kTestMaxTargetAtoms, kTestMaxQueryAtoms>::StorageType;
   AsyncDeviceVector<LabelStorage> d_labelMatrix(1, stream_.stream());
@@ -400,8 +427,8 @@ TEST_P(VF2AlgoTest, SingleAtomNoMatch) {
   SyntheticMoleculeBuilder queryBuilder(1);
   queryBuilder.setAtomicNum(0, 7);
 
-  auto target = targetBuilder.buildTargetView();
-  auto query  = queryBuilder.buildQueryView();
+  auto target = targetBuilder.buildTargetView(stream_.stream());
+  auto query  = queryBuilder.buildQueryView(stream_.stream());
 
   using LabelStorage = typename BitMatrix2DView<kTestMaxTargetAtoms, kTestMaxQueryAtoms>::StorageType;
   AsyncDeviceVector<LabelStorage> d_labelMatrix(1, stream_.stream());
@@ -450,8 +477,8 @@ TEST_P(VF2AlgoTest, TwoAtomChainMultipleMatches) {
   SyntheticMoleculeBuilder queryBuilder(2);
   queryBuilder.buildLinearChain(6);
 
-  auto target = targetBuilder.buildTargetView();
-  auto query  = queryBuilder.buildQueryView();
+  auto target = targetBuilder.buildTargetView(stream_.stream());
+  auto query  = queryBuilder.buildQueryView(stream_.stream());
 
   using LabelStorage = typename BitMatrix2DView<kTestMaxTargetAtoms, kTestMaxQueryAtoms>::StorageType;
   AsyncDeviceVector<LabelStorage> d_labelMatrix(1, stream_.stream());
@@ -516,8 +543,8 @@ TEST_F(SubstructAlgosTestBase, VF2ParamOutputBufferOverflow) {
   SyntheticMoleculeBuilder queryBuilder(2);
   queryBuilder.buildLinearChain(6);
 
-  auto target = targetBuilder.buildTargetView();
-  auto query  = queryBuilder.buildQueryView();
+  auto target = targetBuilder.buildTargetView(stream_.stream());
+  auto query  = queryBuilder.buildQueryView(stream_.stream());
 
   using LabelStorage = typename BitMatrix2DView<kTestMaxTargetAtoms, kTestMaxQueryAtoms>::StorageType;
   AsyncDeviceVector<LabelStorage> d_labelMatrix(1, stream_.stream());
@@ -588,8 +615,8 @@ TEST_P(GSIAlgoTest, SingleAtomQuery) {
   queryBuilder.setAtomicNum(0, 6);
   queryBuilder.setDegree(0, 0);
 
-  auto target = targetBuilder.buildTargetView();
-  auto query  = queryBuilder.buildQueryView();
+  auto target = targetBuilder.buildTargetView(stream_.stream());
+  auto query  = queryBuilder.buildQueryView(stream_.stream());
 
   using LabelStorage = typename BitMatrix2DView<kTestMaxTargetAtoms, kTestMaxQueryAtoms>::StorageType;
   AsyncDeviceVector<LabelStorage>                      d_labelMatrix(1, stream_.stream());
@@ -653,8 +680,8 @@ TEST_P(GSIAlgoTest, TwoAtomChain) {
   SyntheticMoleculeBuilder queryBuilder(2);
   queryBuilder.buildLinearChain(6);
 
-  auto target = targetBuilder.buildTargetView();
-  auto query  = queryBuilder.buildQueryView();
+  auto target = targetBuilder.buildTargetView(stream_.stream());
+  auto query  = queryBuilder.buildQueryView(stream_.stream());
 
   using LabelStorage = typename BitMatrix2DView<kTestMaxTargetAtoms, kTestMaxQueryAtoms>::StorageType;
   AsyncDeviceVector<LabelStorage>                      d_labelMatrix(1, stream_.stream());
@@ -722,8 +749,8 @@ TEST_P(GSIAlgoTest, NoMatch) {
   SyntheticMoleculeBuilder queryBuilder(1);
   queryBuilder.setAtomicNum(0, 7);
 
-  auto target = targetBuilder.buildTargetView();
-  auto query  = queryBuilder.buildQueryView();
+  auto target = targetBuilder.buildTargetView(stream_.stream());
+  auto query  = queryBuilder.buildQueryView(stream_.stream());
 
   using LabelStorage = typename BitMatrix2DView<kTestMaxTargetAtoms, kTestMaxQueryAtoms>::StorageType;
   AsyncDeviceVector<LabelStorage>                      d_labelMatrix(1, stream_.stream());
@@ -791,8 +818,8 @@ TEST_F(SubstructAlgosTestBase, GSIPaintMode) {
   queryBuilder.setAtomicNum(0, 6);
   queryBuilder.setDegree(0, 0);
 
-  auto target = targetBuilder.buildTargetView();
-  auto query  = queryBuilder.buildQueryView();
+  auto target = targetBuilder.buildTargetView(stream_.stream());
+  auto query  = queryBuilder.buildQueryView(stream_.stream());
 
   using LabelStorage = typename BitMatrix2DView<kTestMaxTargetAtoms, kTestMaxQueryAtoms>::StorageType;
   AsyncDeviceVector<LabelStorage>                      d_labelMatrix(1, stream_.stream());
@@ -937,8 +964,8 @@ TEST_F(SubstructAlgosTestBase, NitroGroupInNitrobenzene) {
   queryBuilder.addQueryBond(0, 2);
   queryBuilder.addQueryBond(2, 0);
 
-  auto target = targetBuilder.buildTargetView();
-  auto query  = queryBuilder.buildQueryView();
+  auto target = targetBuilder.buildTargetView(stream_.stream());
+  auto query  = queryBuilder.buildQueryView(stream_.stream());
 
   using LabelStorage = typename BitMatrix2DView<kTestMaxTargetAtoms, kTestMaxQueryAtoms>::StorageType;
   AsyncDeviceVector<LabelStorage>                      d_labelMatrix(1, stream_.stream());
@@ -1066,8 +1093,8 @@ TEST_F(SubstructAlgosTestBase, MultipleNitroGroupsLikeTNT) {
   queryBuilder.addQueryBond(0, 2);
   queryBuilder.addQueryBond(2, 0);
 
-  auto target = targetBuilder.buildTargetView();
-  auto query  = queryBuilder.buildQueryView();
+  auto target = targetBuilder.buildTargetView(stream_.stream());
+  auto query  = queryBuilder.buildQueryView(stream_.stream());
 
   using LabelStorage = typename BitMatrix2DView<kTestMaxTargetAtoms, kTestMaxQueryAtoms>::StorageType;
   AsyncDeviceVector<LabelStorage>                      d_labelMatrix(1, stream_.stream());
@@ -1151,8 +1178,8 @@ TEST_F(SubstructAlgosTestBase, GSIPartialsSpillToOverflow) {
   SyntheticMoleculeBuilder queryBuilder(numQueryAtoms);
   queryBuilder.buildLinearChain(6);
 
-  auto target = targetBuilder.buildTargetView();
-  auto query  = queryBuilder.buildQueryView();
+  auto target = targetBuilder.buildTargetView(stream_.stream());
+  auto query  = queryBuilder.buildQueryView(stream_.stream());
 
   using LabelStorage = typename BitMatrix2DView<kTestMaxTargetAtoms, kTestMaxQueryAtoms>::StorageType;
   AsyncDeviceVector<LabelStorage>                      d_labelMatrix(1, stream_.stream());
@@ -1233,8 +1260,8 @@ TEST_F(SubstructAlgosTestBase, GSIPartialsExhausted) {
   SyntheticMoleculeBuilder queryBuilder(numQueryAtoms);
   queryBuilder.buildLinearChain(6);
 
-  auto target = targetBuilder.buildTargetView();
-  auto query  = queryBuilder.buildQueryView();
+  auto target = targetBuilder.buildTargetView(stream_.stream());
+  auto query  = queryBuilder.buildQueryView(stream_.stream());
 
   using LabelStorage = typename BitMatrix2DView<kTestMaxTargetAtoms, kTestMaxQueryAtoms>::StorageType;
   AsyncDeviceVector<LabelStorage>                      d_labelMatrix(1, stream_.stream());
@@ -1314,8 +1341,8 @@ TEST_F(SubstructAlgosTestBase, VF2OutputBufferOverflow) {
   SyntheticMoleculeBuilder queryBuilder(numQueryAtoms);
   queryBuilder.buildLinearChain(6);
 
-  auto target = targetBuilder.buildTargetView();
-  auto query  = queryBuilder.buildQueryView();
+  auto target = targetBuilder.buildTargetView(stream_.stream());
+  auto query  = queryBuilder.buildQueryView(stream_.stream());
 
   using LabelStorage = typename BitMatrix2DView<kTestMaxTargetAtoms, kTestMaxQueryAtoms>::StorageType;
   AsyncDeviceVector<LabelStorage> d_labelMatrix(1, stream_.stream());
@@ -1388,8 +1415,8 @@ TEST_F(SubstructAlgosTestBase, GSIOutputBufferOverflow) {
   SyntheticMoleculeBuilder queryBuilder(numQueryAtoms);
   queryBuilder.buildLinearChain(6);
 
-  auto target = targetBuilder.buildTargetView();
-  auto query  = queryBuilder.buildQueryView();
+  auto target = targetBuilder.buildTargetView(stream_.stream());
+  auto query  = queryBuilder.buildQueryView(stream_.stream());
 
   using LabelStorage = typename BitMatrix2DView<kTestMaxTargetAtoms, kTestMaxQueryAtoms>::StorageType;
   AsyncDeviceVector<LabelStorage>                      d_labelMatrix(1, stream_.stream());
