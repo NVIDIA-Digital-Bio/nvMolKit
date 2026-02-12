@@ -26,6 +26,7 @@ def butina(
     cutoff: float,
     neighborlist_max_size: int = 64,
     return_centroids: bool = False,
+    stream: torch.cuda.Stream | None = None,
 ) -> AsyncGpuResult | tuple[AsyncGpuResult, AsyncGpuResult]:
     """
     Perform Butina clustering on a distance matrix.
@@ -47,6 +48,7 @@ def butina(
                               allow parallel processing of larger clusters but use more
                               shared memory.
         return_centroids: Whether to return centroid indices for each cluster.
+        stream: CUDA stream to use. If None, uses the current stream.
     
     Returns:
         - if return_centroids == False: clusters
@@ -58,11 +60,15 @@ def butina(
     Note:
         The distance matrix should be symmetric and have zeros on the diagonal.
     """
+    if stream is not None and not isinstance(stream, torch.cuda.Stream):
+        raise TypeError(f"stream must be a torch.cuda.Stream or None, got {type(stream).__name__}")
+    stream_ptr = (stream if stream is not None else torch.cuda.current_stream()).cuda_stream
     result = _clustering.butina(
         distance_matrix.__cuda_array_interface__,
         cutoff,
         neighborlist_max_size,
         return_centroids,
+        stream_ptr,
     )
     if return_centroids:
         clusters, centroids = result

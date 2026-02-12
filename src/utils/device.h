@@ -18,6 +18,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 
 #include "cuda_runtime.h"
 
@@ -98,6 +99,24 @@ class ScopedCudaEvent {
  private:
   cudaEvent_t original_event_ = nullptr;
 };
+
+/**
+ * @brief Validate and acquire a CUDA stream from an externally-provided pointer value.
+ *
+ * Casts the integer to a cudaStream_t, then validates that the stream handle
+ * is recognized by the CUDA runtime on the current device.  Returns the stream
+ * on success, or std::nullopt if the handle belongs to a different device
+ * context.
+ *
+ * @note The caller must provide a valid CUDA stream pointer (e.g. from
+ *       torch.cuda.Stream.cuda_stream) or 0 for the default stream.
+ *       Passing an arbitrary integer that is not a CUDA stream handle
+ *       is undefined behavior.
+ *
+ * @param streamPtr Stream pointer as an integer (e.g. from Python's
+ *                  torch.cuda.Stream.cuda_stream).  0 is the default stream.
+ */
+std::optional<cudaStream_t> acquireExternalStream(std::uintptr_t streamPtr);
 
 //! Returns the amount of free memory on the current device.
 size_t getDeviceFreeMemory();

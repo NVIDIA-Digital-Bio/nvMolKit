@@ -41,9 +41,11 @@ class MorganFingerprintGenerator {
     std::optional<FingerprintComputeOptions> computeOptions = std::nullopt);
   //! Compute a batch of fingerprints and keep results on GPU.
   //! Note that this method overrides fpSize.
+  //! @param stream CUDA stream to use for output allocation and ordering.
   template <int nBits>
   AsyncDeviceVector<FlatBitVect<nBits>> GetFingerprintsGpuBuffer(
     const std::vector<const RDKit::ROMol*>&  mols,
+    cudaStream_t                             stream         = nullptr,
     std::optional<FingerprintComputeOptions> computeOptions = std::nullopt);
 
   //! Return the current options

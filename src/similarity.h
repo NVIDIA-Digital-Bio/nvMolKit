@@ -35,11 +35,14 @@ struct CrossSimilarityOptions {
 // Tanimoto similarity wrapper functions
 // --------------------------------
 
-AsyncDeviceVector<double> crossTanimotoSimilarityGpuResult(cuda::std::span<const std::uint32_t> bits, int fpSize);
+AsyncDeviceVector<double> crossTanimotoSimilarityGpuResult(cuda::std::span<const std::uint32_t> bits,
+                                                           int                                  fpSize,
+                                                           cudaStream_t                         stream = nullptr);
 
 AsyncDeviceVector<double> crossTanimotoSimilarityGpuResult(cuda::std::span<const std::uint32_t> bitsOneBuffer,
                                                            cuda::std::span<const std::uint32_t> bitsTwoBuffer,
-                                                           int                                  fpSize);
+                                                           int                                  fpSize,
+                                                           cudaStream_t                         stream = nullptr);
 
 std::vector<double> crossTanimotoSimilarityCPUResult(cuda::std::span<const std::uint32_t> bitsOneBuffer,
                                                      cuda::std::span<const std::uint32_t> bitsTwoBuffer,
@@ -49,11 +52,14 @@ std::vector<double> crossTanimotoSimilarityCPUResult(cuda::std::span<const std::
 // Cosine similarity wrapper functions
 // --------------------------------
 
-AsyncDeviceVector<double> crossCosineSimilarityGpuResult(cuda::std::span<const std::uint32_t> bits, int fpSize);
+AsyncDeviceVector<double> crossCosineSimilarityGpuResult(cuda::std::span<const std::uint32_t> bits,
+                                                         int                                  fpSize,
+                                                         cudaStream_t                         stream = nullptr);
 
 AsyncDeviceVector<double> crossCosineSimilarityGpuResult(cuda::std::span<const std::uint32_t> bitsOneBuffer,
                                                          cuda::std::span<const std::uint32_t> bitsTwoBuffer,
-                                                         int                                  fpSize);
+                                                         int                                  fpSize,
+                                                         cudaStream_t                         stream = nullptr);
 
 std::vector<double> crossCosineSimilarityCPUResult(cuda::std::span<const std::uint32_t> bitsOneBuffer,
                                                    cuda::std::span<const std::uint32_t> bitsTwoBuffer,

@@ -15,6 +15,7 @@
 
 import pytest
 import torch
+from rdkit import Chem
 from rdkit.Chem import rdFingerprintGenerator
 
 from nvmolkit.fingerprints import MorganFingerprintGenerator, pack_fingerprint, unpack_fingerprint
@@ -97,3 +98,43 @@ def test_nvmolkit_morgan_fingerprint(size_limited_mols, fpSize, radius):
         assert unpacked.device.type == 'cuda'
         assert unpacked.dtype == torch.bool
         torch.testing.assert_close(ref_fp.ToList(), unpacked.to(int).tolist()[0])
+
+
+def test_fingerprints_on_explicit_stream(size_limited_mols):
+    """Verify fingerprints computed with an explicit stream parameter produce correct results."""
+    fpgen = rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=2048)
+    ref_fps = [fpgen.GetFingerprint(mol) for mol in size_limited_mols]
+
+    s = torch.cuda.Stream()
+    gen = MorganFingerprintGenerator(radius=3, fpSize=2048)
+    result = gen.GetFingerprints(size_limited_mols, stream=s).torch()
+    s.synchronize()
+
+    assert result.shape == (len(size_limited_mols), 2048 // 32)
+    for i in range(len(size_limited_mols)):
+        for j in range(2048):
+            column = j // 32
+            mask = 1 << (j % 32)
+            got_bit = result[i, column].item() & mask != 0
+            assert got_bit == ref_fps[i].GetBit(j)
+
+
+def test_fingerprints_invalid_stream_type(size_limited_mols):
+    gen = MorganFingerprintGenerator(radius=3, fpSize=2048)
+    with pytest.raises(TypeError):
+        gen.GetFingerprints(size_limited_mols, stream=42)
+
+
+def test_gh_issue_84():
+    """Regression test for https://github.com/NVIDIA/nvMolKit/issues/84."""
+    mol = Chem.MolFromSmiles(
+        "CC1(C)C2=C(C=CC(=C2)P(C3=CC=CC=C3)C4=CC=CC=C4)OC5=C1C=CC(=C5)P(C6=CC=CC=C6)C7=CC=CC=C7"
+    )
+    assert mol is not None
+
+    configs = [(2, 512), (2, 1024), (3, 512), (3, 1024)]
+    for i in range(256):
+        radius, fp_size = configs[i % len(configs)]
+        gen = MorganFingerprintGenerator(radius=radius, fpSize=fp_size)
+        bits = unpack_fingerprint(gen.GetFingerprints([mol]).torch()).sum().item()
+        assert bits > 0, f"Got empty fingerprint for BINAP on attempt {i}"

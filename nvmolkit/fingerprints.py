@@ -76,7 +76,7 @@ class MorganFingerprintGenerator:
         """
         self._internal = InternalFPGen(radius, fpSize)
 
-    def GetFingerprints(self, mols: list, num_threads: int = 0):
+    def GetFingerprints(self, mols: list, num_threads: int = 0, stream: torch.cuda.Stream | None = None):
         """Compute Morgan fingerprints for a list of molecules.
 
         Preprocessing of fingerprinting features is done on the CPU, and is parallelized with the `num_threads` argument.
@@ -88,9 +88,13 @@ class MorganFingerprintGenerator:
         Args:
             mols: List of RDKit molecules to generate fingerprints for
             num_threads: Number of CPU threads to use for fingerprint generation. If 0, uses all available threads.
+            stream: CUDA stream to use. If None, uses the current stream.
 
         Returns:
             AsyncGpuResult wrapping a torch.Tensor of shape (len(mols), fpSize / 32) containing the fingerprints.
             Each row is a fingerprint for the corresponding molecule.
         """
-        return AsyncGpuResult(self._internal.GetFingerprintsDevice(mols, num_threads))
+        if stream is not None and not isinstance(stream, torch.cuda.Stream):
+            raise TypeError(f"stream must be a torch.cuda.Stream or None, got {type(stream).__name__}")
+        stream_ptr = (stream if stream is not None else torch.cuda.current_stream()).cuda_stream
+        return AsyncGpuResult(self._internal.GetFingerprintsDevice(mols, num_threads, stream_ptr))

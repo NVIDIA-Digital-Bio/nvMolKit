@@ -103,3 +103,27 @@ def test_butina_returns_centroids():
         members = torch.nonzero(clusters_tensor == cluster_id, as_tuple=False).flatten()
         for member in members:
             assert adjacency[centroid, member].item()
+
+
+def test_butina_on_explicit_stream():
+    n = 100
+    cutoff = 0.1
+    np.random.seed(42)
+    dists = np.random.rand(n, n)
+    dists = np.abs(dists - dists.T)
+    torch_dists = torch.tensor(dists).to('cuda')
+
+    s = torch.cuda.Stream()
+    result = butina(torch_dists, cutoff, stream=s).torch()
+    s.synchronize()
+
+    nvmol_clusts = [tuple(torch.argwhere(result == i).flatten().tolist()) for i in range(result.max() + 1)]
+    check_butina_correctness(torch_dists <= cutoff, nvmol_clusts)
+
+
+def test_butina_invalid_stream_type():
+    n = 10
+    dists = torch.zeros(n, n, device='cuda', dtype=torch.float64)
+    with pytest.raises(TypeError):
+        butina(dists, 0.1, stream=42)
+

@@ -19,13 +19,13 @@ set(CMAKE_SHARED_MODULE_PREFIX "")
 add_library(_DataStructs MODULE DataStructs.cpp)
 target_link_libraries(
   _DataStructs PUBLIC ${Boost_LIBRARIES} ${PYTHON_LIBRARIES} ${RDKit_LIBS}
-                      Similarity)
+                      Similarity device)
 target_include_directories(_DataStructs PRIVATE ${Python_INCLUDE_DIRS})
 installpythontarget(_DataStructs ./)
 
 add_library(_Fingerprints MODULE fingerprints.cpp)
 target_link_libraries(_Fingerprints ${Boost_LIBRARIES} ${PYTHON_LIBRARIES}
-                      ${RDKit_LIBS} morganFingerprint CUDA::cudart)
+                      ${RDKit_LIBS} morganFingerprint device CUDA::cudart)
 target_include_directories(_Fingerprints PRIVATE ${Python_INCLUDE_DIRS})
 installpythontarget(_Fingerprints ./)
 
@@ -64,7 +64,7 @@ target_include_directories(
   _clustering PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils ${Boost_INCLUDE_DIRS}
                      ${Python_INCLUDE_DIRS})
 target_link_libraries(_clustering PUBLIC ${Boost_LIBRARIES} ${PYTHON_LIBRARIES}
-                                         device_vector butina)
+                                         device_vector butina device)
 installpythontarget(_clustering ./)
 
 add_library(_substructure MODULE substructure.cpp)

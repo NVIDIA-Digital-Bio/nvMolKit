@@ -37,6 +37,20 @@ WithDevice::~WithDevice() {
   cudaCheckErrorNoThrow(cudaSetDevice(original_device_id_));
 }
 
+std::optional<cudaStream_t> acquireExternalStream(std::uintptr_t streamPtr) {
+  auto stream = reinterpret_cast<cudaStream_t>(streamPtr);
+  if (streamPtr == 0) {
+    return stream;
+  }
+  cudaError_t err = cudaStreamQuery(stream);
+  if (err == cudaSuccess || err == cudaErrorNotReady) {
+    return stream;
+  }
+  // Clear the sticky error state
+  cudaGetLastError();
+  return std::nullopt;
+}
+
 size_t getDeviceFreeMemory() {
   size_t free  = 0;
   size_t total = 0;

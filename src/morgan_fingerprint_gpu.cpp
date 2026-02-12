@@ -202,11 +202,12 @@ AsyncDeviceVector<FlatBitVect<fpSize>> computeFingerprintsCuImpl(const std::vect
                                                                  const int                               maxRadius,
                                                                  const size_t dispatchChunkSizeInit,
                                                                  const int    nThreads,
-                                                                 std::vector<MorganPerThreadBuffers>& threadBuffers) {
+                                                                 std::vector<MorganPerThreadBuffers>& threadBuffers,
+                                                                 cudaStream_t stream = nullptr) {
   nvMolKit::ScopedNvtxRange range1("MorganFPBatchAllocation");
   const size_t              numMols           = mols.size();
-  auto                      outputAccumulator = AsyncDeviceVector<FlatBitVect<fpSize>>(numMols);
-  cudaCheckError(cudaMemsetAsync(outputAccumulator.data(), 0, numMols * sizeof(FlatBitVect<fpSize>)));
+  auto                      outputAccumulator = AsyncDeviceVector<FlatBitVect<fpSize>>(numMols, stream);
+  cudaCheckError(cudaMemsetAsync(outputAccumulator.data(), 0, numMols * sizeof(FlatBitVect<fpSize>), stream));
   const int nThreadsActual = nThreads == 0 ? omp_get_max_threads() : nThreads;
   threadBuffers.resize(nThreadsActual);
 
@@ -241,8 +242,12 @@ AsyncDeviceVector<FlatBitVect<fpSize>> computeFingerprintsCuImpl(const std::vect
     cudaCheckError(cudaEventRecord(perThreadBuffer.prevMemcpyDoneEvent.event(), perThreadBuffer.stream.stream()));
   }
 
-  // Sync on initial allocation of output buffer
-  cudaCheckError(cudaStreamSynchronize(nullptr));
+  // Ensure output alloc+memset on external stream is visible to per-thread streams
+  ScopedCudaEvent outputAllocDone;
+  cudaCheckError(cudaEventRecord(outputAllocDone.event(), stream));
+  for (const auto& perThreadBuffer : threadBuffers) {
+    cudaCheckError(cudaStreamWaitEvent(perThreadBuffer.stream.stream(), outputAllocDone.event(), 0));
+  }
   range1.pop();
 
   WorkBag work32;
@@ -440,6 +445,14 @@ AsyncDeviceVector<FlatBitVect<fpSize>> computeFingerprintsCuImpl(const std::vect
     }
   }
   exceptionRegistry.rethrow();
+
+  // Make external stream wait on all per-thread work completion
+  for (const auto& buf : threadBuffers) {
+    ScopedCudaEvent workDone;
+    cudaCheckError(cudaEventRecord(workDone.event(), buf.stream.stream()));
+    cudaCheckError(cudaStreamWaitEvent(stream, workDone.event(), 0));
+  }
+
   return outputAccumulator;
 }
 
@@ -532,6 +545,7 @@ std::vector<std::unique_ptr<ExplicitBitVect>> MorganFingerprintGpuGenerator::Get
 template <int nBits>
 AsyncDeviceVector<FlatBitVect<nBits>> MorganFingerprintGpuGenerator::GetFingerprintsGpuBuffer(
   const std::vector<const RDKit::ROMol*>&  mols,
+  cudaStream_t                             stream,
   std::optional<FingerprintComputeOptions> computeOptions) {
   const FingerprintComputeOptions options = computeOptions.value_or(FingerprintComputeOptions());
   if (options.backend != FingerprintComputeBackend::GPU) {
@@ -545,12 +559,14 @@ AsyncDeviceVector<FlatBitVect<nBits>> MorganFingerprintGpuGenerator::GetFingerpr
                                           radius_,
                                           batchSize,
                                           options.numCpuThreads.value_or(omp_get_max_threads()),
-                                          perThreadCpuBuffers_);
+                                          perThreadCpuBuffers_,
+                                          stream);
 }
 
 #define DEFINE_TEMPLATE(fpSize)                                                                                      \
   template AsyncDeviceVector<FlatBitVect<(fpSize)>> MorganFingerprintGpuGenerator::GetFingerprintsGpuBuffer<fpSize>( \
     const std::vector<const RDKit::ROMol*>&  mols,                                                                   \
+    cudaStream_t                             stream,                                                                 \
     std::optional<FingerprintComputeOptions> options);
 DEFINE_TEMPLATE(128)
 DEFINE_TEMPLATE(256)
