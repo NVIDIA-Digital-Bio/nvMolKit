@@ -1,14 +1,30 @@
 # Changelog
 
-## 0.0.1  2025-09-09
+## 0.3.0 - 2025-12-12
 
-### Summary 
+### Summary
 
-Initial release of nvMolKit. Features include:
-- Morgan Fingerprints
-- Tanimoto and Cosine similarity
-- ETKDG conformer generation
-- MMFF optimization
+nvMolKit 0.3.0 adds Butina clustering support, improved performance to MMFF relaxation and conformer generation, and increased compatibility with libraries and compilers.
+
+### Contributors
+- Kevin Boyd (@scal444)
+- Eva Xue (@evasnow1992)
+- Xuangui Huang (@stslxg-nv)
+
+### Features
+- Butina clustering API enabled, using distance matrix input. On an H200 GPU, speedups of 400-1000x can be achieved on datasets up to 60k molecules
+- Improvements to BFGS minimizer. Up to 5x speedup compared to nvMolKit v0.2 on batches of small molecules (<20 atoms), with ~10-20% speedup in the general case. Applies to both MMFF relaxation and conformer generation.
+- Conda-forge releases now support RDKit versions 2024.9.6 to 2025.9.3
+
+### Bug Fixes
+- Fixed a bug where synchronizations on the wrong stream could lead to data races in tests (Issue #28)
+- Fixed several areas where a memcpy could go out of scope before completing (Issue #28, Issue #29)
+- Fixed a bug where ETKDG would exit early with small CPU counts due to an incorrect identification of resource mis-configuration (Issue #31)
+
+### Miscellaneous
+- (C++) Added support for CUB/CCCL > v2.8
+- (C++) Added support for externally specified CCCL
+- (C++) Added support for CUDA 13.0
 
 ## 0.2.0 - 2025-10-24
 
@@ -37,3 +53,13 @@ the first release to have a [conda-forge release](https://anaconda.org/conda-for
 
 ### Miscellaneous
 - Removed unsupported Bulk Similarity APIs ([#12](https://github.com/NVIDIA-Digital-Bio/nvMolKit/pull/12))
+
+## 0.0.1  2025-09-09
+
+### Summary
+
+Initial release of nvMolKit. Features include:
+- Morgan Fingerprints
+- Tanimoto and Cosine similarity
+- ETKDG conformer generation
+- MMFF optimization
