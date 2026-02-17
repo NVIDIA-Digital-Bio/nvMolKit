@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nvMolKit"
-version = "0.2.0"
+version = "0.4.0"
 description = "Python bindings for the nvMolKit project"
 
 
