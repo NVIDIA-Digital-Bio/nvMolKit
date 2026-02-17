@@ -42,6 +42,7 @@ from nvmolkit._substructure import hasSubstructMatch as _hasSubstructMatch
 
 __all__ = [
     "SubstructSearchConfig",
+    "SubstructMatchResults",
     "getSubstructMatches",
     "countSubstructMatches",
     "hasSubstructMatch",
@@ -139,7 +140,14 @@ class SubstructSearchConfig:
 
 
 @dataclass(frozen=True)
-class _CsrMatchView:
+class SubstructMatchResults:
+    """Results of a batch substructure search.
+
+    Indexable as ``results[target_idx][query_idx]`` to obtain a list of numpy
+    arrays, each containing the target atom indices for one match.  Also
+    supports ``results.get_pair(target_idx, query_idx)`` for direct access.
+    """
+
     atom_indices: np.ndarray
     match_indptr: np.ndarray
     pair_indptr: np.ndarray
@@ -148,10 +156,19 @@ class _CsrMatchView:
     def __len__(self) -> int:
         return self.shape[0]
 
-    def __getitem__(self, target_idx: int) -> "_CsrTargetView":
-        return _CsrTargetView(self, target_idx)
+    def __getitem__(self, target_idx: int) -> _SubstructTargetView:
+        return _SubstructTargetView(self, target_idx)
 
     def get_pair(self, target_idx: int, query_idx: int) -> list[np.ndarray]:
+        """Return matches for a single (target, query) pair.
+
+        Args:
+            target_idx: Index into the targets list.
+            query_idx: Index into the queries list.
+
+        Returns:
+            List of numpy arrays, each containing target atom indices for one match.
+        """
         num_targets, num_queries = self.shape
         if target_idx < 0:
             target_idx += num_targets
@@ -172,8 +189,8 @@ class _CsrMatchView:
 
 
 @dataclass(frozen=True)
-class _CsrTargetView:
-    parent: _CsrMatchView
+class _SubstructTargetView:
+    parent: SubstructMatchResults
     target_idx: int
 
     def __len__(self) -> int:
@@ -234,7 +251,7 @@ def getSubstructMatches(
     targets: Sequence[Mol],
     queries: Sequence[Mol],
     config: SubstructSearchConfig | None = None,
-) -> _CsrMatchView:
+) -> SubstructMatchResults:
     """Perform batch substructure matching on GPU, returning full atom-index mappings.
 
     Args:
@@ -244,12 +261,12 @@ def getSubstructMatches(
             If ``None``, uses default configuration.
 
     Returns:
-        A :class:`_CsrMatchView` providing list-like access to match results.
+        A :class:`SubstructMatchResults` providing list-like access to match results.
         Index as ``results[target_idx][query_idx]`` to get a list of numpy
         arrays, each containing the target atom indices for one match.
     """
     if config is None:
         config = SubstructSearchConfig()
     atom_indices, match_indptr, pair_indptr, shape = _getSubstructMatches(targets, queries, config._as_native())
-    return _CsrMatchView(atom_indices, match_indptr, pair_indptr, shape)
+    return SubstructMatchResults(atom_indices, match_indptr, pair_indptr, shape)
 

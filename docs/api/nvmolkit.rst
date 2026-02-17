@@ -74,6 +74,7 @@ Substructure Search
    :template: class_template.rst
 
    substructure.SubstructSearchConfig
+   substructure.SubstructMatchResults
 
 Types
 -----
