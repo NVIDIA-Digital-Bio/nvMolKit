@@ -49,6 +49,33 @@ MMFF Optimization
 
    mmffOptimization.MMFFOptimizeMoleculesConfs
 
+Butina Clustering
+-----------------
+
+.. autosummary::
+   :toctree: generated/
+   :template: function_template.rst
+
+   clustering.butina
+
+Substructure Search
+-------------------
+
+.. autosummary::
+   :toctree: generated/
+   :template: function_template.rst
+
+   substructure.hasSubstructMatch
+   substructure.countSubstructMatches
+   substructure.getSubstructMatches
+
+.. autosummary::
+   :toctree: generated/
+   :template: class_template.rst
+
+   substructure.SubstructSearchConfig
+   substructure.SubstructMatchResults
+
 Types
 -----
 
