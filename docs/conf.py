@@ -63,3 +63,4 @@ napoleon_include_init_with_doc = True
 # -- Options for autodoc -----------------------------------------------------
 
 autodoc_member_order = "bysource"
+autodoc_typehints_format = "short"

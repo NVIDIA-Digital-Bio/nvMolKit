@@ -79,7 +79,7 @@ Conda Forge
 Conda is the recommended way to install nvMolKit, in line with RDKit's recommended installation practice. First, ensure
 you have a conda-based environment manager installed and activated, such as `Miniconda <https://docs.conda.io/en/latest/miniconda.html>`_ or `Miniforge <https://conda-forge.org/download/>`_.
 
-nvMolKit v0.2.0 supports RDKit 2024.09.6 and 2025.03.1.
+nvMolKit v0.4.0 supports RDKit 2024.09.6 through 2025.09.5.
 
 To install with conda, run::
 
@@ -117,6 +117,10 @@ nvMolKit currently supports the following features:
     * Batch optimization of multiple molecules and conformers
     * Supports multiple GPUs
 
+* **Butina clustering**: GPU-accelerated clustering from a distance matrix via the Taylor-Butina method
+
+* **Substructure Search**: GPU-accelerated substructure matching against batches of molecules
+    * Supports SMILES and SMARTS-based query molecules via RDKit
 
 .. _async-results:
 
@@ -150,7 +154,8 @@ The "asynchronous" nature of nvMolKit operations allows you to queue multiple GP
 You can then choose when to synchronize with the GPU and retrieve results or launch additional operations. Numpy conversions involve
 synchronizing with the GPU before copy to the GPU. For torch operations, synchronization can be achieved at any time via `torch.cuda.synchronize()`.
 
-NOTE: Support for streams is not yet implemented, all operations are executed on the default stream.
+Most nvMolKit operations accept an optional ``stream`` parameter (a ``torch.cuda.Stream``) to control which CUDA stream
+the operation runs on. If not specified, the current torch stream is used.
 
 
 Hardware targeting
