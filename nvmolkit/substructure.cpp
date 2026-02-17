@@ -219,17 +219,7 @@ BOOST_PYTHON_MODULE(_substructure) {
 
       return make_tuple(atomIndicesArr, matchIndptrArr, pairIndptrArr, make_tuple(csr->numTargets, csr->numQueries));
     },
-    (arg("targets"), arg("queries"), arg("config") = nvMolKit::SubstructSearchConfig()),
-    "Perform batch substructure matching on GPU.\n"
-    "\n"
-    "Args:\n"
-    "    targets: List of target RDKit molecules\n"
-    "    queries: List of query RDKit molecules (typically from SMARTS)\n"
-    "    config: SubstructSearchConfig with execution settings\n"
-    "\n"
-    "Returns:\n"
-    "    CSR-style tuple of numpy arrays: (atom_indices, match_indptr, pair_indptr, shape).\n"
-    "    Use nvmolkit.substructure.getSubstructMatches() (Python wrapper) for list-like access.");
+    (arg("targets"), arg("queries"), arg("config") = nvMolKit::SubstructSearchConfig()));
 
   def(
     "countSubstructMatches",
@@ -292,16 +282,7 @@ BOOST_PYTHON_MODULE(_substructure) {
                               make_tuple(strides_arr[0], strides_arr[1]),
                               owner);
     },
-    (arg("targets"), arg("queries"), arg("config") = nvMolKit::SubstructSearchConfig()),
-    "Count substructure matches per target/query pair.\n"
-    "\n"
-    "Args:\n"
-    "    targets: List of target RDKit molecules\n"
-    "    queries: List of query RDKit molecules (typically from SMARTS)\n"
-    "    config: SubstructSearchConfig with execution settings\n"
-    "\n"
-    "Returns:\n"
-    "    2D numpy array of int: results[target_idx, query_idx] = match count");
+    (arg("targets"), arg("queries"), arg("config") = nvMolKit::SubstructSearchConfig()));
 
   def(
     "hasSubstructMatch",
@@ -364,16 +345,5 @@ BOOST_PYTHON_MODULE(_substructure) {
                               make_tuple(strides_arr[0], strides_arr[1]),
                               owner);
     },
-    (arg("targets"), arg("queries"), arg("config") = nvMolKit::SubstructSearchConfig()),
-    "Check if targets contain query substructures (boolean results).\n"
-    "\n"
-    "More efficient than getSubstructMatches when only existence is needed.\n"
-    "\n"
-    "Args:\n"
-    "    targets: List of target RDKit molecules\n"
-    "    queries: List of query RDKit molecules (typically from SMARTS)\n"
-    "    config: SubstructSearchConfig with execution settings\n"
-    "\n"
-    "Returns:\n"
-    "    2D numpy array of uint8: results[target_idx, query_idx] = 1 if match exists, 0 otherwise");
+    (arg("targets"), arg("queries"), arg("config") = nvMolKit::SubstructSearchConfig()));
 }
