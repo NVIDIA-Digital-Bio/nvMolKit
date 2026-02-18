@@ -14,6 +14,14 @@ LOG_DIR=$3
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 VERIFY_SCRIPT="$SCRIPT_DIR/verify_conda_distributable.sh"
 
+# Optional: use conda default locations unless you export CONDA_PKGS_DIRS / CONDA_ENVS_PATH (e.g. to scratch)
+if [[ -n "${CONDA_PKGS_DIRS:-}" ]]; then
+  mkdir -p "$CONDA_PKGS_DIRS"
+fi
+if [[ -n "${CONDA_ENVS_PATH:-}" ]]; then
+  mkdir -p "$CONDA_ENVS_PATH"
+fi
+
 if [[ ! -x $VERIFY_SCRIPT ]]; then
   if [[ -f $VERIFY_SCRIPT ]]; then
     chmod +x "$VERIFY_SCRIPT"
@@ -29,7 +37,7 @@ SUMMARY_LOG="$LOG_DIR/summary.log"
 printf 'Verification Summary - %s\n' "$(date)" >"$SUMMARY_LOG"
 
 PYTHON_VERSIONS=("3.10" "3.11" "3.12" "3.13")
-RDKIT_VERSIONS=("2024.09.6" "2025.03.1" "2025.03.2"  "2025.03.3"  "2025.03.4"  "2025.03.5"  "2025.03.6" "2025.09.1" "2025.09.2" "2025.09.3")
+RDKIT_VERSIONS=("2024.09.6" "2025.03.1" "2025.03.2"  "2025.03.3"  "2025.03.4"  "2025.03.5"  "2025.03.6" "2025.09.1" "2025.09.2" "2025.09.3" "2025.09.4" "2025.09.5")
 
 for PYTHON_VERSION in "${PYTHON_VERSIONS[@]}"; do
   for RDKIT_VERSION in "${RDKIT_VERSIONS[@]}"; do
@@ -37,13 +45,15 @@ for PYTHON_VERSION in "${PYTHON_VERSIONS[@]}"; do
     RD_LABEL=${RDKIT_VERSION//./}
     LOG_FILE="$LOG_DIR/verify_py${PY_LABEL}_rdkit${RD_LABEL}.log"
 
+    printf 'Testing Python %s, RDKit %s ... ' "$PYTHON_VERSION" "$RDKIT_VERSION" >&2
     if "$VERIFY_SCRIPT" "$LOCAL_CONDA_ENDPOINT" "$PYTEST_DIR" "$RDKIT_VERSION" "$PYTHON_VERSION" >"$LOG_FILE" 2>&1; then
       printf 'PASS: Python %s, RDKit %s\n' "$PYTHON_VERSION" "$RDKIT_VERSION" | tee -a "$SUMMARY_LOG"
+      echo 'PASS' >&2
     else
       printf 'FAIL: Python %s, RDKit %s\n' "$PYTHON_VERSION" "$RDKIT_VERSION" | tee -a "$SUMMARY_LOG"
+      echo 'FAIL' >&2
     fi
   done
 done
 
-echo "Verification completed. Summary available at $SUMMARY_LOG"
-
+printf 'Verification completed. Summary available at %s\n' "$SUMMARY_LOG" >&2

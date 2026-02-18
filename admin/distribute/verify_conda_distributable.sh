@@ -32,6 +32,14 @@ if [[ $PYTHON_VERSION != 3.* ]]; then
   exit 1
 fi
 
+# Optional: use conda default locations unless you export CONDA_PKGS_DIRS / CONDA_ENVS_PATH (e.g. to scratch)
+if [[ -n "${CONDA_PKGS_DIRS:-}" ]]; then
+  mkdir -p "$CONDA_PKGS_DIRS"
+fi
+if [[ -n "${CONDA_ENVS_PATH:-}" ]]; then
+  mkdir -p "$CONDA_ENVS_PATH"
+fi
+
 LOCAL_CHANNEL_SPEC=$LOCAL_CONDA_ENDPOINT
 
 if [[ $LOCAL_CHANNEL_SPEC != file://* ]]; then
@@ -55,11 +63,13 @@ trap 'cleanup $?' EXIT
 
 eval "$(conda shell.bash hook)"
 
-conda create --name "$ENV_NAME" "python=$PYTHON_VERSION" "rdkit=$RDKIT_VERSION" pytest pandas psutil --yes
+# Create env with python, rdkit, and nvmolkit's other run deps (numpy, pytorch) from conda-forge
+conda create -c conda-forge --name "$ENV_NAME" "python=$PYTHON_VERSION" "rdkit=$RDKIT_VERSION" numpy pytorch pytest pandas psutil --yes
 
 conda activate "$ENV_NAME"
 
-conda install --name "$ENV_NAME" --yes -c "$LOCAL_CHANNEL_SPEC" nvmolkit
+# Force nvmolkit from local only (--no-deps so conda-forge is not used for nvmolkit)
+conda install --name "$ENV_NAME" --yes --no-deps -c "$LOCAL_CHANNEL_SPEC" nvmolkit
 
 pytest "$PYTEST_DIR"
 
