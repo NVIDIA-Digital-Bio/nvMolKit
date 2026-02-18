@@ -47,11 +47,11 @@ for PYTHON_VERSION in "${PYTHON_VERSIONS[@]}"; do
 
     printf 'Testing Python %s, RDKit %s ... ' "$PYTHON_VERSION" "$RDKIT_VERSION" >&2
     if "$VERIFY_SCRIPT" "$LOCAL_CONDA_ENDPOINT" "$PYTEST_DIR" "$RDKIT_VERSION" "$PYTHON_VERSION" >"$LOG_FILE" 2>&1; then
-      printf 'PASS: Python %s, RDKit %s\n' "$PYTHON_VERSION" "$RDKIT_VERSION" | tee -a "$SUMMARY_LOG"
       echo 'PASS' >&2
+      printf 'PASS: Python %s, RDKit %s\n' "$PYTHON_VERSION" "$RDKIT_VERSION" >> "$SUMMARY_LOG"
     else
-      printf 'FAIL: Python %s, RDKit %s\n' "$PYTHON_VERSION" "$RDKIT_VERSION" | tee -a "$SUMMARY_LOG"
       echo 'FAIL' >&2
+      printf 'FAIL: Python %s, RDKit %s\n' "$PYTHON_VERSION" "$RDKIT_VERSION" >> "$SUMMARY_LOG"
     fi
   done
 done
