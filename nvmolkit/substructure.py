@@ -209,11 +209,6 @@ def hasSubstructMatch(
 
     More efficient than :func:`getSubstructMatches` when only existence is needed.
 
-    Supports recursive SMARTS queries. Does not currently support
-    chirality-aware matching (``useChirality``), enhanced stereochemistry
-    (``useEnhancedStereo``), or other advanced RDKit
-    ``SubstructMatchParameters`` options.
-
     Args:
         targets: List of target RDKit molecules.
         queries: List of query RDKit molecules (typically from SMARTS).
@@ -237,11 +232,6 @@ def countSubstructMatches(
 ) -> np.ndarray:
     """Count substructure matches per target/query pair.
 
-    Supports match deduplication (``uniquify``) and recursive SMARTS queries.
-    Does not currently support chirality-aware matching (``useChirality``),
-    enhanced stereochemistry (``useEnhancedStereo``), or other advanced RDKit
-    ``SubstructMatchParameters`` options.
-
     Args:
         targets: List of target RDKit molecules.
         queries: List of query RDKit molecules (typically from SMARTS).
@@ -263,11 +253,6 @@ def getSubstructMatches(
     config: SubstructSearchConfig | None = None,
 ) -> SubstructMatchResults:
     """Perform batch substructure matching on GPU, returning full atom-index mappings.
-
-    Supports match deduplication (``uniquify``) and recursive SMARTS queries.
-    Does not currently support chirality-aware matching (``useChirality``),
-    enhanced stereochemistry (``useEnhancedStereo``), or other advanced RDKit
-    ``SubstructMatchParameters`` options.
 
     Args:
         targets: List of target RDKit molecules.

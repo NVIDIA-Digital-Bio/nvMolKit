@@ -51,11 +51,11 @@ def butina(
         stream: CUDA stream to use. If None, uses the current stream.
     
     Returns:
-        AsyncGpuResult of shape ``(N,)`` with cluster IDs (cluster 0 is the
-        largest) when ``return_centroids`` is False.  When ``return_centroids``
-        is True, returns a tuple ``(clusters, centroids)`` where *centroids* is
-        an AsyncGpuResult of shape ``(num_clusters,)`` containing the centroid
-        index for each cluster ID.
+        - if return_centroids == False: clusters
+          AsyncGpuResult of shape (N,) with cluster IDs. Cluster 0 is the largest.
+        - if return_centroids == True: (clusters, centroids)
+          centroids is an AsyncGpuResult of shape (num_clusters,) containing the
+          centroid index for each cluster ID.
     
     Note:
         The distance matrix should be symmetric and have zeros on the diagonal.
