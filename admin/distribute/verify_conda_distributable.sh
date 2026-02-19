@@ -63,13 +63,17 @@ trap 'cleanup $?' EXIT
 
 eval "$(conda shell.bash hook)"
 
-# Create env with python, rdkit, and nvmolkit's other run deps (numpy, pytorch) from conda-forge
-conda create -c conda-forge --name "$ENV_NAME" "python=$PYTHON_VERSION" "rdkit=$RDKIT_VERSION" numpy pytorch pytest pandas psutil --yes
+# Create env with python, rdkit, nvmolkit run deps (numpy, pytorch, cuda-cudart, etc.) from conda-forge.
+# Pre-installing cuda 12.x run deps allows installing nvmolkit with --no-deps from local only.
+conda create -c conda-forge --name "$ENV_NAME" \
+  "python=$PYTHON_VERSION" "rdkit=$RDKIT_VERSION" \
+  "cuda-cudart>=12.9,<13" "cuda-nvtx>=12.9,<13" "libcublas>=12.9,<13" \
+  numpy pytorch pytest pandas psutil --yes
 
 conda activate "$ENV_NAME"
 
-# Install nvmolkit from local channel first; run deps (cuda-cudart, libcublas, etc.) from conda-forge
-conda install --name "$ENV_NAME" --yes -c "$LOCAL_CHANNEL_SPEC" -c conda-forge nvmolkit
+# Install nvmolkit from local channel only (--no-deps so conda-forge nvmolkit is never used)
+conda install --name "$ENV_NAME" --yes --no-deps -c "$LOCAL_CHANNEL_SPEC" nvmolkit
 
 pytest "$PYTEST_DIR"
 
