@@ -68,8 +68,8 @@ conda create -c conda-forge --name "$ENV_NAME" "python=$PYTHON_VERSION" "rdkit=$
 
 conda activate "$ENV_NAME"
 
-# Force nvmolkit from local only (--no-deps so conda-forge is not used for nvmolkit)
-conda install --name "$ENV_NAME" --yes --no-deps -c "$LOCAL_CHANNEL_SPEC" nvmolkit
+# Install nvmolkit from local channel first; run deps (cuda-cudart, libcublas, etc.) from conda-forge
+conda install --name "$ENV_NAME" --yes -c "$LOCAL_CHANNEL_SPEC" -c conda-forge nvmolkit
 
 pytest "$PYTEST_DIR"
 
