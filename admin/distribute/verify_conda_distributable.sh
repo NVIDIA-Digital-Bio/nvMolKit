@@ -4,7 +4,6 @@ set -exuo pipefail
 
 if [[ $# -ne 4 ]]; then
   echo "Usage: $0 <local_conda_endpoint> <pytest_directory> <rdkit_version> <python_version>" >&2
-  echo "Optional: set NVMOLKIT_CUDA_VER=12.9 (default, V100) or 13.0 (H100) to match artifacts in the channel." >&2
   exit 1
 fi
 
@@ -64,32 +63,17 @@ trap 'cleanup $?' EXIT
 
 eval "$(conda shell.bash hook)"
 
-# CUDA version for run deps (must match nvmolkit artifacts in the channel). Default 12.9 (V100); use 13.0 for H100.
-NVMOLKIT_CUDA_VER=${NVMOLKIT_CUDA_VER:-12.9}
-if [[ "$NVMOLKIT_CUDA_VER" == "12.9" ]]; then
-  CUDA_CUDART_SPEC="cuda-cudart>=12.9,<13"
-  CUDA_NVTX_SPEC="cuda-nvtx>=12.9,<13"
-  LIBCUBLAS_SPEC="libcublas>=12.9,<13"
-elif [[ "$NVMOLKIT_CUDA_VER" == "13.0" ]]; then
-  CUDA_CUDART_SPEC="cuda-cudart>=13,<14"
-  CUDA_NVTX_SPEC="cuda-nvtx>=13,<14"
-  LIBCUBLAS_SPEC="libcublas>=13,<14"
-else
-  echo "NVMOLKIT_CUDA_VER must be 12.9 or 13.0 (got '$NVMOLKIT_CUDA_VER')" >&2
-  exit 1
-fi
-
-# Create env with python, rdkit, nvmolkit run deps (numpy, pytorch, cuda-cudart, etc.) from conda-forge.
-# Pre-installing cuda run deps allows installing nvmolkit with --no-deps from local only.
+# Create env with python, rdkit, and nvmolkit's other run deps (numpy, pytorch) from conda-forge.
 conda create -c conda-forge --name "$ENV_NAME" \
   "python=$PYTHON_VERSION" "rdkit=$RDKIT_VERSION" \
-  "$CUDA_CUDART_SPEC" "$CUDA_NVTX_SPEC" "$LIBCUBLAS_SPEC" \
   numpy pytorch pytest pandas psutil --yes
 
 conda activate "$ENV_NAME"
 
-# Install nvmolkit from local channel only (--no-deps so conda-forge nvmolkit is never used)
-conda install --name "$ENV_NAME" --yes --no-deps -c "$LOCAL_CHANNEL_SPEC" nvmolkit
+# Install nvmolkit from local channel (first), run deps from conda-forge. Strict channel priority
+# ensures nvmolkit is taken from local, not conda-forge.
+conda install --name "$ENV_NAME" --yes --strict-channel-priority \
+  -c "$LOCAL_CHANNEL_SPEC" -c conda-forge nvmolkit
 
 pytest "$PYTEST_DIR"
 
