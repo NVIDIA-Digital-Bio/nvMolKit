@@ -120,7 +120,8 @@ nvMolKit currently supports the following features:
 * **Butina clustering**: GPU-accelerated clustering from a distance matrix via the Taylor-Butina method
 
 * **Substructure Search**: GPU-accelerated substructure matching against batches of molecules
-    * Supports SMILES and SMARTS-based query molecules via RDKit
+    * Supports SMILES and recursive SMARTS-based query molecules via RDKit
+    * Does not yet support chirality-aware matching, enhanced stereochemistry, or other advanced RDKit ``SubstructMatchParameters`` options
 
 .. _async-results:
 
