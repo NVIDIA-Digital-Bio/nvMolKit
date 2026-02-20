@@ -87,6 +87,8 @@ struct LeafSubpatterns {
   /// Max recursion depth across all queries
   int allQueriesMaxDepth = 0;
 
+  int maxPatternAtoms_ = 0;
+
   LeafSubpatterns() = default;
 
   /**
@@ -129,6 +131,11 @@ struct LeafSubpatterns {
    * @brief Get the number of patterns.
    */
   [[nodiscard]] size_t size() const { return patternIndexMap.size(); }
+
+  /**
+   * @brief Max atom count across all leaf subpatterns.
+   */
+  [[nodiscard]] int maxPatternAtoms() const { return maxPatternAtoms_; }
 
   /**
    * @brief Get view for kernel access.

@@ -89,6 +89,13 @@ void LeafSubpatterns::buildAllPatterns(const MoleculesHost& queriesHost) {
     }
   }
 
+  if (patternsHost.numMolecules() > 0) {
+    for (size_t i = 0; i < patternsHost.numMolecules(); ++i) {
+      const int atoms  = patternsHost.batchAtomStarts[i + 1] - patternsHost.batchAtomStarts[i];
+      maxPatternAtoms_ = std::max(maxPatternAtoms_, atoms);
+    }
+  }
+
   // Second pass: build precomputed BatchedPatternEntry structures
   perQueryPatterns.resize(numQueries);
   perQueryMaxDepth.resize(numQueries, 0);
@@ -146,7 +153,7 @@ void LeafSubpatterns::buildAllPatterns(const MoleculesHost& queriesHost) {
     }
 
     for (int d = 0; d <= queryMaxDepth; ++d) {
-      const auto& srcEntries = perQueryPatterns[queryIdx][d];
+      const auto& srcEntries  = perQueryPatterns[queryIdx][d];
       auto&       destEntries = allQueriesPatternsAtDepth[d];
       destEntries.insert(destEntries.end(), srcEntries.begin(), srcEntries.end());
     }
@@ -189,6 +196,11 @@ void RecursivePatternPreprocessor::preprocessMiniBatch(
   ScopedNvtxRange processRecursiveRange("launchRecursivePaintKernels");
 
   scratch.setStream(stream);
+
+  const auto baseProps        = getTemplateConfigProperties(templateConfig);
+  const int  paintQueryAtoms  = std::max(baseProps.maxQueryAtoms, leafSubpatterns_.maxPatternAtoms());
+  const int  paintTargetAtoms = std::max(baseProps.maxTargetAtoms, paintQueryAtoms);
+  const auto paintConfig      = selectTemplateConfig(paintTargetAtoms, paintQueryAtoms, baseProps.maxBondsPerAtom);
 
   constexpr int gsiBuffersPerBlock = 2;
 
@@ -257,7 +269,7 @@ void RecursivePatternPreprocessor::preprocessMiniBatch(
       }
       isFirstLabelKernel = false;
 
-      launchLabelMatrixPaintKernel(templateConfig,
+      launchLabelMatrixPaintKernel(paintConfig,
                                    targetsDevice.view<MoleculeType::Target>(),
                                    leafSubpatterns_.view(),
                                    scratch.patternEntries.data(),
@@ -273,7 +285,7 @@ void RecursivePatternPreprocessor::preprocessMiniBatch(
                                    zeroBuffers,
                                    stream);
 
-      launchSubstructPaintKernel(templateConfig,
+      launchSubstructPaintKernel(paintConfig,
                                  algorithm,
                                  targetsDevice.view<MoleculeType::Target>(),
                                  leafSubpatterns_.view(),
@@ -376,6 +388,11 @@ void preprocessRecursiveSmarts(SubstructTemplateConfig           templateConfig,
   const int lastTargetInMiniBatch  = (miniBatchPairOffset + miniBatchSize - 1) / numQueries;
   const int numTargetsInMiniBatch  = lastTargetInMiniBatch - firstTargetInMiniBatch + 1;
 
+  const auto baseProps        = getTemplateConfigProperties(templateConfig);
+  const int  paintQueryAtoms  = std::max(baseProps.maxQueryAtoms, leafSubpatterns.maxPatternAtoms());
+  const int  paintTargetAtoms = std::max(baseProps.maxTargetAtoms, paintQueryAtoms);
+  const auto paintConfig      = selectTemplateConfig(paintTargetAtoms, paintQueryAtoms, baseProps.maxBondsPerAtom);
+
   constexpr int gsiBuffersPerBlock = 2;
 
   const int maxPaintPairsPerSubBatch = std::max(miniBatchSize, 1024);
@@ -449,7 +466,7 @@ void preprocessRecursiveSmarts(SubstructTemplateConfig           templateConfig,
       }
       isFirstLabelKernel = false;
 
-      launchLabelMatrixPaintKernel(templateConfig,
+      launchLabelMatrixPaintKernel(paintConfig,
                                    targetsDevice.view<MoleculeType::Target>(),
                                    leafSubpatterns.view(),
                                    scratch.patternEntries.data(),
@@ -465,7 +482,7 @@ void preprocessRecursiveSmarts(SubstructTemplateConfig           templateConfig,
                                    zeroBuffers,
                                    stream);
 
-      launchSubstructPaintKernel(templateConfig,
+      launchSubstructPaintKernel(paintConfig,
                                  algorithm,
                                  targetsDevice.view<MoleculeType::Target>(),
                                  leafSubpatterns.view(),
