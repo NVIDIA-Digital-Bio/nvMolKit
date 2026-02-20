@@ -91,10 +91,8 @@ class HardwareOptions:
 class AsyncGpuResult:
     """Handle to a GPU result.
 
-    Populates the __cuda_array_interface__ attribute which can be consumed by other libraries. Note that
-    this result is async, and the data cannot be accessed without a sync, such as torch.cuda.synchronize().
-
-    # TODO: Handle devices and streams.
+    Populates the ``__cuda_array_interface__`` attribute which can be consumed by other libraries. Note that
+    this result is async, and the data cannot be accessed without a sync, such as ``torch.cuda.synchronize()``.
     """
     def __init__(self, obj):
         """Internal construction of the AsyncGpuResult object."""
