@@ -177,3 +177,101 @@ TEST(RecursivePreprocessorTest, PaintsBitsForSimpleRecursivePattern) {
   EXPECT_FALSE(hasRecursiveBit(1, 0));
   EXPECT_FALSE(hasRecursiveBit(1, 1));
 }
+
+/**
+ * @brief Leaf subpattern with more atoms than the caller's MaxQueryAtoms
+ *        template tier should not overflow the shared memory label matrix.
+ */
+TEST(RecursivePreprocessorTest, LeafPatternLargerThanConfigMaxQueryAtoms) {
+  ScopedStream stream;
+
+  auto target = makeMolFromSmiles("CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC");
+  auto query  = makeMolFromSmarts("[$(*~C~C~C~C~C~C~C~C~C~C~C~C~C~C~C~C~C)]");
+
+  ASSERT_NE(target, nullptr);
+  ASSERT_NE(query, nullptr);
+
+  std::vector<const RDKit::ROMol*> targets = {target.get()};
+  std::vector<const RDKit::ROMol*> queries = {query.get()};
+  std::vector<int>                 emptySortOrder;
+
+  MoleculesHost targetsHost;
+  nvMolKit::buildTargetBatchParallelInto(targetsHost, 1, targets, emptySortOrder);
+  MoleculesHost queriesHost = nvMolKit::buildQueryBatchParallel(queries, emptySortOrder, 1);
+
+  const int maxTargetAtoms = maxAtomsPerTarget(targetsHost);
+  ASSERT_GE(maxTargetAtoms, 32);
+
+  MoleculesDevice targetsDevice(stream.stream());
+  targetsDevice.copyFromHost(targetsHost);
+
+  RecursivePatternPreprocessor preprocessor;
+  preprocessor.buildPatterns(queriesHost);
+  preprocessor.syncToDevice(stream.stream());
+
+  const LeafSubpatterns& leafSubpatterns = preprocessor.leafSubpatterns();
+  ASSERT_FALSE(leafSubpatterns.empty());
+  ASSERT_GT(leafSubpatterns.maxPatternAtoms(), 16);
+
+  const int numTargets    = 1;
+  const int numQueries    = 1;
+  const int miniBatchSize = numTargets * numQueries;
+
+  AsyncDeviceVector<int> pairMatchStartsDev(static_cast<size_t>(miniBatchSize + 1), stream.stream());
+  pairMatchStartsDev.zero();
+  MiniBatchResultsDevice miniBatchResults(stream.stream());
+  miniBatchResults.allocateMiniBatch(miniBatchSize, pairMatchStartsDev.data(), 0, numQueries, maxTargetAtoms, 2);
+  const std::vector<int> atomCounts = queryAtomCounts(queriesHost);
+  miniBatchResults.setQueryAtomCounts(atomCounts.data(), atomCounts.size());
+  miniBatchResults.zeroRecursiveBits();
+
+  RecursiveScratchBuffers scratch(stream.stream());
+  scratch.allocateBuffers(256);
+
+  std::array<std::vector<BatchedPatternEntry>, kMaxSmartsNestingDepth + 1> patternsAtDepth;
+  for (auto& vec : patternsAtDepth) {
+    vec.clear();
+  }
+
+  const int queryMaxDepth = leafSubpatterns.perQueryMaxDepth.empty() ? 0 : leafSubpatterns.perQueryMaxDepth[0];
+  for (int depth = 0; depth <= queryMaxDepth; ++depth) {
+    const auto& src = leafSubpatterns.perQueryPatterns[0][depth];
+    patternsAtDepth[depth].insert(patternsAtDepth[depth].end(), src.begin(), src.end());
+  }
+
+  preprocessor.preprocessMiniBatch(SubstructTemplateConfig::Config_T32_Q16_B4,
+                                   targetsDevice,
+                                   miniBatchResults,
+                                   numQueries,
+                                   0,
+                                   miniBatchSize,
+                                   SubstructAlgorithm::GSI,
+                                   stream.stream(),
+                                   scratch,
+                                   patternsAtDepth,
+                                   queryMaxDepth,
+                                   0,
+                                   numTargets,
+                                   nullptr,
+                                   0);
+
+  cudaCheckError(cudaStreamSynchronize(stream.stream()));
+  cudaCheckError(cudaGetLastError());
+
+  std::vector<uint32_t> hostBits(static_cast<size_t>(miniBatchSize) * maxTargetAtoms);
+  cudaCheckError(cudaMemcpyAsync(hostBits.data(),
+                                 miniBatchResults.recursiveMatchBits(),
+                                 hostBits.size() * sizeof(uint32_t),
+                                 cudaMemcpyDeviceToHost,
+                                 stream.stream()));
+  cudaCheckError(cudaStreamSynchronize(stream.stream()));
+
+  bool anyBitSet = false;
+  for (size_t i = 0; i < hostBits.size(); ++i) {
+    if (hostBits[i] != 0) {
+      anyBitSet = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(anyBitSet);
+}
