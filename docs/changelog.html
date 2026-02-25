@@ -33,8 +33,9 @@
 
     <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=03e43079" />
     <link rel="stylesheet" type="text/css" href="_static/styles/nvidia-sphinx-theme.css?v=df3ac72c" />
-    <link rel="stylesheet" type="text/css" href="_static/jupyter-sphinx.css?v=572af1d6" />
+    <link rel="stylesheet" type="text/css" href="_static/jupyter-sphinx.css" />
     <link rel="stylesheet" type="text/css" href="_static/thebelab.css" />
+    <link rel="stylesheet" type="text/css" href="_static/copybutton.css?v=76b2166b" />
   
   <!-- So that users can add custom icons -->
   <script src="_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
@@ -42,10 +43,12 @@
   <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
 <link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
 
-    <script src="_static/documentation_options.js?v=e259d695"></script>
+    <script src="_static/documentation_options.js?v=6c02275b"></script>
     <script src="_static/doctools.js?v=9bcbadda"></script>
     <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="_static/thebelab-helper.js"></script>
+    <script src="_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="_static/copybutton.js?v=f281be69"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@jupyter-widgets/html-manager@^1.0.1/dist/embed-amd.js"></script>
     <script>DOCUMENTATION_OPTIONS.pagename = 'changelog';</script>
@@ -56,7 +59,7 @@
 
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
-  <meta name="docsearch:version" content="0.3.0" />
+  <meta name="docsearch:version" content="0.4.0" />
 
 
   </head>
@@ -264,6 +267,11 @@
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.embedMolecules.EmbedMolecules.html">EmbedMolecules</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.mmffOptimization.MMFFOptimizeMoleculesConfs.html">MMFFOptimizeMoleculesConfs</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.clustering.butina.html">butina</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.substructure.hasSubstructMatch.html">hasSubstructMatch</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.substructure.countSubstructMatches.html">countSubstructMatches</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.substructure.getSubstructMatches.html">getSubstructMatches</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.substructure.SubstructSearchConfig.html">SubstructSearchConfig</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.substructure.SubstructMatchResults.html">SubstructMatchResults</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.types.AsyncGpuResult.html">AsyncGpuResult</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.types.HardwareOptions.html">HardwareOptions</a></li>
 </ul>
@@ -325,29 +333,59 @@
   <section id="changelog">
 <h1>Changelog<a class="headerlink" href="#changelog" title="Link to this heading">#</a></h1>
 <section id="id1">
-<h2>0.3.0 - 2025-12-12<a class="headerlink" href="#id1" title="Link to this heading">#</a></h2>
+<h2>0.4.0 - 2026-02-23<a class="headerlink" href="#id1" title="Link to this heading">#</a></h2>
 <section id="summary">
 <h3>Summary<a class="headerlink" href="#summary" title="Link to this heading">#</a></h3>
-<p>nvMolKit 0.3.0 adds Butina clustering support, improved performance to MMFF relaxation and conformer generation, and increased compatibility with libraries and compilers.</p>
+<p>nvMolKit 0.4.0 adds GPU-accelerated substructure searching, optional stream control across Python APIs, and enhancements to Butina clustering.</p>
 </section>
 <section id="contributors">
 <h3>Contributors<a class="headerlink" href="#contributors" title="Link to this heading">#</a></h3>
 <ul class="simple">
 <li><p>Kevin Boyd (&#64;scal444)</p></li>
 <li><p>Eva Xue (&#64;evasnow1992)</p></li>
-<li><p>Xuangui Huang (&#64;stslxg-nv)</p></li>
 </ul>
 </section>
 <section id="features">
 <h3>Features<a class="headerlink" href="#features" title="Link to this heading">#</a></h3>
+<ul class="simple">
+<li><p>GPU-accelerated substructure search with <code class="docutils literal notranslate"><span class="pre">hasSubstructMatch</span></code>, <code class="docutils literal notranslate"><span class="pre">countSubstructMatches</span></code>, and <code class="docutils literal notranslate"><span class="pre">getSubstructMatches</span></code>. Supports batch queries against batch targets with SMARTS-based query molecules.</p></li>
+<li><p>Optional <code class="docutils literal notranslate"><span class="pre">stream</span></code> parameter added to fingerprint generation, similarity, and Butina clustering APIs, enabling explicit CUDA stream control</p></li>
+<li><p>Butina clustering now supports optional centroid reporting via the <code class="docutils literal notranslate"><span class="pre">return_centroids</span></code> parameter (<a class="reference external" href="https://github.com/NVIDIA-Digital-Bio/nvMolKit/pull/82">#82</a>)</p></li>
+<li><p>Butina clustering performance improved by replacing CPU loops with CUDA Graph conditional nodes (<a class="reference external" href="https://github.com/NVIDIA-Digital-Bio/nvMolKit/pull/72">#72</a>)</p></li>
+</ul>
+</section>
+<section id="bug-fixes">
+<h3>Bug Fixes<a class="headerlink" href="#bug-fixes" title="Link to this heading">#</a></h3>
+<ul class="simple">
+<li><p>Fix data races when torch operations immediately followed nvMolKit calls on the default stream (Issue <a class="reference external" href="https://github.com/NVIDIA-Digital-Bio/nvMolKit/issues/84">#84</a>). Operations now correctly use the current stream or an explicit <code class="docutils literal notranslate"><span class="pre">stream</span></code> parameter (<a class="reference external" href="https://github.com/NVIDIA-Digital-Bio/nvMolKit/issues/36">#36</a>).</p></li>
+<li><p>Fix <code class="docutils literal notranslate"><span class="pre">setup.py</span></code> compatibility on some Python versions and rework CUDA target detection (<a class="reference external" href="https://github.com/NVIDIA-Digital-Bio/nvMolKit/pull/68">#68</a>)</p></li>
+</ul>
+</section>
+</section>
+<section id="id2">
+<h2>0.3.0 - 2025-12-12<a class="headerlink" href="#id2" title="Link to this heading">#</a></h2>
+<section id="id3">
+<h3>Summary<a class="headerlink" href="#id3" title="Link to this heading">#</a></h3>
+<p>nvMolKit 0.3.0 adds Butina clustering support, improved performance to MMFF relaxation and conformer generation, and increased compatibility with libraries and compilers.</p>
+</section>
+<section id="id4">
+<h3>Contributors<a class="headerlink" href="#id4" title="Link to this heading">#</a></h3>
+<ul class="simple">
+<li><p>Kevin Boyd (&#64;scal444)</p></li>
+<li><p>Eva Xue (&#64;evasnow1992)</p></li>
+<li><p>Xuangui Huang (&#64;stslxg-nv)</p></li>
+</ul>
+</section>
+<section id="id5">
+<h3>Features<a class="headerlink" href="#id5" title="Link to this heading">#</a></h3>
 <ul class="simple">
 <li><p>Butina clustering API enabled, using distance matrix input. On an H200 GPU, speedups of 400-1000x can be achieved on datasets up to 60k molecules</p></li>
 <li><p>Improvements to BFGS minimizer. Up to 5x speedup compared to nvMolKit v0.2 on batches of small molecules (&lt;20 atoms), with ~10-20% speedup in the general case. Applies to both MMFF relaxation and conformer generation.</p></li>
 <li><p>Conda-forge releases now support RDKit versions 2024.9.6 to 2025.9.3</p></li>
 </ul>
 </section>
-<section id="bug-fixes">
-<h3>Bug Fixes<a class="headerlink" href="#bug-fixes" title="Link to this heading">#</a></h3>
+<section id="id6">
+<h3>Bug Fixes<a class="headerlink" href="#id6" title="Link to this heading">#</a></h3>
 <ul class="simple">
 <li><p>Fixed a bug where synchronizations on the wrong stream could lead to data races in tests (Issue #28)</p></li>
 <li><p>Fixed several areas where a memcpy could go out of scope before completing (Issue #28, Issue #29)</p></li>
@@ -363,23 +401,23 @@
 </ul>
 </section>
 </section>
-<section id="id2">
-<h2>0.2.0 - 2025-10-24<a class="headerlink" href="#id2" title="Link to this heading">#</a></h2>
-<section id="id3">
-<h3>Summary<a class="headerlink" href="#id3" title="Link to this heading">#</a></h3>
+<section id="id7">
+<h2>0.2.0 - 2025-10-24<a class="headerlink" href="#id7" title="Link to this heading">#</a></h2>
+<section id="id8">
+<h3>Summary<a class="headerlink" href="#id8" title="Link to this heading">#</a></h3>
 <p>nvMolKit 0.2.0 comes with significant usability and feature-completeness improvements to existing functionality. It is also
 the first release to have a <a class="reference external" href="https://anaconda.org/conda-forge/nvmolkit">conda-forge release</a>.</p>
 </section>
-<section id="id4">
-<h3>Contributors<a class="headerlink" href="#id4" title="Link to this heading">#</a></h3>
+<section id="id9">
+<h3>Contributors<a class="headerlink" href="#id9" title="Link to this heading">#</a></h3>
 <ul class="simple">
 <li><p>Kevin Boyd (&#64;scal444)</p></li>
 <li><p>Eva Xue (&#64;evasnow1992)</p></li>
 <li><p>Ignacio Pickering (&#64;ignaciojpickering)</p></li>
 </ul>
 </section>
-<section id="id5">
-<h3>Features<a class="headerlink" href="#id5" title="Link to this heading">#</a></h3>
+<section id="id10">
+<h3>Features<a class="headerlink" href="#id10" title="Link to this heading">#</a></h3>
 <ul class="simple">
 <li><p>Add memory-segmented cross-similarity code, enabling larger datasets on systems with limited GPU memory (<a class="reference external" href="https://github.com/NVIDIA-Digital-Bio/nvMolKit/pull/13">#13</a>)</p></li>
 <li><p>Support conformer deduplication in ETKDG conformer generation (<a class="reference external" href="https://github.com/NVIDIA-Digital-Bio/nvMolKit/pull/14">#14</a>)</p></li>
@@ -387,8 +425,8 @@ the first release to have a <a class="reference external" href="https://anaconda
 <li><p>Enable all combinations of (ET)(K)(DG) in conformer generator (<a class="reference external" href="https://github.com/NVIDIA-Digital-Bio/nvMolKit/pull/17">#17</a>)</p></li>
 </ul>
 </section>
-<section id="id6">
-<h3>Bug Fixes<a class="headerlink" href="#id6" title="Link to this heading">#</a></h3>
+<section id="id11">
+<h3>Bug Fixes<a class="headerlink" href="#id11" title="Link to this heading">#</a></h3>
 <ul class="simple">
 <li><p>Fix compilation error on C++ build with target=native on Hopper architecture GPUs. (<a class="reference external" href="https://github.com/NVIDIA-Digital-Bio/nvMolKit/pull/6">#6</a>)</p></li>
 <li><p>Fix lack of device-set cleanup in multi-GPU code (<a class="reference external" href="https://github.com/NVIDIA-Digital-Bio/nvMolKit/pull/8">#8</a>)</p></li>
@@ -397,17 +435,17 @@ the first release to have a <a class="reference external" href="https://anaconda
 <li><p>Fix crash in most multithreaded APIs whenever exceptions are thrown inside of OpenMP loop. Exceptions now properly propagated to python (<a class="reference external" href="https://github.com/NVIDIA-Digital-Bio/nvMolKit/pull/18">#18</a>)</p></li>
 </ul>
 </section>
-<section id="id7">
-<h3>Miscellaneous<a class="headerlink" href="#id7" title="Link to this heading">#</a></h3>
+<section id="id12">
+<h3>Miscellaneous<a class="headerlink" href="#id12" title="Link to this heading">#</a></h3>
 <ul class="simple">
 <li><p>Removed unsupported Bulk Similarity APIs (<a class="reference external" href="https://github.com/NVIDIA-Digital-Bio/nvMolKit/pull/12">#12</a>)</p></li>
 </ul>
 </section>
 </section>
-<section id="id8">
-<h2>0.0.1  2025-09-09<a class="headerlink" href="#id8" title="Link to this heading">#</a></h2>
-<section id="id9">
-<h3>Summary<a class="headerlink" href="#id9" title="Link to this heading">#</a></h3>
+<section id="id13">
+<h2>0.0.1  2025-09-09<a class="headerlink" href="#id13" title="Link to this heading">#</a></h2>
+<section id="id14">
+<h3>Summary<a class="headerlink" href="#id14" title="Link to this heading">#</a></h3>
 <p>Initial release of nvMolKit. Features include:</p>
 <ul class="simple">
 <li><p>Morgan Fingerprints</p></li>
@@ -459,24 +497,31 @@ the first release to have a <a class="reference external" href="https://anaconda
   </div>
   <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="visible nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#id1">0.3.0 - 2025-12-12</a><ul class="nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#id1">0.4.0 - 2026-02-23</a><ul class="nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#summary">Summary</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#contributors">Contributors</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#features">Features</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#bug-fixes">Bug Fixes</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#miscellaneous">Miscellaneous</a></li>
 </ul>
 </li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#id2">0.2.0 - 2025-10-24</a><ul class="nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#id2">0.3.0 - 2025-12-12</a><ul class="nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id3">Summary</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id4">Contributors</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id5">Features</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id6">Bug Fixes</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id7">Miscellaneous</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#miscellaneous">Miscellaneous</a></li>
 </ul>
 </li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#id8">0.0.1  2025-09-09</a><ul class="nav section-nav flex-column">
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id9">Summary</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#id7">0.2.0 - 2025-10-24</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id8">Summary</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id9">Contributors</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id10">Features</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id11">Bug Fixes</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id12">Miscellaneous</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#id13">0.0.1  2025-09-09</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id14">Summary</a></li>
 </ul>
 </li>
 </ul>
@@ -564,7 +609,7 @@ the first release to have a <a class="reference external" href="https://anaconda
 
   <p class="copyright">
     
-      Copyright © 2025, NVIDIA Corporation &amp; Affiliates.
+      Copyright © 2025-2026, NVIDIA Corporation &amp; Affiliates.
       <br/>
     
   </p>

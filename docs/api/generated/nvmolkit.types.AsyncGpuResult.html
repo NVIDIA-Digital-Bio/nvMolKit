@@ -33,8 +33,9 @@
 
     <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=03e43079" />
     <link rel="stylesheet" type="text/css" href="../../_static/styles/nvidia-sphinx-theme.css?v=df3ac72c" />
-    <link rel="stylesheet" type="text/css" href="../../_static/jupyter-sphinx.css?v=572af1d6" />
+    <link rel="stylesheet" type="text/css" href="../../_static/jupyter-sphinx.css" />
     <link rel="stylesheet" type="text/css" href="../../_static/thebelab.css" />
+    <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
   
   <!-- So that users can add custom icons -->
   <script src="../../_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
@@ -42,10 +43,12 @@
   <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
 <link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
 
-    <script src="../../_static/documentation_options.js?v=e259d695"></script>
+    <script src="../../_static/documentation_options.js?v=6c02275b"></script>
     <script src="../../_static/doctools.js?v=9bcbadda"></script>
     <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../../_static/thebelab-helper.js"></script>
+    <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../_static/copybutton.js?v=f281be69"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@jupyter-widgets/html-manager@^1.0.1/dist/embed-amd.js"></script>
     <script>DOCUMENTATION_OPTIONS.pagename = 'api/generated/nvmolkit.types.AsyncGpuResult';</script>
@@ -53,11 +56,11 @@
     <link rel="index" title="Index" href="../../genindex.html" />
     <link rel="search" title="Search" href="../../search.html" />
     <link rel="next" title="HardwareOptions" href="nvmolkit.types.HardwareOptions.html" />
-    <link rel="prev" title="butina" href="nvmolkit.clustering.butina.html" />
+    <link rel="prev" title="SubstructMatchResults" href="nvmolkit.substructure.SubstructMatchResults.html" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
-  <meta name="docsearch:version" content="0.3.0" />
+  <meta name="docsearch:version" content="0.4.0" />
 
 
   </head>
@@ -265,6 +268,11 @@
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.embedMolecules.EmbedMolecules.html">EmbedMolecules</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.mmffOptimization.MMFFOptimizeMoleculesConfs.html">MMFFOptimizeMoleculesConfs</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.clustering.butina.html">butina</a></li>
+<li class="toctree-l2"><a class="reference internal" href="nvmolkit.substructure.hasSubstructMatch.html">hasSubstructMatch</a></li>
+<li class="toctree-l2"><a class="reference internal" href="nvmolkit.substructure.countSubstructMatches.html">countSubstructMatches</a></li>
+<li class="toctree-l2"><a class="reference internal" href="nvmolkit.substructure.getSubstructMatches.html">getSubstructMatches</a></li>
+<li class="toctree-l2"><a class="reference internal" href="nvmolkit.substructure.SubstructSearchConfig.html">SubstructSearchConfig</a></li>
+<li class="toctree-l2"><a class="reference internal" href="nvmolkit.substructure.SubstructMatchResults.html">SubstructMatchResults</a></li>
 <li class="toctree-l2 current active"><a class="current reference internal" href="#">AsyncGpuResult</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.types.HardwareOptions.html">HardwareOptions</a></li>
 </ul>
@@ -332,9 +340,8 @@
 <dt class="sig sig-object py" id="nvmolkit.types.AsyncGpuResult">
 <em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">nvmolkit.types.</span></span><span class="sig-name descname"><span class="pre">AsyncGpuResult</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">obj</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#nvmolkit.types.AsyncGpuResult" title="Link to this definition">#</a></dt>
 <dd><p>Handle to a GPU result.</p>
-<p>Populates the __cuda_array_interface__ attribute which can be consumed by other libraries. Note that
-this result is async, and the data cannot be accessed without a sync, such as torch.cuda.synchronize().</p>
-<p># TODO: Handle devices and streams.</p>
+<p>Populates the <code class="docutils literal notranslate"><span class="pre">__cuda_array_interface__</span></code> attribute which can be consumed by other libraries. Note that
+this result is async, and the data cannot be accessed without a sync, such as <code class="docutils literal notranslate"><span class="pre">torch.cuda.synchronize()</span></code>.</p>
 <dl class="py method">
 <dt class="sig sig-object py" id="nvmolkit.types.AsyncGpuResult.__init__">
 <span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">obj</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#nvmolkit.types.AsyncGpuResult.__init__" title="Link to this definition">#</a></dt>
@@ -374,12 +381,12 @@ this result is async, and the data cannot be accessed without a sync, such as to
                   
 <div class="prev-next-area">
     <a class="left-prev"
-       href="nvmolkit.clustering.butina.html"
+       href="nvmolkit.substructure.SubstructMatchResults.html"
        title="previous page">
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
         <p class="prev-next-subtitle">previous</p>
-        <p class="prev-next-title">butina</p>
+        <p class="prev-next-title">SubstructMatchResults</p>
       </div>
     </a>
     <a class="right-next"
@@ -504,7 +511,7 @@ this result is async, and the data cannot be accessed without a sync, such as to
 
   <p class="copyright">
     
-      Copyright © 2025, NVIDIA Corporation &amp; Affiliates.
+      Copyright © 2025-2026, NVIDIA Corporation &amp; Affiliates.
       <br/>
     
   </p>

@@ -33,8 +33,9 @@
 
     <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=03e43079" />
     <link rel="stylesheet" type="text/css" href="_static/styles/nvidia-sphinx-theme.css?v=df3ac72c" />
-    <link rel="stylesheet" type="text/css" href="_static/jupyter-sphinx.css?v=572af1d6" />
+    <link rel="stylesheet" type="text/css" href="_static/jupyter-sphinx.css" />
     <link rel="stylesheet" type="text/css" href="_static/thebelab.css" />
+    <link rel="stylesheet" type="text/css" href="_static/copybutton.css?v=76b2166b" />
   
   <!-- So that users can add custom icons -->
   <script src="_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
@@ -42,10 +43,12 @@
   <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
 <link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
 
-    <script src="_static/documentation_options.js?v=e259d695"></script>
+    <script src="_static/documentation_options.js?v=6c02275b"></script>
     <script src="_static/doctools.js?v=9bcbadda"></script>
     <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="_static/thebelab-helper.js"></script>
+    <script src="_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="_static/copybutton.js?v=f281be69"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@jupyter-widgets/html-manager@^1.0.1/dist/embed-amd.js"></script>
     <script>DOCUMENTATION_OPTIONS.pagename = 'index';</script>
@@ -56,7 +59,7 @@
 
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
-  <meta name="docsearch:version" content="0.3.0" />
+  <meta name="docsearch:version" content="0.4.0" />
 
 
   </head>
@@ -264,6 +267,11 @@
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.embedMolecules.EmbedMolecules.html">EmbedMolecules</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.mmffOptimization.MMFFOptimizeMoleculesConfs.html">MMFFOptimizeMoleculesConfs</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.clustering.butina.html">butina</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.substructure.hasSubstructMatch.html">hasSubstructMatch</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.substructure.countSubstructMatches.html">countSubstructMatches</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.substructure.getSubstructMatches.html">getSubstructMatches</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.substructure.SubstructSearchConfig.html">SubstructSearchConfig</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.substructure.SubstructMatchResults.html">SubstructMatchResults</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.types.AsyncGpuResult.html">AsyncGpuResult</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.types.HardwareOptions.html">HardwareOptions</a></li>
 </ul>
@@ -364,7 +372,7 @@ A CUDA Driver compatible with CUDA 12.6 or later is also required (driver versio
 <h3>Conda Forge<a class="headerlink" href="#conda-forge" title="Link to this heading">#</a></h3>
 <p>Conda is the recommended way to install nvMolKit, in line with RDKit’s recommended installation practice. First, ensure
 you have a conda-based environment manager installed and activated, such as <a class="reference external" href="https://docs.conda.io/en/latest/miniconda.html">Miniconda</a> or <a class="reference external" href="https://conda-forge.org/download/">Miniforge</a>.</p>
-<p>nvMolKit v0.3.0 supports RDKit 2024.09.6 through 2025.09.3.</p>
+<p>nvMolKit v0.4.0 supports RDKit 2024.09.6 through 2025.09.5.</p>
 <p>To install with conda, run:</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">conda</span> <span class="n">install</span> <span class="o">-</span><span class="n">c</span> <span class="n">conda</span><span class="o">-</span><span class="n">forge</span> <span class="n">nvmolkit</span>
 </pre></div>
@@ -415,6 +423,14 @@ you have a conda-based environment manager installed and activated, such as <a c
 </dl>
 </li>
 <li><p><strong>Butina clustering</strong>: GPU-accelerated clustering from a distance matrix via the Taylor-Butina method</p></li>
+<li><dl class="simple">
+<dt><strong>Substructure Search</strong>: GPU-accelerated substructure matching against batches of molecules</dt><dd><ul>
+<li><p>Supports SMILES and recursive SMARTS-based query molecules via RDKit</p></li>
+<li><p>Does not yet support chirality-aware matching, enhanced stereochemistry, or other advanced RDKit <code class="docutils literal notranslate"><span class="pre">SubstructMatchParameters</span></code> options</p></li>
+</ul>
+</dd>
+</dl>
+</li>
 </ul>
 </section>
 <section id="asynchronous-gpu-results">
@@ -443,7 +459,8 @@ This object wraps a GPU computation and allows you to access the results in diff
 <p>The “asynchronous” nature of nvMolKit operations allows you to queue multiple GPU operations without waiting for each to complete.
 You can then choose when to synchronize with the GPU and retrieve results or launch additional operations. Numpy conversions involve
 synchronizing with the GPU before copy to the GPU. For torch operations, synchronization can be achieved at any time via <cite>torch.cuda.synchronize()</cite>.</p>
-<p>NOTE: Support for streams is not yet implemented, all operations are executed on the default stream.</p>
+<p>Most nvMolKit operations accept an optional <code class="docutils literal notranslate"><span class="pre">stream</span></code> parameter (a <code class="docutils literal notranslate"><span class="pre">torch.cuda.Stream</span></code>) to control which CUDA stream
+the operation runs on. If not specified, the current torch stream is used.</p>
 </section>
 <section id="hardware-targeting">
 <h2>Hardware targeting<a class="headerlink" href="#hardware-targeting" title="Link to this heading">#</a></h2>
@@ -637,7 +654,7 @@ controlling tunable performance parameters. The <code class="docutils literal no
 
   <p class="copyright">
     
-      Copyright © 2025, NVIDIA Corporation &amp; Affiliates.
+      Copyright © 2025-2026, NVIDIA Corporation &amp; Affiliates.
       <br/>
     
   </p>

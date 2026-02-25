@@ -1,8 +1,9 @@
 ﻿.. SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
-crossCosineSimilarity
+SubstructSearchConfig
 =====================
 
-.. currentmodule:: nvmolkit.similarity
+.. currentmodule:: nvmolkit.substructure
 
-.. autofunction:: crossCosineSimilarity
+.. autoclass:: SubstructSearchConfig
+   :members:

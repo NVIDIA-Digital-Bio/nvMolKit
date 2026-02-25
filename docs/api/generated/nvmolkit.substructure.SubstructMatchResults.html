@@ -9,7 +9,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>crossTanimotoSimilarity &#8212; nvMolKit</title>
+    <title>SubstructMatchResults &#8212; nvMolKit</title>
   
   
   
@@ -51,12 +51,12 @@
     <script src="../../_static/copybutton.js?v=f281be69"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@jupyter-widgets/html-manager@^1.0.1/dist/embed-amd.js"></script>
-    <script>DOCUMENTATION_OPTIONS.pagename = 'api/generated/nvmolkit.similarity.crossTanimotoSimilarity';</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'api/generated/nvmolkit.substructure.SubstructMatchResults';</script>
     <link rel="icon" href="../../_static/favicon.png"/>
     <link rel="index" title="Index" href="../../genindex.html" />
     <link rel="search" title="Search" href="../../search.html" />
-    <link rel="next" title="crossTanimotoSimilarityMemoryConstrained" href="nvmolkit.similarity.crossTanimotoSimilarityMemoryConstrained.html" />
-    <link rel="prev" title="unpack_fingerprint" href="nvmolkit.fingerprints.unpack_fingerprint.html" />
+    <link rel="next" title="AsyncGpuResult" href="nvmolkit.types.AsyncGpuResult.html" />
+    <link rel="prev" title="SubstructSearchConfig" href="nvmolkit.substructure.SubstructSearchConfig.html" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
@@ -261,7 +261,7 @@
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.fingerprints.MorganFingerprintGenerator.html">MorganFingerprintGenerator</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.fingerprints.pack_fingerprint.html">pack_fingerprint</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.fingerprints.unpack_fingerprint.html">unpack_fingerprint</a></li>
-<li class="toctree-l2 current active"><a class="current reference internal" href="#">crossTanimotoSimilarity</a></li>
+<li class="toctree-l2"><a class="reference internal" href="nvmolkit.similarity.crossTanimotoSimilarity.html">crossTanimotoSimilarity</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.similarity.crossTanimotoSimilarityMemoryConstrained.html">crossTanimotoSimilarityMemoryConstrained</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.similarity.crossCosineSimilarity.html">crossCosineSimilarity</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.similarity.crossCosineSimilarityMemoryConstrained.html">crossCosineSimilarityMemoryConstrained</a></li>
@@ -272,7 +272,7 @@
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.substructure.countSubstructMatches.html">countSubstructMatches</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.substructure.getSubstructMatches.html">getSubstructMatches</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.substructure.SubstructSearchConfig.html">SubstructSearchConfig</a></li>
-<li class="toctree-l2"><a class="reference internal" href="nvmolkit.substructure.SubstructMatchResults.html">SubstructMatchResults</a></li>
+<li class="toctree-l2 current active"><a class="current reference internal" href="#">SubstructMatchResults</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.types.AsyncGpuResult.html">AsyncGpuResult</a></li>
 <li class="toctree-l2"><a class="reference internal" href="nvmolkit.types.HardwareOptions.html">HardwareOptions</a></li>
 </ul>
@@ -317,7 +317,7 @@
     
     <li class="breadcrumb-item"><a href="../nvmolkit.html" class="nav-link">nvMolKit APIs</a></li>
     
-    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">crossTanimotoSimilarity</span></li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">SubstructMatchResults</span></li>
   </ul>
 </nav>
 </div>
@@ -334,40 +334,48 @@
 <div id="searchbox"></div>
                 <article class="bd-article">
                   
-  <section id="crosstanimotosimilarity">
-<h1>crossTanimotoSimilarity<a class="headerlink" href="#crosstanimotosimilarity" title="Link to this heading">#</a></h1>
-<dl class="py function">
-<dt class="sig sig-object py" id="nvmolkit.similarity.crossTanimotoSimilarity">
-<span class="sig-prename descclassname"><span class="pre">nvmolkit.similarity.</span></span><span class="sig-name descname"><span class="pre">crossTanimotoSimilarity</span></span><span class="sig-paren">(</span>
+  <section id="substructmatchresults">
+<h1>SubstructMatchResults<a class="headerlink" href="#substructmatchresults" title="Link to this heading">#</a></h1>
+<dl class="py class">
+<dt class="sig sig-object py" id="nvmolkit.substructure.SubstructMatchResults">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">nvmolkit.substructure.</span></span><span class="sig-name descname"><span class="pre">SubstructMatchResults</span></span><span class="sig-paren">(</span>
 
 <dl>
-<dd><em class="sig-param"><span class="n"><span class="pre">fingerprint_group_one</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="nvmolkit.types.AsyncGpuResult.html#nvmolkit.types.AsyncGpuResult" title="nvmolkit.types.AsyncGpuResult"><span class="pre">AsyncGpuResult</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Tensor</span></span></em>,</dd>
-<dd><em class="sig-param"><span class="n"><span class="pre">fingerprint_group_two</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="nvmolkit.types.AsyncGpuResult.html#nvmolkit.types.AsyncGpuResult" title="nvmolkit.types.AsyncGpuResult"><span class="pre">AsyncGpuResult</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>,</dd>
-<dd><em class="sig-param"><span class="n"><span class="pre">stream</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Stream</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>,</dd>
+<dd><em class="sig-param"><span class="n"><span class="pre">atom_indices</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="(in NumPy v2.4)"><span class="pre">ndarray</span></a></span></em>,</dd>
+<dd><em class="sig-param"><span class="n"><span class="pre">match_indptr</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="(in NumPy v2.4)"><span class="pre">ndarray</span></a></span></em>,</dd>
+<dd><em class="sig-param"><span class="n"><span class="pre">pair_indptr</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="(in NumPy v2.4)"><span class="pre">ndarray</span></a></span></em>,</dd>
+<dd><em class="sig-param"><span class="n"><span class="pre">shape</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><span class="pre">tuple</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a><span class="p"><span class="pre">]</span></span></span></em>,</dd>
 </dl>
 
-<span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="nvmolkit.types.AsyncGpuResult.html#nvmolkit.types.AsyncGpuResult" title="nvmolkit.types.AsyncGpuResult"><span class="pre">AsyncGpuResult</span></a></span></span><a class="headerlink" href="#nvmolkit.similarity.crossTanimotoSimilarity" title="Link to this definition">#</a></dt>
-<dd><p>Returns the Tanimoto similarity within a set of fingerprints or between two sets of fingerprints.</p>
-<p>Expects fingerprints generated by nvMolKit or as a torch tensor located on device 0, with the leading dimension corresponding to
-the number of fingerprints, and the second dimension representing the packed fingerprint
-bitfield.</p>
-<p>The special case of fingerprint_group_1 as a 1 x n_bits tensor is equivalent to RDKit’s BulkTanimotoSimilarity.</p>
+<span class="sig-paren">)</span><a class="headerlink" href="#nvmolkit.substructure.SubstructMatchResults" title="Link to this definition">#</a></dt>
+<dd><p>Results of a batch substructure search.</p>
+<p>Indexable as <code class="docutils literal notranslate"><span class="pre">results[target_idx][query_idx]</span></code> to obtain a list of numpy
+arrays, each containing the target atom indices for one match.  Also
+supports <code class="docutils literal notranslate"><span class="pre">results.get_pair(target_idx,</span> <span class="pre">query_idx)</span></code> for direct access.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="nvmolkit.substructure.SubstructMatchResults.get_pair">
+<span class="sig-name descname"><span class="pre">get_pair</span></span><span class="sig-paren">(</span>
+
+<dl>
+<dd><em class="sig-param"><span class="n"><span class="pre">target_idx</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span></em>,</dd>
+<dd><em class="sig-param"><span class="n"><span class="pre">query_idx</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span></em>,</dd>
+</dl>
+
+<span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="(in NumPy v2.4)"><span class="pre">ndarray</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#nvmolkit.substructure.SubstructMatchResults.get_pair" title="Link to this definition">#</a></dt>
+<dd><p>Return matches for a single (target, query) pair.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>fingerprint_group_one</strong> – A torch Tensor or AsyncGpuResult computed from nvMolKit fingerprints</p></li>
-<li><p><strong>fingerprint_group_two</strong> – A torch Tensor or AsyncGpuResult computed from nvMolKit fingerprints,
-or None for all-to-all similarity within fingerprint_group_one.</p></li>
-<li><p><strong>stream</strong> – CUDA stream to use. If None, uses the current stream.</p></li>
+<li><p><strong>target_idx</strong> – Index into the targets list.</p></li>
+<li><p><strong>query_idx</strong> – Index into the queries list.</p></li>
 </ul>
 </dd>
 <dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>An n x m matrix of Tanimoto similarities, with index [i, j] corresponding to the
-similarity between fingerprint i in fingerprint_group_one and fingerprint j in
-fingerprint_group_two. If fingerprint_group_two is None, computes all-to-all
-similarity within fingerprint_group_one.</p>
+<dd class="field-even"><p>List of numpy arrays, each containing target atom indices for one match.</p>
 </dd>
 </dl>
+</dd></dl>
+
 </dd></dl>
 
 </section>
@@ -383,20 +391,20 @@ similarity within fingerprint_group_one.</p>
                   
 <div class="prev-next-area">
     <a class="left-prev"
-       href="nvmolkit.fingerprints.unpack_fingerprint.html"
+       href="nvmolkit.substructure.SubstructSearchConfig.html"
        title="previous page">
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
         <p class="prev-next-subtitle">previous</p>
-        <p class="prev-next-title">unpack_fingerprint</p>
+        <p class="prev-next-title">SubstructSearchConfig</p>
       </div>
     </a>
     <a class="right-next"
-       href="nvmolkit.similarity.crossTanimotoSimilarityMemoryConstrained.html"
+       href="nvmolkit.types.AsyncGpuResult.html"
        title="next page">
       <div class="prev-next-info">
         <p class="prev-next-subtitle">next</p>
-        <p class="prev-next-title">crossTanimotoSimilarityMemoryConstrained</p>
+        <p class="prev-next-title">AsyncGpuResult</p>
       </div>
       <i class="fa-solid fa-angle-right"></i>
     </a>
@@ -421,7 +429,10 @@ similarity within fingerprint_group_one.</p>
   </div>
   <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="visible nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#nvmolkit.similarity.crossTanimotoSimilarity"><code class="docutils literal notranslate"><span class="pre">crossTanimotoSimilarity()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#nvmolkit.substructure.SubstructMatchResults"><code class="docutils literal notranslate"><span class="pre">SubstructMatchResults</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nvmolkit.substructure.SubstructMatchResults.get_pair"><code class="docutils literal notranslate"><span class="pre">get_pair()</span></code></a></li>
+</ul>
+</li>
 </ul>
   </nav></div>
 

@@ -32,8 +32,9 @@
 
     <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=03e43079" />
     <link rel="stylesheet" type="text/css" href="_static/styles/nvidia-sphinx-theme.css?v=df3ac72c" />
-    <link rel="stylesheet" type="text/css" href="_static/jupyter-sphinx.css?v=572af1d6" />
+    <link rel="stylesheet" type="text/css" href="_static/jupyter-sphinx.css" />
     <link rel="stylesheet" type="text/css" href="_static/thebelab.css" />
+    <link rel="stylesheet" type="text/css" href="_static/copybutton.css?v=76b2166b" />
   
   <!-- So that users can add custom icons -->
   <script src="_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
@@ -41,10 +42,12 @@
   <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
 <link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
 
-    <script src="_static/documentation_options.js?v=e259d695"></script>
+    <script src="_static/documentation_options.js?v=6c02275b"></script>
     <script src="_static/doctools.js?v=9bcbadda"></script>
     <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="_static/thebelab-helper.js"></script>
+    <script src="_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="_static/copybutton.js?v=f281be69"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@jupyter-widgets/html-manager@^1.0.1/dist/embed-amd.js"></script>
     <script>DOCUMENTATION_OPTIONS.pagename = 'genindex';</script>
@@ -54,7 +57,7 @@
 
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
-  <meta name="docsearch:version" content="0.3.0" />
+  <meta name="docsearch:version" content="0.4.0" />
 
 
   </head>
@@ -258,6 +261,11 @@
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.embedMolecules.EmbedMolecules.html">EmbedMolecules</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.mmffOptimization.MMFFOptimizeMoleculesConfs.html">MMFFOptimizeMoleculesConfs</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.clustering.butina.html">butina</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.substructure.hasSubstructMatch.html">hasSubstructMatch</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.substructure.countSubstructMatches.html">countSubstructMatches</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.substructure.getSubstructMatches.html">getSubstructMatches</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.substructure.SubstructSearchConfig.html">SubstructSearchConfig</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.substructure.SubstructMatchResults.html">SubstructMatchResults</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.types.AsyncGpuResult.html">AsyncGpuResult</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api/generated/nvmolkit.types.HardwareOptions.html">HardwareOptions</a></li>
 </ul>
@@ -307,8 +315,10 @@
  | <a href="#M"><strong>M</strong></a>
  | <a href="#N"><strong>N</strong></a>
  | <a href="#P"><strong>P</strong></a>
+ | <a href="#S"><strong>S</strong></a>
  | <a href="#T"><strong>T</strong></a>
  | <a href="#U"><strong>U</strong></a>
+ | <a href="#W"><strong>W</strong></a>
  
 </div>
 <h2 id="_">_</h2>
@@ -336,10 +346,14 @@
   <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="api/generated/nvmolkit.types.HardwareOptions.html#nvmolkit.types.HardwareOptions.batchesPerGpu">batchesPerGpu (nvmolkit.types.HardwareOptions property)</a>
 </li>
+      <li><a href="api/generated/nvmolkit.substructure.SubstructSearchConfig.html#nvmolkit.substructure.SubstructSearchConfig.batchSize">batchSize (nvmolkit.substructure.SubstructSearchConfig property)</a>
+
+      <ul>
+        <li><a href="api/generated/nvmolkit.types.HardwareOptions.html#nvmolkit.types.HardwareOptions.batchSize">(nvmolkit.types.HardwareOptions property)</a>
+</li>
+      </ul></li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/generated/nvmolkit.types.HardwareOptions.html#nvmolkit.types.HardwareOptions.batchSize">batchSize (nvmolkit.types.HardwareOptions property)</a>
-</li>
       <li><a href="api/generated/nvmolkit.clustering.butina.html#nvmolkit.clustering.butina">butina() (in module nvmolkit.clustering)</a>
 </li>
   </ul></td>
@@ -348,12 +362,14 @@
 <h2 id="C">C</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/generated/nvmolkit.similarity.crossCosineSimilarity.html#nvmolkit.similarity.crossCosineSimilarity">crossCosineSimilarity() (in module nvmolkit.similarity)</a>
+      <li><a href="api/generated/nvmolkit.substructure.countSubstructMatches.html#nvmolkit.substructure.countSubstructMatches">countSubstructMatches() (in module nvmolkit.substructure)</a>
 </li>
-      <li><a href="api/generated/nvmolkit.similarity.crossCosineSimilarityMemoryConstrained.html#nvmolkit.similarity.crossCosineSimilarityMemoryConstrained">crossCosineSimilarityMemoryConstrained() (in module nvmolkit.similarity)</a>
+      <li><a href="api/generated/nvmolkit.similarity.crossCosineSimilarity.html#nvmolkit.similarity.crossCosineSimilarity">crossCosineSimilarity() (in module nvmolkit.similarity)</a>
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="api/generated/nvmolkit.similarity.crossCosineSimilarityMemoryConstrained.html#nvmolkit.similarity.crossCosineSimilarityMemoryConstrained">crossCosineSimilarityMemoryConstrained() (in module nvmolkit.similarity)</a>
+</li>
       <li><a href="api/generated/nvmolkit.similarity.crossTanimotoSimilarity.html#nvmolkit.similarity.crossTanimotoSimilarity">crossTanimotoSimilarity() (in module nvmolkit.similarity)</a>
 </li>
       <li><a href="api/generated/nvmolkit.similarity.crossTanimotoSimilarityMemoryConstrained.html#nvmolkit.similarity.crossTanimotoSimilarityMemoryConstrained">crossTanimotoSimilarityMemoryConstrained() (in module nvmolkit.similarity)</a>
@@ -380,12 +396,20 @@
 <h2 id="G">G</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="api/generated/nvmolkit.substructure.SubstructMatchResults.html#nvmolkit.substructure.SubstructMatchResults.get_pair">get_pair() (nvmolkit.substructure.SubstructMatchResults method)</a>
+</li>
       <li><a href="api/generated/nvmolkit.fingerprints.MorganFingerprintGenerator.html#nvmolkit.fingerprints.MorganFingerprintGenerator.GetFingerprints">GetFingerprints() (nvmolkit.fingerprints.MorganFingerprintGenerator method)</a>
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/generated/nvmolkit.types.HardwareOptions.html#nvmolkit.types.HardwareOptions.gpuIds">gpuIds (nvmolkit.types.HardwareOptions property)</a>
+      <li><a href="api/generated/nvmolkit.substructure.getSubstructMatches.html#nvmolkit.substructure.getSubstructMatches">getSubstructMatches() (in module nvmolkit.substructure)</a>
 </li>
+      <li><a href="api/generated/nvmolkit.substructure.SubstructSearchConfig.html#nvmolkit.substructure.SubstructSearchConfig.gpuIds">gpuIds (nvmolkit.substructure.SubstructSearchConfig property)</a>
+
+      <ul>
+        <li><a href="api/generated/nvmolkit.types.HardwareOptions.html#nvmolkit.types.HardwareOptions.gpuIds">(nvmolkit.types.HardwareOptions property)</a>
+</li>
+      </ul></li>
   </ul></td>
 </tr></table>
 
@@ -395,13 +419,21 @@
       <li><a href="api/generated/nvmolkit.types.HardwareOptions.html#nvmolkit.types.HardwareOptions">HardwareOptions (class in nvmolkit.types)</a>
 </li>
   </ul></td>
+  <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="api/generated/nvmolkit.substructure.hasSubstructMatch.html#nvmolkit.substructure.hasSubstructMatch">hasSubstructMatch() (in module nvmolkit.substructure)</a>
+</li>
+  </ul></td>
 </tr></table>
 
 <h2 id="M">M</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="api/generated/nvmolkit.substructure.SubstructSearchConfig.html#nvmolkit.substructure.SubstructSearchConfig.maxMatches">maxMatches (nvmolkit.substructure.SubstructSearchConfig property)</a>
+</li>
       <li><a href="api/generated/nvmolkit.mmffOptimization.MMFFOptimizeMoleculesConfs.html#nvmolkit.mmffOptimization.MMFFOptimizeMoleculesConfs">MMFFOptimizeMoleculesConfs() (in module nvmolkit.mmffOptimization)</a>
 </li>
+  </ul></td>
+  <td style="width: 33%; vertical-align: top;"><ul>
       <li>
     module
 
@@ -409,8 +441,6 @@
         <li><a href="api/nvmolkit.html#module-nvmolkit">nvmolkit</a>
 </li>
       </ul></li>
-  </ul></td>
-  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="api/generated/nvmolkit.fingerprints.MorganFingerprintGenerator.html#nvmolkit.fingerprints.MorganFingerprintGenerator">MorganFingerprintGenerator (class in nvmolkit.fingerprints)</a>
 </li>
   </ul></td>
@@ -440,7 +470,23 @@
 </li>
   </ul></td>
   <td style="width: 33%; vertical-align: top;"><ul>
-      <li><a href="api/generated/nvmolkit.types.HardwareOptions.html#nvmolkit.types.HardwareOptions.preprocessingThreads">preprocessingThreads (nvmolkit.types.HardwareOptions property)</a>
+      <li><a href="api/generated/nvmolkit.substructure.SubstructSearchConfig.html#nvmolkit.substructure.SubstructSearchConfig.preprocessingThreads">preprocessingThreads (nvmolkit.substructure.SubstructSearchConfig property)</a>
+
+      <ul>
+        <li><a href="api/generated/nvmolkit.types.HardwareOptions.html#nvmolkit.types.HardwareOptions.preprocessingThreads">(nvmolkit.types.HardwareOptions property)</a>
+</li>
+      </ul></li>
+  </ul></td>
+</tr></table>
+
+<h2 id="S">S</h2>
+<table style="width: 100%" class="indextable genindextable"><tr>
+  <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="api/generated/nvmolkit.substructure.SubstructMatchResults.html#nvmolkit.substructure.SubstructMatchResults">SubstructMatchResults (class in nvmolkit.substructure)</a>
+</li>
+  </ul></td>
+  <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="api/generated/nvmolkit.substructure.SubstructSearchConfig.html#nvmolkit.substructure.SubstructSearchConfig">SubstructSearchConfig (class in nvmolkit.substructure)</a>
 </li>
   </ul></td>
 </tr></table>
@@ -456,7 +502,19 @@
 <h2 id="U">U</h2>
 <table style="width: 100%" class="indextable genindextable"><tr>
   <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="api/generated/nvmolkit.substructure.SubstructSearchConfig.html#nvmolkit.substructure.SubstructSearchConfig.uniquify">uniquify (nvmolkit.substructure.SubstructSearchConfig property)</a>
+</li>
+  </ul></td>
+  <td style="width: 33%; vertical-align: top;"><ul>
       <li><a href="api/generated/nvmolkit.fingerprints.unpack_fingerprint.html#nvmolkit.fingerprints.unpack_fingerprint">unpack_fingerprint (class in nvmolkit.fingerprints)</a>
+</li>
+  </ul></td>
+</tr></table>
+
+<h2 id="W">W</h2>
+<table style="width: 100%" class="indextable genindextable"><tr>
+  <td style="width: 33%; vertical-align: top;"><ul>
+      <li><a href="api/generated/nvmolkit.substructure.SubstructSearchConfig.html#nvmolkit.substructure.SubstructSearchConfig.workerThreads">workerThreads (nvmolkit.substructure.SubstructSearchConfig property)</a>
 </li>
   </ul></td>
 </tr></table>
@@ -563,7 +621,7 @@
 
   <p class="copyright">
     
-      Copyright © 2025, NVIDIA Corporation &amp; Affiliates.
+      Copyright © 2025-2026, NVIDIA Corporation &amp; Affiliates.
       <br/>
     
   </p>

@@ -1,9 +1,8 @@
 ﻿.. SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
-unpack\_fingerprint
+getSubstructMatches
 ===================
 
-.. currentmodule:: nvmolkit.fingerprints
+.. currentmodule:: nvmolkit.substructure
 
-.. autoclass:: unpack_fingerprint
-   :members:
+.. autofunction:: getSubstructMatches
