@@ -16,14 +16,13 @@
 import sys
 
 import pandas as pd
+import torch
 from rdkit.Chem import MolFromSmiles
 from rdkit.ML.Cluster.Butina import ClusterData
-import torch
 
 from nvmolkit.clustering import butina as butina_nvmol
 from nvmolkit.fingerprints import MorganFingerprintGenerator as nvmolMorganGen
 from nvmolkit.similarity import crossTanimotoSimilarity
-
 
 def check_butina_correctness(hit_mat, clusts):
     hit_mat = hit_mat.clone()
@@ -45,7 +44,9 @@ def check_butina_correctness(hit_mat, clusts):
             seen.update(remaining_set)
             break
         counts = hit_mat.sum(-1)
-        assert clust_size == counts.max(), f"Cluster size {clust_size} doesn't match max available count {counts.max()}"
+        assert clust_size == counts.max(), (
+            f"Cluster size {clust_size} doesn't match max available count {counts.max()}"
+        )
         for item in clust:
             assert item not in seen, f"Point {item} assigned to multiple clusters"
             seen.add(item)
@@ -91,9 +92,11 @@ def time_it(func, runs=3, warmups=1):
 def bench_rdkit(data, threshold):
     return time_it(lambda: ClusterData(data, len(data), threshold, isDistData=True, reordering=True))
 
+
 def bench_nvmol_inner(data, threshold, neighborlist_max_size):
     butina_nvmol(data, threshold, neighborlist_max_size=neighborlist_max_size)
     torch.cuda.synchronize()
+
 
 MAX_BENCH_SIZE = 40000
 
@@ -106,7 +109,7 @@ if __name__ == "__main__":
 
     with open(input_data, "r") as f:
         smis = [line.strip() for line in f.readlines()]
-    mols = [MolFromSmiles(smi, sanitize=True) for smi in smis[:MAX_BENCH_SIZE + 100]]
+    mols = [MolFromSmiles(smi, sanitize=True) for smi in smis[: MAX_BENCH_SIZE + 100]]
     mols = [mol for mol in mols if mol is not None]
 
     dists = get_distance_matrix(mols)
@@ -119,37 +122,40 @@ if __name__ == "__main__":
     try:
         for size in sizes:
             for cutoff in cutoffs:
-                    for max_nl in max_nl_sizes:
-                        # Don't run large sizes for edge cases.
-                        if cutoff in (1e-10, 1.1) and size > 20000:
-                            continue
-                        print(f"Running size {size} cutoff {cutoff} max_nl {max_nl}")
-                        dist_mat = resize_and_fill(dists, size)
-                        if do_rdkit:
-                            dist_mat_numpy = dist_mat.cpu().numpy()
-                            rdkit_time, rdk_std = bench_rdkit(dist_mat_numpy, cutoff)
-                        else:
-                            rdkit_time = 0.0
-                            rdk_std = 0.0
-                        nvmol_time, nvmol_std = time_it(lambda: bench_nvmol_inner(dist_mat, cutoff, max_nl))
+                # Don't run large sizes for edge cases.
+                if cutoff in (1e-10, 1.1) and size > 20000:
+                    continue
+                dist_mat = resize_and_fill(dists, size)
+                if do_rdkit:
+                    dist_mat_numpy = dist_mat.cpu().numpy()
+                    rdkit_time, rdk_std = bench_rdkit(dist_mat_numpy, cutoff)
+                else:
+                    rdkit_time = 0.0
+                    rdk_std = 0.0
 
-                        # Verify correctness
-                        nvmol_res = butina_nvmol(dist_mat, cutoff, neighborlist_max_size=max_nl).torch()
-                        torch.cuda.synchronize()
-                        nvmol_clusts = [tuple(torch.argwhere(nvmol_res == i).flatten().tolist()) for i in range(nvmol_res.max() + 1)]
-                        check_butina_correctness(dist_mat <= cutoff, nvmol_clusts)
+                for max_nl in max_nl_sizes:
+                    print(f"Running size {size} cutoff {cutoff} max_nl {max_nl}")
+                    nvmol_time, nvmol_std = time_it(lambda: bench_nvmol_inner(dist_mat, cutoff, max_nl))
 
-                        results.append(
-                            {
-                                "size": size,
-                                "cutoff": cutoff,
-                                "max_neighborlist_size": max_nl,
-                                "rdkit_time_ms": rdkit_time,
-                                "rdkit_std_ms": rdk_std,
-                                "nvmol_time_ms": nvmol_time,
-                                "nvmol_std_ms": nvmol_std,
-                            }
-                        )
+                    # Verify correctness
+                    nvmol_res = butina_nvmol(dist_mat, cutoff, neighborlist_max_size=max_nl).torch()
+                    torch.cuda.synchronize()
+                    nvmol_clusts = [
+                        tuple(torch.argwhere(nvmol_res == i).flatten().tolist()) for i in range(nvmol_res.max() + 1)
+                    ]
+                    check_butina_correctness(dist_mat <= cutoff, nvmol_clusts)
+
+                    results.append(
+                        {
+                            "size": size,
+                            "cutoff": cutoff,
+                            "max_neighborlist_size": max_nl,
+                            "rdkit_time_ms": rdkit_time,
+                            "rdkit_std_ms": rdk_std,
+                            "nvmol_time_ms": nvmol_time,
+                            "nvmol_std_ms": nvmol_std,
+                        }
+                    )
     except Exception as e:
         print(f"Got exception: {e}, exiting early")
     df = pd.DataFrame(results)
