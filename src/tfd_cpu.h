@@ -46,7 +46,8 @@ class TFDCpuGenerator {
   //! @return Angles array [numConformers][totalQuartetsForMol], flattened
   std::vector<float> computeDihedralAngles(const TFDSystemHost& system, int molIdx = 0);
 
-  //! Compute TFD matrix from precomputed angles (multi-quartet aware)
+ private:
+  //! Compute TFD matrix from precomputed angles
   //! @param system Prepared TFD system data
   //! @param molIdx Index of molecule in batch
   //! @param angles Dihedral angles [numConformers][totalQuartetsForMol]
@@ -55,8 +56,7 @@ class TFDCpuGenerator {
                                                  int                       molIdx,
                                                  const std::vector<float>& angles);
 
- private:
-  //! Compute TFD between two conformers (multi-quartet aware)
+  //! Compute TFD between two conformers
   //! @param anglesI Angles for conformer i (totalQuartetsForMol values)
   //! @param anglesJ Angles for conformer j (totalQuartetsForMol values)
   //! @param system TFD system data

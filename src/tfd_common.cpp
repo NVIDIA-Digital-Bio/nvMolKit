@@ -318,14 +318,12 @@ double calculateBeta(const RDKit::ROMol& mol, const double* distMat, int aid1) {
 
 }  // namespace
 
-TorsionList extractTorsionList(const RDKit::ROMol& mol,
-                               TFDMaxDevMode       maxDevMode,
-                               int                 symmRadius,
-                               bool                ignoreColinearBonds) {
+// Internal: build torsion list from precomputed bonds (used when caller already has bonds)
+static TorsionList extractTorsionListImpl(const RDKit::ROMol&          mol,
+                                          TFDMaxDevMode                maxDevMode,
+                                          int                          symmRadius,
+                                          const std::vector<BondInfo>& bonds) {
   TorsionList result;
-
-  // Get bonds for torsions
-  auto bonds = getBondsForTorsions(mol, ignoreColinearBonds);
 
   // Get atom invariants
   std::vector<int> inv;
@@ -346,45 +344,52 @@ TorsionList extractTorsionList(const RDKit::ROMol& mol,
 
     TorsionDef torsion;
 
-    if (d1.size() == 1 && d2.size() == 1) {
-      // Case 1, 2, 4, 5, 7, 10, 16, 12, 17, 19 - single torsion
-      torsion.atomQuartets.push_back(
-        {static_cast<int>(d1[0]->getIdx()), bond.a1, bond.a2, static_cast<int>(d2[0]->getIdx())});
-      torsion.maxDev = 180.0f;
-    } else if (d1.size() == 1) {
-      // Case 3, 6, 8, 13, 20 - multiple torsions from d2
-      for (const auto* nb : d2) {
-        torsion.atomQuartets.push_back(
-          {static_cast<int>(d1[0]->getIdx()), bond.a1, bond.a2, static_cast<int>(nb->getIdx())});
-      }
-      torsion.maxDev = (bond.nb2.size() == 2) ? 90.0f : 60.0f;
-    } else if (d2.size() == 1) {
-      // Case 3, 6, 8, 13, 20 - multiple torsions from d1
-      for (const auto* nb : d1) {
-        torsion.atomQuartets.push_back(
-          {static_cast<int>(nb->getIdx()), bond.a1, bond.a2, static_cast<int>(d2[0]->getIdx())});
-      }
-      torsion.maxDev = (bond.nb1.size() == 2) ? 90.0f : 60.0f;
-    } else {
-      // Both symmetric - all combinations
+    if (maxDevMode == TFDMaxDevMode::Equal) {
+      // Equal mode: all combinations (d1 x d2), maxDev 180 (default path)
       for (const auto* n1 : d1) {
         for (const auto* n2 : d2) {
           torsion.atomQuartets.push_back(
             {static_cast<int>(n1->getIdx()), bond.a1, bond.a2, static_cast<int>(n2->getIdx())});
         }
       }
-      if (bond.nb1.size() == 2 && bond.nb2.size() == 2) {
-        torsion.maxDev = 90.0f;
-      } else if (bond.nb1.size() == 3 && bond.nb2.size() == 3) {
-        torsion.maxDev = 60.0f;
-      } else {
-        torsion.maxDev = 30.0f;
-      }
-    }
-
-    // Override with equal mode if requested
-    if (maxDevMode == TFDMaxDevMode::Equal) {
       torsion.maxDev = 180.0f;
+    } else {
+      // Spec mode: build quartets and set torsion-specific maxDev
+      if (d1.size() == 1 && d2.size() == 1) {
+        // Case 1, 2, 4, 5, 7, 10, 16, 12, 17, 19 - single torsion
+        torsion.atomQuartets.push_back(
+          {static_cast<int>(d1[0]->getIdx()), bond.a1, bond.a2, static_cast<int>(d2[0]->getIdx())});
+        torsion.maxDev = 180.0f;
+      } else if (d1.size() == 1) {
+        // Case 3, 6, 8, 13, 20 - multiple torsions from d2
+        for (const auto* nb : d2) {
+          torsion.atomQuartets.push_back(
+            {static_cast<int>(d1[0]->getIdx()), bond.a1, bond.a2, static_cast<int>(nb->getIdx())});
+        }
+        torsion.maxDev = (bond.nb2.size() == 2) ? 90.0f : 60.0f;
+      } else if (d2.size() == 1) {
+        // Case 3, 6, 8, 13, 20 - multiple torsions from d1
+        for (const auto* nb : d1) {
+          torsion.atomQuartets.push_back(
+            {static_cast<int>(nb->getIdx()), bond.a1, bond.a2, static_cast<int>(d2[0]->getIdx())});
+        }
+        torsion.maxDev = (bond.nb1.size() == 2) ? 90.0f : 60.0f;
+      } else {
+        // Both symmetric - all combinations
+        for (const auto* n1 : d1) {
+          for (const auto* n2 : d2) {
+            torsion.atomQuartets.push_back(
+              {static_cast<int>(n1->getIdx()), bond.a1, bond.a2, static_cast<int>(n2->getIdx())});
+          }
+        }
+        if (bond.nb1.size() == 2 && bond.nb2.size() == 2) {
+          torsion.maxDev = 90.0f;
+        } else if (bond.nb1.size() == 3 && bond.nb2.size() == 3) {
+          torsion.maxDev = 60.0f;
+        } else {
+          torsion.maxDev = 30.0f;
+        }
+      }
     }
 
     result.nonRingTorsions.push_back(std::move(torsion));
@@ -416,9 +421,18 @@ TorsionList extractTorsionList(const RDKit::ROMol& mol,
   return result;
 }
 
-std::vector<float> computeTorsionWeights(const RDKit::ROMol& mol,
-                                         const TorsionList&  torsionList,
-                                         bool                ignoreColinearBonds) {
+TorsionList extractTorsionList(const RDKit::ROMol& mol,
+                               TFDMaxDevMode       maxDevMode,
+                               int                 symmRadius,
+                               bool                ignoreColinearBonds) {
+  auto bonds = getBondsForTorsions(mol, ignoreColinearBonds);
+  return extractTorsionListImpl(mol, maxDevMode, symmRadius, bonds);
+}
+
+// Internal: compute weights using precomputed bonds (used when caller already has bonds)
+static std::vector<float> computeTorsionWeightsImpl(const RDKit::ROMol&          mol,
+                                                    const TorsionList&           torsionList,
+                                                    const std::vector<BondInfo>& bonds) {
   std::vector<float> weights;
 
   // If no torsions, return empty weights
@@ -443,10 +457,7 @@ std::vector<float> computeTorsionWeights(const RDKit::ROMol& mol,
   // Calculate beta
   double beta = calculateBeta(mol, distMat, aid1);
 
-  // Get bonds for torsions (same as used in extractTorsionList)
-  auto bonds = getBondsForTorsions(mol, ignoreColinearBonds);
-
-  // Calculate weights for non-ring torsions
+  // Calculate weights for non-ring torsions (bonds provided by caller)
   for (size_t i = 0; i < bonds.size(); ++i) {
     const auto& bond = bonds[i];
     double      d;
@@ -494,6 +505,13 @@ std::vector<float> computeTorsionWeights(const RDKit::ROMol& mol,
   return weights;
 }
 
+std::vector<float> computeTorsionWeights(const RDKit::ROMol& mol,
+                                         const TorsionList&  torsionList,
+                                         bool                ignoreColinearBonds) {
+  auto bonds = getBondsForTorsions(mol, ignoreColinearBonds);
+  return computeTorsionWeightsImpl(mol, torsionList, bonds);
+}
+
 // Sequential single-molecule builder (used as the building block for parallel batch builds)
 static TFDSystemHost buildTFDSystemImpl(const RDKit::ROMol& mol, const TFDComputeOptions& options) {
   TFDSystemHost system;
@@ -505,14 +523,14 @@ static TFDSystemHost buildTFDSystemImpl(const RDKit::ROMol& mol, const TFDComput
     throw std::runtime_error("Molecule has no conformers");
   }
 
-  // Extract torsion list
-  TorsionList torsionList =
-    extractTorsionList(mol, options.maxDevMode, options.symmRadius, options.ignoreColinearBonds);
+  // Get bonds once and reuse for torsion list and (optionally) weights
+  auto        bonds       = getBondsForTorsions(mol, options.ignoreColinearBonds);
+  TorsionList torsionList = extractTorsionListImpl(mol, options.maxDevMode, options.symmRadius, bonds);
 
-  // Extract weights if needed
+  // Extract weights if needed (reuse same bonds)
   std::vector<float> weights;
   if (options.useWeights) {
-    weights = computeTorsionWeights(mol, torsionList, options.ignoreColinearBonds);
+    weights = computeTorsionWeightsImpl(mol, torsionList, bonds);
   }
 
   // Capture CSR starts before pushing (for building flattened work items below)
@@ -560,7 +578,6 @@ static TFDSystemHost buildTFDSystemImpl(const RDKit::ROMol& mol, const TFDComput
 
     if (torsion.atomQuartets.size() > 1) {
       system.torsionTypes.push_back(TorsionType::Symmetric);
-      system.hasMultiQuartet = true;
     } else {
       system.torsionTypes.push_back(TorsionType::Single);
     }
@@ -589,7 +606,6 @@ static TFDSystemHost buildTFDSystemImpl(const RDKit::ROMol& mol, const TFDComput
 
     if (torsion.atomQuartets.size() > 1) {
       system.torsionTypes.push_back(TorsionType::Ring);
-      system.hasMultiQuartet = true;
     } else {
       system.torsionTypes.push_back(TorsionType::Single);
     }
@@ -607,9 +623,9 @@ static TFDSystemHost buildTFDSystemImpl(const RDKit::ROMol& mol, const TFDComput
   // Dihedral storage: numConformers * totalQuartetsForMol per molecule
   int quartetEndForMol    = system.totalQuartets();
   int totalQuartetsForMol = quartetEndForMol - quartetStartForMol;
-  int dihedStart          = system.molDihedralStarts.back();
+  int dihedStart          = system.totalDihedrals();
   int numDihedrals        = numConformers * totalQuartetsForMol;
-  system.molDihedralStarts.push_back(dihedStart + numDihedrals);
+  system.totalDihedrals_  = dihedStart + numDihedrals;
 
   // Build flattened dihedral work items for this molecule
   // One work item per (conformer, quartet) pair
@@ -721,7 +737,6 @@ TFDSystemHost mergeTFDSystems(std::vector<TFDSystemHost>& systems) {
   // Reserve space to avoid reallocations
   merged.molConformerStarts.reserve(N + 1);
   merged.molTorsionStarts.reserve(N + 1);
-  merged.molDihedralStarts.reserve(N + 1);
   merged.tfdOutputStarts.reserve(N + 1);
   merged.quartetStarts.reserve(totalTors + 1);
   merged.positions.reserve(totalPos);
@@ -749,7 +764,6 @@ TFDSystemHost mergeTFDSystems(std::vector<TFDSystemHost>& systems) {
     // CSR arrays: append final value from each single-molecule system with offset
     merged.molConformerStarts.push_back(confOffset[i] + s.molConformerStarts.back());
     merged.molTorsionStarts.push_back(torsOffset[i] + s.molTorsionStarts.back());
-    merged.molDihedralStarts.push_back(dihedOffset[i] + s.molDihedralStarts.back());
     merged.tfdOutputStarts.push_back(tfdOutOffset[i] + s.tfdOutputStarts.back());
 
     // quartetStarts CSR: skip leading 0, add quartet offset
@@ -769,36 +783,25 @@ TFDSystemHost mergeTFDSystems(std::vector<TFDSystemHost>& systems) {
       merged.confPositionStarts.push_back(posOffset[i] + idx);
     }
 
-    // Dihedral work items: add respective offsets
-    for (int idx : s.dihedralConfIdx) {
-      merged.dihedralConfIdx.push_back(confOffset[i] + idx);
-    }
-    for (int idx : s.dihedralTorsIdx) {
-      merged.dihedralTorsIdx.push_back(quartetOffset[i] + idx);
-    }
-    for (int idx : s.dihedralOutIdx) {
-      merged.dihedralOutIdx.push_back(dihedOffset[i] + idx);
+    // Dihedral work items: add respective offsets (parallel arrays, one loop)
+    for (size_t j = 0; j < s.dihedralConfIdx.size(); ++j) {
+      merged.dihedralConfIdx.push_back(confOffset[i] + s.dihedralConfIdx[j]);
+      merged.dihedralTorsIdx.push_back(quartetOffset[i] + s.dihedralTorsIdx[j]);
+      merged.dihedralOutIdx.push_back(dihedOffset[i] + s.dihedralOutIdx[j]);
     }
 
-    // TFD pair work items: add respective offsets
-    for (int idx : s.tfdAnglesI) {
-      merged.tfdAnglesI.push_back(dihedOffset[i] + idx);
-    }
-    for (int idx : s.tfdAnglesJ) {
-      merged.tfdAnglesJ.push_back(dihedOffset[i] + idx);
-    }
-    for (int idx : s.tfdTorsStart) {
-      merged.tfdTorsStart.push_back(torsOffset[i] + idx);
+    // TFD pair work items: add respective offsets (parallel arrays, one loop)
+    for (size_t j = 0; j < s.tfdAnglesI.size(); ++j) {
+      merged.tfdAnglesI.push_back(dihedOffset[i] + s.tfdAnglesI[j]);
+      merged.tfdAnglesJ.push_back(dihedOffset[i] + s.tfdAnglesJ[j]);
+      merged.tfdTorsStart.push_back(torsOffset[i] + s.tfdTorsStart[j]);
+      merged.tfdOutIdx.push_back(tfdOutOffset[i] + s.tfdOutIdx[j]);
     }
     // tfdNumTorsions: counts, no offset needed
     merged.tfdNumTorsions.insert(merged.tfdNumTorsions.end(), s.tfdNumTorsions.begin(), s.tfdNumTorsions.end());
-    for (int idx : s.tfdOutIdx) {
-      merged.tfdOutIdx.push_back(tfdOutOffset[i] + idx);
-    }
-
-    merged.hasMultiQuartet = merged.hasMultiQuartet || s.hasMultiQuartet;
   }
 
+  merged.totalDihedrals_ = totalDiheds;
   return merged;
 }
 

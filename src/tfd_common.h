@@ -85,9 +85,8 @@ struct TFDSystemHost {
   //! CSR index: torsion boundaries per molecule [nMols + 1]
   std::vector<int> molTorsionStarts = {0};
 
-  //! CSR index: dihedral angle storage boundaries per molecule [nMols + 1]
-  //! Each molecule stores numConformers * totalQuartetsForMol angles contiguously
-  std::vector<int> molDihedralStarts = {0};
+  //! Total number of dihedral angle values (numConformers * totalQuartets across all molecules)
+  int totalDihedrals_ = 0;
 
   //! Flattened 3D coordinates, tightly packed (no padding)
   //! Stored as: conf0_atom0_xyz, conf0_atom1_xyz, ..., conf1_atom0_xyz, ...
@@ -98,8 +97,7 @@ struct TFDSystemHost {
   std::vector<int> confPositionStarts;
 
   //! Flattened torsion atom indices: [totalQuartets][4]
-  //! When hasMultiQuartet is false, totalQuartets == totalTorsions.
-  //! When hasMultiQuartet is true, multiple quartets per torsion are stored contiguously.
+  //! Multiple quartets per torsion (when torsionTypes[t] is Ring or Symmetric) are stored contiguously.
   std::vector<std::array<int, 4>> torsionAtoms;
 
   //! Weight per torsion [totalTorsions]
@@ -114,9 +112,6 @@ struct TFDSystemHost {
   //! CSR index: quartet boundaries per torsion [totalTorsions + 1]
   //! quartetStarts[t] to quartetStarts[t+1] are indices into torsionAtoms for torsion t
   std::vector<int> quartetStarts = {0};
-
-  //! Whether any torsion has more than one quartet
-  bool hasMultiQuartet = false;
 
   //! CSR index: TFD output boundaries per molecule [nMols + 1]
   //! Each molecule with C conformers produces C*(C-1)/2 TFD values
@@ -154,7 +149,7 @@ struct TFDSystemHost {
   int totalTFDOutputs() const { return tfdOutputStarts.empty() ? 0 : tfdOutputStarts.back(); }
 
   //! Total number of dihedral angle values to store
-  int totalDihedrals() const { return molDihedralStarts.empty() ? 0 : molDihedralStarts.back(); }
+  int totalDihedrals() const { return totalDihedrals_; }
 
   //! Total number of dihedral work items (for kernel launch)
   int totalDihedralWorkItems() const { return static_cast<int>(dihedralConfIdx.size()); }
