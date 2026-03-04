@@ -185,7 +185,6 @@ TEST_F(TFDCpuTest, BuildTFDSystem) {
 
   // Single-quartet molecule: totalQuartets == totalTorsions
   EXPECT_EQ(system.totalQuartets(), system.totalTorsions());
-  EXPECT_FALSE(system.hasMultiQuartet);
 }
 
 TEST_F(TFDCpuTest, BuildTFDSystemMultiQuartet) {
@@ -200,7 +199,6 @@ TEST_F(TFDCpuTest, BuildTFDSystemMultiQuartet) {
   EXPECT_EQ(system.numMolecules(), 1);
   EXPECT_EQ(system.totalTorsions(), 1);  // 1 torsion
   EXPECT_EQ(system.totalQuartets(), 2);  // 2 quartets
-  EXPECT_TRUE(system.hasMultiQuartet);
 
   // Verify torsion type
   ASSERT_EQ(system.torsionTypes.size(), 1u);
@@ -226,7 +224,6 @@ TEST_F(TFDCpuTest, BuildTFDSystemRingTorsion) {
 
   EXPECT_EQ(system.totalTorsions(), 1);  // 1 ring torsion
   EXPECT_EQ(system.totalQuartets(), 6);  // 6 quartets in the ring
-  EXPECT_TRUE(system.hasMultiQuartet);
 
   ASSERT_EQ(system.torsionTypes.size(), 1u);
   EXPECT_EQ(system.torsionTypes[0], nvMolKit::TorsionType::Ring);
