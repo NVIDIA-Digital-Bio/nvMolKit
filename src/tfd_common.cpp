@@ -51,11 +51,11 @@ std::vector<const RDKit::Atom*> getHeavyAtomNeighbors(const RDKit::Atom* atom, i
 }
 
 //! Check if all atoms have the same invariant
-bool doMatch(const std::vector<int>& inv, const std::vector<const RDKit::Atom*>& atoms) {
+bool doMatch(const std::vector<std::uint32_t>& inv, const std::vector<const RDKit::Atom*>& atoms) {
   if (atoms.size() < 2) {
     return true;
   }
-  int firstInv = inv[atoms[0]->getIdx()];
+  auto firstInv = inv[atoms[0]->getIdx()];
   for (size_t i = 1; i < atoms.size(); ++i) {
     if (inv[atoms[i]->getIdx()] != firstInv) {
       return false;
@@ -65,7 +65,7 @@ bool doMatch(const std::vector<int>& inv, const std::vector<const RDKit::Atom*>&
 }
 
 //! Find the atom that is different when two atoms match (for 3 atoms)
-const RDKit::Atom* doMatchExcept1(const std::vector<int>& inv, const std::vector<const RDKit::Atom*>& atoms) {
+const RDKit::Atom* doMatchExcept1(const std::vector<std::uint32_t>& inv, const std::vector<const RDKit::Atom*>& atoms) {
   if (atoms.size() != 3) {
     return nullptr;
   }
@@ -84,13 +84,13 @@ const RDKit::Atom* doMatchExcept1(const std::vector<int>& inv, const std::vector
 }
 
 //! Get atom invariants using Morgan fingerprints at given radius
-std::vector<int> getAtomInvariantsWithRadius(const RDKit::ROMol& mol, int radius) {
-  std::vector<int> inv(mol.getNumAtoms(), 0);
+std::vector<std::uint32_t> getAtomInvariantsWithRadius(const RDKit::ROMol& mol, int radius) {
+  std::vector<std::uint32_t> inv(mol.getNumAtoms(), 0);
 
   auto fpGen = RDKit::MorganFingerprint::getMorganGenerator<std::uint32_t>(radius,
-                                                                           true /* countSimulation */,
+                                                                           false /* countSimulation */,
                                                                            false /* includeChirality */,
-                                                                           false /* useBondTypes */,
+                                                                           true /* useBondTypes */,
                                                                            false /* onlyNonzeroInvariants */,
                                                                            true /* includeRedundantEnvironments */);
 
@@ -105,7 +105,7 @@ std::vector<int> getAtomInvariantsWithRadius(const RDKit::ROMol& mol, int radius
     for (const auto& [bitId, atomRadiusPairs] : *bitInfo) {
       for (const auto& [atomIdx, r] : atomRadiusPairs) {
         if (r == static_cast<unsigned int>(radius)) {
-          inv[atomIdx] = static_cast<int>(bitId);
+          inv[atomIdx] = bitId;
         }
       }
     }
@@ -116,7 +116,7 @@ std::vector<int> getAtomInvariantsWithRadius(const RDKit::ROMol& mol, int radius
 
 //! Get reference atoms for torsion based on neighbor symmetry
 std::vector<const RDKit::Atom*> getIndexForTorsion(const std::vector<const RDKit::Atom*>& neighbors,
-                                                   const std::vector<int>&                inv) {
+                                                   const std::vector<std::uint32_t>&      inv) {
   if (neighbors.size() == 1) {
     return neighbors;
   } else if (doMatch(inv, neighbors)) {
@@ -326,7 +326,7 @@ static TorsionList extractTorsionListImpl(const RDKit::ROMol&          mol,
   TorsionList result;
 
   // Get atom invariants
-  std::vector<int> inv;
+  std::vector<std::uint32_t> inv;
   if (symmRadius > 0) {
     inv = getAtomInvariantsWithRadius(mol, symmRadius);
   } else {

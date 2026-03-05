@@ -104,10 +104,8 @@ __global__ void tfdMatrixKernel(const int      totalWorkItems,
       float avgI = 0.0f;
       float avgJ = 0.0f;
       for (int q = 0; q < numQ; ++q) {
-        float ai = dihedralAngles[aI + qLocalStart + q];
-        float aj = dihedralAngles[aJ + qLocalStart + q];
-        avgI += fminf(ai, 360.0f - ai);
-        avgJ += fminf(aj, 360.0f - aj);
+        avgI += fabsf(dihedralAngles[aI + qLocalStart + q] - 180.0f);
+        avgJ += fabsf(dihedralAngles[aJ + qLocalStart + q] - 180.0f);
       }
       avgI /= numQ;
       avgJ /= numQ;
