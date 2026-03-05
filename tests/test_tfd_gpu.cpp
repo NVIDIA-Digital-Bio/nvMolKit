@@ -126,13 +126,15 @@ TEST_F(TFDGpuTest, MatchesCPUReferenceUnweighted) {
 TEST_F(TFDGpuTest, BatchMultipleMolecules) {
   // Mix of single-quartet and multi-quartet molecules in a single batch
   std::vector<std::string> smilesList = {
-    "CCCC",        // n-butane (single-quartet)
-    "CCCCC",       // n-pentane (single-quartet)
-    "CC(C)CC",     // isopentane (symmetric, 2 quartets)
-    "C1CCCCC1",    // cyclohexane (ring, 6 quartets)
-    "c1ccccc1CC",  // ethylbenzene (ring + symmetric)
-    "CCO",         // ethanol
-    "CC(=O)O",     // acetic acid
+    "CCCC",                           // n-butane (single-quartet)
+    "CCCCC",                          // n-pentane (single-quartet)
+    "CC(C)CC",                        // isopentane (symmetric, 2 quartets)
+    "C1CCCCC1",                       // cyclohexane (ring, 6 quartets)
+    "c1ccccc1CC",                     // ethylbenzene (ring + symmetric)
+    "CCO",                            // ethanol
+    "CC(=O)O",                        // acetic acid
+    "CC(=O)[C@H]1CCCC[C@@H]1CN",      // cyclohexane + ketone/amine substituents
+    "C[C@@H](CN(C)C(=O)C#CCN)C1CC1",  // cyclopropane + triple bond
   };
 
   std::vector<std::unique_ptr<RDKit::RWMol>> mols;

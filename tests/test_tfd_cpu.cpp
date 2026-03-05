@@ -124,6 +124,46 @@ TEST_F(TFDCpuTest, ExtractTorsionListRDKitReference) {
     EXPECT_EQ(ringTorsion.atomQuartets[4], (std::array<int, 4>{2, 1, 0, 5}));
     EXPECT_EQ(ringTorsion.atomQuartets[5], (std::array<int, 4>{1, 0, 5, 4}));
   }
+
+  // --- CC(=O)[C@H]1CCCC[C@@H]1CN: 2 non-ring + 1 ring (cyclohexane with substituents) ---
+  {
+    SCOPED_TRACE("CC(=O)[C@H]1CCCC[C@@H]1CN");
+    auto mol = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol("CC(=O)[C@H]1CCCC[C@@H]1CN"));
+    ASSERT_NE(mol, nullptr);
+    auto tl = nvMolKit::extractTorsionList(*mol);
+
+    ASSERT_EQ(tl.nonRingTorsions.size(), 2u);
+    ASSERT_EQ(tl.ringTorsions.size(), 1u);
+
+    EXPECT_EQ(tl.nonRingTorsions[0].atomQuartets[0], (std::array<int, 4>{0, 1, 3, 4}));
+    EXPECT_EQ(tl.nonRingTorsions[1].atomQuartets[0], (std::array<int, 4>{3, 8, 9, 10}));
+
+    ASSERT_EQ(tl.ringTorsions[0].atomQuartets.size(), 6u);
+    EXPECT_NEAR(tl.ringTorsions[0].maxDev, 36.34f, 0.1f);
+    EXPECT_EQ(tl.ringTorsions[0].atomQuartets[0], (std::array<int, 4>{3, 8, 7, 6}));
+    EXPECT_EQ(tl.ringTorsions[0].atomQuartets[5], (std::array<int, 4>{4, 3, 8, 7}));
+  }
+
+  // --- C[C@@H](CN(C)C(=O)C#CCN)C1CC1: 4 non-ring + 1 ring (cyclopropane + triple bond) ---
+  {
+    SCOPED_TRACE("C[C@@H](CN(C)C(=O)C#CCN)C1CC1");
+    auto mol = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol("C[C@@H](CN(C)C(=O)C#CCN)C1CC1"));
+    ASSERT_NE(mol, nullptr);
+    auto tl = nvMolKit::extractTorsionList(*mol);
+
+    ASSERT_EQ(tl.nonRingTorsions.size(), 4u);
+    ASSERT_EQ(tl.ringTorsions.size(), 1u);
+
+    EXPECT_EQ(tl.nonRingTorsions[0].atomQuartets[0], (std::array<int, 4>{0, 1, 2, 3}));
+    EXPECT_EQ(tl.nonRingTorsions[1].atomQuartets[0], (std::array<int, 4>{1, 2, 3, 4}));
+    EXPECT_EQ(tl.nonRingTorsions[2].atomQuartets[0], (std::array<int, 4>{4, 3, 5, 7}));
+    ASSERT_EQ(tl.nonRingTorsions[3].atomQuartets.size(), 2u);
+    EXPECT_EQ(tl.nonRingTorsions[3].atomQuartets[0], (std::array<int, 4>{0, 1, 11, 12}));
+    EXPECT_EQ(tl.nonRingTorsions[3].atomQuartets[1], (std::array<int, 4>{0, 1, 11, 13}));
+
+    ASSERT_EQ(tl.ringTorsions[0].atomQuartets.size(), 3u);
+    EXPECT_NEAR(tl.ringTorsions[0].maxDev, 8.74f, 0.1f);
+  }
 }
 
 // =============================================================================
@@ -141,9 +181,11 @@ TEST_F(TFDCpuTest, ComputeTorsionWeightsRDKitReference) {
 
   // clang-format off
   std::vector<TestCase> cases = {
-    {"CCCC",   {1.0f}},                     // 1 torsion: central bond
-    {"CCCCC",  {1.0f, 0.1f}},               // 2 torsions: central + terminal
-    {"CCCCCC", {0.1f, 1.0f, 0.1f}},         // 3 torsions: symmetric around center
+    {"CCCC",   {1.0f}},                                             // 1 torsion: central bond
+    {"CCCCC",  {1.0f, 0.1f}},                                      // 2 torsions: central + terminal
+    {"CCCCCC", {0.1f, 1.0f, 0.1f}},                                // 3 torsions: symmetric around center
+    {"CC(=O)[C@H]1CCCC[C@@H]1CN", {0.3593813664f, 0.3593813664f, 0.1748047999f}},  // cyclohexane + substituents
+    {"C[C@@H](CN(C)C(=O)C#CCN)C1CC1", {0.5623413252f, 1.0f, 0.5623413252f, 0.1f, 0.0025021508f}},  // cyclopropane + triple bond
   };
   // clang-format on
 
@@ -596,71 +638,59 @@ TEST_F(TFDCpuTest, IgnoreColinearBondsFalse) {
 
 TEST_F(TFDCpuTest, CompareWithRDKitReference) {
   // Compare full TFD pipeline against pre-computed RDKit reference values.
-  // Includes both single-quartet and multi-quartet (ring, symmetric) molecules.
+  // Includes single-quartet, multi-quartet (ring, symmetric), ring+substituent,
+  // and triple-bond molecules.
   //
   // Reference values generated with RDKit Python:
   //   mol = Chem.MolFromSmiles(smiles)
   //   params = AllChem.ETKDGv3()
-  //   params.randomSeed = 42
-  //   AllChem.EmbedMultipleConfs(mol, 4, params)
+  //   params.randomSeed = <seed>
+  //   AllChem.EmbedMultipleConfs(mol, <numConfs>, params)
   //   tfd = TorsionFingerprints.GetTFDMatrix(mol, useWeights=True, maxDev='equal', symmRadius=2)
 
   struct TestCase {
     const char*         smiles;
+    int                 numConfs;
+    int                 seed;
     std::vector<double> reference;
   };
 
   // clang-format off
   std::vector<TestCase> cases = {
-    {"CCCC", {                    // n-butane, 1 torsion
-      0.6667389132,  // TFD(1,0)
-      0.0000726610,  // TFD(2,0)
-      0.6666662521,  // TFD(2,1)
-      0.6667387931,  // TFD(3,0)
-      0.0000001200,  // TFD(3,1)
-      0.6666661321   // TFD(3,2)
+    {"CCCC", 4, 42, {              // n-butane, 1 torsion
+      0.6667389132, 0.0000726610, 0.6666662521,
+      0.6667387931, 0.0000001200, 0.6666661321
     }},
-    {"CCCCC", {                   // n-pentane, 2 torsions
-      0.6060606631,  // TFD[0]
-      0.6060573299,  // TFD[1]
-      0.6060662252,  // TFD[2]
-      0.6666872992,  // TFD[3]
-      0.6666326206,  // TFD[4]
-      0.0606323184   // TFD[5]
+    {"CCCCC", 4, 42, {             // n-pentane, 2 torsions
+      0.6060606631, 0.6060573299, 0.6060662252,
+      0.6666872992, 0.6666326206, 0.0606323184
     }},
-    {"CCCCCC", {                  // n-hexane, 3 torsions
-      0.6111276139,  // TFD[0]
-      0.0555704226,  // TFD[1]
-      0.6666744357,  // TFD[2]
-      0.5555532106,  // TFD[3]
-      0.6111014381,  // TFD[4]
-      0.6111123144   // TFD[5]
+    {"CCCCCC", 4, 42, {            // n-hexane, 3 torsions
+      0.6111276139, 0.0555704226, 0.6666744357,
+      0.5555532106, 0.6111014381, 0.6111123144
     }},
-    {"CC(C)CC", {                   // isopentane, 1 symmetric torsion (2 quartets)
-      0.0000045777,  // TFD[0]
-      0.0433253929,  // TFD[1]
-      0.0433299706,  // TFD[2]
-      0.0000027031,  // TFD[3]
-      0.0000072808,  // TFD[4]
-      0.0433226898   // TFD[5]
+    {"CC(C)CC", 4, 42, {           // isopentane, 1 symmetric torsion (2 quartets)
+      0.0000045777, 0.0433253929, 0.0433299706,
+      0.0000027031, 0.0000072808, 0.0433226898
     }},
-    {"C1CCCCC1", {                  // cyclohexane, 1 ring torsion (6 quartets)
-      0.1343662730,  // TFD[0]
-      0.3653621455,  // TFD[1]
-      0.2309958724,  // TFD[2]
-      0.1017138867,  // TFD[3]
-      0.2360801597,  // TFD[4]
-      0.4670760321   // TFD[5]
+    {"C1CCCCC1", 4, 42, {          // cyclohexane, 1 ring torsion (6 quartets)
+      0.1343662730, 0.3653621455, 0.2309958724,
+      0.1017138867, 0.2360801597, 0.4670760321
     }},
-    {"c1ccccc1CC", {                // ethylbenzene, 1 symmetric non-ring + 1 ring torsion
-      0.0000114982,  // TFD[0]
-      0.0000104863,  // TFD[1]
-      0.0000020789,  // TFD[2]
-      0.0000100311,  // TFD[3]
-      0.0000018047,  // TFD[4]
-      0.0000013199   // TFD[5]
+    {"c1ccccc1CC", 4, 42, {        // ethylbenzene, 1 symmetric non-ring + 1 ring torsion
+      0.0000114982, 0.0000104863, 0.0000020789,
+      0.0000100311, 0.0000018047, 0.0000013199
+    }},
+    {"CC(=O)[C@H]1CCCC[C@@H]1CN", 5, 44, {  // cyclohexane + ketone/amine substituents
+      0.3538817165, 0.5909262055, 0.2991979130, 0.5450659705, 0.6307899386,
+      0.3316291211, 0.5590066863, 0.3311160459, 0.3000513884, 0.5678678139
+    }},
+    {"C[C@@H](CN(C)C(=O)C#CCN)C1CC1", 5, 45, {  // cyclopropane + triple bond
+      0.6173232107, 0.2578577097, 0.8622528617, 0.4208162955, 0.7014876045,
+      0.1738248769, 0.1683354053, 0.4489912664, 0.4239770187, 0.2525001786
     }},
   };
+  // clang-format on
 
   nvMolKit::TFDComputeOptions options;
   options.useWeights          = true;
@@ -674,16 +704,13 @@ TEST_F(TFDCpuTest, CompareWithRDKitReference) {
     auto mol = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol(tc.smiles));
     ASSERT_NE(mol, nullptr);
 
-    generateConformers(*mol, 4, 42);
+    generateConformers(*mol, tc.numConfs, tc.seed);
     auto tfdMatrix = generator_.GetTFDMatrix(*mol, options);
 
     ASSERT_EQ(tfdMatrix.size(), tc.reference.size());
-    // Slightly relaxed tolerance for multi-torsion molecules where floating-point
-    // differences in weight computation accumulate (e.g., hexane ~0.00013 diff)
     constexpr double kRDKitTolerance = 5e-4;
     for (size_t i = 0; i < tfdMatrix.size(); ++i) {
-      EXPECT_NEAR(tfdMatrix[i], tc.reference[i], kRDKitTolerance)
-          << "TFD[" << i << "] mismatch with RDKit reference";
+      EXPECT_NEAR(tfdMatrix[i], tc.reference[i], kRDKitTolerance) << "TFD[" << i << "] mismatch with RDKit reference";
     }
   }
 }

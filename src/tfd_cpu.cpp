@@ -50,15 +50,14 @@ double TFDCpuGenerator::computeTFDPair(const float*         anglesI,
       float diff = detail::circularDifference(anglesI[qLocal], anglesJ[qLocal]);
       deviation  = diff / system.torsionMaxDevs[globalT];
     } else if (type == TorsionType::Ring) {
-      // Average abs(signed dihedral) for each conformer, then compare averages
+      // Average abs(signed dihedral) for each conformer, then compare averages.
+      // Our angles are in [0,360) with a 180° offset from RDKit's signed convention,
+      // so abs(signed) = abs(angle - 180) (not min(angle, 360-angle)).
       double avgI = 0.0;
       double avgJ = 0.0;
       for (int q = 0; q < numQ; ++q) {
-        float ai = anglesI[qLocal + q];
-        float aj = anglesJ[qLocal + q];
-        // Convert [0,360) to abs(signed) = min(angle, 360 - angle) giving [0,180]
-        avgI += std::min(static_cast<double>(ai), 360.0 - ai);
-        avgJ += std::min(static_cast<double>(aj), 360.0 - aj);
+        avgI += std::abs(static_cast<double>(anglesI[qLocal + q]) - 180.0);
+        avgJ += std::abs(static_cast<double>(anglesJ[qLocal + q]) - 180.0);
       }
       avgI /= numQ;
       avgJ /= numQ;
