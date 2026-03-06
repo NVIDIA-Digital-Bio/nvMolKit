@@ -44,12 +44,9 @@ class HardwareOptions:
         native = _embedMolecules.BatchHardwareOptions()
         native.preprocessingThreads = int(preprocessingThreads)
         native.batchSize = int(batchSize)
-        batchesPerGpu = int(batchesPerGpu)
-        if batchesPerGpu != -1 and batchesPerGpu <= 0:
-            raise ValueError("batchesPerGpu must be greater than 0 or -1 for automatic")
-        native.batchesPerGpu = batchesPerGpu
         native.gpuIds = list(gpuIds) if gpuIds is not None else []
         self._native = native
+        self.batchesPerGpu = batchesPerGpu  # reuses setter validation
 
     @property
     def preprocessingThreads(self) -> int:
