@@ -28,6 +28,8 @@ Example:
 """
 
 import argparse
+import os
+import pickle
 import sys
 import time
 from typing import List, Tuple
@@ -92,17 +94,42 @@ def generate_conformers(mol: Chem.Mol, num_confs: int, seed: int = 42) -> Chem.M
     return mol
 
 
-def prepare_molecules(smiles_list: List[str], num_confs: int, max_mols: int = 100) -> List[Chem.Mol]:
-    """Prepare molecules with conformers for benchmarking.
+def _try_load_pickle(num_confs: int, max_mols: int, smiles_file: str = None) -> List[Chem.Mol]:
+    """Try to load precomputed molecules from pickle file."""
+    search_dirs = []
+    if smiles_file:
+        search_dirs.append(os.path.dirname(os.path.abspath(smiles_file)))
+    search_dirs.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
+
+    for d in search_dirs:
+        pkl_path = os.path.join(d, f"prepared_mols_{num_confs}confs.pkl")
+        if os.path.exists(pkl_path):
+            with open(pkl_path, "rb") as f:
+                all_mols = pickle.load(f)
+            mols = all_mols[:max_mols]
+            print(f"  Loaded {len(mols)} molecules from {pkl_path}")
+            return mols
+    return None
+
+
+def prepare_molecules(smiles_list: List[str], num_confs: int, max_mols: int = 100,
+                      smiles_file: str = None) -> List[Chem.Mol]:
+    """Prepare molecules with conformers, using precomputed pickle if available.
 
     Args:
-        smiles_list: List of SMILES strings
+        smiles_list: List of SMILES strings (fallback if no pickle)
         num_confs: Number of conformers per molecule
         max_mols: Maximum number of molecules to prepare
+        smiles_file: Path to SMILES CSV (used to locate pickle files)
 
     Returns:
         List of molecules with conformers
     """
+    cached = _try_load_pickle(num_confs, max_mols, smiles_file)
+    if cached is not None:
+        return cached
+
+    print(f"  No precomputed pickle found, generating from scratch...")
     mols = []
     for i, smi in enumerate(smiles_list):
         if len(mols) >= max_mols:
@@ -112,7 +139,6 @@ def prepare_molecules(smiles_list: List[str], num_confs: int, max_mols: int = 10
         if mol is None:
             continue
 
-        # Skip very small molecules (no torsions)
         if mol.GetNumAtoms() < 4:
             continue
 
@@ -185,6 +211,7 @@ def run_benchmarks(
     smiles_list: List[str],
     skip_rdkit: bool = False,
     output_file: str = "tfd_results.csv",
+    smiles_file: str = None,
 ) -> pd.DataFrame:
     """Run TFD benchmarks with various configurations.
 
@@ -210,7 +237,8 @@ def run_benchmarks(
         print(f"\n--- Preparing molecules with {num_confs} conformers ---")
 
         # Prepare molecules (use larger pool for selection)
-        all_mols = prepare_molecules(smiles_list, num_confs, max_mols=max(mol_counts) + 20)
+        all_mols = prepare_molecules(smiles_list, num_confs, max_mols=max(mol_counts) + 20,
+                                     smiles_file=smiles_file)
 
         if len(all_mols) < max(mol_counts):
             print(f"Warning: Only {len(all_mols)} molecules available")
@@ -361,7 +389,8 @@ def main():
     # Optional: Verify correctness
     if args.verify:
         print("\nVerifying correctness...")
-        test_mols = prepare_molecules(smiles_list[:20], num_confs=5, max_mols=5)
+        test_mols = prepare_molecules(smiles_list[:20], num_confs=5, max_mols=5,
+                                      smiles_file=args.smiles_file)
         all_correct = True
         for i, mol in enumerate(test_mols):
             if verify_correctness(mol):
@@ -377,6 +406,7 @@ def main():
         smiles_list,
         skip_rdkit=args.skip_rdkit,
         output_file=args.output,
+        smiles_file=args.smiles_file,
     )
 
 
