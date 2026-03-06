@@ -372,9 +372,13 @@ def test_embed_molecules_invalid_params():
 
 @pytest.mark.parametrize("invalid_value", [0, -2, -99])
 def test_embed_molecules_invalid_batches_per_gpu(invalid_value):
-    """Test that invalid batchesPerGpu values are rejected at construction time."""
+    """Test that invalid batchesPerGpu values are rejected at construction time and via setter."""
     with pytest.raises(ValueError, match="batchesPerGpu must be greater than 0 or -1"):
         HardwareOptions(batchesPerGpu=invalid_value)
+
+    hw = HardwareOptions()
+    with pytest.raises(ValueError, match="batchesPerGpu must be greater than 0 or -1"):
+        hw.batchesPerGpu = invalid_value
 
 
 def test_embed_molecules_with_hardware_options(embed_test_mols):
