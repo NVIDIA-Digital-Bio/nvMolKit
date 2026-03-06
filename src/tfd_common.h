@@ -234,11 +234,16 @@ void transferToDevice(const TFDSystemHost& host, TFDSystemDevice& device, cudaSt
 //! Build TFDSystemHost from a batch of molecules
 //! @param mols Vector of molecules (each may have multiple conformers)
 //! @param options Computation options
+//! @param skipGpuWorkItems If true, skip building flattened GPU kernel work items
+//!        (dihedralConfIdx/TorsIdx/OutIdx, tfdAnglesI/J/TorsStart/NumTorsions/OutIdx).
+//!        Use for CPU-only paths to avoid unnecessary allocation.
 //! @return Populated TFDSystemHost ready for GPU transfer or CPU computation
-TFDSystemHost buildTFDSystem(const std::vector<const RDKit::ROMol*>& mols, const TFDComputeOptions& options);
+TFDSystemHost buildTFDSystem(const std::vector<const RDKit::ROMol*>& mols,
+                             const TFDComputeOptions&                options,
+                             bool                                    skipGpuWorkItems = false);
 
 //! Build TFDSystemHost from a single molecule (convenience wrapper)
-TFDSystemHost buildTFDSystem(const RDKit::ROMol& mol, const TFDComputeOptions& options);
+TFDSystemHost buildTFDSystem(const RDKit::ROMol& mol, const TFDComputeOptions& options, bool skipGpuWorkItems = false);
 
 //! Merge multiple single-molecule TFDSystemHost structs into one batched system.
 //! Concatenates all data arrays and adjusts CSR indices / work-item offsets.
