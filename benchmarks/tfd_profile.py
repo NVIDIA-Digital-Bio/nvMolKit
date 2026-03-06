@@ -37,6 +37,8 @@ Usage:
 """
 
 import argparse
+import os
+import pickle
 import sys
 
 import nvtx
@@ -61,7 +63,18 @@ def generate_conformers(mol, num_confs, seed=42):
 
 
 def prepare_molecules(smiles_file, num_mols, num_confs):
-    """Load SMILES and prepare molecules with conformers."""
+    """Load molecules with conformers, using precomputed pickle if available."""
+    data_dir = os.path.dirname(os.path.abspath(smiles_file))
+    pkl_path = os.path.join(data_dir, f"prepared_mols_{num_confs}confs.pkl")
+
+    if os.path.exists(pkl_path):
+        with open(pkl_path, "rb") as f:
+            all_mols = pickle.load(f)
+        mols = all_mols[:num_mols]
+        print(f"  Loaded {len(mols)} molecules from {pkl_path}")
+        return mols
+
+    print(f"  No precomputed file found ({pkl_path}), generating from scratch...")
     import pandas as pd
 
     df = pd.read_csv(smiles_file)
@@ -115,11 +128,12 @@ Examples:
         default=3,
         help="Number of profiled runs (default: 3)",
     )
+    _default_smiles = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "benchmark_smiles.csv")
     parser.add_argument(
         "--smiles-file",
         type=str,
-        default="data/benchmark_smiles.csv",
-        help="CSV file with SMILES (default: data/benchmark_smiles.csv)",
+        default=_default_smiles,
+        help="CSV file with SMILES (default: benchmarks/data/benchmark_smiles.csv)",
     )
     args = parser.parse_args()
 
