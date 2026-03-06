@@ -1,0 +1,52 @@
+// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#ifndef NVMOLKIT_CONFORMER_RMSD_H
+#define NVMOLKIT_CONFORMER_RMSD_H
+
+#include "device_vector.h"
+
+namespace nvMolKit {
+
+/**
+ * @brief Compute pairwise RMSD between all conformers, returning a condensed lower-triangle matrix.
+ *
+ * For N conformers with M atoms each, computes N*(N-1)/2 pairwise RMSD values.
+ * When prealigned is false, each pair is optimally aligned using the Kabsch algorithm
+ * (closed-form SVD of the 3x3 cross-covariance matrix) before computing RMSD.
+ *
+ * The output format matches RDKit's GetConformerRMSMatrix: a flat array of N*(N-1)/2
+ * doubles in lower-triangle order, where element index for pair (i, j) with i > j is:
+ *   index = i*(i-1)/2 + j
+ *
+ * @param coords Flattened coordinate array of shape (numConformers * numAtoms * 3).
+ *               Layout: coords[conf * numAtoms * 3 + atom * 3 + xyz].
+ * @param rmsdOut Output array of size numConformers*(numConformers-1)/2.
+ * @param numConformers Number of conformers.
+ * @param numAtoms Number of atoms per conformer.
+ * @param prealigned If true, skip Kabsch alignment and compute RMSD directly.
+ *                   If false (default), optimally align each pair before RMSD.
+ * @param stream CUDA stream to execute operations on.
+ */
+void conformerRmsdMatrixGpu(cuda::std::span<const double> coords,
+                            cuda::std::span<double>       rmsdOut,
+                            int                           numConformers,
+                            int                           numAtoms,
+                            bool                          prealigned = false,
+                            cudaStream_t                  stream     = nullptr);
+
+}  // namespace nvMolKit
+
+#endif  // NVMOLKIT_CONFORMER_RMSD_H

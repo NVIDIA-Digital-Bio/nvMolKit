@@ -1,0 +1,147 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Benchmark: GPU vs CPU conformer RMSD matrix computation.
+
+Measures speedup of nvMolKit's GPU GetConformerRMSMatrix over RDKit's
+CPU GetConformerRMSMatrix across varying conformer counts and molecule sizes.
+
+Usage:
+    python conformer_rmsd_bench.py
+    python conformer_rmsd_bench.py --num-confs 50 100 200 500
+    python conformer_rmsd_bench.py --smiles "CCCCCCCCCC" --num-confs 500
+"""
+
+import argparse
+import time
+
+import torch
+import numpy as np
+from rdkit import Chem
+from rdkit.Chem import AllChem, rdDistGeom
+
+from nvmolkit.conformerRmsd import GetConformerRMSMatrix
+
+
+def benchmark_cpu(mol, n_warmup=1, n_iter=5):
+    """Benchmark RDKit CPU GetConformerRMSMatrix."""
+    for _ in range(n_warmup):
+        AllChem.GetConformerRMSMatrix(mol, prealigned=False)
+
+    times = []
+    for _ in range(n_iter):
+        t0 = time.perf_counter()
+        AllChem.GetConformerRMSMatrix(mol, prealigned=False)
+        t1 = time.perf_counter()
+        times.append(t1 - t0)
+    return np.median(times)
+
+
+def benchmark_gpu(mol, n_warmup=2, n_iter=10):
+    """Benchmark nvMolKit GPU GetConformerRMSMatrix."""
+    for _ in range(n_warmup):
+        result = GetConformerRMSMatrix(mol, prealigned=False)
+        torch.cuda.synchronize()
+
+    times = []
+    for _ in range(n_iter):
+        torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        result = GetConformerRMSMatrix(mol, prealigned=False)
+        torch.cuda.synchronize()
+        t1 = time.perf_counter()
+        times.append(t1 - t0)
+    return np.median(times)
+
+
+def run_benchmark(smiles, num_confs_list, seed=42):
+    """Run CPU vs GPU benchmark for a molecule at various conformer counts."""
+    mol_base = Chem.AddHs(Chem.MolFromSmiles(smiles))
+    no_h_base = Chem.RemoveHs(Chem.AddHs(Chem.MolFromSmiles(smiles)))
+    n_atoms = no_h_base.GetNumAtoms()
+
+    print(f"\nMolecule: {smiles}  ({n_atoms} heavy atoms)")
+    print(f"{'Confs':>8}  {'Pairs':>10}  {'CPU (ms)':>10}  {'GPU (ms)':>10}  {'Speedup':>8}  {'Match':>6}")
+    print("-" * 70)
+
+    for num_confs in num_confs_list:
+        mol = Chem.RWMol(mol_base)
+        mol.RemoveAllConformers()
+        params = rdDistGeom.ETKDGv3()
+        params.randomSeed = seed
+        params.useRandomCoords = True
+        rdDistGeom.EmbedMultipleConfs(mol, numConfs=num_confs, params=params)
+        actual_confs = mol.GetNumConformers()
+
+        if actual_confs < 2:
+            print(f"{num_confs:>8}  {'skipped (embedding failed)':>50}")
+            continue
+
+        no_h = Chem.RemoveHs(mol)
+        n_pairs = actual_confs * (actual_confs - 1) // 2
+
+        # CPU benchmark
+        cpu_time = benchmark_cpu(no_h)
+
+        # GPU benchmark
+        gpu_time = benchmark_gpu(no_h)
+
+        # Correctness check: compare a sample of values
+        rdkit_rms = list(AllChem.GetConformerRMSMatrix(no_h, prealigned=False))
+        gpu_result = GetConformerRMSMatrix(no_h, prealigned=False)
+        torch.cuda.synchronize()
+        gpu_rms = gpu_result.numpy().tolist()
+
+        max_diff = max(abs(g - r) for g, r in zip(gpu_rms, rdkit_rms)) if rdkit_rms else 0.0
+        match_ok = max_diff < 0.05
+
+        speedup = cpu_time / gpu_time if gpu_time > 0 else float("inf")
+
+        print(
+            f"{actual_confs:>8}  {n_pairs:>10}  {cpu_time * 1000:>10.2f}  "
+            f"{gpu_time * 1000:>10.2f}  {speedup:>7.1f}x  "
+            f"{'OK' if match_ok else f'FAIL ({max_diff:.4f})':>6}"
+        )
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Benchmark GPU vs CPU conformer RMSD matrix")
+    parser.add_argument(
+        "--smiles",
+        nargs="+",
+        default=["CCCCCC", "CCCCCCCCCC", "CC(=O)Oc1ccccc1C(=O)O", "C" * 30],
+        help="SMILES strings to benchmark",
+    )
+    parser.add_argument(
+        "--num-confs",
+        nargs="+",
+        type=int,
+        default=[10, 50, 100, 200, 500],
+        help="Number of conformers to generate",
+    )
+    args = parser.parse_args()
+
+    device_name = torch.cuda.get_device_name(0)
+    print(f"GPU: {device_name}")
+    print(f"CUDA: {torch.version.cuda}")
+
+    for smiles in args.smiles:
+        run_benchmark(smiles, args.num_confs)
+
+    print("\nDone.")
+
+
+if __name__ == "__main__":
+    main()

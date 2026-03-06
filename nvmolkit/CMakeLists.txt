@@ -67,6 +67,15 @@ target_link_libraries(_clustering PUBLIC ${Boost_LIBRARIES} ${PYTHON_LIBRARIES}
                                          device_vector butina device)
 installpythontarget(_clustering ./)
 
+add_library(_conformerRmsd MODULE conformerRmsd.cpp)
+target_include_directories(
+  _conformerRmsd PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils ${Boost_INCLUDE_DIRS}
+                        ${Python_INCLUDE_DIRS})
+target_link_libraries(_conformerRmsd PUBLIC ${Boost_LIBRARIES} ${PYTHON_LIBRARIES}
+                                            device_vector conformer_rmsd device)
+target_link_libraries(_conformerRmsd PRIVATE ${RDKit_LIBS})
+installpythontarget(_conformerRmsd ./)
+
 add_library(_substructure MODULE substructure.cpp)
 target_include_directories(
         _substructure PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils ${Boost_INCLUDE_DIRS}
