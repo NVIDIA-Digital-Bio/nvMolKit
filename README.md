@@ -20,6 +20,14 @@ nvMolKit v0.2.0 supports RDKit 2024.09.6 and 2025.03.1. To install:
 conda install -c conda-forge nvmolkit
 ```
 
+**Note**: If you are not running CUDA 13, the default install may select `cuda-version=13` and
+fall back to a CPU-only PyTorch. To ensure a GPU-accelerated PyTorch is installed, specify
+`cuda-version` to match your system's CUDA version (check with `nvcc --version`):
+
+```bash
+conda install -c conda-forge nvmolkit cuda-version=12.6
+```
+
 
 ### Installation from Source
 #### Prerequisites
