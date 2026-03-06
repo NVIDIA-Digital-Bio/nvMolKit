@@ -157,8 +157,8 @@ std::vector<double> TFDCpuGenerator::computeTFDMatrixFromAngles(const TFDSystemH
 }
 
 std::vector<double> TFDCpuGenerator::GetTFDMatrix(const RDKit::ROMol& mol, const TFDComputeOptions& options) {
-  // Build system data
-  TFDSystemHost system = buildTFDSystem(mol, options);
+  // Build system data (skip GPU work items — CPU path doesn't need them)
+  TFDSystemHost system = buildTFDSystem(mol, options, /*skipGpuWorkItems=*/true);
 
   if (system.numMolecules() == 0) {
     return {};

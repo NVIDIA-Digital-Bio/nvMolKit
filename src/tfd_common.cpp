@@ -513,7 +513,9 @@ std::vector<float> computeTorsionWeights(const RDKit::ROMol& mol,
 }
 
 // Sequential single-molecule builder (used as the building block for parallel batch builds)
-static TFDSystemHost buildTFDSystemImpl(const RDKit::ROMol& mol, const TFDComputeOptions& options) {
+static TFDSystemHost buildTFDSystemImpl(const RDKit::ROMol&      mol,
+                                        const TFDComputeOptions& options,
+                                        bool                     skipGpuWorkItems = false) {
   TFDSystemHost system;
 
   int numConformers = mol.getNumConformers();
@@ -627,41 +629,42 @@ static TFDSystemHost buildTFDSystemImpl(const RDKit::ROMol& mol, const TFDComput
   int numDihedrals        = numConformers * totalQuartetsForMol;
   system.totalDihedrals_  = dihedStart + numDihedrals;
 
-  // Build flattened dihedral work items for this molecule
-  // One work item per (conformer, quartet) pair
-  for (int c = 0; c < numConformers; ++c) {
-    for (int q = 0; q < totalQuartetsForMol; ++q) {
-      system.dihedralConfIdx.push_back(confStart + c);
-      system.dihedralTorsIdx.push_back(quartetStartForMol + q);
-      system.dihedralOutIdx.push_back(dihedStart + c * totalQuartetsForMol + q);
+  if (!skipGpuWorkItems) {
+    // Build flattened dihedral work items (GPU kernel dispatch)
+    for (int c = 0; c < numConformers; ++c) {
+      for (int q = 0; q < totalQuartetsForMol; ++q) {
+        system.dihedralConfIdx.push_back(confStart + c);
+        system.dihedralTorsIdx.push_back(quartetStartForMol + q);
+        system.dihedralOutIdx.push_back(dihedStart + c * totalQuartetsForMol + q);
+      }
     }
-  }
 
-  // Build flattened TFD pair work items for this molecule
-  // One work item per conformer pair (i > j), lower triangular order
-  // tfdAnglesI/J point to the start of the quartet-angle block for each conformer
-  int outBase = system.tfdOutputStarts[system.tfdOutputStarts.size() - 2];
-  for (int i = 1; i < numConformers; ++i) {
-    for (int j = 0; j < i; ++j) {
-      system.tfdAnglesI.push_back(dihedStart + i * totalQuartetsForMol);
-      system.tfdAnglesJ.push_back(dihedStart + j * totalQuartetsForMol);
-      system.tfdTorsStart.push_back(torsStart);
-      system.tfdNumTorsions.push_back(numTorsions);
-      system.tfdOutIdx.push_back(outBase + i * (i - 1) / 2 + j);
+    // Build flattened TFD pair work items (GPU kernel dispatch)
+    int outBase = system.tfdOutputStarts[system.tfdOutputStarts.size() - 2];
+    for (int i = 1; i < numConformers; ++i) {
+      for (int j = 0; j < i; ++j) {
+        system.tfdAnglesI.push_back(dihedStart + i * totalQuartetsForMol);
+        system.tfdAnglesJ.push_back(dihedStart + j * totalQuartetsForMol);
+        system.tfdTorsStart.push_back(torsStart);
+        system.tfdNumTorsions.push_back(numTorsions);
+        system.tfdOutIdx.push_back(outBase + i * (i - 1) / 2 + j);
+      }
     }
   }
 
   return system;
 }
 
-TFDSystemHost buildTFDSystem(const std::vector<const RDKit::ROMol*>& mols, const TFDComputeOptions& options) {
+TFDSystemHost buildTFDSystem(const std::vector<const RDKit::ROMol*>& mols,
+                             const TFDComputeOptions&                options,
+                             bool                                    skipGpuWorkItems) {
   ScopedNvtxRange range("buildTFDSystem (" + std::to_string(mols.size()) + " mols)", NvtxColor::kCyan);
 
   if (mols.empty()) {
     return {};
   }
   if (mols.size() == 1) {
-    return buildTFDSystemImpl(*mols[0], options);
+    return buildTFDSystemImpl(*mols[0], options, skipGpuWorkItems);
   }
 
   // Build per-molecule systems in parallel (RDKit extraction — the expensive part)
@@ -673,7 +676,7 @@ TFDSystemHost buildTFDSystem(const std::vector<const RDKit::ROMol*>& mols, const
 #pragma omp parallel for schedule(dynamic)
 #endif
     for (size_t i = 0; i < mols.size(); ++i) {
-      perMol[i] = buildTFDSystemImpl(*mols[i], options);
+      perMol[i] = buildTFDSystemImpl(*mols[i], options, skipGpuWorkItems);
     }
   }
 
@@ -682,8 +685,8 @@ TFDSystemHost buildTFDSystem(const std::vector<const RDKit::ROMol*>& mols, const
   return mergeTFDSystems(perMol);
 }
 
-TFDSystemHost buildTFDSystem(const RDKit::ROMol& mol, const TFDComputeOptions& options) {
-  return buildTFDSystemImpl(mol, options);
+TFDSystemHost buildTFDSystem(const RDKit::ROMol& mol, const TFDComputeOptions& options, bool skipGpuWorkItems) {
+  return buildTFDSystemImpl(mol, options, skipGpuWorkItems);
 }
 
 TFDSystemHost mergeTFDSystems(std::vector<TFDSystemHost>& systems) {
