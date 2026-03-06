@@ -22,9 +22,10 @@ conda install -c conda-forge nvmolkit
 
 **Note**: If you are not running CUDA 13, the default install may select `cuda-version=13` and
 fall back to a CPU-only PyTorch. To ensure a GPU-accelerated PyTorch is installed, specify
-`cuda-version` to match your system's CUDA version (check with `nvcc --version`):
+`cuda-version` to match your system's CUDA driver version (check with `nvidia-smi`):
 
 ```bash
+# Replace 12.6 with your CUDA version shown by nvidia-smi
 conda install -c conda-forge nvmolkit cuda-version=12.6
 ```
 
