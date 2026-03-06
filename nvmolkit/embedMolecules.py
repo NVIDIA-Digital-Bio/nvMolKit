@@ -116,10 +116,5 @@ def EmbedMolecules(
         hardwareOptions = HardwareOptions()
     native_options = hardwareOptions._as_native()
 
-    # Validate hardware options
-
-    if hardwareOptions.batchesPerGpu <= 0 and hardwareOptions.batchesPerGpu != -1:
-        raise ValueError("batchesPerGpu must be greater than 0 or -1 for automatic")
-
     # Call the C++ implementation
     _embedMolecules.EmbedMolecules(molecules, params, confsPerMolecule, maxIterations, native_options)
