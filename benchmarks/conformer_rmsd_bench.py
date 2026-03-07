@@ -42,7 +42,7 @@ def _numpy_kabsch_rmsd(p, q):
     H = p_c.T @ q_c
     U, S, Vt = np.linalg.svd(H)
     d = np.sign(np.linalg.det(H))
-    S[-1] *= d
+    S[-1] *= d if d != 0.0 else 1.0
     Sp = np.sum(p_c ** 2)
     Sq = np.sum(q_c ** 2)
     return np.sqrt(max((Sp + Sq - 2.0 * np.sum(S)) / len(p), 0.0))

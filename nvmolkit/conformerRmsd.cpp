@@ -22,6 +22,7 @@
 
 #include "array_helpers.h"
 #include "conformer_rmsd.h"
+#include "cuda_error_check.h"
 #include "device.h"
 
 namespace {
@@ -68,9 +69,11 @@ BOOST_PYTHON_MODULE(_conformerRmsd) {
         }
       }
 
-      // Transfer to GPU
+      // Transfer to GPU and synchronize before hostCoords goes out of scope,
+      // since copyFromHost uses cudaMemcpyAsync internally.
       nvMolKit::AsyncDeviceVector<double> deviceCoords(hostCoords.size(), stream);
       deviceCoords.copyFromHost(hostCoords);
+      cudaCheckError(cudaStreamSynchronize(stream));
 
       // Allocate output
       const int numPairs = numConfs * (numConfs - 1) / 2;

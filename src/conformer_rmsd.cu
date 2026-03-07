@@ -99,13 +99,40 @@ __global__ void conformerRmsdKernel(const double* __restrict__ coords,
   const double* coordJ = coords + cj * stride;
 
   // Shared memory for reductions.
-  // Layout: [3 centroidI, 3 centroidJ, 1 Sp, 1 Sq, 9 H] = 17 doubles per thread
-  // We use a two-pass approach with shared memory for block-wide sums.
-  __shared__ double sCentI[3];  // centroid of conformer i
-  __shared__ double sCentJ[3];  // centroid of conformer j
+  __shared__ double sReduce[kRmsdBlockSize];
   __shared__ double sAccum[11]; // Sp, Sq, H[0..8]
 
-  // ---- Pass 1: Compute centroids ----
+  // Helper macro for block-wide sum reduction
+  #define BLOCK_REDUCE_SUM(val, result_ptr) \
+    sReduce[tid] = val; \
+    __syncthreads(); \
+    for (int s = kRmsdBlockSize / 2; s > 0; s >>= 1) { \
+      if (tid < s) sReduce[tid] += sReduce[tid + s]; \
+      __syncthreads(); \
+    } \
+    if (tid == 0) *result_ptr = sReduce[0]; \
+    __syncthreads();
+
+  if (prealigned) {
+    // ---- Simple RMSD without alignment (no centering, matches RDKit behavior) ----
+    double sumSqDiff = 0.0;
+    for (int a = tid; a < numAtoms; a += kRmsdBlockSize) {
+      const double dx = coordI[a * 3 + 0] - coordJ[a * 3 + 0];
+      const double dy = coordI[a * 3 + 1] - coordJ[a * 3 + 1];
+      const double dz = coordI[a * 3 + 2] - coordJ[a * 3 + 2];
+      sumSqDiff += dx * dx + dy * dy + dz * dz;
+    }
+    BLOCK_REDUCE_SUM(sumSqDiff, &sAccum[0])
+    if (tid == 0) {
+      rmsdOut[pairIdx] = sqrt(sAccum[0] / static_cast<double>(numAtoms));
+    }
+    return;
+  }
+
+  // ---- Kabsch alignment path: compute centroids ----
+  __shared__ double sCentI[3];
+  __shared__ double sCentJ[3];
+
   double sumIx = 0.0, sumIy = 0.0, sumIz = 0.0;
   double sumJx = 0.0, sumJy = 0.0, sumJz = 0.0;
 
@@ -117,21 +144,6 @@ __global__ void conformerRmsdKernel(const double* __restrict__ coords,
     sumJy += coordJ[a * 3 + 1];
     sumJz += coordJ[a * 3 + 2];
   }
-
-  // Warp-level reduce then block-level via shared memory
-  // Use simple shared-memory reduction for clarity and correctness.
-  __shared__ double sReduce[kRmsdBlockSize];
-
-  // Helper lambda-like pattern using a macro for 6 reductions
-  #define BLOCK_REDUCE_SUM(val, result_ptr) \
-    sReduce[tid] = val; \
-    __syncthreads(); \
-    for (int s = kRmsdBlockSize / 2; s > 0; s >>= 1) { \
-      if (tid < s) sReduce[tid] += sReduce[tid + s]; \
-      __syncthreads(); \
-    } \
-    if (tid == 0) *result_ptr = sReduce[0]; \
-    __syncthreads();
 
   BLOCK_REDUCE_SUM(sumIx, &sCentI[0])
   BLOCK_REDUCE_SUM(sumIy, &sCentI[1])
@@ -154,23 +166,7 @@ __global__ void conformerRmsdKernel(const double* __restrict__ coords,
   const double cIx = sCentI[0], cIy = sCentI[1], cIz = sCentI[2];
   const double cJx = sCentJ[0], cJy = sCentJ[1], cJz = sCentJ[2];
 
-  if (prealigned) {
-    // ---- Simple RMSD without alignment (no centering, matches RDKit behavior) ----
-    double sumSqDiff = 0.0;
-    for (int a = tid; a < numAtoms; a += kRmsdBlockSize) {
-      const double dx = coordI[a * 3 + 0] - coordJ[a * 3 + 0];
-      const double dy = coordI[a * 3 + 1] - coordJ[a * 3 + 1];
-      const double dz = coordI[a * 3 + 2] - coordJ[a * 3 + 2];
-      sumSqDiff += dx * dx + dy * dy + dz * dz;
-    }
-    BLOCK_REDUCE_SUM(sumSqDiff, &sAccum[0])
-    if (tid == 0) {
-      rmsdOut[pairIdx] = sqrt(sAccum[0] / static_cast<double>(numAtoms));
-    }
-    return;
-  }
-
-  // ---- Pass 2: Compute Sp, Sq, and cross-covariance H (Kabsch alignment) ----
+  // ---- Compute Sp, Sq, and cross-covariance H (Kabsch alignment) ----
   // Sp = sum ||pi - centI||^2,  Sq = sum ||qj - centJ||^2
   // H[r][c] = sum (pi[r] - centI[r]) * (qj[c] - centJ[c])
   double localSp = 0.0, localSq = 0.0;
