@@ -38,27 +38,54 @@ def _rdkit_rmsd_matrix(mol, prealigned=False):
     return list(AllChem.GetConformerRMSMatrix(mol, prealigned=prealigned))
 
 
+def _numpy_kabsch_rmsd(p, q):
+    """Independent Kabsch RMSD using numpy SVD (gold reference)."""
+    p_c = p - p.mean(axis=0)
+    q_c = q - q.mean(axis=0)
+    H = p_c.T @ q_c
+    U, S, Vt = np.linalg.svd(H)
+    d = np.sign(np.linalg.det(H))
+    S[-1] *= d
+    Sp = np.sum(p_c ** 2)
+    Sq = np.sum(q_c ** 2)
+    return np.sqrt(max((Sp + Sq - 2.0 * np.sum(S)) / len(p), 0.0))
+
+
+def _numpy_rmsd_matrix(mol, prealigned=False):
+    """Compute full RMSD matrix using numpy Kabsch (independent reference)."""
+    confs = mol.GetConformers()
+    n = len(confs)
+    coords = [np.array(c.GetPositions()) for c in confs]
+    result = []
+    for i in range(n):
+        for j in range(i):
+            if prealigned:
+                diff = coords[i] - coords[j]
+                rmsd = np.sqrt(np.sum(diff ** 2) / len(coords[i]))
+            else:
+                rmsd = _numpy_kabsch_rmsd(coords[i], coords[j])
+            result.append(rmsd)
+    return result
+
+
 @pytest.mark.parametrize("smiles", ["CCCCCC", "c1ccccc1", "CC(=O)Oc1ccccc1C(=O)O"])
-def test_rmsd_matches_rdkit(smiles):
-    """GPU RMSD matrix matches RDKit reference within tolerance."""
+def test_rmsd_matches_numpy_kabsch(smiles):
+    """GPU RMSD matrix matches numpy Kabsch SVD reference within tolerance."""
     mol = _embed_mol(smiles, num_confs=20)
     no_h = Chem.RemoveHs(mol)
 
-    # RDKit's GetConformerRMSMatrix(prealigned=False) modifies conformer
-    # coordinates in-place during sequential alignment, so use a deep copy
-    # to preserve the original coordinates for the GPU computation.
-    rdkit_rms = _rdkit_rmsd_matrix(copy.deepcopy(no_h), prealigned=False)
+    ref_rms = _numpy_rmsd_matrix(no_h, prealigned=False)
     gpu_result = GetConformerRMSMatrix(no_h, prealigned=False)
     torch.cuda.synchronize()
     gpu_rms = gpu_result.numpy().tolist()
 
-    assert len(gpu_rms) == len(rdkit_rms), (
-        f"Length mismatch: GPU={len(gpu_rms)}, RDKit={len(rdkit_rms)}"
+    assert len(gpu_rms) == len(ref_rms), (
+        f"Length mismatch: GPU={len(gpu_rms)}, ref={len(ref_rms)}"
     )
 
-    for i, (g, r) in enumerate(zip(gpu_rms, rdkit_rms)):
-        assert abs(g - r) < 0.05, (
-            f"RMSD mismatch at index {i}: GPU={g:.6f}, RDKit={r:.6f}, diff={abs(g - r):.6f}"
+    for i, (g, r) in enumerate(zip(gpu_rms, ref_rms)):
+        assert abs(g - r) < 0.01, (
+            f"RMSD mismatch at index {i}: GPU={g:.6f}, numpy={r:.6f}, diff={abs(g - r):.6f}"
         )
 
 
@@ -102,13 +129,13 @@ def test_rmsd_two_conformers():
     mol = _embed_mol("CCCC", num_confs=2)
     no_h = Chem.RemoveHs(mol)
 
-    rdkit_rms = _rdkit_rmsd_matrix(no_h)
+    ref_rms = _numpy_rmsd_matrix(no_h)
     gpu_result = GetConformerRMSMatrix(no_h)
     torch.cuda.synchronize()
     gpu_rms = gpu_result.numpy()
 
     assert gpu_rms.shape[0] == 1
-    assert abs(gpu_rms[0] - rdkit_rms[0]) < 0.05
+    assert abs(gpu_rms[0] - ref_rms[0]) < 0.01
 
 
 def test_rmsd_rigid_molecule():
@@ -132,11 +159,11 @@ def test_rmsd_explicit_stream():
     gpu_result = GetConformerRMSMatrix(no_h, stream=s)
     s.synchronize()
 
-    rdkit_rms = _rdkit_rmsd_matrix(copy.deepcopy(no_h))
+    ref_rms = _numpy_rmsd_matrix(no_h)
     gpu_rms = gpu_result.numpy().tolist()
 
-    for g, r in zip(gpu_rms, rdkit_rms):
-        assert abs(g - r) < 0.05
+    for g, r in zip(gpu_rms, ref_rms):
+        assert abs(g - r) < 0.01
 
 
 def test_rmsd_invalid_input_none():
