@@ -57,7 +57,7 @@ def GetConformerRMSMatrix(
         pair (i, j) with i > j is at index ``i*(i-1)//2 + j``.
 
     Raises:
-        ValueError: If ``mol`` is None or has no conformers.
+        ValueError: If ``mol`` is None or has fewer than 2 conformers.
         TypeError: If ``stream`` is not a ``torch.cuda.Stream`` or None.
 
     Example:

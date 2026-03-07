@@ -41,9 +41,7 @@ BOOST_PYTHON_MODULE(_conformerRmsd) {
         std::uintptr_t streamPtr) -> boost::python::object {
       const int numConfs = mol.getNumConformers();
       if (numConfs <= 1) {
-        // Return empty result — matches RDKit behaviour
-        nvMolKit::AsyncDeviceVector<double> empty(0);
-        return toOwnedPyArray(nvMolKit::makePyArray(empty, boost::python::make_tuple(0)));
+        throw std::invalid_argument("mol must have at least 2 conformers");
       }
 
       auto streamOpt = nvMolKit::acquireExternalStream(streamPtr);

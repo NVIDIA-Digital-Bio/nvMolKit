@@ -91,7 +91,7 @@ __global__ void conformerRmsdKernel(const double* __restrict__ coords,
   const int cj = pairIdx - ci * (ci - 1) / 2;
 
   // Safety check (floating point edge cases in the inverse formula)
-  if (ci >= numConformers || cj >= ci) return;
+  if (ci >= numConformers || cj < 0 || cj >= ci) return;
 
   const int tid       = threadIdx.x;
   const int stride    = numAtoms * 3;
