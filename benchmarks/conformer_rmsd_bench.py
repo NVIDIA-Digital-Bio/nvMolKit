@@ -25,6 +25,7 @@ Usage:
 """
 
 import argparse
+import copy
 import time
 
 import torch
@@ -99,7 +100,7 @@ def run_benchmark(smiles, num_confs_list, seed=42):
         gpu_time = benchmark_gpu(no_h)
 
         # Correctness check: compare a sample of values
-        rdkit_rms = list(AllChem.GetConformerRMSMatrix(no_h, prealigned=False))
+        rdkit_rms = list(AllChem.GetConformerRMSMatrix(copy.deepcopy(no_h), prealigned=False))
         gpu_result = GetConformerRMSMatrix(no_h, prealigned=False)
         torch.cuda.synchronize()
         gpu_rms = gpu_result.numpy().tolist()

@@ -155,12 +155,12 @@ __global__ void conformerRmsdKernel(const double* __restrict__ coords,
   const double cJx = sCentJ[0], cJy = sCentJ[1], cJz = sCentJ[2];
 
   if (prealigned) {
-    // ---- Simple RMSD without alignment ----
+    // ---- Simple RMSD without alignment (no centering, matches RDKit behavior) ----
     double sumSqDiff = 0.0;
     for (int a = tid; a < numAtoms; a += kRmsdBlockSize) {
-      const double dx = (coordI[a * 3 + 0] - cIx) - (coordJ[a * 3 + 0] - cJx);
-      const double dy = (coordI[a * 3 + 1] - cIy) - (coordJ[a * 3 + 1] - cJy);
-      const double dz = (coordI[a * 3 + 2] - cIz) - (coordJ[a * 3 + 2] - cJz);
+      const double dx = coordI[a * 3 + 0] - coordJ[a * 3 + 0];
+      const double dy = coordI[a * 3 + 1] - coordJ[a * 3 + 1];
+      const double dz = coordI[a * 3 + 2] - coordJ[a * 3 + 2];
       sumSqDiff += dx * dx + dy * dy + dz * dz;
     }
     BLOCK_REDUCE_SUM(sumSqDiff, &sAccum[0])

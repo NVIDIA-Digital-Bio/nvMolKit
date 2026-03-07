@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
+
 import pytest
 import torch
 import numpy as np
@@ -42,7 +44,10 @@ def test_rmsd_matches_rdkit(smiles):
     mol = _embed_mol(smiles, num_confs=20)
     no_h = Chem.RemoveHs(mol)
 
-    rdkit_rms = _rdkit_rmsd_matrix(no_h, prealigned=False)
+    # RDKit's GetConformerRMSMatrix(prealigned=False) modifies conformer
+    # coordinates in-place during sequential alignment, so use a deep copy
+    # to preserve the original coordinates for the GPU computation.
+    rdkit_rms = _rdkit_rmsd_matrix(copy.deepcopy(no_h), prealigned=False)
     gpu_result = GetConformerRMSMatrix(no_h, prealigned=False)
     torch.cuda.synchronize()
     gpu_rms = gpu_result.numpy().tolist()
@@ -127,7 +132,7 @@ def test_rmsd_explicit_stream():
     gpu_result = GetConformerRMSMatrix(no_h, stream=s)
     s.synchronize()
 
-    rdkit_rms = _rdkit_rmsd_matrix(no_h)
+    rdkit_rms = _rdkit_rmsd_matrix(copy.deepcopy(no_h))
     gpu_rms = gpu_result.numpy().tolist()
 
     for g, r in zip(gpu_rms, rdkit_rms):
