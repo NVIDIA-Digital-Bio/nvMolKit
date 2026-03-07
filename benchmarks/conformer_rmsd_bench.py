@@ -146,7 +146,12 @@ def main():
     parser.add_argument(
         "--smiles",
         nargs="+",
-        default=["CCCCCC", "CCCCCCCCCC", "CC(=O)Oc1ccccc1C(=O)O", "C" * 30],
+        default=[
+            "CC(=O)Oc1ccccc1C(=O)O",                                                  # aspirin (13 HA)
+            "Cc1ccc(-c2cc(C(F)(F)F)nn2-c2ccc(S(N)(=O)=O)cc2)cc1",                     # celecoxib (24 HA)
+            "C=CC(=O)Nc1cc(OC)c(Nc2nccc(-c3cn(C)c4ccccc34)n2)cc1N(C)CCN(C)C",         # osimertinib (33 HA)
+            "CC(C)CC1NC(=O)C(CC(=O)O)NC(=O)C(Cc2ccc(O)cc2)NC(=O)C(CO)NC(=O)C(Cc2c[nH]c3ccccc23)NC1=O",  # cyclic pentapeptide (~48 HA)
+        ],
         help="SMILES strings to benchmark",
     )
     parser.add_argument(
