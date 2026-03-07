@@ -23,6 +23,7 @@ from nvmolkit.types import AsyncGpuResult
 
 _VALID_NEIGHBORLIST_SIZES = frozenset({8, 16, 24, 32, 64, 128})
 
+
 def butina(
     distance_matrix: AsyncGpuResult | torch.Tensor,
     cutoff: float,
