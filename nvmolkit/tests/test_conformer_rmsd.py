@@ -172,11 +172,11 @@ def test_rmsd_invalid_input_none():
         GetConformerRMSMatrix(None)
 
 
-def test_rmsd_invalid_input_no_conformers():
-    """Molecule with fewer than 2 conformers should raise ValueError."""
+def test_rmsd_fewer_than_two_conformers():
+    """Molecule with fewer than 2 conformers returns empty result."""
     mol = Chem.MolFromSmiles("CCO")
-    with pytest.raises(ValueError, match="mol must have at least 2 conformers"):
-        GetConformerRMSMatrix(mol)
+    result = GetConformerRMSMatrix(mol)
+    assert result.numpy().shape[0] == 0
 
 
 def test_rmsd_invalid_stream_type():

@@ -57,7 +57,7 @@ def GetConformerRMSMatrix(
         pair (i, j) with i > j is at index ``i*(i-1)//2 + j``.
 
     Raises:
-        ValueError: If ``mol`` is None or has fewer than 2 conformers.
+        ValueError: If ``mol`` is None.
         TypeError: If ``stream`` is not a ``torch.cuda.Stream`` or None.
 
     Example:
@@ -85,8 +85,6 @@ def GetConformerRMSMatrix(
     """
     if mol is None:
         raise ValueError("mol must not be None")
-    if mol.GetNumConformers() < 2:
-        raise ValueError("mol must have at least 2 conformers")
     if stream is not None and not isinstance(stream, torch.cuda.Stream):
         raise TypeError(f"stream must be a torch.cuda.Stream or None, got {type(stream).__name__}")
 
