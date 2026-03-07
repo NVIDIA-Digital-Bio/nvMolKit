@@ -25,7 +25,6 @@ Usage:
 """
 
 import argparse
-import copy
 import time
 
 import torch
@@ -34,6 +33,19 @@ from rdkit import Chem
 from rdkit.Chem import AllChem, rdDistGeom
 
 from nvmolkit.conformerRmsd import GetConformerRMSMatrix
+
+
+def _numpy_kabsch_rmsd(p, q):
+    """Independent Kabsch RMSD using numpy SVD."""
+    p_c = p - p.mean(axis=0)
+    q_c = q - q.mean(axis=0)
+    H = p_c.T @ q_c
+    U, S, Vt = np.linalg.svd(H)
+    d = np.sign(np.linalg.det(H))
+    S[-1] *= d
+    Sp = np.sum(p_c ** 2)
+    Sq = np.sum(q_c ** 2)
+    return np.sqrt(max((Sp + Sq - 2.0 * np.sum(S)) / len(p), 0.0))
 
 
 def benchmark_cpu(mol, n_warmup=1, n_iter=5):
@@ -99,13 +111,25 @@ def run_benchmark(smiles, num_confs_list, seed=42):
         # GPU benchmark
         gpu_time = benchmark_gpu(no_h)
 
-        # Correctness check: compare a sample of values
-        rdkit_rms = list(AllChem.GetConformerRMSMatrix(copy.deepcopy(no_h), prealigned=False))
+        # Correctness check against numpy Kabsch SVD (sample first 50 pairs)
         gpu_result = GetConformerRMSMatrix(no_h, prealigned=False)
         torch.cuda.synchronize()
         gpu_rms = gpu_result.numpy().tolist()
 
-        max_diff = max(abs(g - r) for g, r in zip(gpu_rms, rdkit_rms)) if rdkit_rms else 0.0
+        confs = no_h.GetConformers()
+        coords = [np.array(c.GetPositions()) for c in confs]
+        max_diff = 0.0
+        count = 0
+        for i in range(len(confs)):
+            for j in range(i):
+                idx = i * (i - 1) // 2 + j
+                ref = _numpy_kabsch_rmsd(coords[i], coords[j])
+                max_diff = max(max_diff, abs(gpu_rms[idx] - ref))
+                count += 1
+                if count >= 50:
+                    break
+            if count >= 50:
+                break
         match_ok = max_diff < 0.05
 
         speedup = cpu_time / gpu_time if gpu_time > 0 else float("inf")
