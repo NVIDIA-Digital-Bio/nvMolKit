@@ -21,6 +21,9 @@ from nvmolkit import _clustering
 from nvmolkit._arrayHelpers import *  # noqa: F403
 from nvmolkit.types import AsyncGpuResult
 
+_VALID_NEIGHBORLIST_SIZES = frozenset({8, 16, 24, 32, 64, 128})
+
+
 def butina(
     distance_matrix: AsyncGpuResult | torch.Tensor,
     cutoff: float,
@@ -60,6 +63,11 @@ def butina(
     Note:
         The distance matrix should be symmetric and have zeros on the diagonal.
     """
+    if neighborlist_max_size not in _VALID_NEIGHBORLIST_SIZES:
+        raise ValueError(
+            f"neighborlist_max_size must be one of {sorted(_VALID_NEIGHBORLIST_SIZES)}, "
+            f"got {neighborlist_max_size}"
+        )
     if stream is not None and not isinstance(stream, torch.cuda.Stream):
         raise TypeError(f"stream must be a torch.cuda.Stream or None, got {type(stream).__name__}")
     stream_ptr = (stream if stream is not None else torch.cuda.current_stream()).cuda_stream

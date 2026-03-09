@@ -127,3 +127,12 @@ def test_butina_invalid_stream_type():
     with pytest.raises(TypeError):
         butina(dists, 0.1, stream=42)
 
+
+@pytest.mark.parametrize("invalid_size", [0, 1, 7, 9, 15, 33, 48, 100, 256])
+def test_butina_invalid_neighborlist_max_size(invalid_size):
+    """Test that invalid neighborlist_max_size values are rejected before reaching the GPU."""
+    n = 10
+    dists = torch.zeros(n, n, dtype=torch.float64)
+    with pytest.raises(ValueError, match="neighborlist_max_size must be one of"):
+        butina(dists, 0.1, neighborlist_max_size=invalid_size)
+
