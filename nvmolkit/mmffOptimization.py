@@ -21,6 +21,8 @@ optimization for multiple molecules and conformers using CUDA and OpenMP.
 
 from typing import TYPE_CHECKING
 
+from rdkit.Chem import AllChem
+
 if TYPE_CHECKING:
     from rdkit.Chem import Mol
 
@@ -53,7 +55,7 @@ def MMFFOptimizeMoleculesConfs(
         molecule order and conformer iteration order.
 
     Raises:
-        ValueError: If any molecule in the input list is invalid
+        ValueError: If any molecule in the input list is None or lacks MMFF atom types
         RuntimeError: If CUDA operations fail or optimization encounters errors
 
     Example:
@@ -89,6 +91,11 @@ def MMFFOptimizeMoleculesConfs(
     for i, mol in enumerate(molecules):
         if mol is None:
             raise ValueError(f"Molecule at index {i} is None")
+        if not AllChem.MMFFHasAllMoleculeParams(mol):
+            raise ValueError(
+                f"Molecule at index {i} lacks MMFF atom types and cannot be optimized with MMFF. "
+                "Use AllChem.MMFFHasAllMoleculeParams() to filter incompatible molecules before submission."
+            )
 
     # Call the C++ implementation
     if hardwareOptions is None:
