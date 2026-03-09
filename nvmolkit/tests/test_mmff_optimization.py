@@ -267,7 +267,7 @@ def test_error_case_throws_properly():
     params.useRandomCoords = True
     EmbedMolecules([mol], params, confsPerMolecule=1)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ValueError, match="lacks MMFF atom types"):
         nvmolkit_mmff.MMFFOptimizeMoleculesConfs(
             [mol], maxIters=200
         )
