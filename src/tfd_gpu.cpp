@@ -104,12 +104,15 @@ TFDGpuResult TFDGpuGenerator::GetTFDMatricesGpuBuffer(const std::vector<const RD
   // Build host system data (CPU preprocessing, parallelized across molecules)
   TFDSystemHost system = buildTFDSystem(mols, options);
 
-  // Store metadata for result extraction
-  result.tfdOutputStarts = system.tfdOutputStarts;
-  result.conformerCounts.reserve(mols.size());
-  for (size_t i = 0; i < mols.size(); ++i) {
-    int numConf = system.molConformerStarts[i + 1] - system.molConformerStarts[i];
-    result.conformerCounts.push_back(numConf);
+  // Build result metadata from MolDescriptors
+  result.tfdOutputStarts.resize(system.numMolecules() + 1);
+  result.tfdOutputStarts[0] = 0;
+  result.conformerCounts.resize(system.numMolecules());
+  for (int i = 0; i < system.numMolecules(); ++i) {
+    const auto& desc              = system.molDescriptors[i];
+    result.conformerCounts[i]     = desc.numConformers;
+    int numPairs                  = desc.numConformers * (desc.numConformers - 1) / 2;
+    result.tfdOutputStarts[i + 1] = result.tfdOutputStarts[i] + numPairs;
   }
 
   // Handle edge case: no TFD outputs
@@ -132,27 +135,23 @@ TFDGpuResult TFDGpuGenerator::GetTFDMatricesGpuBuffer(const std::vector<const RD
                          device_.positions.data(),
                          device_.confPositionStarts.data(),
                          device_.torsionAtoms.data(),
-                         device_.dihedralConfIdx.data(),
-                         device_.dihedralTorsIdx.data(),
-                         device_.dihedralOutIdx.data(),
+                         device_.molDescriptors.data(),
+                         device_.dihedralWorkStarts.data(),
+                         system.numMolecules(),
                          device_.dihedralAngles.data(),
                          stream);
   }
 
-  // Launch TFD matrix kernel
+  // Launch TFD matrix kernel (one block per molecule)
   {
     ScopedNvtxRange range("GPU: launchTFDMatrixKernel", NvtxColor::kOrange);
-    launchTFDMatrixKernel(system.totalTFDWorkItems(),
+    launchTFDMatrixKernel(system.numMolecules(),
                           device_.dihedralAngles.data(),
                           device_.torsionWeights.data(),
                           device_.torsionMaxDevs.data(),
                           device_.quartetStarts.data(),
                           device_.torsionTypes.data(),
-                          device_.tfdAnglesI.data(),
-                          device_.tfdAnglesJ.data(),
-                          device_.tfdTorsStart.data(),
-                          device_.tfdNumTorsions.data(),
-                          device_.tfdOutIdx.data(),
+                          device_.molDescriptors.data(),
                           device_.tfdOutput.data(),
                           stream);
   }

@@ -95,7 +95,7 @@ TEST_F(TFDKernelsTest, DihedralKernelBasic) {
   auto                        system = nvMolKit::buildTFDSystem(*mol, options);
 
   ASSERT_EQ(system.numMolecules(), 1);
-  ASSERT_GT(system.totalConformers(), 0);
+  ASSERT_EQ(system.molDescriptors[0].numConformers, 3);
   ASSERT_GT(system.totalTorsions(), 0);
   ASSERT_GT(system.totalDihedralWorkItems(), 0);
 
@@ -113,9 +113,9 @@ TEST_F(TFDKernelsTest, DihedralKernelBasic) {
                                    device.positions.data(),
                                    device.confPositionStarts.data(),
                                    device.torsionAtoms.data(),
-                                   device.dihedralConfIdx.data(),
-                                   device.dihedralTorsIdx.data(),
-                                   device.dihedralOutIdx.data(),
+                                   device.molDescriptors.data(),
+                                   device.dihedralWorkStarts.data(),
+                                   system.numMolecules(),
                                    device.dihedralAngles.data(),
                                    stream);
 
@@ -125,7 +125,8 @@ TEST_F(TFDKernelsTest, DihedralKernelBasic) {
   }
 
   // Compute CPU reference
-  auto cpuAngles = cpuGenerator_.computeDihedralAngles(system, 0);
+  auto tl = nvMolKit::extractTorsionList(*mol, options.maxDevMode, options.symmRadius, options.ignoreColinearBonds);
+  auto cpuAngles = cpuGenerator_.computeDihedralAngles(*mol, tl);
 
   // Compare
   ASSERT_EQ(gpuAngles.size(), cpuAngles.size());
@@ -170,24 +171,20 @@ TEST_F(TFDKernelsTest, TFDMatrixKernelMatchesCPU) {
                                    device.positions.data(),
                                    device.confPositionStarts.data(),
                                    device.torsionAtoms.data(),
-                                   device.dihedralConfIdx.data(),
-                                   device.dihedralTorsIdx.data(),
-                                   device.dihedralOutIdx.data(),
+                                   device.molDescriptors.data(),
+                                   device.dihedralWorkStarts.data(),
+                                   system.numMolecules(),
                                    device.dihedralAngles.data(),
                                    stream);
 
     // Compute TFD matrix
-    nvMolKit::launchTFDMatrixKernel(system.totalTFDWorkItems(),
+    nvMolKit::launchTFDMatrixKernel(system.numMolecules(),
                                     device.dihedralAngles.data(),
                                     device.torsionWeights.data(),
                                     device.torsionMaxDevs.data(),
                                     device.quartetStarts.data(),
                                     device.torsionTypes.data(),
-                                    device.tfdAnglesI.data(),
-                                    device.tfdAnglesJ.data(),
-                                    device.tfdTorsStart.data(),
-                                    device.tfdNumTorsions.data(),
-                                    device.tfdOutIdx.data(),
+                                    device.molDescriptors.data(),
                                     device.tfdOutput.data(),
                                     stream);
 
@@ -255,24 +252,20 @@ TEST_F(TFDKernelsTest, BatchMultipleMolecules) {
                                    device.positions.data(),
                                    device.confPositionStarts.data(),
                                    device.torsionAtoms.data(),
-                                   device.dihedralConfIdx.data(),
-                                   device.dihedralTorsIdx.data(),
-                                   device.dihedralOutIdx.data(),
+                                   device.molDescriptors.data(),
+                                   device.dihedralWorkStarts.data(),
+                                   system.numMolecules(),
                                    device.dihedralAngles.data(),
                                    stream);
 
     // Launch TFD matrix kernel
-    nvMolKit::launchTFDMatrixKernel(system.totalTFDWorkItems(),
+    nvMolKit::launchTFDMatrixKernel(system.numMolecules(),
                                     device.dihedralAngles.data(),
                                     device.torsionWeights.data(),
                                     device.torsionMaxDevs.data(),
                                     device.quartetStarts.data(),
                                     device.torsionTypes.data(),
-                                    device.tfdAnglesI.data(),
-                                    device.tfdAnglesJ.data(),
-                                    device.tfdTorsStart.data(),
-                                    device.tfdNumTorsions.data(),
-                                    device.tfdOutIdx.data(),
+                                    device.molDescriptors.data(),
                                     device.tfdOutput.data(),
                                     stream);
 
@@ -285,8 +278,9 @@ TEST_F(TFDKernelsTest, BatchMultipleMolecules) {
 
   // Compare per molecule
   for (size_t m = 0; m < molPtrs.size(); ++m) {
-    int outStart = system.tfdOutputStarts[m];
-    int outEnd   = system.tfdOutputStarts[m + 1];
+    int outStart = system.molDescriptors[m].tfdOutStart;
+    int outEnd   = (static_cast<int>(m) + 1 < system.numMolecules()) ? system.molDescriptors[m + 1].tfdOutStart :
+                                                                       system.totalTFDOutputs();
 
     ASSERT_EQ(static_cast<size_t>(outEnd - outStart), cpuResults[m].size()) << "Size mismatch for molecule " << m;
 
@@ -402,23 +396,19 @@ TEST_F(TFDKernelsTest, CompareWithRDKitReference) {
                                      device.positions.data(),
                                      device.confPositionStarts.data(),
                                      device.torsionAtoms.data(),
-                                     device.dihedralConfIdx.data(),
-                                     device.dihedralTorsIdx.data(),
-                                     device.dihedralOutIdx.data(),
+                                     device.molDescriptors.data(),
+                                     device.dihedralWorkStarts.data(),
+                                     system.numMolecules(),
                                      device.dihedralAngles.data(),
                                      stream);
 
-      nvMolKit::launchTFDMatrixKernel(system.totalTFDWorkItems(),
+      nvMolKit::launchTFDMatrixKernel(system.numMolecules(),
                                       device.dihedralAngles.data(),
                                       device.torsionWeights.data(),
                                       device.torsionMaxDevs.data(),
                                       device.quartetStarts.data(),
                                       device.torsionTypes.data(),
-                                      device.tfdAnglesI.data(),
-                                      device.tfdAnglesJ.data(),
-                                      device.tfdTorsStart.data(),
-                                      device.tfdNumTorsions.data(),
-                                      device.tfdOutIdx.data(),
+                                      device.molDescriptors.data(),
                                       device.tfdOutput.data(),
                                       stream);
 
@@ -454,7 +444,7 @@ TEST_F(TFDKernelsTest, TwoConformers) {
   ASSERT_EQ(cpuTFD.size(), 1u);
 
   auto system = nvMolKit::buildTFDSystem(*mol, options);
-  ASSERT_EQ(system.totalTFDWorkItems(), 1);
+  ASSERT_EQ(system.totalTFDOutputs(), 1);
   ASSERT_EQ(system.totalTFDOutputs(), 1);
 
   cudaStream_t stream;
@@ -470,23 +460,19 @@ TEST_F(TFDKernelsTest, TwoConformers) {
                                    device.positions.data(),
                                    device.confPositionStarts.data(),
                                    device.torsionAtoms.data(),
-                                   device.dihedralConfIdx.data(),
-                                   device.dihedralTorsIdx.data(),
-                                   device.dihedralOutIdx.data(),
+                                   device.molDescriptors.data(),
+                                   device.dihedralWorkStarts.data(),
+                                   system.numMolecules(),
                                    device.dihedralAngles.data(),
                                    stream);
 
-    nvMolKit::launchTFDMatrixKernel(system.totalTFDWorkItems(),
+    nvMolKit::launchTFDMatrixKernel(system.numMolecules(),
                                     device.dihedralAngles.data(),
                                     device.torsionWeights.data(),
                                     device.torsionMaxDevs.data(),
                                     device.quartetStarts.data(),
                                     device.torsionTypes.data(),
-                                    device.tfdAnglesI.data(),
-                                    device.tfdAnglesJ.data(),
-                                    device.tfdTorsStart.data(),
-                                    device.tfdNumTorsions.data(),
-                                    device.tfdOutIdx.data(),
+                                    device.molDescriptors.data(),
                                     device.tfdOutput.data(),
                                     stream);
 
@@ -536,23 +522,19 @@ TEST_F(TFDKernelsTest, BatchWithZeroTorsionMolecule) {
                                    device.positions.data(),
                                    device.confPositionStarts.data(),
                                    device.torsionAtoms.data(),
-                                   device.dihedralConfIdx.data(),
-                                   device.dihedralTorsIdx.data(),
-                                   device.dihedralOutIdx.data(),
+                                   device.molDescriptors.data(),
+                                   device.dihedralWorkStarts.data(),
+                                   system.numMolecules(),
                                    device.dihedralAngles.data(),
                                    stream);
 
-    nvMolKit::launchTFDMatrixKernel(system.totalTFDWorkItems(),
+    nvMolKit::launchTFDMatrixKernel(system.numMolecules(),
                                     device.dihedralAngles.data(),
                                     device.torsionWeights.data(),
                                     device.torsionMaxDevs.data(),
                                     device.quartetStarts.data(),
                                     device.torsionTypes.data(),
-                                    device.tfdAnglesI.data(),
-                                    device.tfdAnglesJ.data(),
-                                    device.tfdTorsStart.data(),
-                                    device.tfdNumTorsions.data(),
-                                    device.tfdOutIdx.data(),
+                                    device.molDescriptors.data(),
                                     device.tfdOutput.data(),
                                     stream);
 
@@ -563,16 +545,17 @@ TEST_F(TFDKernelsTest, BatchWithZeroTorsionMolecule) {
     cudaStreamSynchronize(stream);
   }
 
-  // Check ethane: all TFD values should be 0 (no torsions)
-  int ethaneStart = system.tfdOutputStarts[0];
-  int ethaneEnd   = system.tfdOutputStarts[1];
+  // Check ethane: all TFD values must be exactly 0 (no torsions).
+  // The kernel skips molecules with 0 torsions, so output buffer must be pre-zeroed.
+  int ethaneStart = system.molDescriptors[0].tfdOutStart;
+  int ethaneEnd   = system.molDescriptors[1].tfdOutStart;
   for (int i = ethaneStart; i < ethaneEnd; ++i) {
-    EXPECT_NEAR(gpuTFD[i], 0.0f, kTolerance) << "Ethane (no torsions) should have TFD=0 at index " << i;
+    EXPECT_EQ(gpuTFD[i], 0.0f) << "Ethane (no torsions) should have TFD=0 at index " << i;
   }
 
   // Check butane: should match CPU reference (not corrupted by ethane)
-  int butaneStart = system.tfdOutputStarts[1];
-  int butaneEnd   = system.tfdOutputStarts[2];
+  int butaneStart = system.molDescriptors[1].tfdOutStart;
+  int butaneEnd   = system.totalTFDOutputs();
   ASSERT_EQ(static_cast<size_t>(butaneEnd - butaneStart), cpuButane.size());
   for (int i = butaneStart; i < butaneEnd; ++i) {
     EXPECT_NEAR(gpuTFD[i], cpuButane[i - butaneStart], kTolerance)
@@ -652,23 +635,19 @@ TEST_F(TFDKernelsTest, CompareWithRDKitReferenceAddHs) {
                                      device.positions.data(),
                                      device.confPositionStarts.data(),
                                      device.torsionAtoms.data(),
-                                     device.dihedralConfIdx.data(),
-                                     device.dihedralTorsIdx.data(),
-                                     device.dihedralOutIdx.data(),
+                                     device.molDescriptors.data(),
+                                     device.dihedralWorkStarts.data(),
+                                     system.numMolecules(),
                                      device.dihedralAngles.data(),
                                      stream);
 
-      nvMolKit::launchTFDMatrixKernel(system.totalTFDWorkItems(),
+      nvMolKit::launchTFDMatrixKernel(system.numMolecules(),
                                       device.dihedralAngles.data(),
                                       device.torsionWeights.data(),
                                       device.torsionMaxDevs.data(),
                                       device.quartetStarts.data(),
                                       device.torsionTypes.data(),
-                                      device.tfdAnglesI.data(),
-                                      device.tfdAnglesJ.data(),
-                                      device.tfdTorsStart.data(),
-                                      device.tfdNumTorsions.data(),
-                                      device.tfdOutIdx.data(),
+                                      device.molDescriptors.data(),
                                       device.tfdOutput.data(),
                                       stream);
 

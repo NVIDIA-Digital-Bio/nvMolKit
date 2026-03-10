@@ -20,61 +20,38 @@
 
 #include <cstdint>
 
+#include "tfd_types.h"
+
 namespace nvMolKit {
 
 //! Block size for TFD kernels
 constexpr int kTFDBlockSize = 256;
 
-//! Launch kernel to compute dihedral angles for all conformers
-//! One thread per (conformer, torsion) work item using flattened indexing
-//! @param totalWorkItems Total number of work items to process
-//! @param positions Tightly packed coordinates (no padding)
-//! @param confPositionStarts Position offset per conformer [totalConformers]
-//! @param torsionAtoms Torsion atom indices [totalTorsions * 4]
-//! @param dihedralConfIdx Global conformer index per work item [totalWorkItems]
-//! @param dihedralTorsIdx Global torsion index per work item [totalWorkItems]
-//! @param dihedralOutIdx Output index per work item [totalWorkItems]
-//! @param dihedralAngles Output: angles in degrees [totalDihedrals]
-//! @param stream CUDA stream
-void launchDihedralKernel(int          totalWorkItems,
-                          const float* positions,
-                          const int*   confPositionStarts,
-                          const int*   torsionAtoms,
-                          const int*   dihedralConfIdx,
-                          const int*   dihedralTorsIdx,
-                          const int*   dihedralOutIdx,
-                          float*       dihedralAngles,
-                          cudaStream_t stream);
+//! Launch kernel to compute dihedral angles for all conformers.
+//! One thread per (conformer, quartet) work item; uses binary search on
+//! dihedralWorkStarts to find the molecule, then computes indices arithmetically.
+void launchDihedralKernel(int                  totalWorkItems,
+                          const float*         positions,
+                          const int*           confPositionStarts,
+                          const int*           torsionAtoms,
+                          const MolDescriptor* molDescriptors,
+                          const int*           dihedralWorkStarts,
+                          int                  numMolecules,
+                          float*               dihedralAngles,
+                          cudaStream_t         stream);
 
-//! Launch kernel to compute TFD matrix for all conformer pairs
-//! Handles Ring (averaged abs), Symmetric (cross-product min), and Single torsion types.
-//! One thread per conformer pair using flattened indexing.
-//! @param totalWorkItems Total number of work items to process
-//! @param dihedralAngles Computed dihedral angles [totalDihedrals]
-//! @param torsionWeights Weights per torsion [totalTorsions]
-//! @param torsionMaxDevs Max deviation per torsion [totalTorsions]
-//! @param quartetStarts CSR index: quartet boundaries per torsion [totalTorsions + 1]
-//! @param torsionTypes Type per torsion (0=Single, 1=Ring, 2=Symmetric) [totalTorsions]
-//! @param tfdAnglesI Offset into dihedralAngles for conformer i [totalWorkItems]
-//! @param tfdAnglesJ Offset into dihedralAngles for conformer j [totalWorkItems]
-//! @param tfdTorsStart Global torsion start per work item [totalWorkItems]
-//! @param tfdNumTorsions Number of torsions per work item [totalWorkItems]
-//! @param tfdOutIdx Output index per work item [totalWorkItems]
-//! @param tfdOutput Output: TFD matrix values
-//! @param stream CUDA stream
-void launchTFDMatrixKernel(int            totalWorkItems,
-                           const float*   dihedralAngles,
-                           const float*   torsionWeights,
-                           const float*   torsionMaxDevs,
-                           const int*     quartetStarts,
-                           const uint8_t* torsionTypes,
-                           const int*     tfdAnglesI,
-                           const int*     tfdAnglesJ,
-                           const int*     tfdTorsStart,
-                           const int*     tfdNumTorsions,
-                           const int*     tfdOutIdx,
-                           float*         tfdOutput,
-                           cudaStream_t   stream);
+//! Launch kernel to compute TFD matrix for all conformer pairs.
+//! One block per molecule; threads within a block cooperatively process pairs.
+//! Uses shared memory for torsion metadata to reduce global reads.
+void launchTFDMatrixKernel(int                  numMolecules,
+                           const float*         dihedralAngles,
+                           const float*         torsionWeights,
+                           const float*         torsionMaxDevs,
+                           const int*           quartetStarts,
+                           const uint8_t*       torsionTypes,
+                           const MolDescriptor* molDescriptors,
+                           float*               tfdOutput,
+                           cudaStream_t         stream);
 
 }  // namespace nvMolKit
 
