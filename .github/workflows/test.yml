@@ -1,0 +1,60 @@
+name: Tests
+
+on:
+  push:
+    branches: ["main", "fix/**", "feature/**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: gpu-t4
+    container:
+      image: nvcr.io/nvidia/cuda:12.5.0-devel-ubuntu22.04
+      options: --gpus all
+
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends \
+            wget git build-essential libeigen3-dev \
+            libstdc++-12-dev libomp-15-dev
+
+      - name: Install Miniconda
+        run: |
+          wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
+          bash miniconda.sh -b -p /opt/conda
+          rm miniconda.sh
+          echo "/opt/conda/bin" >> $GITHUB_PATH
+          /opt/conda/bin/conda init bash
+
+      - name: Create conda environment
+        run: |
+          conda create -y -n nvmolkit python=3.12.1
+          conda install -y -n nvmolkit -c conda-forge \
+            rdkit=2024.09.6 rdkit-dev=2024.09.6 \
+            libboost libboost-python libboost-devel \
+            libboost-headers libboost-python-devel \
+            cmake>=3.26
+
+      - name: Install PyTorch
+        run: conda run -n nvmolkit pip install torch torchvision torchaudio
+
+      - name: Build and install nvMolKit
+        run: |
+          conda run -n nvmolkit \
+            bash -c "CMAKE_BUILD_PARALLEL_LEVEL=$(nproc) CMAKE_CUDA_ARCHITECTURES=75 pip -v install ."
+
+      - name: Install test dependencies
+        run: conda run -n nvmolkit pip install pytest
+
+      - name: Run tests
+        run: |
+          conda run -n nvmolkit \
+            bash -c "cd nvmolkit/tests && pytest -v test_types.py test_embed_molecules.py"

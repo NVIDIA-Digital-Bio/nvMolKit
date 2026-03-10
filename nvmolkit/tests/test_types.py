@@ -21,6 +21,7 @@ import torch
 from rdkit.Chem import MolFromSmiles
 
 from nvmolkit.fingerprints import MorganFingerprintGenerator
+from nvmolkit.types import HardwareOptions
 
 def _get_fps(num_mols):
     generator = MorganFingerprintGenerator(radius=0, fpSize=2048)
@@ -54,4 +55,15 @@ def test_async_gpu_result_release_frees_memory():
     free_post, _ = torch.cuda.mem_get_info()
 
     assert (free_post - free_after_alloc) >= expected_bytes
+
+
+@pytest.mark.parametrize("invalid_value", [0, -2, -99])
+def test_hardware_options_invalid_batches_per_gpu(invalid_value):
+    """Test that invalid batchesPerGpu values are rejected at construction time and via setter."""
+    with pytest.raises(ValueError, match="batchesPerGpu must be greater than 0 or -1"):
+        HardwareOptions(batchesPerGpu=invalid_value)
+
+    hw = HardwareOptions()
+    with pytest.raises(ValueError, match="batchesPerGpu must be greater than 0 or -1"):
+        hw.batchesPerGpu = invalid_value
 
