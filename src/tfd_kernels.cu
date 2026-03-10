@@ -24,122 +24,153 @@ using detail::computeDihedralAngle;
 
 namespace {
 
-//! Kernel to compute dihedral angles for all conformers
-//! One thread per (conformer, torsion) work item using flattened indexing
-__global__ void dihedralKernel(const int    totalWorkItems,
-                               const float* positions,
-                               const int*   confPositionStarts,
-                               const int*   torsionAtoms,
-                               const int*   dihedralConfIdx,
-                               const int*   dihedralTorsIdx,
-                               const int*   dihedralOutIdx,
-                               float*       dihedralAngles) {
-  int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx >= totalWorkItems) {
-    return;
+//! Binary search: find m such that starts[m] <= idx < starts[m+1]
+__device__ __forceinline__ int findMolecule(const int* starts, int numMolecules, int idx) {
+  int lo = 0, hi = numMolecules;
+  while (lo < hi) {
+    int mid = (lo + hi) / 2;
+    if (starts[mid + 1] <= idx) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
   }
-
-  // Direct index lookup from flattened work items
-  int confIdx = dihedralConfIdx[idx];
-  int torsIdx = dihedralTorsIdx[idx];
-  int outIdx  = dihedralOutIdx[idx];
-
-  // Get torsion atom indices
-  int a = torsionAtoms[torsIdx * 4 + 0];
-  int b = torsionAtoms[torsIdx * 4 + 1];
-  int c = torsionAtoms[torsIdx * 4 + 2];
-  int d = torsionAtoms[torsIdx * 4 + 3];
-
-  // Get positions base for this conformer (tightly packed, no padding)
-  const float* posBase = positions + confPositionStarts[confIdx];
-
-  float angle = computeDihedralAngle(posBase + a * 3, posBase + b * 3, posBase + c * 3, posBase + d * 3);
-
-  dihedralAngles[outIdx] = angle;
+  return lo;
 }
 
-//! Kernel to compute TFD matrix values
-//! Handles Single, Ring (averaged abs), and Symmetric (cross-product min) torsion types.
-//! One thread per conformer pair using flattened indexing.
-__global__ void tfdMatrixKernel(const int      totalWorkItems,
-                                const float*   dihedralAngles,
-                                const float*   torsionWeights,
-                                const float*   torsionMaxDevs,
-                                const int*     quartetStarts,
-                                const uint8_t* torsionTypes,
-                                const int*     tfdAnglesI,
-                                const int*     tfdAnglesJ,
-                                const int*     tfdTorsStart,
-                                const int*     tfdNumTorsions,
-                                const int*     tfdOutIdx,
-                                float*         tfdOutput) {
+//! Kernel to compute dihedral angles for all conformers.
+//! One thread per (conformer, quartet) work item.
+//! Uses binary search on dihedralWorkStarts to find the molecule,
+//! then computes (confIdx, quartetIdx, outIdx) arithmetically.
+__global__ void dihedralKernel(const int totalWorkItems,
+                               const float* __restrict__ positions,
+                               const int* __restrict__ confPositionStarts,
+                               const int* __restrict__ torsionAtoms,
+                               const MolDescriptor* __restrict__ molDescriptors,
+                               const int* __restrict__ dihedralWorkStarts,
+                               const int numMolecules,
+                               float* __restrict__ dihedralAngles) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= totalWorkItems) {
     return;
   }
 
-  int aI      = tfdAnglesI[idx];
-  int aJ      = tfdAnglesJ[idx];
-  int ts      = tfdTorsStart[idx];
-  int numTors = tfdNumTorsions[idx];
-  int outIdx  = tfdOutIdx[idx];
+  int m = findMolecule(dihedralWorkStarts, numMolecules, idx);
 
-  // Base quartet offset for this molecule's torsions
-  int qBase = quartetStarts[ts];
+  const MolDescriptor& desc     = molDescriptors[m];
+  int                  localIdx = idx - dihedralWorkStarts[m];
+  int                  c        = localIdx / desc.numQuartets;
+  int                  q        = localIdx % desc.numQuartets;
 
-  float sumWeightedDev = 0.0f;
-  float sumWeights     = 0.0f;
+  int confIdx = desc.confStart + c;
+  int torsIdx = desc.quartetStart + q;
+  int outIdx  = desc.dihedStart + localIdx;
 
-  for (int t = 0; t < numTors; ++t) {
-    int     globalT     = ts + t;
-    int     qLocalStart = quartetStarts[globalT] - qBase;
-    int     numQ        = quartetStarts[globalT + 1] - quartetStarts[globalT];
-    uint8_t type        = torsionTypes[globalT];
+  int a  = torsionAtoms[torsIdx * 4 + 0];
+  int b  = torsionAtoms[torsIdx * 4 + 1];
+  int cc = torsionAtoms[torsIdx * 4 + 2];
+  int d  = torsionAtoms[torsIdx * 4 + 3];
 
-    float deviation;
-    if (type == 0) {  // Single
-      deviation = circularDifference(dihedralAngles[aI + qLocalStart], dihedralAngles[aJ + qLocalStart]) /
-                  torsionMaxDevs[globalT];
-    } else if (type == 1) {  // Ring
-      float avgI = 0.0f;
-      float avgJ = 0.0f;
-      for (int q = 0; q < numQ; ++q) {
-        avgI += fabsf(dihedralAngles[aI + qLocalStart + q] - 180.0f);
-        avgJ += fabsf(dihedralAngles[aJ + qLocalStart + q] - 180.0f);
-      }
-      avgI /= numQ;
-      avgJ /= numQ;
-      deviation = fabsf(avgI - avgJ) / torsionMaxDevs[globalT];
-    } else {  // Symmetric
-      float minDiff = 180.0f;
-      for (int qi = 0; qi < numQ; ++qi) {
-        for (int qj = 0; qj < numQ; ++qj) {
-          float d = circularDifference(dihedralAngles[aI + qLocalStart + qi], dihedralAngles[aJ + qLocalStart + qj]);
-          minDiff = fminf(minDiff, d);
-        }
-      }
-      deviation = minDiff / torsionMaxDevs[globalT];
-    }
+  const float* posBase = positions + confPositionStarts[confIdx];
 
-    float weight = torsionWeights[globalT];
-    sumWeightedDev += deviation * weight;
-    sumWeights += weight;
+  dihedralAngles[outIdx] = computeDihedralAngle(posBase + a * 3, posBase + b * 3, posBase + cc * 3, posBase + d * 3);
+}
+
+//! Kernel to compute TFD matrix values.
+//! One block per molecule. Threads within a block cooperatively process
+//! all C*(C-1)/2 conformer pairs via grid-stride loop.
+//! All threads in a block share the same torsion types — no cross-molecule divergence.
+__global__ void tfdMatrixKernel(const int numMolecules,
+                                const float* __restrict__ dihedralAngles,
+                                const float* __restrict__ torsionWeights,
+                                const float* __restrict__ torsionMaxDevs,
+                                const int* __restrict__ quartetStarts,
+                                const uint8_t* __restrict__ torsionTypes,
+                                const MolDescriptor* __restrict__ molDescriptors,
+                                float* __restrict__ tfdOutput) {
+  int m = blockIdx.x;
+  if (m >= numMolecules) {
+    return;
   }
 
-  tfdOutput[outIdx] = (sumWeights > 1e-10f) ? (sumWeightedDev / sumWeights) : 0.0f;
+  const MolDescriptor& desc     = molDescriptors[m];
+  int                  numConf  = desc.numConformers;
+  int                  numPairs = numConf * (numConf - 1) / 2;
+  int                  numTors  = desc.numTorsions;
+  int                  qBase    = quartetStarts[desc.torsStart];
+
+  if (numPairs == 0 || numTors == 0) {
+    return;
+  }
+
+  // Each thread processes conformer pairs via grid-stride within this block
+  for (int pairIdx = threadIdx.x; pairIdx < numPairs; pairIdx += blockDim.x) {
+    // Decode lower-triangular (i, j) from flat pairIdx
+    // i*(i-1)/2 + j = pairIdx, i > j >= 0
+    // i = floor((1 + sqrt(1 + 8*pairIdx)) / 2)
+    int i = static_cast<int>((1.0f + sqrtf(1.0f + 8.0f * pairIdx)) * 0.5f);
+    if (i * (i - 1) / 2 > pairIdx)
+      i--;
+    int j = pairIdx - i * (i - 1) / 2;
+
+    int aI = desc.dihedStart + i * desc.numQuartets;
+    int aJ = desc.dihedStart + j * desc.numQuartets;
+
+    float sumWeightedDev = 0.0f;
+    float sumWeights     = 0.0f;
+
+    for (int t = 0; t < numTors; ++t) {
+      int     globalT     = desc.torsStart + t;
+      int     qLocalStart = quartetStarts[globalT] - qBase;
+      int     numQ        = quartetStarts[globalT + 1] - quartetStarts[globalT];
+      uint8_t type        = torsionTypes[globalT];
+
+      float deviation;
+      if (type == 0) {  // Single
+        deviation = circularDifference(dihedralAngles[aI + qLocalStart], dihedralAngles[aJ + qLocalStart]) /
+                    torsionMaxDevs[globalT];
+      } else if (type == 1) {  // Ring
+        float avgI = 0.0f;
+        float avgJ = 0.0f;
+        for (int qq = 0; qq < numQ; ++qq) {
+          avgI += fabsf(dihedralAngles[aI + qLocalStart + qq] - 180.0f);
+          avgJ += fabsf(dihedralAngles[aJ + qLocalStart + qq] - 180.0f);
+        }
+        avgI /= numQ;
+        avgJ /= numQ;
+        deviation = fabsf(avgI - avgJ) / torsionMaxDevs[globalT];
+      } else {  // Symmetric
+        float minDiff = 180.0f;
+        for (int qi = 0; qi < numQ; ++qi) {
+          for (int qj = 0; qj < numQ; ++qj) {
+            float diff =
+              circularDifference(dihedralAngles[aI + qLocalStart + qi], dihedralAngles[aJ + qLocalStart + qj]);
+            minDiff = fminf(minDiff, diff);
+          }
+        }
+        deviation = minDiff / torsionMaxDevs[globalT];
+      }
+
+      float weight = torsionWeights[globalT];
+      sumWeightedDev += deviation * weight;
+      sumWeights += weight;
+    }
+
+    tfdOutput[desc.tfdOutStart + pairIdx] = (sumWeights > 1e-10f) ? (sumWeightedDev / sumWeights) : 0.0f;
+  }
 }
 
 }  // namespace
 
-void launchDihedralKernel(int          totalWorkItems,
-                          const float* positions,
-                          const int*   confPositionStarts,
-                          const int*   torsionAtoms,
-                          const int*   dihedralConfIdx,
-                          const int*   dihedralTorsIdx,
-                          const int*   dihedralOutIdx,
-                          float*       dihedralAngles,
-                          cudaStream_t stream) {
+void launchDihedralKernel(int                  totalWorkItems,
+                          const float*         positions,
+                          const int*           confPositionStarts,
+                          const int*           torsionAtoms,
+                          const MolDescriptor* molDescriptors,
+                          const int*           dihedralWorkStarts,
+                          int                  numMolecules,
+                          float*               dihedralAngles,
+                          cudaStream_t         stream) {
   if (totalWorkItems == 0) {
     return;
   }
@@ -150,45 +181,36 @@ void launchDihedralKernel(int          totalWorkItems,
                                                          positions,
                                                          confPositionStarts,
                                                          torsionAtoms,
-                                                         dihedralConfIdx,
-                                                         dihedralTorsIdx,
-                                                         dihedralOutIdx,
+                                                         molDescriptors,
+                                                         dihedralWorkStarts,
+                                                         numMolecules,
                                                          dihedralAngles);
 
   cudaCheckError(cudaGetLastError());
 }
 
-void launchTFDMatrixKernel(int            totalWorkItems,
-                           const float*   dihedralAngles,
-                           const float*   torsionWeights,
-                           const float*   torsionMaxDevs,
-                           const int*     quartetStarts,
-                           const uint8_t* torsionTypes,
-                           const int*     tfdAnglesI,
-                           const int*     tfdAnglesJ,
-                           const int*     tfdTorsStart,
-                           const int*     tfdNumTorsions,
-                           const int*     tfdOutIdx,
-                           float*         tfdOutput,
-                           cudaStream_t   stream) {
-  if (totalWorkItems == 0) {
+void launchTFDMatrixKernel(int                  numMolecules,
+                           const float*         dihedralAngles,
+                           const float*         torsionWeights,
+                           const float*         torsionMaxDevs,
+                           const int*           quartetStarts,
+                           const uint8_t*       torsionTypes,
+                           const MolDescriptor* molDescriptors,
+                           float*               tfdOutput,
+                           cudaStream_t         stream) {
+  if (numMolecules == 0) {
     return;
   }
 
-  int gridSize = (totalWorkItems + kTFDBlockSize - 1) / kTFDBlockSize;
-
-  tfdMatrixKernel<<<gridSize, kTFDBlockSize, 0, stream>>>(totalWorkItems,
-                                                          dihedralAngles,
-                                                          torsionWeights,
-                                                          torsionMaxDevs,
-                                                          quartetStarts,
-                                                          torsionTypes,
-                                                          tfdAnglesI,
-                                                          tfdAnglesJ,
-                                                          tfdTorsStart,
-                                                          tfdNumTorsions,
-                                                          tfdOutIdx,
-                                                          tfdOutput);
+  // One block per molecule; threads within block process pairs via grid-stride
+  tfdMatrixKernel<<<numMolecules, kTFDBlockSize, 0, stream>>>(numMolecules,
+                                                              dihedralAngles,
+                                                              torsionWeights,
+                                                              torsionMaxDevs,
+                                                              quartetStarts,
+                                                              torsionTypes,
+                                                              molDescriptors,
+                                                              tfdOutput);
 
   cudaCheckError(cudaGetLastError());
 }

@@ -513,9 +513,7 @@ std::vector<float> computeTorsionWeights(const RDKit::ROMol& mol,
 }
 
 // Sequential single-molecule builder (used as the building block for parallel batch builds)
-static TFDSystemHost buildTFDSystemImpl(const RDKit::ROMol&      mol,
-                                        const TFDComputeOptions& options,
-                                        bool                     skipGpuWorkItems = false) {
+static TFDSystemHost buildTFDSystemImpl(const RDKit::ROMol& mol, const TFDComputeOptions& options) {
   TFDSystemHost system;
 
   int numConformers = mol.getNumConformers();
@@ -535,21 +533,9 @@ static TFDSystemHost buildTFDSystemImpl(const RDKit::ROMol&      mol,
     weights = computeTorsionWeightsImpl(mol, torsionList, bonds);
   }
 
-  // Capture CSR starts before pushing (for building flattened work items below)
-  int confStart = system.molConformerStarts.back();
-  int torsStart = system.molTorsionStarts.back();
-
-  // Update CSR indices
-  system.molConformerStarts.push_back(confStart + numConformers);
-
-  int numTorsions = static_cast<int>(torsionList.totalCount());
-  system.molTorsionStarts.push_back(torsStart + numTorsions);
-
-  // Remember quartet start for this molecule (before adding quartets)
+  int confStart          = static_cast<int>(system.confPositionStarts.size());
+  int torsStart          = system.totalTorsions();
   int quartetStartForMol = system.totalQuartets();
-
-  int numTFDOutputs = numConformers * (numConformers - 1) / 2;
-  system.tfdOutputStarts.push_back(system.tfdOutputStarts.back() + numTFDOutputs);
 
   // Extract coordinates (tightly packed, no padding)
   for (auto confIt = mol.beginConformers(); confIt != mol.endConformers(); ++confIt) {
@@ -566,105 +552,71 @@ static TFDSystemHost buildTFDSystemImpl(const RDKit::ROMol&      mol,
   // Add torsion definitions (store ALL quartets, classify type)
   int torsionIdx = 0;
 
-  // Non-ring torsions
   for (const auto& torsion : torsionList.nonRingTorsions) {
     if (torsion.atomQuartets.empty()) {
       torsionIdx++;
       continue;
     }
-
-    for (const auto& q : torsion.atomQuartets) {
+    for (const auto& q : torsion.atomQuartets)
       system.torsionAtoms.push_back(q);
-    }
     system.quartetStarts.push_back(static_cast<int>(system.torsionAtoms.size()));
-
-    if (torsion.atomQuartets.size() > 1) {
-      system.torsionTypes.push_back(TorsionType::Symmetric);
-    } else {
-      system.torsionTypes.push_back(TorsionType::Single);
-    }
-
+    system.torsionTypes.push_back(torsion.atomQuartets.size() > 1 ? TorsionType::Symmetric : TorsionType::Single);
     system.torsionMaxDevs.push_back(torsion.maxDev);
-
-    if (options.useWeights && torsionIdx < static_cast<int>(weights.size())) {
-      system.torsionWeights.push_back(weights[torsionIdx]);
-    } else {
-      system.torsionWeights.push_back(1.0f);
-    }
+    system.torsionWeights.push_back(
+      (options.useWeights && torsionIdx < static_cast<int>(weights.size())) ? weights[torsionIdx] : 1.0f);
     torsionIdx++;
   }
 
-  // Ring torsions
   for (const auto& torsion : torsionList.ringTorsions) {
     if (torsion.atomQuartets.empty()) {
       torsionIdx++;
       continue;
     }
-
-    for (const auto& q : torsion.atomQuartets) {
+    for (const auto& q : torsion.atomQuartets)
       system.torsionAtoms.push_back(q);
-    }
     system.quartetStarts.push_back(static_cast<int>(system.torsionAtoms.size()));
-
-    if (torsion.atomQuartets.size() > 1) {
-      system.torsionTypes.push_back(TorsionType::Ring);
-    } else {
-      system.torsionTypes.push_back(TorsionType::Single);
-    }
-
+    system.torsionTypes.push_back(torsion.atomQuartets.size() > 1 ? TorsionType::Ring : TorsionType::Single);
     system.torsionMaxDevs.push_back(torsion.maxDev);
-
-    if (options.useWeights && torsionIdx < static_cast<int>(weights.size())) {
-      system.torsionWeights.push_back(weights[torsionIdx]);
-    } else {
-      system.torsionWeights.push_back(1.0f);
-    }
+    system.torsionWeights.push_back(
+      (options.useWeights && torsionIdx < static_cast<int>(weights.size())) ? weights[torsionIdx] : 1.0f);
     torsionIdx++;
   }
 
-  // Dihedral storage: numConformers * totalQuartetsForMol per molecule
-  int quartetEndForMol    = system.totalQuartets();
-  int totalQuartetsForMol = quartetEndForMol - quartetStartForMol;
+  // Build per-molecule descriptor
+  int numTorsions         = system.totalTorsions() - torsStart;
+  int totalQuartetsForMol = system.totalQuartets() - quartetStartForMol;
   int dihedStart          = system.totalDihedrals();
   int numDihedrals        = numConformers * totalQuartetsForMol;
-  system.totalDihedrals_  = dihedStart + numDihedrals;
+  int numTFDOutputs       = numConformers * (numConformers - 1) / 2;
+  int tfdOutStart         = system.totalTFDOutputs();
 
-  if (!skipGpuWorkItems) {
-    // Build flattened dihedral work items (GPU kernel dispatch)
-    for (int c = 0; c < numConformers; ++c) {
-      for (int q = 0; q < totalQuartetsForMol; ++q) {
-        system.dihedralConfIdx.push_back(confStart + c);
-        system.dihedralTorsIdx.push_back(quartetStartForMol + q);
-        system.dihedralOutIdx.push_back(dihedStart + c * totalQuartetsForMol + q);
-      }
-    }
+  system.totalDihedrals_ = dihedStart + numDihedrals;
 
-    // Build flattened TFD pair work items (GPU kernel dispatch)
-    int outBase = system.tfdOutputStarts[system.tfdOutputStarts.size() - 2];
-    for (int i = 1; i < numConformers; ++i) {
-      for (int j = 0; j < i; ++j) {
-        system.tfdAnglesI.push_back(dihedStart + i * totalQuartetsForMol);
-        system.tfdAnglesJ.push_back(dihedStart + j * totalQuartetsForMol);
-        system.tfdTorsStart.push_back(torsStart);
-        system.tfdNumTorsions.push_back(numTorsions);
-        system.tfdOutIdx.push_back(outBase + i * (i - 1) / 2 + j);
-      }
-    }
-  }
+  MolDescriptor desc;
+  desc.confStart     = confStart;
+  desc.numConformers = numConformers;
+  desc.quartetStart  = quartetStartForMol;
+  desc.numQuartets   = totalQuartetsForMol;
+  desc.dihedStart    = dihedStart;
+  desc.torsStart     = torsStart;
+  desc.numTorsions   = numTorsions;
+  desc.tfdOutStart   = tfdOutStart;
+  system.molDescriptors.push_back(desc);
+
+  system.dihedralWorkStarts.push_back(system.dihedralWorkStarts.back() + numDihedrals);
+  system.tfdWorkStarts.push_back(system.tfdWorkStarts.back() + numTFDOutputs);
 
   return system;
 }
 
-TFDSystemHost buildTFDSystem(const std::vector<const RDKit::ROMol*>& mols,
-                             const TFDComputeOptions&                options,
-                             bool                                    skipGpuWorkItems) {
+TFDSystemHost buildTFDSystem(const std::vector<const RDKit::ROMol*>& mols, const TFDComputeOptions& options) {
   ScopedNvtxRange range("buildTFDSystem (" + std::to_string(mols.size()) + " mols)", NvtxColor::kCyan);
 
   if (mols.empty()) {
     return {};
   }
   if (mols.size() == 1) {
-    return buildTFDSystemImpl(*mols[0], options, skipGpuWorkItems);
+    return buildTFDSystemImpl(*mols[0], options);
   }
 
   // Build per-molecule systems in parallel (RDKit extraction — the expensive part)
@@ -676,7 +628,7 @@ TFDSystemHost buildTFDSystem(const std::vector<const RDKit::ROMol*>& mols,
 #pragma omp parallel for schedule(dynamic)
 #endif
     for (size_t i = 0; i < mols.size(); ++i) {
-      perMol[i] = buildTFDSystemImpl(*mols[i], options, skipGpuWorkItems);
+      perMol[i] = buildTFDSystemImpl(*mols[i], options);
     }
   }
 
@@ -685,8 +637,8 @@ TFDSystemHost buildTFDSystem(const std::vector<const RDKit::ROMol*>& mols,
   return mergeTFDSystems(perMol);
 }
 
-TFDSystemHost buildTFDSystem(const RDKit::ROMol& mol, const TFDComputeOptions& options, bool skipGpuWorkItems) {
-  return buildTFDSystemImpl(mol, options, skipGpuWorkItems);
+TFDSystemHost buildTFDSystem(const RDKit::ROMol& mol, const TFDComputeOptions& options) {
+  return buildTFDSystemImpl(mol, options);
 }
 
 TFDSystemHost mergeTFDSystems(std::vector<TFDSystemHost>& systems) {
@@ -706,15 +658,13 @@ TFDSystemHost mergeTFDSystems(std::vector<TFDSystemHost>& systems) {
   std::vector<int> tfdOutOffset(N);
   std::vector<int> posOffset(N);
 
-  int totalConfs             = 0;
-  int totalTors              = 0;
-  int totalQuartets          = 0;
-  int totalDiheds            = 0;
-  int totalTfdOuts           = 0;
-  int totalPos               = 0;
-  int totalDihedralWorkItems = 0;
-  int totalTFDWorkItems      = 0;
-  int totalConfPositions     = 0;
+  int totalConfs         = 0;
+  int totalTors          = 0;
+  int totalQuartets      = 0;
+  int totalDiheds        = 0;
+  int totalTfdOuts       = 0;
+  int totalPos           = 0;
+  int totalConfPositions = 0;
 
   for (int i = 0; i < N; ++i) {
     confOffset[i]    = totalConfs;
@@ -724,23 +674,18 @@ TFDSystemHost mergeTFDSystems(std::vector<TFDSystemHost>& systems) {
     tfdOutOffset[i]  = totalTfdOuts;
     posOffset[i]     = totalPos;
 
-    totalConfs += systems[i].totalConformers();
+    totalConfs += static_cast<int>(systems[i].confPositionStarts.size());
     totalTors += systems[i].totalTorsions();
     totalQuartets += systems[i].totalQuartets();
     totalDiheds += systems[i].totalDihedrals();
     totalTfdOuts += systems[i].totalTFDOutputs();
     totalPos += static_cast<int>(systems[i].positions.size());
-    totalDihedralWorkItems += systems[i].totalDihedralWorkItems();
-    totalTFDWorkItems += systems[i].totalTFDWorkItems();
     totalConfPositions += static_cast<int>(systems[i].confPositionStarts.size());
   }
 
   TFDSystemHost merged;
 
   // Reserve space to avoid reallocations
-  merged.molConformerStarts.reserve(N + 1);
-  merged.molTorsionStarts.reserve(N + 1);
-  merged.tfdOutputStarts.reserve(N + 1);
   merged.quartetStarts.reserve(totalTors + 1);
   merged.positions.reserve(totalPos);
   merged.confPositionStarts.reserve(totalConfPositions);
@@ -748,14 +693,7 @@ TFDSystemHost mergeTFDSystems(std::vector<TFDSystemHost>& systems) {
   merged.torsionWeights.reserve(totalTors);
   merged.torsionMaxDevs.reserve(totalTors);
   merged.torsionTypes.reserve(totalTors);
-  merged.dihedralConfIdx.reserve(totalDihedralWorkItems);
-  merged.dihedralTorsIdx.reserve(totalDihedralWorkItems);
-  merged.dihedralOutIdx.reserve(totalDihedralWorkItems);
-  merged.tfdAnglesI.reserve(totalTFDWorkItems);
-  merged.tfdAnglesJ.reserve(totalTFDWorkItems);
-  merged.tfdTorsStart.reserve(totalTFDWorkItems);
-  merged.tfdNumTorsions.reserve(totalTFDWorkItems);
-  merged.tfdOutIdx.reserve(totalTFDWorkItems);
+  merged.molDescriptors.reserve(N);
 
   for (int i = 0; i < N; ++i) {
     auto& s = systems[i];
@@ -763,11 +701,6 @@ TFDSystemHost mergeTFDSystems(std::vector<TFDSystemHost>& systems) {
     if (s.numMolecules() == 0) {
       continue;
     }
-
-    // CSR arrays: append final value from each single-molecule system with offset
-    merged.molConformerStarts.push_back(confOffset[i] + s.molConformerStarts.back());
-    merged.molTorsionStarts.push_back(torsOffset[i] + s.molTorsionStarts.back());
-    merged.tfdOutputStarts.push_back(tfdOutOffset[i] + s.tfdOutputStarts.back());
 
     // quartetStarts CSR: skip leading 0, add quartet offset
     for (size_t j = 1; j < s.quartetStarts.size(); ++j) {
@@ -786,22 +719,26 @@ TFDSystemHost mergeTFDSystems(std::vector<TFDSystemHost>& systems) {
       merged.confPositionStarts.push_back(posOffset[i] + idx);
     }
 
-    // Dihedral work items: add respective offsets (parallel arrays, one loop)
-    for (size_t j = 0; j < s.dihedralConfIdx.size(); ++j) {
-      merged.dihedralConfIdx.push_back(confOffset[i] + s.dihedralConfIdx[j]);
-      merged.dihedralTorsIdx.push_back(quartetOffset[i] + s.dihedralTorsIdx[j]);
-      merged.dihedralOutIdx.push_back(dihedOffset[i] + s.dihedralOutIdx[j]);
+    // Adjust and append per-molecule descriptor with global offsets
+    for (const auto& desc : s.molDescriptors) {
+      MolDescriptor adjusted = desc;
+      adjusted.confStart += confOffset[i];
+      adjusted.quartetStart += quartetOffset[i];
+      adjusted.dihedStart += dihedOffset[i];
+      adjusted.torsStart += torsOffset[i];
+      adjusted.tfdOutStart += tfdOutOffset[i];
+      merged.molDescriptors.push_back(adjusted);
     }
 
-    // TFD pair work items: add respective offsets (parallel arrays, one loop)
-    for (size_t j = 0; j < s.tfdAnglesI.size(); ++j) {
-      merged.tfdAnglesI.push_back(dihedOffset[i] + s.tfdAnglesI[j]);
-      merged.tfdAnglesJ.push_back(dihedOffset[i] + s.tfdAnglesJ[j]);
-      merged.tfdTorsStart.push_back(torsOffset[i] + s.tfdTorsStart[j]);
-      merged.tfdOutIdx.push_back(tfdOutOffset[i] + s.tfdOutIdx[j]);
+    // Append work CSRs: skip leading 0, offset by current cumulative total
+    int dihedBase = merged.dihedralWorkStarts.back();
+    for (size_t j = 1; j < s.dihedralWorkStarts.size(); ++j) {
+      merged.dihedralWorkStarts.push_back(dihedBase + s.dihedralWorkStarts[j]);
     }
-    // tfdNumTorsions: counts, no offset needed
-    merged.tfdNumTorsions.insert(merged.tfdNumTorsions.end(), s.tfdNumTorsions.begin(), s.tfdNumTorsions.end());
+    int tfdBase = merged.tfdWorkStarts.back();
+    for (size_t j = 1; j < s.tfdWorkStarts.size(); ++j) {
+      merged.tfdWorkStarts.push_back(tfdBase + s.tfdWorkStarts[j]);
+    }
   }
 
   merged.totalDihedrals_ = totalDiheds;

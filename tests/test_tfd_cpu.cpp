@@ -219,7 +219,7 @@ TEST_F(TFDCpuTest, BuildTFDSystem) {
   auto                        system = nvMolKit::buildTFDSystem(*mol, options);
 
   EXPECT_EQ(system.numMolecules(), 1);
-  EXPECT_EQ(system.totalConformers(), 5);
+  EXPECT_EQ(system.molDescriptors[0].numConformers, 5);
   EXPECT_GT(system.totalTorsions(), 0);
 
   // TFD output size: 5 conformers = 5*4/2 = 10 pairs
@@ -316,14 +316,14 @@ TEST_F(TFDCpuTest, KnownDihedralAngle) {
   options.useWeights = false;
   options.maxDevMode = nvMolKit::TFDMaxDevMode::Equal;
 
-  auto system = nvMolKit::buildTFDSystem(*mol, options);
-  auto angles = generator_.computeDihedralAngles(system, 0);
+  auto tl     = nvMolKit::extractTorsionList(*mol, options.maxDevMode, options.symmRadius, options.ignoreColinearBonds);
+  auto angles = generator_.computeDihedralAngles(*mol, tl);
 
-  int numTorsions = system.molTorsionStarts[1] - system.molTorsionStarts[0];
-  ASSERT_GE(numTorsions, 1);
+  int totalQuartets = static_cast<int>(tl.totalCount());
+  ASSERT_GE(totalQuartets, 1);
 
   EXPECT_NEAR(angles[0], 180.0f, 5.0f) << "Trans conformer should have ~180° dihedral";
-  EXPECT_NEAR(angles[numTorsions], 60.0f, 5.0f) << "Gauche conformer should have ~60° dihedral";
+  EXPECT_NEAR(angles[totalQuartets], 60.0f, 5.0f) << "Gauche conformer should have ~60° dihedral";
 
   // TFD: difference = |180 - 60| = 120°, normalized by 180° ≈ 0.667
   auto tfdMatrix = generator_.GetTFDMatrix(*mol, options);
@@ -389,8 +389,8 @@ TEST_F(TFDCpuTest, ComputeDihedralAnglesRDKitReference) {
     generateConformers(*mol, 4, 42);
     ASSERT_EQ(mol->getNumConformers(), 4);
 
-    auto system = nvMolKit::buildTFDSystem(*mol, options);
-    auto angles = generator_.computeDihedralAngles(system, 0);
+    auto tl = nvMolKit::extractTorsionList(*mol, options.maxDevMode, options.symmRadius, options.ignoreColinearBonds);
+    auto angles = generator_.computeDihedralAngles(*mol, tl);
 
     int numConf = 4;
     int numTors = tc.numTorsions;

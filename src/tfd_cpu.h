@@ -41,28 +41,33 @@ class TFDCpuGenerator {
                                                   const TFDComputeOptions& options = TFDComputeOptions{});
 
   //! Compute dihedral angles for all conformers of a molecule
-  //! @param system Prepared TFD system data
-  //! @param molIdx Index of molecule in batch (0 for single molecule)
-  //! @return Angles array [numConformers][totalQuartetsForMol], flattened
-  std::vector<float> computeDihedralAngles(const TFDSystemHost& system, int molIdx = 0);
+  //! @param mol Molecule with conformers
+  //! @param torsionList Previously extracted torsion list
+  //! @return Angles array [numConformers][totalQuartets], flattened
+  std::vector<float> computeDihedralAngles(const RDKit::ROMol& mol, const TorsionList& torsionList);
 
  private:
+  //! Torsion list and weights for a single molecule
+  struct TorsionData {
+    TorsionList        torsionList;
+    std::vector<float> weights;
+  };
+
+  //! Extract torsion list and weights from a molecule
+  static TorsionData extractTorsionData(const RDKit::ROMol& mol, const TFDComputeOptions& options);
+
   //! Compute TFD matrix from precomputed angles
-  //! @param system Prepared TFD system data
-  //! @param molIdx Index of molecule in batch
-  //! @param angles Dihedral angles [numConformers][totalQuartetsForMol]
-  //! @return Lower triangular TFD matrix
-  std::vector<double> computeTFDMatrixFromAngles(const TFDSystemHost&      system,
-                                                 int                       molIdx,
-                                                 const std::vector<float>& angles);
+  std::vector<double> computeTFDMatrixFromAngles(const std::vector<float>& angles,
+                                                 int                       numConformers,
+                                                 int                       totalQuartets,
+                                                 const TorsionList&        torsionList,
+                                                 const std::vector<float>& weights);
 
   //! Compute TFD between two conformers
-  //! @param anglesI Angles for conformer i (totalQuartetsForMol values)
-  //! @param anglesJ Angles for conformer j (totalQuartetsForMol values)
-  //! @param system TFD system data
-  //! @param molIdx Molecule index
-  //! @return TFD value
-  static double computeTFDPair(const float* anglesI, const float* anglesJ, const TFDSystemHost& system, int molIdx);
+  static double computeTFDPair(const float*              anglesI,
+                               const float*              anglesJ,
+                               const TorsionList&        torsionList,
+                               const std::vector<float>& weights);
 };
 
 }  // namespace nvMolKit

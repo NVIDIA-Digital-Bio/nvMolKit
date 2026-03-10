@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "device_vector.h"
+#include "tfd_types.h"
 
 namespace nvMolKit {
 
@@ -35,13 +36,6 @@ enum class TFDComputeBackend {
 enum class TFDMaxDevMode {
   Equal,  //!< All torsions normalized by 180.0
   Spec,   //!< Each torsion normalized by its specific max deviation
-};
-
-//! Torsion type for multi-quartet handling
-enum class TorsionType : uint8_t {
-  Single,     //!< 1 quartet: direct circularDifference
-  Ring,       //!< N quartets: average abs(signed), compare averages
-  Symmetric,  //!< N quartets: min circularDiff across all (qi,qj) pairs
 };
 
 //! A single torsion definition: four atom indices and normalization factor
@@ -78,16 +72,6 @@ struct TFDComputeOptions {
 
 //! Flattened system data on host for a batch of molecules
 struct TFDSystemHost {
-  //! CSR index: conformer boundaries per molecule [nMols + 1]
-  //! molConformerStarts[i] to molConformerStarts[i+1] are conformer indices for molecule i
-  std::vector<int> molConformerStarts = {0};
-
-  //! CSR index: torsion boundaries per molecule [nMols + 1]
-  std::vector<int> molTorsionStarts = {0};
-
-  //! Total number of dihedral angle values (numConformers * totalQuartets across all molecules)
-  int totalDihedrals_ = 0;
-
   //! Flattened 3D coordinates, tightly packed (no padding)
   //! Stored as: conf0_atom0_xyz, conf0_atom1_xyz, ..., conf1_atom0_xyz, ...
   std::vector<float> positions;
@@ -113,55 +97,45 @@ struct TFDSystemHost {
   //! quartetStarts[t] to quartetStarts[t+1] are indices into torsionAtoms for torsion t
   std::vector<int> quartetStarts = {0};
 
-  //! CSR index: TFD output boundaries per molecule [nMols + 1]
-  //! Each molecule with C conformers produces C*(C-1)/2 TFD values
-  std::vector<int> tfdOutputStarts = {0};
+  // ========== Per-molecule descriptors for GPU kernel dispatch ==========
 
-  // ========== Flattened work items for GPU dihedral kernel ==========
+  //! One descriptor per molecule with all offsets needed by both kernels
+  std::vector<MolDescriptor> molDescriptors;
 
-  //! One per (conformer, quartet) pair across all molecules
-  std::vector<int> dihedralConfIdx;  //!< Global conformer index for positions lookup
-  std::vector<int> dihedralTorsIdx;  //!< Global quartet index (into torsionAtoms)
-  std::vector<int> dihedralOutIdx;   //!< Output index in dihedralAngles array
+  //! CSR: cumulative dihedral work items per molecule [nMols + 1]
+  //! dihedralWorkStarts[m+1] - dihedralWorkStarts[m] = numConformers[m] * numQuartets[m]
+  std::vector<int> dihedralWorkStarts = {0};
 
-  // ========== Flattened work items for GPU TFD matrix kernel ==========
+  //! CSR: cumulative TFD pair work items per molecule [nMols + 1]
+  //! tfdWorkStarts[m+1] - tfdWorkStarts[m] = C[m] * (C[m]-1) / 2
+  std::vector<int> tfdWorkStarts = {0};
 
-  //! One per conformer pair (i > j) across all molecules
-  std::vector<int> tfdAnglesI;      //!< Offset into dihedralAngles for conformer i
-  std::vector<int> tfdAnglesJ;      //!< Offset into dihedralAngles for conformer j
-  std::vector<int> tfdTorsStart;    //!< Global torsion start (for weights/maxDevs)
-  std::vector<int> tfdNumTorsions;  //!< Number of torsions for this molecule
-  std::vector<int> tfdOutIdx;       //!< Output index in tfdOutput
+  //! Total number of dihedral angle values (numConformers * totalQuartets across all molecules)
+  int totalDihedrals_ = 0;
 
   //! Total number of molecules
-  int numMolecules() const { return static_cast<int>(molConformerStarts.size()) - 1; }
-
-  //! Total number of conformers across all molecules
-  int totalConformers() const { return molConformerStarts.empty() ? 0 : molConformerStarts.back(); }
+  int numMolecules() const { return static_cast<int>(molDescriptors.size()); }
 
   //! Total number of torsions across all molecules
-  int totalTorsions() const { return molTorsionStarts.empty() ? 0 : molTorsionStarts.back(); }
+  int totalTorsions() const { return quartetStarts.empty() ? 0 : static_cast<int>(quartetStarts.size()) - 1; }
 
   //! Total number of quartets across all molecules
   int totalQuartets() const { return quartetStarts.empty() ? 0 : quartetStarts.back(); }
 
   //! Total number of TFD output values
-  int totalTFDOutputs() const { return tfdOutputStarts.empty() ? 0 : tfdOutputStarts.back(); }
+  int totalTFDOutputs() const { return tfdWorkStarts.empty() ? 0 : tfdWorkStarts.back(); }
 
   //! Total number of dihedral angle values to store
   int totalDihedrals() const { return totalDihedrals_; }
 
-  //! Total number of dihedral work items (for kernel launch)
-  int totalDihedralWorkItems() const { return static_cast<int>(dihedralConfIdx.size()); }
-
-  //! Total number of TFD pair work items (for kernel launch)
-  int totalTFDWorkItems() const { return static_cast<int>(tfdAnglesI.size()); }
+  //! Total number of dihedral work items (for dihedral kernel launch)
+  int totalDihedralWorkItems() const { return dihedralWorkStarts.empty() ? 0 : dihedralWorkStarts.back(); }
 };
 
 //! Flattened system data on GPU device
 //! Mirrors TFDSystemHost for device-side storage.
 struct TFDSystemDevice {
-  // ========== Dihedral kernel inputs ==========
+  // ========== Shared kernel inputs ==========
 
   //! Flattened 3D coordinates (tightly packed, no padding)
   AsyncDeviceVector<float> positions;
@@ -170,29 +144,23 @@ struct TFDSystemDevice {
   //! Flattened torsion atom indices [totalQuartets * 4]
   AsyncDeviceVector<int>   torsionAtoms;
 
-  //! Flattened dihedral work items - one per (conformer, torsion) pair
-  AsyncDeviceVector<int> dihedralConfIdx;
-  AsyncDeviceVector<int> dihedralTorsIdx;
-  AsyncDeviceVector<int> dihedralOutIdx;
-
-  // ========== TFD matrix kernel inputs ==========
-
   //! Weight per torsion
-  AsyncDeviceVector<float> torsionWeights;
+  AsyncDeviceVector<float>   torsionWeights;
   //! Maximum deviation per torsion
-  AsyncDeviceVector<float> torsionMaxDevs;
-
+  AsyncDeviceVector<float>   torsionMaxDevs;
   //! CSR index: quartet boundaries per torsion [totalTorsions + 1]
   AsyncDeviceVector<int>     quartetStarts;
   //! Type per torsion [totalTorsions]
   AsyncDeviceVector<uint8_t> torsionTypes;
 
-  //! Flattened TFD pair work items - one per conformer pair (i > j)
-  AsyncDeviceVector<int> tfdAnglesI;
-  AsyncDeviceVector<int> tfdAnglesJ;
-  AsyncDeviceVector<int> tfdTorsStart;
-  AsyncDeviceVector<int> tfdNumTorsions;
-  AsyncDeviceVector<int> tfdOutIdx;
+  // ========== Per-molecule descriptors ==========
+
+  //! One MolDescriptor per molecule [nMols]
+  AsyncDeviceVector<MolDescriptor> molDescriptors;
+  //! CSR: cumulative dihedral work items [nMols + 1]
+  AsyncDeviceVector<int>           dihedralWorkStarts;
+  //! CSR: cumulative TFD pair work items [nMols + 1]
+  AsyncDeviceVector<int>           tfdWorkStarts;
 
   // ========== Output buffers ==========
 
@@ -234,16 +202,11 @@ void transferToDevice(const TFDSystemHost& host, TFDSystemDevice& device, cudaSt
 //! Build TFDSystemHost from a batch of molecules
 //! @param mols Vector of molecules (each may have multiple conformers)
 //! @param options Computation options
-//! @param skipGpuWorkItems If true, skip building flattened GPU kernel work items
-//!        (dihedralConfIdx/TorsIdx/OutIdx, tfdAnglesI/J/TorsStart/NumTorsions/OutIdx).
-//!        Use for CPU-only paths to avoid unnecessary allocation.
-//! @return Populated TFDSystemHost ready for GPU transfer or CPU computation
-TFDSystemHost buildTFDSystem(const std::vector<const RDKit::ROMol*>& mols,
-                             const TFDComputeOptions&                options,
-                             bool                                    skipGpuWorkItems = false);
+//! @return Populated TFDSystemHost ready for GPU transfer
+TFDSystemHost buildTFDSystem(const std::vector<const RDKit::ROMol*>& mols, const TFDComputeOptions& options);
 
 //! Build TFDSystemHost from a single molecule (convenience wrapper)
-TFDSystemHost buildTFDSystem(const RDKit::ROMol& mol, const TFDComputeOptions& options, bool skipGpuWorkItems = false);
+TFDSystemHost buildTFDSystem(const RDKit::ROMol& mol, const TFDComputeOptions& options);
 
 //! Merge multiple single-molecule TFDSystemHost structs into one batched system.
 //! Concatenates all data arrays and adjusts CSR indices / work-item offsets.
