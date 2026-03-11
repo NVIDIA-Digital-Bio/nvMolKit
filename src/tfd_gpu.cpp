@@ -64,21 +64,27 @@ std::vector<std::vector<double>> TFDGpuResult::extractAll() const {
     return results;
   }
 
+  int totalValues = static_cast<int>(tfdValues.size());
+
   // Copy all data at once
-  std::vector<float> allHostFloats(tfdValues.size());
-  const_cast<AsyncDeviceVector<float>&>(tfdValues).copyToHost(allHostFloats.data(), tfdValues.size());
+  std::vector<float> allHostFloats(totalValues);
+  const_cast<AsyncDeviceVector<float>&>(tfdValues).copyToHost(allHostFloats.data(), totalValues);
   cudaStreamSynchronize(tfdValues.stream());
 
-  // Extract per-molecule results
+  // Pre-allocate all per-molecule vectors in one pass to reduce allocation overhead
   for (int m = 0; m < numMolecules; ++m) {
-    int outStart  = tfdOutputStarts[m];
-    int outEnd    = tfdOutputStarts[m + 1];
-    int numValues = outEnd - outStart;
+    results[m].resize(tfdOutputStarts[m + 1] - tfdOutputStarts[m]);
+  }
 
-    results[m].resize(numValues);
+  // Convert float→double and scatter (parallelizable, cache-friendly)
+  const float* src = allHostFloats.data();
+  for (int m = 0; m < numMolecules; ++m) {
+    int     numValues = static_cast<int>(results[m].size());
+    double* dst       = results[m].data();
     for (int i = 0; i < numValues; ++i) {
-      results[m][i] = static_cast<double>(allHostFloats[outStart + i]);
+      dst[i] = static_cast<double>(src[i]);
     }
+    src += numValues;
   }
 
   return results;
