@@ -28,6 +28,38 @@
 #include <functional>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
+
+namespace {
+// Compat helpers: RDKit 2025.09+ deprecates getExplicitValence/getImplicitValence
+// in favor of getValence(ValenceType). Detect at compile time via SFINAE.
+template <typename T, typename = void> struct HasValenceType : std::false_type {};
+template <typename T> struct HasValenceType<T, std::void_t<typename T::ValenceType>> : std::true_type {};
+
+template <typename T = RDKit::Atom, std::enable_if_t<HasValenceType<T>::value, int> = 0>
+int getExplicitValenceCompat(const RDKit::Atom* atom) {
+  return atom->getValence(RDKit::Atom::ValenceType::EXPLICIT);
+}
+template <typename T = RDKit::Atom, std::enable_if_t<!HasValenceType<T>::value, int> = 0>
+int                    getExplicitValenceCompat(const RDKit::Atom* atom) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+  return atom->getExplicitValence();
+#pragma GCC diagnostic pop
+}
+
+template <typename T = RDKit::Atom, std::enable_if_t<HasValenceType<T>::value, int> = 0>
+int getImplicitValenceCompat(const RDKit::Atom* atom) {
+  return atom->getValence(RDKit::Atom::ValenceType::IMPLICIT);
+}
+template <typename T = RDKit::Atom, std::enable_if_t<!HasValenceType<T>::value, int> = 0>
+int                    getImplicitValenceCompat(const RDKit::Atom* atom) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+  return atom->getImplicitValence();
+#pragma GCC diagnostic pop
+}
+}  // namespace
 
 #include "nvtx.h"
 #include "packed_bonds.h"
@@ -49,13 +81,8 @@ void populateAtomScalars(const RDKit::Atom* atom, AtomDataPacked& packed, const 
   packed.setAtomicNum(atom->getAtomicNum());
   packed.setChiralTag(atom->getChiralTag());
   packed.setNumExplicitHs(atom->getTotalNumHs());
-#if RDKIT_VERSION_NUM >= 0x20240300
-  packed.setExplicitValence(atom->getValence(RDKit::Atom::ValenceType::EXPLICIT));
-  packed.setImplicitValence(atom->getValence(RDKit::Atom::ValenceType::IMPLICIT));
-#else
-  packed.setExplicitValence(atom->getExplicitValence());
-  packed.setImplicitValence(atom->getImplicitValence());
-#endif
+  packed.setExplicitValence(getExplicitValenceCompat(atom));
+  packed.setImplicitValence(getImplicitValenceCompat(atom));
   packed.setTotalValence(atom->getTotalValence());
   packed.setFormalCharge(atom->getFormalCharge());
   packed.setHybridization(atom->getHybridization());

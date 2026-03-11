@@ -104,9 +104,15 @@ int getExpectedAtomProperty(const RDKit::ROMol* mol, int atomIdx, AtomProperty p
     case AtomProperty::NumExplicitHs:
       return atom->getTotalNumHs();
     case AtomProperty::ExplicitValence:
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
       return atom->getExplicitValence();
+#pragma GCC diagnostic pop
     case AtomProperty::ImplicitValence:
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
       return atom->getImplicitValence();
+#pragma GCC diagnostic pop
     case AtomProperty::FormalCharge:
       return atom->getFormalCharge();
     case AtomProperty::ChiralTag:
