@@ -27,20 +27,22 @@ Example usage:
     >>> from rdkit.Chem import AllChem
     >>> import nvmolkit.tfd as tfd
     >>>
-    >>> # Create molecule with conformers
     >>> mol = Chem.MolFromSmiles('CCCCC')
     >>> AllChem.EmbedMultipleConfs(mol, numConfs=5)
     >>>
-    >>> # Compute TFD matrix (GPU-accelerated)
+    >>> # Python lists (RDKit-compatible, default)
     >>> tfd_matrix = tfd.GetTFDMatrix(mol)
     >>>
-    >>> # Batch processing
-    >>> mols = [mol1, mol2, mol3]
-    >>> tfd_matrices = tfd.GetTFDMatrices(mols)
+    >>> # Numpy arrays (fast, stays on CPU)
+    >>> tfd_matrices = tfd.GetTFDMatrices(mols, return_type="numpy")
+    >>>
+    >>> # GPU tensors (fastest, no D2H copy)
+    >>> tfd_matrices = tfd.GetTFDMatrices(mols, return_type="tensor")
 """
 
-from typing import List
+from typing import List, Union
 
+import numpy as np
 import torch
 
 from nvmolkit import _TFD
@@ -48,109 +50,11 @@ from nvmolkit._arrayHelpers import *  # noqa: F403
 from nvmolkit.types import AsyncGpuResult
 
 
-def GetTFDMatrix(
-    mol,
-    useWeights: bool = True,
-    maxDev: str = "equal",
-    symmRadius: int = 2,
-    ignoreColinearBonds: bool = True,
-    backend: str = "gpu",
-) -> List[float]:
-    """Calculate the TFD matrix for conformers of a molecule.
-
-    This function computes the pairwise Torsion Fingerprint Deviation (TFD)
-    values between all conformers of a molecule. The result is a lower
-    triangular matrix stored as a flat list.
-
-    Args:
-        mol: RDKit molecule with multiple conformers.
-        useWeights: If True (default), use distance-based torsion weights.
-        maxDev: Normalization mode for torsion deviations.
-            'equal': All torsions normalized by 180 degrees (default).
-            'spec': Each torsion uses its specific maximum deviation.
-        symmRadius: Radius for Morgan fingerprint atom invariants used
-            to detect symmetric atoms (default: 2).
-        ignoreColinearBonds: If True (default), ignore single bonds
-            adjacent to triple bonds.
-        backend: Computation backend, 'gpu' (default) or 'cpu'.
-
-    Returns:
-        Lower triangular TFD matrix as a flat list. For C conformers,
-        returns C*(C-1)/2 values in row-major order:
-        [TFD(1,0), TFD(2,0), TFD(2,1), TFD(3,0), ...]
-
-    Example:
-        >>> mol = Chem.MolFromSmiles('CCCCC')
-        >>> AllChem.EmbedMultipleConfs(mol, numConfs=4)
-        >>> tfd_matrix = GetTFDMatrix(mol)
-        >>> len(tfd_matrix)  # 4*(4-1)/2 = 6
-        6
-    """
-    return list(
-        _TFD.GetTFDMatrix(
-            mol,
-            useWeights=useWeights,
-            maxDev=maxDev,
-            symmRadius=symmRadius,
-            ignoreColinearBonds=ignoreColinearBonds,
-            backend=backend,
-        )
-    )
-
-
-def GetTFDMatrices(
-    mols: List,
-    useWeights: bool = True,
-    maxDev: str = "equal",
-    symmRadius: int = 2,
-    ignoreColinearBonds: bool = True,
-    backend: str = "gpu",
-) -> List[List[float]]:
-    """Calculate TFD matrices for multiple molecules.
-
-    Batch version of GetTFDMatrix that processes multiple molecules
-    efficiently on the GPU.
-
-    Args:
-        mols: List of RDKit molecules, each with multiple conformers.
-        useWeights: If True (default), use distance-based torsion weights.
-        maxDev: Normalization mode ('equal' or 'spec').
-        symmRadius: Radius for atom invariants (default: 2).
-        ignoreColinearBonds: If True (default), ignore colinear bonds.
-        backend: Computation backend, 'gpu' (default) or 'cpu'.
-
-    Returns:
-        List of TFD matrices, one per molecule. Each matrix is a flat
-        list of lower triangular values.
-
-    Example:
-        >>> mols = [mol1, mol2, mol3]
-        >>> tfd_matrices = GetTFDMatrices(mols)
-        >>> len(tfd_matrices)
-        3
-    """
-    results = _TFD.GetTFDMatrices(
-        mols,
-        useWeights=useWeights,
-        maxDev=maxDev,
-        symmRadius=symmRadius,
-        ignoreColinearBonds=ignoreColinearBonds,
-        backend=backend,
-    )
-    return [list(r) for r in results]
-
-
 class TFDGpuResult:
     """Result container for GPU-resident TFD computation.
 
-    This class holds GPU-resident TFD values along with metadata needed
-    to extract per-molecule results. Use this when you want to keep
-    results on GPU for further processing (e.g., clustering).
-
-    Attributes:
-        tfd_values: AsyncGpuResult containing all TFD values as a 1D tensor.
-        output_starts: CSR-style boundaries for each molecule's TFD values.
-        conformer_counts: Number of conformers per molecule.
+    Holds GPU-resident TFD values along with metadata needed
+    to extract per-molecule results.
     """
 
     def __init__(self, tfd_values: AsyncGpuResult, output_starts: List[int], conformer_counts: List[int]):
@@ -159,81 +63,36 @@ class TFDGpuResult:
         self.conformer_counts = conformer_counts
 
     def extract_molecule(self, mol_idx: int) -> torch.Tensor:
-        """Extract TFD matrix for a single molecule as a torch tensor.
-
-        Args:
-            mol_idx: Index of the molecule in the batch.
-
-        Returns:
-            1D torch tensor containing the TFD values for the molecule.
-        """
+        """Extract TFD matrix for a single molecule as a GPU tensor."""
         if mol_idx < 0 or mol_idx >= len(self.conformer_counts):
             raise IndexError(f"Molecule index {mol_idx} out of range [0, {len(self.conformer_counts)})")
-
         start = self.output_starts[mol_idx]
         end = self.output_starts[mol_idx + 1]
         return self.tfd_values.torch()[start:end]
 
-    def extract_all(self) -> List[torch.Tensor]:
-        """Extract TFD matrices for all molecules.
-
-        Returns:
-            List of 1D torch tensors, one per molecule.
-        """
+    def to_tensors(self) -> List[torch.Tensor]:
+        """Extract TFD matrices as a list of GPU tensors (no D2H copy)."""
         all_values = self.tfd_values.torch()
-        results = []
-        for i in range(len(self.conformer_counts)):
-            start = self.output_starts[i]
-            end = self.output_starts[i + 1]
-            results.append(all_values[start:end])
-        return results
+        return [all_values[self.output_starts[i]:self.output_starts[i + 1]]
+                for i in range(len(self.conformer_counts))]
 
-    def to_lists(self) -> List[List[float]]:
-        """Convert GPU results to Python lists (blocking operation).
-
-        Returns:
-            List of TFD matrices as Python lists.
-        """
+    def to_numpy(self) -> List[np.ndarray]:
+        """Extract TFD matrices as a list of numpy arrays (one bulk D2H copy)."""
         torch.cuda.synchronize()
         all_values = self.tfd_values.numpy()
-        results = []
-        for i in range(len(self.conformer_counts)):
-            start = self.output_starts[i]
-            end = self.output_starts[i + 1]
-            results.append(all_values[start:end].tolist())
-        return results
+        return [all_values[self.output_starts[i]:self.output_starts[i + 1]]
+                for i in range(len(self.conformer_counts))]
+
+    def to_lists(self) -> List[List[float]]:
+        """Extract TFD matrices as Python lists (bulk D2H + tolist)."""
+        torch.cuda.synchronize()
+        all_list = self.tfd_values.numpy().tolist()
+        return [all_list[self.output_starts[i]:self.output_starts[i + 1]]
+                for i in range(len(self.conformer_counts))]
 
 
-def GetTFDMatricesGpu(
-    mols: List,
-    useWeights: bool = True,
-    maxDev: str = "equal",
-    symmRadius: int = 2,
-    ignoreColinearBonds: bool = True,
-) -> TFDGpuResult:
-    """Calculate TFD matrices with GPU-resident output.
-
-    Similar to GetTFDMatrices but keeps results on GPU for further
-    processing. Useful when chaining with other GPU operations like
-    clustering.
-
-    Args:
-        mols: List of RDKit molecules, each with multiple conformers.
-        useWeights: If True (default), use distance-based torsion weights.
-        maxDev: Normalization mode ('equal' or 'spec').
-        symmRadius: Radius for atom invariants (default: 2).
-        ignoreColinearBonds: If True (default), ignore colinear bonds.
-
-    Returns:
-        TFDGpuResult containing GPU-resident TFD values and metadata.
-
-    Example:
-        >>> result = GetTFDMatricesGpu(mols)
-        >>> # Access as torch tensor (async)
-        >>> tensor = result.tfd_values.torch()
-        >>> # Or extract per-molecule
-        >>> mol0_tfd = result.extract_molecule(0)
-    """
+def _get_gpu_result(mols, useWeights, maxDev, symmRadius, ignoreColinearBonds):
+    """Run GPU TFD computation and return TFDGpuResult (no D2H copy)."""
     pyarray, output_starts, conformer_counts = _TFD.GetTFDMatricesGpuBuffer(
         mols,
         useWeights=useWeights,
@@ -248,14 +107,32 @@ def GetTFDMatricesGpu(
     )
 
 
-def GetTFDMatrixGpu(
+def _extract_result(gpu_result, return_type, single=False):
+    """Extract results from TFDGpuResult based on return_type."""
+    if return_type == "tensor":
+        results = gpu_result.to_tensors()
+    elif return_type == "numpy":
+        results = gpu_result.to_numpy()
+    else:
+        results = gpu_result.to_lists()
+
+    if single:
+        return results[0] if results else ([] if return_type == "list" else
+                                           np.array([], dtype=np.float32) if return_type == "numpy" else
+                                           torch.tensor([], dtype=torch.float32))
+    return results
+
+
+def GetTFDMatrix(
     mol,
     useWeights: bool = True,
     maxDev: str = "equal",
     symmRadius: int = 2,
     ignoreColinearBonds: bool = True,
-) -> AsyncGpuResult:
-    """Calculate TFD matrix for a single molecule with GPU-resident output.
+    backend: str = "gpu",
+    return_type: str = "list",
+) -> Union[List[float], np.ndarray, torch.Tensor]:
+    """Calculate the TFD matrix for conformers of a molecule.
 
     Args:
         mol: RDKit molecule with multiple conformers.
@@ -263,15 +140,89 @@ def GetTFDMatrixGpu(
         maxDev: Normalization mode ('equal' or 'spec').
         symmRadius: Radius for atom invariants (default: 2).
         ignoreColinearBonds: If True (default), ignore colinear bonds.
+        backend: Computation backend, 'gpu' (default) or 'cpu'.
+        return_type: Output format:
+            'list' (default): Python list of floats (RDKit-compatible).
+            'numpy': numpy float32 array (CPU, no Python object overhead).
+            'tensor': GPU torch.Tensor (no D2H copy).
 
     Returns:
-        AsyncGpuResult containing TFD values as a 1D tensor.
+        Lower triangular TFD matrix as a flat list, numpy array, or GPU tensor.
     """
+    if backend in ("gpu", "GPU"):
+        gpu_result = _get_gpu_result([mol], useWeights, maxDev, symmRadius, ignoreColinearBonds)
+        return _extract_result(gpu_result, return_type, single=True)
+
+    return list(
+        _TFD.GetTFDMatrix(
+            mol, useWeights=useWeights, maxDev=maxDev, symmRadius=symmRadius,
+            ignoreColinearBonds=ignoreColinearBonds, backend=backend,
+        )
+    )
+
+
+def GetTFDMatrices(
+    mols: List,
+    useWeights: bool = True,
+    maxDev: str = "equal",
+    symmRadius: int = 2,
+    ignoreColinearBonds: bool = True,
+    backend: str = "gpu",
+    return_type: str = "list",
+) -> Union[List[List[float]], List[np.ndarray], List[torch.Tensor]]:
+    """Calculate TFD matrices for multiple molecules.
+
+    Args:
+        mols: List of RDKit molecules, each with multiple conformers.
+        useWeights: If True (default), use distance-based torsion weights.
+        maxDev: Normalization mode ('equal' or 'spec').
+        symmRadius: Radius for atom invariants (default: 2).
+        ignoreColinearBonds: If True (default), ignore colinear bonds.
+        backend: Computation backend, 'gpu' (default) or 'cpu'.
+        return_type: Output format:
+            'list' (default): List of Python lists (RDKit-compatible).
+            'numpy': List of numpy float32 arrays (CPU).
+            'tensor': List of GPU torch.Tensors (no D2H copy).
+
+    Returns:
+        List of TFD matrices in the requested format.
+    """
+    if backend in ("gpu", "GPU"):
+        gpu_result = _get_gpu_result(mols, useWeights, maxDev, symmRadius, ignoreColinearBonds)
+        return _extract_result(gpu_result, return_type)
+
+    results = _TFD.GetTFDMatrices(
+        mols, useWeights=useWeights, maxDev=maxDev, symmRadius=symmRadius,
+        ignoreColinearBonds=ignoreColinearBonds, backend=backend,
+    )
+    return [list(r) for r in results]
+
+
+def GetTFDMatricesGpu(
+    mols: List,
+    useWeights: bool = True,
+    maxDev: str = "equal",
+    symmRadius: int = 2,
+    ignoreColinearBonds: bool = True,
+) -> TFDGpuResult:
+    """Calculate TFD matrices with GPU-resident output.
+
+    Returns a TFDGpuResult holding GPU-resident values. No D2H copy
+    until explicitly requested via to_tensors(), to_numpy(), or to_lists().
+    """
+    return _get_gpu_result(mols, useWeights, maxDev, symmRadius, ignoreColinearBonds)
+
+
+def GetTFDMatrixGpu(
+    mol,
+    useWeights: bool = True,
+    maxDev: str = "equal",
+    symmRadius: int = 2,
+    ignoreColinearBonds: bool = True,
+) -> AsyncGpuResult:
+    """Calculate TFD matrix for a single molecule with GPU-resident output."""
     result = GetTFDMatricesGpu(
-        [mol],
-        useWeights=useWeights,
-        maxDev=maxDev,
-        symmRadius=symmRadius,
-        ignoreColinearBonds=ignoreColinearBonds,
+        [mol], useWeights=useWeights, maxDev=maxDev,
+        symmRadius=symmRadius, ignoreColinearBonds=ignoreColinearBonds,
     )
     return result.tfd_values

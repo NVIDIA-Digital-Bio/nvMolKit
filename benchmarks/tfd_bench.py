@@ -176,15 +176,21 @@ def bench_nvmol_gpu_single(mol: Chem.Mol) -> None:
     torch.cuda.synchronize()
 
 
-def bench_nvmol_gpu_batch(mols: List[Chem.Mol]) -> None:
-    """Benchmark nvMolKit GPU TFD for multiple molecules."""
-    nvmol_tfd.GetTFDMatrices(mols, useWeights=True, maxDev="equal", backend="gpu")
+def bench_nvmol_gpu_list(mols: List[Chem.Mol]) -> None:
+    """Benchmark nvMolKit GPU TFD returning Python lists."""
+    nvmol_tfd.GetTFDMatrices(mols, useWeights=True, maxDev="equal", backend="gpu", return_type="list")
     torch.cuda.synchronize()
 
 
-def bench_nvmol_gpu_buffer(mols: List[Chem.Mol]) -> None:
-    """Benchmark nvMolKit GPU TFD with GPU-resident output."""
-    result = nvmol_tfd.GetTFDMatricesGpu(mols, useWeights=True, maxDev="equal")
+def bench_nvmol_gpu_numpy(mols: List[Chem.Mol]) -> None:
+    """Benchmark nvMolKit GPU TFD returning numpy arrays."""
+    nvmol_tfd.GetTFDMatrices(mols, useWeights=True, maxDev="equal", backend="gpu", return_type="numpy")
+    torch.cuda.synchronize()
+
+
+def bench_nvmol_gpu_tensor(mols: List[Chem.Mol]) -> None:
+    """Benchmark nvMolKit GPU TFD returning GPU tensors (no D2H)."""
+    nvmol_tfd.GetTFDMatrices(mols, useWeights=True, maxDev="equal", backend="gpu", return_type="tensor")
     torch.cuda.synchronize()
 
 
@@ -212,6 +218,8 @@ def run_benchmarks(
     skip_rdkit: bool = False,
     output_file: str = "tfd_results.csv",
     smiles_file: str = None,
+    mol_counts: List[int] = None,
+    conformer_counts: List[int] = None,
 ) -> pd.DataFrame:
     """Run TFD benchmarks with various configurations.
 
@@ -219,24 +227,29 @@ def run_benchmarks(
         smiles_list: List of SMILES strings
         skip_rdkit: If True, skip RDKit benchmarks (faster for large runs)
         output_file: Output CSV file path
+        smiles_file: Path to SMILES CSV (used to locate pickle files)
+        mol_counts: List of molecule counts to benchmark
+        conformer_counts: List of conformer counts to benchmark
 
     Returns:
         DataFrame with benchmark results
     """
-    results = []
+    if mol_counts is None:
+        mol_counts = [1, 5, 10, 25, 50, 100]
+    if conformer_counts is None:
+        conformer_counts = [5, 10, 20]
 
-    # Test configurations
-    mol_counts = [1, 5, 10, 25, 50, 100]
-    conformer_counts = [5, 10, 20]
+    results = []
 
     print("=" * 70)
     print("TFD Benchmark: RDKit vs nvMolKit (CPU) vs nvMolKit (GPU)")
+    print(f"Molecule counts: {mol_counts}")
+    print(f"Conformer counts: {conformer_counts}")
     print("=" * 70)
 
     for num_confs in conformer_counts:
         print(f"\n--- Preparing molecules with {num_confs} conformers ---")
 
-        # Prepare molecules (use larger pool for selection)
         all_mols = prepare_molecules(smiles_list, num_confs, max_mols=max(mol_counts) + 20,
                                      smiles_file=smiles_file)
 
@@ -291,51 +304,49 @@ def run_benchmarks(
                 result["nvmol_cpu_time_ms"] = None
                 result["nvmol_cpu_std_ms"] = None
 
-            # nvMolKit GPU benchmark
+            # nvMolKit GPU list benchmark (return_type="list")
             try:
-                nvmol_gpu_time, nvmol_gpu_std = time_it(lambda: bench_nvmol_gpu_batch(mols))
-                result["nvmol_gpu_time_ms"] = nvmol_gpu_time
-                result["nvmol_gpu_std_ms"] = nvmol_gpu_std
-                print(f"  nvMolKit (GPU):     {nvmol_gpu_time:8.2f} ms (+/- {nvmol_gpu_std:.2f})")
+                t, s = time_it(lambda: bench_nvmol_gpu_list(mols))
+                result["nvmol_gpu_list_time_ms"] = t
+                result["nvmol_gpu_list_std_ms"] = s
+                print(f"  nvMolKit (GPU list):  {t:8.2f} ms (+/- {s:.2f})")
             except Exception as e:
-                print(f"  nvMolKit GPU failed: {e}")
-                result["nvmol_gpu_time_ms"] = None
-                result["nvmol_gpu_std_ms"] = None
+                print(f"  nvMolKit GPU list failed: {e}")
+                result["nvmol_gpu_list_time_ms"] = None
 
-            # nvMolKit GPU-resident benchmark
+            # nvMolKit GPU numpy benchmark (return_type="numpy")
             try:
-                nvmol_gpu_buf_time, nvmol_gpu_buf_std = time_it(lambda: bench_nvmol_gpu_buffer(mols))
-                result["nvmol_gpu_buffer_time_ms"] = nvmol_gpu_buf_time
-                result["nvmol_gpu_buffer_std_ms"] = nvmol_gpu_buf_std
-                print(f"  nvMolKit (GPU buf): {nvmol_gpu_buf_time:8.2f} ms (+/- {nvmol_gpu_buf_std:.2f})")
+                t, s = time_it(lambda: bench_nvmol_gpu_numpy(mols))
+                result["nvmol_gpu_numpy_time_ms"] = t
+                result["nvmol_gpu_numpy_std_ms"] = s
+                print(f"  nvMolKit (GPU numpy): {t:8.2f} ms (+/- {s:.2f})")
             except Exception as e:
-                print(f"  nvMolKit GPU buffer failed: {e}")
-                result["nvmol_gpu_buffer_time_ms"] = None
-                result["nvmol_gpu_buffer_std_ms"] = None
+                print(f"  nvMolKit GPU numpy failed: {e}")
+                result["nvmol_gpu_numpy_time_ms"] = None
 
-            # Calculate speedups
-            if result.get("rdkit_time_ms") and result.get("nvmol_cpu_time_ms"):
-                result["speedup_cpu_vs_rdkit"] = result["rdkit_time_ms"] / result["nvmol_cpu_time_ms"]
-            else:
-                result["speedup_cpu_vs_rdkit"] = None
+            # nvMolKit GPU tensor benchmark (return_type="tensor", no D2H)
+            try:
+                t, s = time_it(lambda: bench_nvmol_gpu_tensor(mols))
+                result["nvmol_gpu_tensor_time_ms"] = t
+                result["nvmol_gpu_tensor_std_ms"] = s
+                print(f"  nvMolKit (GPU ten):  {t:8.2f} ms (+/- {s:.2f})")
+            except Exception as e:
+                print(f"  nvMolKit GPU tensor failed: {e}")
+                result["nvmol_gpu_tensor_time_ms"] = None
 
-            if result.get("rdkit_time_ms") and result.get("nvmol_gpu_time_ms"):
-                result["speedup_gpu_vs_rdkit"] = result["rdkit_time_ms"] / result["nvmol_gpu_time_ms"]
-            else:
-                result["speedup_gpu_vs_rdkit"] = None
+            # Calculate speedups vs RDKit
+            speedups = {}
+            for key, label in [
+                ("nvmol_cpu_time_ms",        "CPU"),
+                ("nvmol_gpu_list_time_ms",   "GPU list"),
+                ("nvmol_gpu_numpy_time_ms",  "GPU numpy"),
+                ("nvmol_gpu_tensor_time_ms", "GPU tensor"),
+            ]:
+                if result.get("rdkit_time_ms") and result.get(key):
+                    speedups[label] = result["rdkit_time_ms"] / result[key]
 
-            if result.get("nvmol_cpu_time_ms") and result.get("nvmol_gpu_time_ms"):
-                result["speedup_gpu_vs_cpu"] = result["nvmol_cpu_time_ms"] / result["nvmol_gpu_time_ms"]
-            else:
-                result["speedup_gpu_vs_cpu"] = None
-
-            # Print speedups
-            if result.get("speedup_cpu_vs_rdkit"):
-                print(f"  Speedup CPU vs RDKit: {result['speedup_cpu_vs_rdkit']:.1f}x")
-            if result.get("speedup_gpu_vs_rdkit"):
-                print(f"  Speedup GPU vs RDKit: {result['speedup_gpu_vs_rdkit']:.1f}x")
-            if result.get("speedup_gpu_vs_cpu"):
-                print(f"  Speedup GPU vs CPU:   {result['speedup_gpu_vs_cpu']:.1f}x")
+            for label, val in speedups.items():
+                print(f"  Speedup {label:>10s} vs RDKit: {val:.1f}x")
 
             results.append(result)
 
@@ -350,18 +361,34 @@ def run_benchmarks(
 
 
 def main():
+    _default_smiles = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "benchmark_smiles.csv")
+
     parser = argparse.ArgumentParser(description="TFD Benchmark")
     parser.add_argument(
         "--smiles-file",
         type=str,
-        default="data/benchmark_smiles.csv",
-        help="CSV file with SMILES (first column)",
+        default=_default_smiles,
+        help="CSV file with SMILES (default: benchmarks/data/benchmark_smiles.csv)",
     )
     parser.add_argument(
         "--output",
         type=str,
         default="tfd_results.csv",
         help="Output CSV file for results",
+    )
+    parser.add_argument(
+        "--num-mols",
+        type=int,
+        nargs="+",
+        default=[1, 10, 50, 100, 500, 1000],
+        help="Molecule counts to benchmark (default: 1 10 50 100 500 1000)",
+    )
+    parser.add_argument(
+        "--num-confs",
+        type=int,
+        nargs="+",
+        default=[5, 10, 20, 50],
+        help="Conformer counts to benchmark (default: 5 10 20 50)",
     )
     parser.add_argument(
         "--skip-rdkit",
@@ -389,17 +416,21 @@ def main():
     # Optional: Verify correctness
     if args.verify:
         print("\nVerifying correctness...")
-        test_mols = prepare_molecules(smiles_list[:20], num_confs=5, max_mols=5,
+        test_mols = prepare_molecules(smiles_list, num_confs=5, max_mols=50,
                                       smiles_file=args.smiles_file)
         all_correct = True
+        mismatches = 0
         for i, mol in enumerate(test_mols):
             if verify_correctness(mol):
                 print(f"  Molecule {i}: OK")
             else:
                 print(f"  Molecule {i}: MISMATCH")
                 all_correct = False
-        if not all_correct:
-            print("Warning: Some molecules did not match RDKit within tolerance")
+                mismatches += 1
+        if all_correct:
+            print(f"All {len(test_mols)} molecules match RDKit.")
+        else:
+            print(f"Warning: {mismatches}/{len(test_mols)} molecules did not match RDKit within tolerance")
 
     # Run benchmarks
     run_benchmarks(
@@ -407,6 +438,8 @@ def main():
         skip_rdkit=args.skip_rdkit,
         output_file=args.output,
         smiles_file=args.smiles_file,
+        mol_counts=args.num_mols,
+        conformer_counts=args.num_confs,
     )
 
 

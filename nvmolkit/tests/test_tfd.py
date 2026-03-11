@@ -200,7 +200,7 @@ class TestGpuResidentOutput:
         assert len(result.output_starts) == len(mols) + 1
 
         # Extract individual results
-        extracted = result.extract_all()
+        extracted = result.to_tensors()
         assert len(extracted) == len(mols)
 
         for i, (mol, tensor) in enumerate(zip(mols, extracted)):

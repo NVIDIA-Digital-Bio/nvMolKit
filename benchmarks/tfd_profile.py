@@ -20,20 +20,22 @@ C++ NVTX ranges (buildTFDSystem, transferToDevice, kernel launches, etc.) are
 automatically captured by nsys alongside the Python-level annotations below.
 
 Usage:
-    # Profile GPU path
+    # Profile GPU with default sweep (multiple mol counts and conformer counts):
     nsys profile -t nvtx,osrt,cuda --gpu-metrics-devices=all --stats=true \
         -f true -o tfd_gpu_profile \
-        python benchmarks/tfd_profile.py 50 20 gpu
+        python benchmarks/tfd_profile.py gpu
 
-    # Profile CPU path
-    nsys profile -t nvtx,osrt,cuda --stats=true \
-        -f true -o tfd_cpu_profile \
-        python benchmarks/tfd_profile.py 50 20 cpu
+    # Profile GPU with specific configurations:
+    python benchmarks/tfd_profile.py gpu --num-mols 100 500 1000 --num-confs 20 50
 
-    # Profile both paths
-    nsys profile -t nvtx,osrt,cuda --gpu-metrics-devices=all --stats=true \
-        -f true -o tfd_both_profile \
-        python benchmarks/tfd_profile.py 50 20 both
+    # Profile a single configuration (legacy style):
+    python benchmarks/tfd_profile.py gpu --num-mols 50 --num-confs 20
+
+    # Profile CPU path:
+    python benchmarks/tfd_profile.py cpu
+
+    # Profile both paths:
+    python benchmarks/tfd_profile.py both
 """
 
 import argparse
@@ -94,27 +96,75 @@ def prepare_molecules(smiles_file, num_mols, num_confs):
     return mols
 
 
+def run_config(mols, backend, num_runs, label):
+    """Run profiled iterations for a single configuration."""
+    actual_confs = [mol.GetNumConformers() for mol in mols]
+    total_pairs = sum(c * (c - 1) // 2 for c in actual_confs)
+    print(f"\n[{label}] {len(mols)} mols, avg {sum(actual_confs)/len(actual_confs):.1f} confs, "
+          f"{total_pairs} TFD pairs")
+
+    for run in range(num_runs):
+        if backend in ("cpu", "both"):
+            with nvtx.annotate(f"{label} CPU run {run}", color="cyan"):
+                results = nvmol_tfd.GetTFDMatrices(
+                    mols, useWeights=True, maxDev="equal", backend="cpu"
+                )
+                total_values = sum(len(r) for r in results)
+                print(f"  CPU run {run}: {total_values} TFD values")
+
+        if backend in ("gpu", "both"):
+            with nvtx.annotate(f"{label} GPU run {run}", color="orange"):
+                results = nvmol_tfd.GetTFDMatrices(
+                    mols, useWeights=True, maxDev="equal", backend="gpu"
+                )
+                torch.cuda.synchronize()
+                total_values = sum(len(r) for r in results)
+                print(f"  GPU run {run}: {total_values} TFD values")
+
+        if backend in ("gpu_buffer", "both"):
+            with nvtx.annotate(f"{label} GPU_buf run {run}", color="yellow"):
+                nvmol_tfd.GetTFDMatricesGpu(mols, useWeights=True, maxDev="equal")
+                torch.cuda.synchronize()
+                print(f"  GPU_buf run {run}: done")
+
+
 def main():
+    _default_smiles = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "benchmark_smiles.csv")
+
     parser = argparse.ArgumentParser(
         description="TFD profiling script for nsys",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 Examples:
-  # Profile GPU with 50 molecules, 20 conformers each:
+  # Profile GPU with default sweep:
   nsys profile -t nvtx,osrt,cuda --gpu-metrics-devices=all --stats=true \\
-      -f true -o tfd_gpu python benchmarks/tfd_profile.py 50 20 gpu
+      -f true -o tfd_gpu python benchmarks/tfd_profile.py gpu
 
-  # Profile CPU:
-  nsys profile -t nvtx,osrt,cuda --stats=true \\
-      -f true -o tfd_cpu python benchmarks/tfd_profile.py 50 20 cpu
+  # Profile GPU with large configurations:
+  python benchmarks/tfd_profile.py gpu --num-mols 500 1000 --num-confs 50 100
+
+  # Profile CPU with single config:
+  python benchmarks/tfd_profile.py cpu --num-mols 100 --num-confs 20
 """,
     )
-    parser.add_argument("num_mols", type=int, help="Number of molecules")
-    parser.add_argument("num_confs", type=int, help="Number of conformers per molecule")
     parser.add_argument(
         "backend",
         choices=["cpu", "gpu", "gpu_buffer", "both"],
         help="Backend to profile",
+    )
+    parser.add_argument(
+        "--num-mols",
+        type=int,
+        nargs="+",
+        default=[50, 100, 500, 1000],
+        help="Number of molecules to test (default: 50 100 500 1000)",
+    )
+    parser.add_argument(
+        "--num-confs",
+        type=int,
+        nargs="+",
+        default=[10, 20, 50],
+        help="Number of conformers to test (default: 10 20 50)",
     )
     parser.add_argument(
         "--warmup",
@@ -126,9 +176,8 @@ Examples:
         "--runs",
         type=int,
         default=3,
-        help="Number of profiled runs (default: 3)",
+        help="Number of profiled runs per configuration (default: 3)",
     )
-    _default_smiles = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "benchmark_smiles.csv")
     parser.add_argument(
         "--smiles-file",
         type=str,
@@ -137,26 +186,34 @@ Examples:
     )
     args = parser.parse_args()
 
-    # === Setup ===
-    with nvtx.annotate("Setup", color="blue"):
-        print(f"Loading molecules: {args.num_mols} mols x {args.num_confs} confs")
-        mols = prepare_molecules(args.smiles_file, args.num_mols, args.num_confs)
-        if not mols:
-            print("Error: No valid molecules prepared")
-            sys.exit(1)
+    print(f"Backend: {args.backend}")
+    print(f"Molecule counts: {args.num_mols}")
+    print(f"Conformer counts: {args.num_confs}")
+    print(f"Runs per config: {args.runs}")
 
-        actual_confs = [mol.GetNumConformers() for mol in mols]
-        total_pairs = sum(c * (c - 1) // 2 for c in actual_confs)
-        print(f"Prepared {len(mols)} molecules, avg {sum(actual_confs)/len(actual_confs):.1f} conformers")
-        print(f"Total TFD pairs: {total_pairs}")
-        print(f"Backend: {args.backend}")
+    # === Setup: load all needed configurations ===
+    configs = {}
+    with nvtx.annotate("Setup", color="blue"):
+        for num_confs in args.num_confs:
+            max_mols = max(args.num_mols)
+            print(f"\nLoading up to {max_mols} molecules with {num_confs} conformers...")
+            all_mols = prepare_molecules(args.smiles_file, max_mols, num_confs)
+            if not all_mols:
+                print(f"  Warning: no molecules available for {num_confs} conformers, skipping")
+                continue
+            configs[num_confs] = all_mols
+
+    if not configs:
+        print("Error: No valid molecules prepared")
+        sys.exit(1)
 
     # === Warmup ===
     if args.warmup > 0:
         with nvtx.annotate("Warmup", color="red"):
-            print(f"\nWarmup ({args.warmup} iteration(s))...")
-            warmup_mols = mols[:min(5, len(mols))]
-            for i in range(args.warmup):
+            first_mols = list(configs.values())[0]
+            warmup_mols = first_mols[:min(5, len(first_mols))]
+            print(f"\nWarmup ({args.warmup} iteration(s)) with {len(warmup_mols)} molecules...")
+            for _ in range(args.warmup):
                 if args.backend in ("cpu", "both"):
                     nvmol_tfd.GetTFDMatrices(warmup_mols, useWeights=True, maxDev="equal", backend="cpu")
                 if args.backend in ("gpu", "gpu_buffer", "both"):
@@ -165,33 +222,15 @@ Examples:
 
     # === Profiled runs ===
     with nvtx.annotate("Profiled runs", color="green"):
-        print(f"\nRunning {args.runs} profiled iteration(s)...")
-
-        for run in range(args.runs):
-            if args.backend in ("cpu", "both"):
-                with nvtx.annotate(f"CPU run {run}", color="cyan"):
-                    results = nvmol_tfd.GetTFDMatrices(
-                        mols, useWeights=True, maxDev="equal", backend="cpu"
-                    )
-                    total_values = sum(len(r) for r in results)
-                    print(f"  CPU run {run}: {total_values} TFD values computed")
-
-            if args.backend in ("gpu", "both"):
-                with nvtx.annotate(f"GPU run {run}", color="orange"):
-                    results = nvmol_tfd.GetTFDMatrices(
-                        mols, useWeights=True, maxDev="equal", backend="gpu"
-                    )
-                    torch.cuda.synchronize()
-                    total_values = sum(len(r) for r in results)
-                    print(f"  GPU run {run}: {total_values} TFD values computed")
-
-            if args.backend in ("gpu_buffer", "both"):
-                with nvtx.annotate(f"GPU buffer run {run}", color="yellow"):
-                    result = nvmol_tfd.GetTFDMatricesGpu(
-                        mols, useWeights=True, maxDev="equal"
-                    )
-                    torch.cuda.synchronize()
-                    print(f"  GPU buffer run {run}: done")
+        for num_confs in sorted(configs.keys()):
+            all_mols = configs[num_confs]
+            for num_mols in args.num_mols:
+                mols = all_mols[:num_mols]
+                if len(mols) == 0:
+                    continue
+                label = f"{len(mols)}mols_{num_confs}confs"
+                with nvtx.annotate(label, color="magenta"):
+                    run_config(mols, args.backend, args.runs, label)
 
     print("\nProfiling complete.")
 
