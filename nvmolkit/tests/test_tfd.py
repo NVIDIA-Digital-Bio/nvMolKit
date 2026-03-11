@@ -248,6 +248,40 @@ class TestGpuResidentOutput:
                 assert abs(g - d) < 1e-4
 
 
+    def test_return_type_numpy(self, multiple_mols_with_conformers):
+        """Test return_type='numpy' returns correct numpy arrays."""
+        import numpy as np
+
+        mols = multiple_mols_with_conformers
+        lists = tfd.GetTFDMatrices(mols, return_type="list")
+        arrays = tfd.GetTFDMatrices(mols, return_type="numpy")
+
+        assert len(arrays) == len(lists)
+        for arr, lst in zip(arrays, lists):
+            assert isinstance(arr, np.ndarray)
+            assert arr.dtype == np.float32
+            assert len(arr) == len(lst)
+            for a, l in zip(arr.tolist(), lst):
+                assert abs(a - l) < 1e-4
+
+    def test_return_type_tensor(self, multiple_mols_with_conformers):
+        """Test return_type='tensor' returns correct GPU tensors."""
+        import torch
+
+        mols = multiple_mols_with_conformers
+        lists = tfd.GetTFDMatrices(mols, return_type="list")
+        tensors = tfd.GetTFDMatrices(mols, return_type="tensor")
+
+        assert len(tensors) == len(lists)
+        for tensor, lst in zip(tensors, lists):
+            assert isinstance(tensor, torch.Tensor)
+            assert tensor.is_cuda
+            assert tensor.dtype == torch.float32
+            assert len(tensor) == len(lst)
+            for t, l in zip(tensor.cpu().tolist(), lst):
+                assert abs(t - l) < 1e-4
+
+
 class TestCompareWithRDKit:
     """Tests comparing nvMolKit TFD with RDKit TFD."""
 
