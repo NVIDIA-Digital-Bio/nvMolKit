@@ -44,7 +44,6 @@ std::vector<double> TFDGenerator::GetTFDMatrix(const RDKit::ROMol& mol, const TF
       return cpuGenerator_->GetTFDMatrix(mol, options);
   }
 
-  // Unreachable, but needed to suppress compiler warning
   return {};
 }
 
@@ -59,18 +58,7 @@ std::vector<std::vector<double>> TFDGenerator::GetTFDMatrices(const std::vector<
       return cpuGenerator_->GetTFDMatrices(mols, options);
   }
 
-  // Unreachable, but needed to suppress compiler warning
   return {};
-}
-
-TFDGpuResult TFDGenerator::GetTFDMatricesGpuBuffer(const std::vector<const RDKit::ROMol*>& mols,
-                                                   const TFDComputeOptions&                options) {
-  if (options.backend != TFDComputeBackend::GPU) {
-    throw std::invalid_argument("GetTFDMatricesGpuBuffer requires GPU backend");
-  }
-
-  initializeBackendIfNeeded(TFDComputeBackend::GPU);
-  return gpuGenerator_->GetTFDMatricesGpuBuffer(mols, options);
 }
 
 }  // namespace nvMolKit

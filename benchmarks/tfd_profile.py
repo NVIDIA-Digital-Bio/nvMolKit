@@ -115,17 +115,11 @@ def run_config(mols, backend, num_runs, label):
         if backend in ("gpu", "both"):
             with nvtx.annotate(f"{label} GPU run {run}", color="orange"):
                 results = nvmol_tfd.GetTFDMatrices(
-                    mols, useWeights=True, maxDev="equal", backend="gpu"
+                    mols, useWeights=True, maxDev="equal", backend="gpu", return_type="tensor"
                 )
                 torch.cuda.synchronize()
                 total_values = sum(len(r) for r in results)
                 print(f"  GPU run {run}: {total_values} TFD values")
-
-        if backend in ("gpu_buffer", "both"):
-            with nvtx.annotate(f"{label} GPU_buf run {run}", color="yellow"):
-                nvmol_tfd.GetTFDMatricesGpu(mols, useWeights=True, maxDev="equal")
-                torch.cuda.synchronize()
-                print(f"  GPU_buf run {run}: done")
 
 
 def main():
@@ -149,7 +143,7 @@ Examples:
     )
     parser.add_argument(
         "backend",
-        choices=["cpu", "gpu", "gpu_buffer", "both"],
+        choices=["cpu", "gpu", "both"],
         help="Backend to profile",
     )
     parser.add_argument(
@@ -216,8 +210,9 @@ Examples:
             for _ in range(args.warmup):
                 if args.backend in ("cpu", "both"):
                     nvmol_tfd.GetTFDMatrices(warmup_mols, useWeights=True, maxDev="equal", backend="cpu")
-                if args.backend in ("gpu", "gpu_buffer", "both"):
-                    nvmol_tfd.GetTFDMatrices(warmup_mols, useWeights=True, maxDev="equal", backend="gpu")
+                if args.backend in ("gpu", "both"):
+                    nvmol_tfd.GetTFDMatrices(warmup_mols, useWeights=True, maxDev="equal",
+                                             backend="gpu", return_type="tensor")
                     torch.cuda.synchronize()
 
     # === Profiled runs ===

@@ -168,84 +168,47 @@ class TestGetTFDMatrices:
 
 
 class TestGpuResidentOutput:
-    """Tests for GPU-resident TFD output."""
+    """Tests for GPU-resident TFD output via return_type parameter."""
 
-    def test_gpu_result_basic(self, simple_mol_with_conformers):
-        """Test basic GPU-resident output."""
+    def test_tensor_return_single(self, simple_mol_with_conformers):
+        """Test return_type='tensor' for a single molecule."""
         mol = simple_mol_with_conformers
 
-        result = tfd.GetTFDMatrixGpu(mol)
+        tensor = tfd.GetTFDMatrix(mol, return_type="tensor")
 
-        # Should be an AsyncGpuResult
-        assert hasattr(result, "torch")
-        assert hasattr(result, "numpy")
-
-        # Get as torch tensor
-        tensor = result.torch()
-        torch.cuda.synchronize()
-
+        assert isinstance(tensor, torch.Tensor)
         assert tensor.device.type == "cuda"
         num_conf = mol.GetNumConformers()
         expected_size = num_conf * (num_conf - 1) // 2
         assert tensor.shape[0] == expected_size
 
-    def test_gpu_matrices_result(self, multiple_mols_with_conformers):
-        """Test GPU-resident batch output."""
+    def test_tensor_return_batch(self, multiple_mols_with_conformers):
+        """Test return_type='tensor' for batch."""
         mols = multiple_mols_with_conformers
 
-        result = tfd.GetTFDMatricesGpu(mols)
+        tensors = tfd.GetTFDMatrices(mols, return_type="tensor")
+        assert len(tensors) == len(mols)
 
-        # Check metadata
-        assert len(result.conformer_counts) == len(mols)
-        assert len(result.output_starts) == len(mols) + 1
-
-        # Extract individual results
-        extracted = result.to_tensors()
-        assert len(extracted) == len(mols)
-
-        for i, (mol, tensor) in enumerate(zip(mols, extracted)):
+        for i, (mol, tensor) in enumerate(zip(mols, tensors)):
+            assert isinstance(tensor, torch.Tensor)
+            assert tensor.device.type == "cuda"
             num_conf = mol.GetNumConformers()
             expected_size = num_conf * (num_conf - 1) // 2
             assert tensor.shape[0] == expected_size, f"Molecule {i} has wrong tensor size"
 
-    def test_extract_molecule(self, multiple_mols_with_conformers):
-        """Test extracting single molecule from batch result."""
+    def test_list_matches_tensor(self, multiple_mols_with_conformers):
+        """Test that list and tensor return types give consistent results."""
         mols = multiple_mols_with_conformers
 
-        result = tfd.GetTFDMatricesGpu(mols)
+        lists = tfd.GetTFDMatrices(mols, return_type="list")
+        tensors = tfd.GetTFDMatrices(mols, return_type="tensor")
 
-        for i, mol in enumerate(mols):
-            extracted = result.extract_molecule(i)
-            num_conf = mol.GetNumConformers()
-            expected_size = num_conf * (num_conf - 1) // 2
-            assert extracted.shape[0] == expected_size
-
-    def test_extract_molecule_out_of_range(self, multiple_mols_with_conformers):
-        """Test that out-of-range index raises error."""
-        mols = multiple_mols_with_conformers
-        result = tfd.GetTFDMatricesGpu(mols)
-
-        with pytest.raises(IndexError):
-            result.extract_molecule(-1)
-
-        with pytest.raises(IndexError):
-            result.extract_molecule(len(mols))
-
-    def test_to_lists(self, multiple_mols_with_conformers):
-        """Test converting GPU result to Python lists."""
-        mols = multiple_mols_with_conformers
-
-        gpu_result = tfd.GetTFDMatricesGpu(mols)
-        lists = gpu_result.to_lists()
-
-        # Compare with direct computation
-        direct = tfd.GetTFDMatrices(mols)
-
-        assert len(lists) == len(direct)
-        for gpu_list, direct_list in zip(lists, direct):
-            assert len(gpu_list) == len(direct_list)
-            for g, d in zip(gpu_list, direct_list):
-                assert abs(g - d) < 1e-4
+        assert len(lists) == len(tensors)
+        for gpu_list, tensor in zip(lists, tensors):
+            tensor_list = tensor.cpu().tolist()
+            assert len(gpu_list) == len(tensor_list)
+            for l, t in zip(gpu_list, tensor_list):
+                assert abs(l - t) < 1e-4
 
 
     def test_return_type_numpy(self, multiple_mols_with_conformers):

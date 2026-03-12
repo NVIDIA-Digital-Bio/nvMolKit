@@ -13,7 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "tfd.h"
+#include "tfd_cpu.h"
+#include "tfd_gpu.h"
 
 #include <GraphMol/ROMol.h>
 
@@ -26,7 +27,6 @@ namespace {
 
 using namespace boost::python;
 
-//! Convert boost::python::list of molecules to std::vector
 std::vector<const RDKit::ROMol*> listToMolVector(const boost::python::list& mols) {
   std::vector<const RDKit::ROMol*> molsVec;
   molsVec.reserve(len(mols));
@@ -40,16 +40,6 @@ std::vector<const RDKit::ROMol*> listToMolVector(const boost::python::list& mols
   return molsVec;
 }
 
-//! Convert std::vector<double> to boost::python::list
-boost::python::list vectorToList(const std::vector<double>& vec) {
-  boost::python::list result;
-  for (const auto& value : vec) {
-    result.append(value);
-  }
-  return result;
-}
-
-//! Convert std::vector<int> to boost::python::list
 boost::python::list intVectorToList(const std::vector<int>& vec) {
   boost::python::list result;
   for (const auto& value : vec) {
@@ -58,21 +48,22 @@ boost::python::list intVectorToList(const std::vector<int>& vec) {
   return result;
 }
 
-//! Convert std::vector<std::vector<double>> to boost::python::list of lists
 boost::python::list nestedVectorToList(const std::vector<std::vector<double>>& vec) {
   boost::python::list result;
   for (const auto& inner : vec) {
-    result.append(vectorToList(inner));
+    boost::python::list innerList;
+    for (const auto& value : inner) {
+      innerList.append(value);
+    }
+    result.append(innerList);
   }
   return result;
 }
 
-//! Build TFDComputeOptions from Python arguments
 nvMolKit::TFDComputeOptions buildOptions(bool               useWeights,
                                          const std::string& maxDev,
                                          int                symmRadius,
-                                         bool               ignoreColinearBonds,
-                                         const std::string& backend) {
+                                         bool               ignoreColinearBonds) {
   nvMolKit::TFDComputeOptions options;
   options.useWeights          = useWeights;
   options.symmRadius          = symmRadius;
@@ -86,74 +77,47 @@ nvMolKit::TFDComputeOptions buildOptions(bool               useWeights,
     throw std::invalid_argument("maxDev must be 'equal' or 'spec', got: " + maxDev);
   }
 
-  if (backend == "gpu" || backend == "GPU") {
-    options.backend = nvMolKit::TFDComputeBackend::GPU;
-  } else if (backend == "cpu" || backend == "CPU") {
-    options.backend = nvMolKit::TFDComputeBackend::CPU;
-  } else {
-    throw std::invalid_argument("backend must be 'gpu' or 'cpu', got: " + backend);
-  }
-
   return options;
 }
 
-//! Wrap a raw PyArray* into a Python object with proper ownership
 boost::python::object toOwnedPyArray(nvMolKit::PyArray* array) {
   using Converter = boost::python::manage_new_object::apply<nvMolKit::PyArray*>::type;
   return boost::python::object(boost::python::handle<>(Converter()(array)));
 }
 
-// Shared generator instance for module-level functions
-nvMolKit::TFDGenerator& getGenerator() {
-  static nvMolKit::TFDGenerator generator;
+nvMolKit::TFDCpuGenerator& getCpuGenerator() {
+  static nvMolKit::TFDCpuGenerator generator;
+  return generator;
+}
+
+nvMolKit::TFDGpuGenerator& getGpuGenerator() {
+  static nvMolKit::TFDGpuGenerator generator;
   return generator;
 }
 
 }  // namespace
 
 BOOST_PYTHON_MODULE(_TFD) {
-  // Module-level function: GetTFDMatrix for single molecule
+  // CPU path: returns nested Python lists
   def(
-    "GetTFDMatrix",
-    +[](const RDKit::ROMol& mol,
-        bool                useWeights,
-        const std::string&  maxDev,
-        int                 symmRadius,
-        bool                ignoreColinearBonds,
-        const std::string&  backend) {
-      auto options = buildOptions(useWeights, maxDev, symmRadius, ignoreColinearBonds, backend);
-      auto result  = getGenerator().GetTFDMatrix(mol, options);
-      return vectorToList(result);
-    },
-    (arg("mol"),
-     arg("useWeights")          = true,
-     arg("maxDev")              = "equal",
-     arg("symmRadius")          = 2,
-     arg("ignoreColinearBonds") = true,
-     arg("backend")             = "gpu"));
-
-  // Module-level function: GetTFDMatrices for multiple molecules
-  def(
-    "GetTFDMatrices",
+    "GetTFDMatricesCpu",
     +[](const boost::python::list& mols,
         bool                       useWeights,
         const std::string&         maxDev,
         int                        symmRadius,
-        bool                       ignoreColinearBonds,
-        const std::string&         backend) {
+        bool                       ignoreColinearBonds) {
       auto molsVec = listToMolVector(mols);
-      auto options = buildOptions(useWeights, maxDev, symmRadius, ignoreColinearBonds, backend);
-      auto results = getGenerator().GetTFDMatrices(molsVec, options);
-      return nestedVectorToList(results);
+      auto options = buildOptions(useWeights, maxDev, symmRadius, ignoreColinearBonds);
+      options.backend = nvMolKit::TFDComputeBackend::CPU;
+      return nestedVectorToList(getCpuGenerator().GetTFDMatrices(molsVec, options));
     },
     (arg("mols"),
      arg("useWeights")          = true,
      arg("maxDev")              = "equal",
      arg("symmRadius")          = 2,
-     arg("ignoreColinearBonds") = true,
-     arg("backend")             = "gpu"));
+     arg("ignoreColinearBonds") = true));
 
-  // Module-level function: GetTFDMatricesGpuBuffer for GPU-resident output
+  // GPU path: returns GPU-resident buffer + metadata
   def(
     "GetTFDMatricesGpuBuffer",
     +[](const boost::python::list& mols,
@@ -162,19 +126,17 @@ BOOST_PYTHON_MODULE(_TFD) {
         int                        symmRadius,
         bool                       ignoreColinearBonds) -> boost::python::object {
       auto molsVec = listToMolVector(mols);
-      auto options = buildOptions(useWeights, maxDev, symmRadius, ignoreColinearBonds, "gpu");
+      auto options = buildOptions(useWeights, maxDev, symmRadius, ignoreColinearBonds);
+      options.backend = nvMolKit::TFDComputeBackend::GPU;
 
-      auto gpuResult = getGenerator().GetTFDMatricesGpuBuffer(molsVec, options);
+      auto gpuResult = getGpuGenerator().GetTFDMatricesGpuBuffer(molsVec, options);
 
-      // Create metadata lists
       boost::python::list outputStarts    = intVectorToList(gpuResult.tfdOutputStarts);
       boost::python::list conformerCounts = intVectorToList(gpuResult.conformerCounts);
 
-      // Create PyArray from GPU buffer
       size_t totalSize = gpuResult.tfdValues.size();
       auto*  pyArray   = nvMolKit::makePyArray(gpuResult.tfdValues, boost::python::make_tuple(totalSize));
 
-      // Return tuple of (pyArray, outputStarts, conformerCounts)
       return boost::python::make_tuple(toOwnedPyArray(pyArray), outputStarts, conformerCounts);
     },
     (arg("mols"),

@@ -397,20 +397,6 @@ TEST_F(TFDGeneratorTest, UnifiedAPIBatchProcessing) {
   }
 }
 
-TEST_F(TFDGeneratorTest, GpuBufferWithCPUBackendThrows) {
-  auto mol = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol("CCCC"));
-  ASSERT_NE(mol, nullptr);
-  generateConformers(*mol, 3);
-
-  std::vector<const RDKit::ROMol*> molPtrs = {mol.get()};
-
-  nvMolKit::TFDGenerator      generator;
-  nvMolKit::TFDComputeOptions cpuOptions;
-  cpuOptions.backend = nvMolKit::TFDComputeBackend::CPU;
-
-  EXPECT_THROW(generator.GetTFDMatricesGpuBuffer(molPtrs, cpuOptions), std::invalid_argument);
-}
-
 TEST_F(TFDGeneratorTest, GpuBufferMethodWorks) {
   auto mol = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol("CCCCC"));
   ASSERT_NE(mol, nullptr);
@@ -418,11 +404,10 @@ TEST_F(TFDGeneratorTest, GpuBufferMethodWorks) {
 
   std::vector<const RDKit::ROMol*> molPtrs = {mol.get()};
 
-  nvMolKit::TFDGenerator      generator;
+  nvMolKit::TFDGpuGenerator   gpuGenerator;
   nvMolKit::TFDComputeOptions options;
-  options.backend = nvMolKit::TFDComputeBackend::GPU;
 
-  auto gpuResult = generator.GetTFDMatricesGpuBuffer(molPtrs, options);
+  auto gpuResult = gpuGenerator.GetTFDMatricesGpuBuffer(molPtrs, options);
 
   auto extracted = gpuResult.extractAll();
   ASSERT_EQ(extracted.size(), 1u);
