@@ -27,55 +27,23 @@ namespace nvMolKit {
 
 //! Unified TFD generator with automatic backend selection
 //!
-//! This class provides a unified interface for TFD computation, automatically
+//! Provides a single interface for TFD computation, automatically
 //! selecting between CPU and GPU backends based on the options provided.
 //! Backends are lazily initialized on first use.
 //!
-//! Example usage:
-//! @code
-//!   TFDGenerator generator;
-//!
-//!   // Use GPU (default)
-//!   auto tfd = generator.GetTFDMatrix(mol);
-//!
-//!   // Explicitly use CPU
-//!   TFDComputeOptions cpuOptions;
-//!   cpuOptions.backend = TFDComputeBackend::CPU;
-//!   auto tfdCpu = generator.GetTFDMatrix(mol, cpuOptions);
-//!
-//!   // Batch processing
-//!   auto results = generator.GetTFDMatrices(mols);
-//!
-//!   // Keep results on GPU for further processing
-//!   auto gpuResult = generator.GetTFDMatricesGpuBuffer(mols);
-//! @endcode
+//! For GPU-resident output, use TFDGpuGenerator::GetTFDMatricesGpuBuffer directly.
 class TFDGenerator {
  public:
   TFDGenerator() = default;
 
   //! Compute TFD matrix for a single molecule
-  //! @param mol Molecule with conformers
-  //! @param options Computation options (default: GPU backend)
-  //! @return Lower triangular TFD matrix as flat vector [C*(C-1)/2 values]
   std::vector<double> GetTFDMatrix(const RDKit::ROMol& mol, const TFDComputeOptions& options = TFDComputeOptions{});
 
   //! Compute TFD matrices for multiple molecules
-  //! @param mols Vector of molecules
-  //! @param options Computation options (default: GPU backend)
-  //! @return Vector of TFD matrices, one per molecule
   std::vector<std::vector<double>> GetTFDMatrices(const std::vector<const RDKit::ROMol*>& mols,
                                                   const TFDComputeOptions& options = TFDComputeOptions{});
 
-  //! Compute TFD matrices and keep results on GPU
-  //! @param mols Vector of molecules
-  //! @param options Computation options (must use GPU backend)
-  //! @return TFDGpuResult with GPU-resident data
-  //! @throws std::invalid_argument if CPU backend is requested
-  TFDGpuResult GetTFDMatricesGpuBuffer(const std::vector<const RDKit::ROMol*>& mols,
-                                       const TFDComputeOptions&                options = TFDComputeOptions{});
-
  private:
-  //! Initialize backend if not already created
   void initializeBackendIfNeeded(TFDComputeBackend backend);
 
   std::unique_ptr<TFDGpuGenerator> gpuGenerator_;
