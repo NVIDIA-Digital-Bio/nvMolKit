@@ -135,6 +135,9 @@ def GetTFDMatrices(
         gpu_result = _get_gpu_result(mols, useWeights, maxDev, symmRadius, ignoreColinearBonds)
         return _extract_gpu_result(gpu_result, return_type)
 
+    if backend not in ("cpu", "CPU"):
+        raise ValueError(f"backend must be 'gpu' or 'cpu', got: '{backend}'")
+
     results = _TFD.GetTFDMatricesCpu(
         mols, useWeights=useWeights, maxDev=maxDev,
         symmRadius=symmRadius, ignoreColinearBonds=ignoreColinearBonds,

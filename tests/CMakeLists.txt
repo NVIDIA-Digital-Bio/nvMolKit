@@ -289,8 +289,12 @@ target_link_libraries(
                            test_utils)
 
 add_executable(test_tfd_gpu test_tfd_gpu.cpp)
-target_link_libraries(test_tfd_gpu PRIVATE ${RDKit_LIBS} tfd device_vector
+target_link_libraries(test_tfd_gpu PRIVATE ${RDKit_LIBS} tfd_gpu device_vector
                                            test_utils)
+
+add_executable(test_tfd test_tfd.cpp)
+target_link_libraries(test_tfd PRIVATE ${RDKit_LIBS} tfd device_vector
+                                       test_utils)
 
 set(TEST_LIST
     test_boolean_tree
@@ -299,6 +303,7 @@ set(TEST_LIST
     test_tfd_cpu
     test_tfd_kernels
     test_tfd_gpu
+    test_tfd
     test_openmp_helpers
     test_conformer_checkers
     test_coordgen
