@@ -90,8 +90,8 @@ def _get_gpu_result(mols, useWeights, maxDev, symmRadius, ignoreColinearBonds):
     )
     return _TFDGpuResult(
         tfd_values=AsyncGpuResult(pyarray),
-        output_starts=list(output_starts),
-        conformer_counts=list(conformer_counts),
+        output_starts=output_starts,
+        conformer_counts=conformer_counts,
     )
 
 
@@ -142,7 +142,7 @@ def GetTFDMatrices(
         mols, useWeights=useWeights, maxDev=maxDev,
         symmRadius=symmRadius, ignoreColinearBonds=ignoreColinearBonds,
     )
-    return [list(r) for r in results]
+    return list(results)
 
 
 def GetTFDMatrix(
