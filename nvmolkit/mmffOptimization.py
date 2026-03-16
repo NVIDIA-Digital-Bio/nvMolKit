@@ -55,7 +55,17 @@ def MMFFOptimizeMoleculesConfs(
         molecule order and conformer iteration order.
 
     Raises:
-        ValueError: If any molecule in the input list is None or lacks MMFF atom types
+        ValueError: If any molecules in the input list are None or lack MMFF atom types.
+            ``e.args[0]`` is a summary message, ``e.args[1]`` is a dict
+            with keys ``"none"`` (indices of None molecules) and ``"no_params"``
+            (indices of molecules lacking MMFF atom types). Example::
+
+                try:
+                    MMFFOptimizeMoleculesConfs(mols, ...)
+                except ValueError as e:
+                    failed = e.args[1]
+                    none_idx = failed["none"]
+                    no_params_idx = failed["no_params"]
         RuntimeError: If CUDA operations fail or optimization encounters errors
 
     Example:
@@ -88,14 +98,24 @@ def MMFFOptimizeMoleculesConfs(
     if not molecules:
         return []
 
+    none_indices = []
+    no_params_indices = []
     for i, mol in enumerate(molecules):
         if mol is None:
-            raise ValueError(f"Molecule at index {i} is None")
-        if not AllChem.MMFFHasAllMoleculeParams(mol):
-            raise ValueError(
-                f"Molecule at index {i} lacks MMFF atom types and cannot be optimized with MMFF. "
-                "Use AllChem.MMFFHasAllMoleculeParams() to filter incompatible molecules before submission."
-            )
+            none_indices.append(i)
+        elif not AllChem.MMFFHasAllMoleculeParams(mol):
+            no_params_indices.append(i)
+
+    if none_indices or no_params_indices:
+        parts = []
+        if none_indices:
+            parts.append(f"None at indices {none_indices}")
+        if no_params_indices:
+            parts.append(f"lacking MMFF atom types at indices {no_params_indices}")
+        raise ValueError(
+            "; ".join(parts),
+            {"none": none_indices, "no_params": no_params_indices},
+        )
 
     # Call the C++ implementation
     if hardwareOptions is None:
