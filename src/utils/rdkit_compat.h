@@ -28,9 +28,9 @@ namespace compat {
 template <typename T>
 concept HasValenceType = requires { typename T::ValenceType; };
 
-inline int getExplicitValence(const RDKit::Atom* atom) {
-  if constexpr (HasValenceType<RDKit::Atom>) {
-    return atom->getValence(RDKit::Atom::ValenceType::EXPLICIT);
+template <typename T = RDKit::Atom> inline int getExplicitValence(const T* atom) {
+  if constexpr (HasValenceType<T>) {
+    return atom->getValence(T::ValenceType::EXPLICIT);
   } else {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
@@ -39,9 +39,9 @@ inline int getExplicitValence(const RDKit::Atom* atom) {
   }
 }
 
-inline int getImplicitValence(const RDKit::Atom* atom) {
-  if constexpr (HasValenceType<RDKit::Atom>) {
-    return atom->getValence(RDKit::Atom::ValenceType::IMPLICIT);
+template <typename T = RDKit::Atom> inline int getImplicitValence(const T* atom) {
+  if constexpr (HasValenceType<T>) {
+    return atom->getValence(T::ValenceType::IMPLICIT);
   } else {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
