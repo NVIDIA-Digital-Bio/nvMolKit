@@ -31,6 +31,7 @@
 
 #include "nvtx.h"
 #include "packed_bonds.h"
+#include "rdkit_compat.h"
 #include "substruct_debug.h"
 #include "substruct_types.h"
 
@@ -49,13 +50,8 @@ void populateAtomScalars(const RDKit::Atom* atom, AtomDataPacked& packed, const 
   packed.setAtomicNum(atom->getAtomicNum());
   packed.setChiralTag(atom->getChiralTag());
   packed.setNumExplicitHs(atom->getTotalNumHs());
-#if RDKIT_VERSION_NUM >= 0x20240300
-  packed.setExplicitValence(atom->getValence(RDKit::Atom::ValenceType::EXPLICIT));
-  packed.setImplicitValence(atom->getValence(RDKit::Atom::ValenceType::IMPLICIT));
-#else
-  packed.setExplicitValence(atom->getExplicitValence());
-  packed.setImplicitValence(atom->getImplicitValence());
-#endif
+  packed.setExplicitValence(compat::getExplicitValence(atom));
+  packed.setImplicitValence(compat::getImplicitValence(atom));
   packed.setTotalValence(atom->getTotalValence());
   packed.setFormalCharge(atom->getFormalCharge());
   packed.setHybridization(atom->getHybridization());

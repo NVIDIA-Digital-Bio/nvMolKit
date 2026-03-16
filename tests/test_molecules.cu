@@ -27,6 +27,7 @@
 #include "device.h"
 #include "molecules_device.cuh"
 #include "packed_bonds_device.cuh"
+#include "rdkit_compat.h"
 
 using nvMolKit::AsyncDeviceVector;
 using nvMolKit::AtomDataPacked;
@@ -104,9 +105,9 @@ int getExpectedAtomProperty(const RDKit::ROMol* mol, int atomIdx, AtomProperty p
     case AtomProperty::NumExplicitHs:
       return atom->getTotalNumHs();
     case AtomProperty::ExplicitValence:
-      return atom->getExplicitValence();
+      return nvMolKit::compat::getExplicitValence(atom);
     case AtomProperty::ImplicitValence:
-      return atom->getImplicitValence();
+      return nvMolKit::compat::getImplicitValence(atom);
     case AtomProperty::FormalCharge:
       return atom->getFormalCharge();
     case AtomProperty::ChiralTag:
