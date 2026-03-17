@@ -185,3 +185,18 @@ def test_rmsd_invalid_stream_type():
     no_h = Chem.RemoveHs(mol)
     with pytest.raises(TypeError):
         GetConformerRMSMatrix(no_h, stream=42)
+
+
+def test_rmsd_zero_atoms():
+    """0-atom molecule with multiple conformers raises ValueError.
+
+    nvMolKit intentionally diverges from RDKit here: RDKit returns [nan] for
+    exactly 2 zero-atom conformers and raises ZeroDivisionError for 3+.
+    nvMolKit raises ValueError consistently for all degenerate zero-atom inputs.
+    Such molecules cannot be produced by standard RDKit embedding workflows.
+    """
+    mol = Chem.RWMol()
+    mol.AddConformer(Chem.Conformer(0), assignId=True)
+    mol.AddConformer(Chem.Conformer(0), assignId=True)
+    with pytest.raises(ValueError):
+        GetConformerRMSMatrix(mol.GetMol())

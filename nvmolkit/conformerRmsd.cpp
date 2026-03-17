@@ -15,7 +15,6 @@
 
 #include <boost/python.hpp>
 #include <boost/python/manage_new_object.hpp>
-#include <vector>
 
 #include <GraphMol/GraphMol.h>
 #include <GraphMol/Conformer.h>
@@ -23,6 +22,7 @@
 #include "array_helpers.h"
 #include "conformer_rmsd.h"
 #include "device.h"
+#include "utils/host_vector.h"
 
 namespace {
 
@@ -52,29 +52,33 @@ BOOST_PYTHON_MODULE(_conformerRmsd) {
       auto stream = *streamOpt;
 
       const int numAtoms = mol.getNumAtoms();
+      if (numAtoms == 0) {
+        // Intentional divergence from RDKit, which returns [nan] for exactly 2
+        // zero-atom conformers and raises ZeroDivisionError for 3+. We fail fast
+        // with a consistent error for all degenerate zero-atom inputs.
+        throw std::invalid_argument("Molecule has no atoms");
+      }
 
-      // Extract coordinates from all conformers into a flat host buffer.
+      // Extract coordinates from all conformers into a flat pinned host buffer.
       // Layout: coords[conf * numAtoms * 3 + atom * 3 + xyz]
-      std::vector<double> hostCoords(numConfs * numAtoms * 3);
+      // Pinned memory allows the DMA engine to transfer directly to the device
+      // without a staging copy, and the PinnedHostVector destructor handles
+      // cleanup safely after all stream work has been submitted.
+      const size_t numCoords = static_cast<size_t>(numConfs) * numAtoms * 3;
+      nvMolKit::PinnedHostVector<double> hostCoords(numCoords);
       int confIdx = 0;
       for (auto it = mol.beginConformers(); it != mol.endConformers(); ++it, ++confIdx) {
         const RDKit::Conformer& conf = **it;
         for (int a = 0; a < numAtoms; ++a) {
-          const auto& pos                                   = conf.getAtomPos(a);
+          const auto& pos                                  = conf.getAtomPos(a);
           hostCoords[confIdx * numAtoms * 3 + a * 3 + 0] = pos.x;
           hostCoords[confIdx * numAtoms * 3 + a * 3 + 1] = pos.y;
           hostCoords[confIdx * numAtoms * 3 + a * 3 + 2] = pos.z;
         }
       }
 
-      // Transfer to GPU and synchronize before hostCoords goes out of scope,
-      // since copyFromHost uses cudaMemcpyAsync internally.
-      nvMolKit::AsyncDeviceVector<double> deviceCoords(hostCoords.size(), stream);
-      deviceCoords.copyFromHost(hostCoords);
-      auto err = cudaStreamSynchronize(stream);
-      if (err != cudaSuccess) {
-        throw std::runtime_error(cudaGetErrorString(err));
-      }
+      nvMolKit::AsyncDeviceVector<double> deviceCoords(numCoords, stream);
+      hostCoords.copyToDevice(deviceCoords, stream);
 
       // Allocate output
       const int numPairs = numConfs * (numConfs - 1) / 2;

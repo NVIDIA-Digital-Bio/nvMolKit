@@ -111,7 +111,7 @@ def run_benchmark(smiles, num_confs_list, seed=42):
         # GPU benchmark
         gpu_time = benchmark_gpu(no_h)
 
-        # Correctness check against numpy Kabsch SVD (sample first 50 pairs)
+        # Correctness check against numpy Kabsch SVD (sample up to 500 pairs)
         gpu_result = GetConformerRMSMatrix(no_h, prealigned=False)
         torch.cuda.synchronize()
         gpu_rms = gpu_result.numpy().tolist()
@@ -120,15 +120,16 @@ def run_benchmark(smiles, num_confs_list, seed=42):
         coords = [np.array(c.GetPositions()) for c in confs]
         max_diff = 0.0
         count = 0
+        max_checks = min(500, n_pairs)
         for i in range(len(confs)):
             for j in range(i):
                 idx = i * (i - 1) // 2 + j
                 ref = _numpy_kabsch_rmsd(coords[i], coords[j])
                 max_diff = max(max_diff, abs(gpu_rms[idx] - ref))
                 count += 1
-                if count >= 50:
+                if count >= max_checks:
                     break
-            if count >= 50:
+            if count >= max_checks:
                 break
         match_ok = max_diff < 0.05
 
