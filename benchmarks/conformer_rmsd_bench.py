@@ -25,6 +25,7 @@ Usage:
 """
 
 import argparse
+import copy
 import time
 
 import torch
@@ -49,14 +50,21 @@ def _numpy_kabsch_rmsd(p, q):
 
 
 def benchmark_cpu(mol, n_warmup=1, n_iter=5):
-    """Benchmark RDKit CPU GetConformerRMSMatrix."""
+    """Benchmark RDKit CPU GetConformerRMSMatrix.
+
+    Deep-copies the molecule before each call because GetConformerRMSMatrix
+    modifies conformer coordinates in-place during alignment; reusing the
+    same molecule would measure already-aligned conformers and understate
+    the true CPU cost.
+    """
     for _ in range(n_warmup):
-        AllChem.GetConformerRMSMatrix(mol, prealigned=False)
+        AllChem.GetConformerRMSMatrix(copy.deepcopy(mol), prealigned=False)
 
     times = []
     for _ in range(n_iter):
+        mol_copy = copy.deepcopy(mol)
         t0 = time.perf_counter()
-        AllChem.GetConformerRMSMatrix(mol, prealigned=False)
+        AllChem.GetConformerRMSMatrix(mol_copy, prealigned=False)
         t1 = time.perf_counter()
         times.append(t1 - t0)
     return np.median(times)
