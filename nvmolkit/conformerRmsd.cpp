@@ -135,13 +135,17 @@ BOOST_PYTHON_MODULE(_conformerRmsd) {
       coordOffsetsArr.copyToDevice(devCoordOffsets, stream);
 
       // Allocate per-molecule output buffers; collect their raw device pointers.
+      // Always allocate at least 1 element so that devRmsdPtrs never contains a
+      // null pointer — zero-pair molecules dispatch 0 blocks and their slot is
+      // never written, but a null in the array would be a latent hazard if the
+      // kernel dispatch logic ever changes.
       std::vector<nvMolKit::AsyncDeviceVector<double>> devRmsdVecs;
       devRmsdVecs.reserve(numMols);
       nvMolKit::PinnedHostVector<double*> hostRmsdPtrs(numMols);
       for (int m = 0; m < numMols; ++m) {
         const int numPairs = pairOffsetsArr[m + 1] - pairOffsetsArr[m];
-        devRmsdVecs.emplace_back(numPairs > 0 ? numPairs : 0, stream);
-        hostRmsdPtrs[m] = (numPairs > 0) ? devRmsdVecs.back().data() : nullptr;
+        devRmsdVecs.emplace_back(numPairs > 0 ? numPairs : 1, stream);
+        hostRmsdPtrs[m] = devRmsdVecs.back().data();
       }
 
       nvMolKit::AsyncDeviceVector<double*> devRmsdPtrs(numMols, stream);

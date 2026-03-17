@@ -82,6 +82,8 @@ __global__ void conformerRmsdKernel(const double* __restrict__ coords,
   // Map blockIdx to pair (ci, cj) with ci > cj using lower-triangle indexing.
   const int pairIdx = blockIdx.x;
   // Inverse of pairIdx = ci*(ci-1)/2 + cj:  ci = floor((1 + sqrt(1 + 8*pairIdx)) / 2)
+  // Precision note: double has 53-bit significand; pairIdx is bounded by INT_MAX (~2^31),
+  // which fits exactly in double, so the sqrt cannot round to a wrong integer here.
   const int ci = static_cast<int>(floor((1.0 + sqrt(1.0 + 8.0 * static_cast<double>(pairIdx))) / 2.0));
   const int cj = pairIdx - ci * (ci - 1) / 2;
 
@@ -268,6 +270,8 @@ __global__ void conformerRmsdBatchKernel(const double* __restrict__  coords,
   double*       molRmsd    = rmsdOutputs[mol];
 
   // Map localPairIdx to (ci, cj) with ci > cj.
+  // Precision note: double has 53-bit significand; localPairIdx is bounded by INT_MAX (~2^31),
+  // which fits exactly in double, so the sqrt cannot round to a wrong integer here.
   const int ci = static_cast<int>(floor((1.0 + sqrt(1.0 + 8.0 * static_cast<double>(localPairIdx))) / 2.0));
   const int cj = localPairIdx - ci * (ci - 1) / 2;
 
@@ -303,7 +307,6 @@ __global__ void conformerRmsdBatchKernel(const double* __restrict__  coords,
     if (tid == 0) {
       molRmsd[localPairIdx] = sqrt(sAccum[0] / static_cast<double>(numAtoms));
     }
-    #undef BLOCK_REDUCE_SUM
     return;
   }
 
