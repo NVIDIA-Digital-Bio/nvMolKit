@@ -15,6 +15,10 @@
 
 #include <boost/python.hpp>
 #include <boost/python/manage_new_object.hpp>
+#include <climits>
+#include <cstdint>
+#include <limits>
+#include <stdexcept>
 #include <vector>
 
 #include <GraphMol/GraphMol.h>
@@ -80,8 +84,12 @@ BOOST_PYTHON_MODULE(_conformerRmsd) {
         numAtomsArr[m]  = na;
         coordOffsetsArr[m] = totalCoords;
         totalCoords        += nc * na * 3;
-        const int numPairs  = (nc >= 2) ? nc * (nc - 1) / 2 : 0;
-        pairOffsetsArr[m + 1] = pairOffsetsArr[m] + numPairs;
+        const int64_t numPairs64 = (nc >= 2) ? static_cast<int64_t>(nc) * (nc - 1) / 2 : 0;
+        if (numPairs64 > static_cast<int64_t>(std::numeric_limits<int>::max())) {
+          throw std::overflow_error("Molecule at index " + std::to_string(m) +
+                                    " has too many conformer pairs for a single kernel launch");
+        }
+        pairOffsetsArr[m + 1] = pairOffsetsArr[m] + static_cast<int>(numPairs64);
       }
       const int totalPairs = pairOffsetsArr[numMols];
 
@@ -204,7 +212,7 @@ BOOST_PYTHON_MODULE(_conformerRmsd) {
       hostCoords.copyToDevice(deviceCoords, stream);
 
       // Allocate output
-      const int numPairs = numConfs * (numConfs - 1) / 2;
+      const int64_t numPairs = static_cast<int64_t>(numConfs) * (numConfs - 1) / 2;
       nvMolKit::AsyncDeviceVector<double> deviceRmsd(numPairs, stream);
 
       // Launch kernel

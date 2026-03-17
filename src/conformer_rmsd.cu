@@ -16,6 +16,7 @@
 #include "conformer_rmsd.h"
 #include "cuda_error_check.h"
 
+#include <climits>
 #include <cmath>
 #include <cuda/std/span>
 
@@ -40,19 +41,18 @@ __device__ __forceinline__ void symmetricEigenvalues3x3(const double a00, const 
   const double p3   = p / 3.0;
   const double pp   = (p * p - 3.0 * q) / 9.0;  // -p'/3
   const double qq   = (2.0 * p * p * p - 9.0 * p * q + 27.0 * r) / 54.0;
-  const double disc = pp * pp * pp - qq * qq;
+  // Clamp disc to zero: for real symmetric matrices it is always >= 0, but
+  // floating-point rounding can produce a tiny negative value for near-degenerate
+  // inputs (e.g. repeated eigenvalues).  The fallback e0=e1=e2=p3 is only correct
+  // when all eigenvalues are exactly equal; clamping avoids silently wrong RMSD.
+  const double disc = fmax(pp * pp * pp - qq * qq, 0.0);
 
-  if (disc >= 0.0) {
-    // Three real roots (always the case for symmetric matrices)
-    const double sqrtPP = sqrt(fmax(pp, 0.0));
-    const double theta  = acos(fmin(fmax(qq / fmax(sqrtPP * sqrtPP * sqrtPP, 1e-30), -1.0), 1.0)) / 3.0;
-    e0                  = 2.0 * sqrtPP * cos(theta) + p3;
-    e1                  = 2.0 * sqrtPP * cos(theta - 2.0 * M_PI / 3.0) + p3;
-    e2                  = 2.0 * sqrtPP * cos(theta - 4.0 * M_PI / 3.0) + p3;
-  } else {
-    // Fallback (should not happen for real symmetric matrices)
-    e0 = e1 = e2 = p3;
-  }
+  // Three real roots (guaranteed for real symmetric matrices after clamping)
+  const double sqrtPP = sqrt(fmax(pp, 0.0));
+  const double theta  = acos(fmin(fmax(qq / fmax(sqrtPP * sqrtPP * sqrtPP, 1e-30), -1.0), 1.0)) / 3.0;
+  e0                  = 2.0 * sqrtPP * cos(theta) + p3;
+  e1                  = 2.0 * sqrtPP * cos(theta - 2.0 * M_PI / 3.0) + p3;
+  e2                  = 2.0 * sqrtPP * cos(theta - 4.0 * M_PI / 3.0) + p3;
 
   // Sort descending
   if (e1 > e0) { double t = e0; e0 = e1; e1 = t; }
@@ -411,8 +411,11 @@ void conformerRmsdMatrixGpu(cuda::std::span<const double> coords,
                             cudaStream_t                  stream) {
   if (numConformers <= 1) return;
 
-  const int numPairs = numConformers * (numConformers - 1) / 2;
-  conformerRmsdKernel<<<numPairs, kRmsdBlockSize, 0, stream>>>(
+  const int64_t numPairs = static_cast<int64_t>(numConformers) * (numConformers - 1) / 2;
+  if (numPairs > INT_MAX) {
+    throw std::overflow_error("Number of conformer pairs exceeds maximum kernel grid size");
+  }
+  conformerRmsdKernel<<<static_cast<int>(numPairs), kRmsdBlockSize, 0, stream>>>(
       coords.data(), rmsdOut.data(), numConformers, numAtoms, prealigned);
   cudaCheckError(cudaGetLastError());
 }
