@@ -74,6 +74,12 @@ BOOST_PYTHON_MODULE(_conformerRmsd) {
       nvMolKit::PinnedHostVector<int>    pairOffsetsArr(numMols + 1);
       nvMolKit::PinnedHostVector<size_t> coordOffsetsArr(numMols);
 
+      // pairOffsetsArr and totalPairs are intentionally 32-bit: the kernel
+      // launches one block per pair on the grid x-dimension, whose hardware
+      // limit is 2^31-1 — exactly INT_MAX.  The int64_t accumulation below
+      // exists solely to detect prefix-sum overflow before materializing the
+      // value in that launch/index type; an unchecked overflow would silently
+      // route blocks to the wrong molecule or write out of bounds.
       pairOffsetsArr[0]   = 0;
       size_t totalCoords  = 0;
       for (int m = 0; m < numMols; ++m) {
