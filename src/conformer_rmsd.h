@@ -69,16 +69,16 @@ void conformerRmsdMatrixGpu(cuda::std::span<const double> coords,
  * @param prealigned      If true, skip Kabsch alignment.
  * @param stream          CUDA stream.
  */
-void conformerRmsdBatchMatrixGpu(cuda::std::span<const double> coords,
-                                  cuda::std::span<double*>      rmsdOutputs,
-                                  cuda::std::span<const int>    pairOffsets,
-                                  cuda::std::span<const int>    coordOffsets,
-                                  cuda::std::span<const int>    numConfsPerMol,
-                                  cuda::std::span<const int>    numAtomsPerMol,
-                                  int                           numMols,
-                                  int                           totalPairs,
-                                  bool                          prealigned,
-                                  cudaStream_t                  stream);
+void conformerRmsdBatchMatrixGpu(cuda::std::span<const double>  coords,
+                                  cuda::std::span<double*>       rmsdOutputs,
+                                  cuda::std::span<const int>     pairOffsets,
+                                  cuda::std::span<const size_t>  coordOffsets,
+                                  cuda::std::span<const int>     numConfsPerMol,
+                                  cuda::std::span<const int>     numAtomsPerMol,
+                                  int                            numMols,
+                                  int                            totalPairs,
+                                  bool                           prealigned,
+                                  cudaStream_t                   stream);
 
 }  // namespace nvMolKit
 

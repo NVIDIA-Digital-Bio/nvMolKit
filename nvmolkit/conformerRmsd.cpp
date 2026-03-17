@@ -15,7 +15,6 @@
 
 #include <boost/python.hpp>
 #include <boost/python/manage_new_object.hpp>
-#include <climits>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
@@ -70,26 +69,29 @@ BOOST_PYTHON_MODULE(_conformerRmsd) {
       }
 
       // Build per-molecule metadata on the host.
-      nvMolKit::PinnedHostVector<int> numConfsArr(numMols);
-      nvMolKit::PinnedHostVector<int> numAtomsArr(numMols);
-      nvMolKit::PinnedHostVector<int> pairOffsetsArr(numMols + 1);
-      nvMolKit::PinnedHostVector<int> coordOffsetsArr(numMols);
+      nvMolKit::PinnedHostVector<int>    numConfsArr(numMols);
+      nvMolKit::PinnedHostVector<int>    numAtomsArr(numMols);
+      nvMolKit::PinnedHostVector<int>    pairOffsetsArr(numMols + 1);
+      nvMolKit::PinnedHostVector<size_t> coordOffsetsArr(numMols);
 
-      pairOffsetsArr[0] = 0;
-      int totalCoords   = 0;
+      pairOffsetsArr[0]   = 0;
+      size_t totalCoords  = 0;
       for (int m = 0; m < numMols; ++m) {
         const int nc    = molsVec[m]->getNumConformers();
         const int na    = molsVec[m]->getNumAtoms();
         numConfsArr[m]  = nc;
         numAtomsArr[m]  = na;
-        coordOffsetsArr[m] = totalCoords;
-        totalCoords        += nc * na * 3;
-        const int64_t numPairs64 = (nc >= 2) ? static_cast<int64_t>(nc) * (nc - 1) / 2 : 0;
-        if (numPairs64 > static_cast<int64_t>(std::numeric_limits<int>::max())) {
-          throw std::overflow_error("Molecule at index " + std::to_string(m) +
-                                    " has too many conformer pairs for a single kernel launch");
+
+        coordOffsetsArr[m]  = totalCoords;
+        totalCoords        += static_cast<size_t>(nc) * na * 3;
+
+        const int64_t numPairs64    = (nc >= 2) ? static_cast<int64_t>(nc) * (nc - 1) / 2 : 0;
+        const int64_t newPairOffset = static_cast<int64_t>(pairOffsetsArr[m]) + numPairs64;
+        if (newPairOffset > static_cast<int64_t>(std::numeric_limits<int>::max())) {
+          throw std::overflow_error("Cumulative conformer pairs exceed int range by molecule index " +
+                                    std::to_string(m));
         }
-        pairOffsetsArr[m + 1] = pairOffsetsArr[m] + static_cast<int>(numPairs64);
+        pairOffsetsArr[m + 1] = static_cast<int>(newPairOffset);
       }
       const int totalPairs = pairOffsetsArr[numMols];
 
@@ -102,8 +104,10 @@ BOOST_PYTHON_MODULE(_conformerRmsd) {
         for (auto it = mol.beginConformers(); it != mol.endConformers(); ++it, ++confIdx) {
           const RDKit::Conformer& conf = **it;
           for (int a = 0; a < na; ++a) {
-            const auto& pos = conf.getAtomPos(a);
-            const int base  = coordOffsetsArr[m] + confIdx * na * 3 + a * 3;
+            const auto&  pos  = conf.getAtomPos(a);
+            const size_t base = coordOffsetsArr[m] +
+                                static_cast<size_t>(confIdx) * na * 3 +
+                                static_cast<size_t>(a) * 3;
             hostCoords[base + 0] = pos.x;
             hostCoords[base + 1] = pos.y;
             hostCoords[base + 2] = pos.z;
@@ -116,7 +120,7 @@ BOOST_PYTHON_MODULE(_conformerRmsd) {
       nvMolKit::AsyncDeviceVector<int>    devNumConfs(numMols, stream);
       nvMolKit::AsyncDeviceVector<int>    devNumAtoms(numMols, stream);
       nvMolKit::AsyncDeviceVector<int>    devPairOffsets(numMols + 1, stream);
-      nvMolKit::AsyncDeviceVector<int>    devCoordOffsets(numMols, stream);
+      nvMolKit::AsyncDeviceVector<size_t> devCoordOffsets(numMols, stream);
 
       if (totalCoords > 0) hostCoords.copyToDevice(devCoords, stream);
       numConfsArr.copyToDevice(devNumConfs, stream);

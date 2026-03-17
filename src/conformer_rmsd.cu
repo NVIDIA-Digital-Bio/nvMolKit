@@ -41,13 +41,8 @@ __device__ __forceinline__ void symmetricEigenvalues3x3(const double a00, const 
   const double p3   = p / 3.0;
   const double pp   = (p * p - 3.0 * q) / 9.0;  // -p'/3
   const double qq   = (2.0 * p * p * p - 9.0 * p * q + 27.0 * r) / 54.0;
-  // Clamp disc to zero: for real symmetric matrices it is always >= 0, but
-  // floating-point rounding can produce a tiny negative value for near-degenerate
-  // inputs (e.g. repeated eigenvalues).  The fallback e0=e1=e2=p3 is only correct
-  // when all eigenvalues are exactly equal; clamping avoids silently wrong RMSD.
-  const double disc = fmax(pp * pp * pp - qq * qq, 0.0);
-
-  // Three real roots (guaranteed for real symmetric matrices after clamping)
+  // Three real roots (guaranteed for real symmetric matrices).  Near-degenerate
+  // inputs are handled by the fmax guards on sqrtPP and the acos argument below.
   const double sqrtPP = sqrt(fmax(pp, 0.0));
   const double theta  = acos(fmin(fmax(qq / fmax(sqrtPP * sqrtPP * sqrtPP, 1e-30), -1.0), 1.0)) / 3.0;
   e0                  = 2.0 * sqrtPP * cos(theta) + p3;
@@ -250,21 +245,26 @@ __global__ void conformerRmsdKernel(const double* __restrict__ coords,
 __global__ void conformerRmsdBatchKernel(const double* __restrict__  coords,
                                           double** __restrict__        rmsdOutputs,
                                           const int* __restrict__      pairOffsets,
-                                          const int* __restrict__      coordOffsets,
+                                          const size_t* __restrict__   coordOffsets,
                                           const int* __restrict__      numConfsPerMol,
                                           const int* __restrict__      numAtomsPerMol,
                                           const int                    numMols,
                                           const bool                   prealigned) {
   const int globalPairIdx = blockIdx.x;
 
-  // Find which molecule this block belongs to via linear scan on pairOffsets.
-  int mol = 0;
-  while (mol + 1 < numMols && globalPairIdx >= pairOffsets[mol + 1]) ++mol;
+  // Find which molecule this block belongs to via binary search on pairOffsets.
+  int lo = 0, hi = numMols - 1;
+  while (lo < hi) {
+    const int mid = (lo + hi + 1) / 2;
+    if (globalPairIdx >= pairOffsets[mid]) lo = mid;
+    else hi = mid - 1;
+  }
+  const int mol = lo;
 
   const int localPairIdx   = globalPairIdx - pairOffsets[mol];
   const int numConfs       = numConfsPerMol[mol];
   const int numAtoms       = numAtomsPerMol[mol];
-  const double* molCoords  = coords + coordOffsets[mol];
+  const double* molCoords  = coords + static_cast<ptrdiff_t>(coordOffsets[mol]);
   double*       molRmsd    = rmsdOutputs[mol];
 
   // Map localPairIdx to (ci, cj) with ci > cj.
@@ -420,16 +420,16 @@ void conformerRmsdMatrixGpu(cuda::std::span<const double> coords,
   cudaCheckError(cudaGetLastError());
 }
 
-void conformerRmsdBatchMatrixGpu(cuda::std::span<const double> coords,
-                                  cuda::std::span<double*>      rmsdOutputs,
-                                  cuda::std::span<const int>    pairOffsets,
-                                  cuda::std::span<const int>    coordOffsets,
-                                  cuda::std::span<const int>    numConfsPerMol,
-                                  cuda::std::span<const int>    numAtomsPerMol,
-                                  const int                     numMols,
-                                  const int                     totalPairs,
-                                  const bool                    prealigned,
-                                  cudaStream_t                  stream) {
+void conformerRmsdBatchMatrixGpu(cuda::std::span<const double>  coords,
+                                  cuda::std::span<double*>       rmsdOutputs,
+                                  cuda::std::span<const int>     pairOffsets,
+                                  cuda::std::span<const size_t>  coordOffsets,
+                                  cuda::std::span<const int>     numConfsPerMol,
+                                  cuda::std::span<const int>     numAtomsPerMol,
+                                  const int                      numMols,
+                                  const int                      totalPairs,
+                                  const bool                     prealigned,
+                                  cudaStream_t                   stream) {
   if (totalPairs <= 0) return;
 
   conformerRmsdBatchKernel<<<totalPairs, kRmsdBlockSize, 0, stream>>>(
