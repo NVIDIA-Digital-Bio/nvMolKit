@@ -240,6 +240,166 @@ __global__ void conformerRmsdKernel(const double* __restrict__ coords,
 }
 
 // ---------------------------------------------------------------------------
+// Batch kernel: one thread-block per conformer pair across all molecules.
+//
+// pairOffsets[m]..pairOffsets[m+1] is the global block range for molecule m.
+// coordOffsets[m] is the start index (in doubles) of molecule m in coords[].
+// rmsdOutputs[m] is the pre-allocated device output buffer for molecule m.
+// ---------------------------------------------------------------------------
+
+__global__ void conformerRmsdBatchKernel(const double* __restrict__  coords,
+                                          double** __restrict__        rmsdOutputs,
+                                          const int* __restrict__      pairOffsets,
+                                          const int* __restrict__      coordOffsets,
+                                          const int* __restrict__      numConfsPerMol,
+                                          const int* __restrict__      numAtomsPerMol,
+                                          const int                    numMols,
+                                          const bool                   prealigned) {
+  const int globalPairIdx = blockIdx.x;
+
+  // Find which molecule this block belongs to via linear scan on pairOffsets.
+  int mol = 0;
+  while (mol + 1 < numMols && globalPairIdx >= pairOffsets[mol + 1]) ++mol;
+
+  const int localPairIdx   = globalPairIdx - pairOffsets[mol];
+  const int numConfs       = numConfsPerMol[mol];
+  const int numAtoms       = numAtomsPerMol[mol];
+  const double* molCoords  = coords + coordOffsets[mol];
+  double*       molRmsd    = rmsdOutputs[mol];
+
+  // Map localPairIdx to (ci, cj) with ci > cj.
+  const int ci = static_cast<int>(floor((1.0 + sqrt(1.0 + 8.0 * static_cast<double>(localPairIdx))) / 2.0));
+  const int cj = localPairIdx - ci * (ci - 1) / 2;
+
+  if (ci >= numConfs || cj < 0 || cj >= ci) return;
+
+  const int tid           = threadIdx.x;
+  const int stride        = numAtoms * 3;
+  const double* coordI    = molCoords + ci * stride;
+  const double* coordJ    = molCoords + cj * stride;
+
+  __shared__ double sReduce[kRmsdBlockSize];
+  __shared__ double sAccum[11];
+
+  #define BLOCK_REDUCE_SUM(val, result_ptr) \
+    sReduce[tid] = val; \
+    __syncthreads(); \
+    for (int s = kRmsdBlockSize / 2; s > 0; s >>= 1) { \
+      if (tid < s) sReduce[tid] += sReduce[tid + s]; \
+      __syncthreads(); \
+    } \
+    if (tid == 0) *result_ptr = sReduce[0]; \
+    __syncthreads();
+
+  if (prealigned) {
+    double sumSqDiff = 0.0;
+    for (int a = tid; a < numAtoms; a += kRmsdBlockSize) {
+      const double dx = coordI[a * 3 + 0] - coordJ[a * 3 + 0];
+      const double dy = coordI[a * 3 + 1] - coordJ[a * 3 + 1];
+      const double dz = coordI[a * 3 + 2] - coordJ[a * 3 + 2];
+      sumSqDiff += dx * dx + dy * dy + dz * dz;
+    }
+    BLOCK_REDUCE_SUM(sumSqDiff, &sAccum[0])
+    if (tid == 0) {
+      molRmsd[localPairIdx] = sqrt(sAccum[0] / static_cast<double>(numAtoms));
+    }
+    #undef BLOCK_REDUCE_SUM
+    return;
+  }
+
+  __shared__ double sCentI[3];
+  __shared__ double sCentJ[3];
+
+  double sumIx = 0.0, sumIy = 0.0, sumIz = 0.0;
+  double sumJx = 0.0, sumJy = 0.0, sumJz = 0.0;
+
+  for (int a = tid; a < numAtoms; a += kRmsdBlockSize) {
+    sumIx += coordI[a * 3 + 0];
+    sumIy += coordI[a * 3 + 1];
+    sumIz += coordI[a * 3 + 2];
+    sumJx += coordJ[a * 3 + 0];
+    sumJy += coordJ[a * 3 + 1];
+    sumJz += coordJ[a * 3 + 2];
+  }
+
+  BLOCK_REDUCE_SUM(sumIx, &sCentI[0])
+  BLOCK_REDUCE_SUM(sumIy, &sCentI[1])
+  BLOCK_REDUCE_SUM(sumIz, &sCentI[2])
+  BLOCK_REDUCE_SUM(sumJx, &sCentJ[0])
+  BLOCK_REDUCE_SUM(sumJy, &sCentJ[1])
+  BLOCK_REDUCE_SUM(sumJz, &sCentJ[2])
+
+  if (tid == 0) {
+    const double invN = 1.0 / static_cast<double>(numAtoms);
+    sCentI[0] *= invN; sCentI[1] *= invN; sCentI[2] *= invN;
+    sCentJ[0] *= invN; sCentJ[1] *= invN; sCentJ[2] *= invN;
+  }
+  __syncthreads();
+
+  const double cIx = sCentI[0], cIy = sCentI[1], cIz = sCentI[2];
+  const double cJx = sCentJ[0], cJy = sCentJ[1], cJz = sCentJ[2];
+
+  double localSp = 0.0, localSq = 0.0;
+  double localH[9] = {0.0};
+
+  for (int a = tid; a < numAtoms; a += kRmsdBlockSize) {
+    const double px = coordI[a * 3 + 0] - cIx;
+    const double py = coordI[a * 3 + 1] - cIy;
+    const double pz = coordI[a * 3 + 2] - cIz;
+    const double qx = coordJ[a * 3 + 0] - cJx;
+    const double qy = coordJ[a * 3 + 1] - cJy;
+    const double qz = coordJ[a * 3 + 2] - cJz;
+
+    localSp += px * px + py * py + pz * pz;
+    localSq += qx * qx + qy * qy + qz * qz;
+
+    localH[0] += px * qx; localH[1] += px * qy; localH[2] += px * qz;
+    localH[3] += py * qx; localH[4] += py * qy; localH[5] += py * qz;
+    localH[6] += pz * qx; localH[7] += pz * qy; localH[8] += pz * qz;
+  }
+
+  BLOCK_REDUCE_SUM(localSp,    &sAccum[0])
+  BLOCK_REDUCE_SUM(localSq,    &sAccum[1])
+  BLOCK_REDUCE_SUM(localH[0],  &sAccum[2])
+  BLOCK_REDUCE_SUM(localH[1],  &sAccum[3])
+  BLOCK_REDUCE_SUM(localH[2],  &sAccum[4])
+  BLOCK_REDUCE_SUM(localH[3],  &sAccum[5])
+  BLOCK_REDUCE_SUM(localH[4],  &sAccum[6])
+  BLOCK_REDUCE_SUM(localH[5],  &sAccum[7])
+  BLOCK_REDUCE_SUM(localH[6],  &sAccum[8])
+  BLOCK_REDUCE_SUM(localH[7],  &sAccum[9])
+  BLOCK_REDUCE_SUM(localH[8],  &sAccum[10])
+
+  #undef BLOCK_REDUCE_SUM
+
+  if (tid == 0) {
+    const double Sp = sAccum[0];
+    const double Sq = sAccum[1];
+    const double* H = &sAccum[2];
+
+    const double g00 = H[0]*H[0] + H[3]*H[3] + H[6]*H[6];
+    const double g01 = H[0]*H[1] + H[3]*H[4] + H[6]*H[7];
+    const double g02 = H[0]*H[2] + H[3]*H[5] + H[6]*H[8];
+    const double g11 = H[1]*H[1] + H[4]*H[4] + H[7]*H[7];
+    const double g12 = H[1]*H[2] + H[4]*H[5] + H[7]*H[8];
+    const double g22 = H[2]*H[2] + H[5]*H[5] + H[8]*H[8];
+
+    double ev0, ev1, ev2;
+    symmetricEigenvalues3x3(g00, g01, g02, g11, g12, g22, ev0, ev1, ev2);
+
+    const double s0 = sqrt(fmax(ev0, 0.0));
+    const double s1 = sqrt(fmax(ev1, 0.0));
+    double       s2 = sqrt(fmax(ev2, 0.0));
+
+    if (det3x3(H) < 0.0) s2 = -s2;
+
+    const double invN   = 1.0 / static_cast<double>(numAtoms);
+    const double rmsdSq = fmax((Sp + Sq - 2.0 * (s0 + s1 + s2)) * invN, 0.0);
+    molRmsd[localPairIdx] = sqrt(rmsdSq);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Host entry point
 // ---------------------------------------------------------------------------
 
@@ -254,6 +414,30 @@ void conformerRmsdMatrixGpu(cuda::std::span<const double> coords,
   const int numPairs = numConformers * (numConformers - 1) / 2;
   conformerRmsdKernel<<<numPairs, kRmsdBlockSize, 0, stream>>>(
       coords.data(), rmsdOut.data(), numConformers, numAtoms, prealigned);
+  cudaCheckError(cudaGetLastError());
+}
+
+void conformerRmsdBatchMatrixGpu(cuda::std::span<const double> coords,
+                                  cuda::std::span<double*>      rmsdOutputs,
+                                  cuda::std::span<const int>    pairOffsets,
+                                  cuda::std::span<const int>    coordOffsets,
+                                  cuda::std::span<const int>    numConfsPerMol,
+                                  cuda::std::span<const int>    numAtomsPerMol,
+                                  const int                     numMols,
+                                  const int                     totalPairs,
+                                  const bool                    prealigned,
+                                  cudaStream_t                  stream) {
+  if (totalPairs <= 0) return;
+
+  conformerRmsdBatchKernel<<<totalPairs, kRmsdBlockSize, 0, stream>>>(
+      coords.data(),
+      rmsdOutputs.data(),
+      pairOffsets.data(),
+      coordOffsets.data(),
+      numConfsPerMol.data(),
+      numAtomsPerMol.data(),
+      numMols,
+      prealigned);
   cudaCheckError(cudaGetLastError());
 }
 

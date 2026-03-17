@@ -47,6 +47,39 @@ void conformerRmsdMatrixGpu(cuda::std::span<const double> coords,
                             bool                          prealigned = false,
                             cudaStream_t                  stream     = nullptr);
 
+/**
+ * @brief Compute pairwise RMSD matrices for a batch of molecules on GPU.
+ *
+ * All molecules are processed in a single kernel launch, so their pairs execute
+ * concurrently.  Each molecule writes to its own pre-allocated output buffer.
+ * Molecules with fewer than 2 conformers contribute no blocks and their output
+ * buffers should have size 0.
+ *
+ * Coordinate layout for molecule m:
+ *   coords[coordOffsets[m] + conf * numAtomsPerMol[m] * 3 + atom * 3 + xyz]
+ *
+ * @param coords          Flat coordinate array for all molecules.
+ * @param rmsdOutputs     Device pointers to per-molecule output buffers.
+ *                        Buffer m must hold pairOffsets[m+1]-pairOffsets[m] doubles.
+ * @param pairOffsets     Prefix-sum of per-molecule pair counts, size numMols+1.
+ * @param coordOffsets    Start of each molecule's data in coords[], in units of double.
+ * @param numConfsPerMol  Number of conformers per molecule.
+ * @param numAtomsPerMol  Number of atoms per molecule.
+ * @param numMols         Number of molecules.
+ * @param prealigned      If true, skip Kabsch alignment.
+ * @param stream          CUDA stream.
+ */
+void conformerRmsdBatchMatrixGpu(cuda::std::span<const double> coords,
+                                  cuda::std::span<double*>      rmsdOutputs,
+                                  cuda::std::span<const int>    pairOffsets,
+                                  cuda::std::span<const int>    coordOffsets,
+                                  cuda::std::span<const int>    numConfsPerMol,
+                                  cuda::std::span<const int>    numAtomsPerMol,
+                                  int                           numMols,
+                                  int                           totalPairs,
+                                  bool                          prealigned,
+                                  cudaStream_t                  stream);
+
 }  // namespace nvMolKit
 
 #endif  // NVMOLKIT_CONFORMER_RMSD_H

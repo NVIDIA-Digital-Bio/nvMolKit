@@ -15,6 +15,7 @@
 
 #include <boost/python.hpp>
 #include <boost/python/manage_new_object.hpp>
+#include <vector>
 
 #include <GraphMol/GraphMol.h>
 #include <GraphMol/Conformer.h>
@@ -34,6 +35,128 @@ boost::python::object toOwnedPyArray(nvMolKit::PyArray* array) {
 }  // namespace
 
 BOOST_PYTHON_MODULE(_conformerRmsd) {
+  boost::python::def(
+    "GetConformerRMSMatrixBatch",
+    +[](boost::python::list& mols,
+        const bool           prealigned,
+        std::uintptr_t       streamPtr) -> boost::python::object {
+      auto streamOpt = nvMolKit::acquireExternalStream(streamPtr);
+      if (!streamOpt) {
+        throw std::invalid_argument("Invalid CUDA stream");
+      }
+      auto stream = *streamOpt;
+
+      const int numMols = boost::python::len(mols);
+      if (numMols == 0) {
+        return boost::python::list();
+      }
+
+      // Extract and validate molecules.
+      std::vector<const RDKit::ROMol*> molsVec(numMols);
+      for (int i = 0; i < numMols; ++i) {
+        molsVec[i] = boost::python::extract<const RDKit::ROMol*>(
+            boost::python::object(mols[i]));
+        if (molsVec[i] == nullptr) {
+          throw std::invalid_argument("Invalid molecule at index " + std::to_string(i));
+        }
+        if (molsVec[i]->getNumAtoms() == 0 && molsVec[i]->getNumConformers() >= 2) {
+          throw std::invalid_argument("Molecule at index " + std::to_string(i) +
+                                      " has no atoms");
+        }
+      }
+
+      // Build per-molecule metadata on the host.
+      nvMolKit::PinnedHostVector<int> numConfsArr(numMols);
+      nvMolKit::PinnedHostVector<int> numAtomsArr(numMols);
+      nvMolKit::PinnedHostVector<int> pairOffsetsArr(numMols + 1);
+      nvMolKit::PinnedHostVector<int> coordOffsetsArr(numMols);
+
+      pairOffsetsArr[0] = 0;
+      int totalCoords   = 0;
+      for (int m = 0; m < numMols; ++m) {
+        const int nc    = molsVec[m]->getNumConformers();
+        const int na    = molsVec[m]->getNumAtoms();
+        numConfsArr[m]  = nc;
+        numAtomsArr[m]  = na;
+        coordOffsetsArr[m] = totalCoords;
+        totalCoords        += nc * na * 3;
+        const int numPairs  = (nc >= 2) ? nc * (nc - 1) / 2 : 0;
+        pairOffsetsArr[m + 1] = pairOffsetsArr[m] + numPairs;
+      }
+      const int totalPairs = pairOffsetsArr[numMols];
+
+      // Pack all conformer coordinates into a single flat pinned buffer.
+      nvMolKit::PinnedHostVector<double> hostCoords(totalCoords > 0 ? totalCoords : 1);
+      for (int m = 0; m < numMols; ++m) {
+        const RDKit::ROMol& mol = *molsVec[m];
+        const int na            = numAtomsArr[m];
+        int confIdx             = 0;
+        for (auto it = mol.beginConformers(); it != mol.endConformers(); ++it, ++confIdx) {
+          const RDKit::Conformer& conf = **it;
+          for (int a = 0; a < na; ++a) {
+            const auto& pos = conf.getAtomPos(a);
+            const int base  = coordOffsetsArr[m] + confIdx * na * 3 + a * 3;
+            hostCoords[base + 0] = pos.x;
+            hostCoords[base + 1] = pos.y;
+            hostCoords[base + 2] = pos.z;
+          }
+        }
+      }
+
+      // Transfer coordinates and metadata to device.
+      nvMolKit::AsyncDeviceVector<double> devCoords(totalCoords > 0 ? totalCoords : 1, stream);
+      nvMolKit::AsyncDeviceVector<int>    devNumConfs(numMols, stream);
+      nvMolKit::AsyncDeviceVector<int>    devNumAtoms(numMols, stream);
+      nvMolKit::AsyncDeviceVector<int>    devPairOffsets(numMols + 1, stream);
+      nvMolKit::AsyncDeviceVector<int>    devCoordOffsets(numMols, stream);
+
+      if (totalCoords > 0) hostCoords.copyToDevice(devCoords, stream);
+      numConfsArr.copyToDevice(devNumConfs, stream);
+      numAtomsArr.copyToDevice(devNumAtoms, stream);
+      pairOffsetsArr.copyToDevice(devPairOffsets, stream);
+      coordOffsetsArr.copyToDevice(devCoordOffsets, stream);
+
+      // Allocate per-molecule output buffers; collect their raw device pointers.
+      std::vector<nvMolKit::AsyncDeviceVector<double>> devRmsdVecs;
+      devRmsdVecs.reserve(numMols);
+      nvMolKit::PinnedHostVector<double*> hostRmsdPtrs(numMols);
+      for (int m = 0; m < numMols; ++m) {
+        const int numPairs = pairOffsetsArr[m + 1] - pairOffsetsArr[m];
+        devRmsdVecs.emplace_back(numPairs > 0 ? numPairs : 0, stream);
+        hostRmsdPtrs[m] = (numPairs > 0) ? devRmsdVecs.back().data() : nullptr;
+      }
+
+      nvMolKit::AsyncDeviceVector<double*> devRmsdPtrs(numMols, stream);
+      hostRmsdPtrs.copyToDevice(devRmsdPtrs, stream);
+
+      // Launch a single kernel covering all pairs from all molecules.
+      if (totalPairs > 0) {
+        nvMolKit::conformerRmsdBatchMatrixGpu(
+            toSpan(devCoords),
+            toSpan(devRmsdPtrs),
+            toSpan(devPairOffsets),
+            toSpan(devCoordOffsets),
+            toSpan(devNumConfs),
+            toSpan(devNumAtoms),
+            numMols,
+            totalPairs,
+            prealigned,
+            stream);
+      }
+
+      // Return a Python list of per-molecule PyArray objects.
+      boost::python::list results;
+      for (int m = 0; m < numMols; ++m) {
+        const int numPairs = pairOffsetsArr[m + 1] - pairOffsetsArr[m];
+        results.append(toOwnedPyArray(
+            nvMolKit::makePyArray(devRmsdVecs[m], boost::python::make_tuple(numPairs))));
+      }
+      return results;
+    },
+    (boost::python::arg("mols"),
+     boost::python::arg("prealigned") = false,
+     boost::python::arg("stream")     = 0));
+
   boost::python::def(
     "GetConformerRMSMatrix",
     +[](RDKit::ROMol& mol,

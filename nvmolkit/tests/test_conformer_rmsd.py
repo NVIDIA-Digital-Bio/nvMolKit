@@ -21,7 +21,7 @@ import numpy as np
 from rdkit import Chem
 from rdkit.Chem import AllChem, rdDistGeom
 
-from nvmolkit.conformerRmsd import GetConformerRMSMatrix
+from nvmolkit.conformerRmsd import GetConformerRMSMatrix, GetConformerRMSMatrixBatch
 
 
 def _embed_mol(smiles, num_confs=10, seed=42):
@@ -185,6 +185,90 @@ def test_rmsd_invalid_stream_type():
     no_h = Chem.RemoveHs(mol)
     with pytest.raises(TypeError):
         GetConformerRMSMatrix(no_h, stream=42)
+
+
+# ---------------------------------------------------------------------------
+# Batch API tests
+# ---------------------------------------------------------------------------
+
+def test_batch_matches_single():
+    """Batch results match the single-molecule API for each molecule."""
+    smiles_list = ["CCCCCC", "c1ccccc1", "CC(=O)Oc1ccccc1C(=O)O"]
+    mols = [Chem.RemoveHs(_embed_mol(s, num_confs=10)) for s in smiles_list]
+
+    batch_results = GetConformerRMSMatrixBatch(mols, prealigned=False)
+    torch.cuda.synchronize()
+
+    for mol, batch_result in zip(mols, batch_results):
+        single_result = GetConformerRMSMatrix(mol, prealigned=False)
+        torch.cuda.synchronize()
+
+        batch_rms  = batch_result.numpy()
+        single_rms = single_result.numpy()
+        np.testing.assert_allclose(batch_rms, single_rms, atol=1e-10,
+                                   err_msg="Batch and single-mol results differ")
+
+
+def test_batch_mixed_conformer_counts():
+    """Batch handles molecules with different conformer counts."""
+    mol_many  = Chem.RemoveHs(_embed_mol("CCCCCC", num_confs=20))
+    mol_few   = Chem.RemoveHs(_embed_mol("CC", num_confs=3))
+    mol_one   = Chem.RemoveHs(_embed_mol("CCO", num_confs=1))  # below threshold
+
+    results = GetConformerRMSMatrixBatch([mol_many, mol_few, mol_one])
+    torch.cuda.synchronize()
+
+    n_many = mol_many.GetNumConformers()
+    n_few  = mol_few.GetNumConformers()
+
+    assert results[0].numpy().shape[0] == n_many * (n_many - 1) // 2
+    assert results[1].numpy().shape[0] == n_few * (n_few - 1) // 2
+    assert results[2].numpy().shape[0] == 0
+
+
+def test_batch_empty_list():
+    """Empty input returns an empty list."""
+    results = GetConformerRMSMatrixBatch([])
+    assert results == []
+
+
+def test_batch_prealigned_matches_single():
+    """Batch prealigned=True path matches the single-molecule API."""
+    mols = [Chem.RemoveHs(_embed_mol(s, num_confs=8))
+            for s in ["CCCCCC", "c1ccccc1"]]
+
+    batch_results = GetConformerRMSMatrixBatch(mols, prealigned=True)
+    torch.cuda.synchronize()
+
+    for mol, batch_result in zip(mols, batch_results):
+        single_result = GetConformerRMSMatrix(mol, prealigned=True)
+        torch.cuda.synchronize()
+        np.testing.assert_allclose(batch_result.numpy(), single_result.numpy(),
+                                   atol=1e-10,
+                                   err_msg="Batch prealigned and single-mol results differ")
+
+
+def test_batch_invalid_none():
+    """None molecule in list raises ValueError."""
+    mol = Chem.RemoveHs(_embed_mol("CCCC", num_confs=2))
+    with pytest.raises(ValueError):
+        GetConformerRMSMatrixBatch([mol, None])
+
+
+def test_batch_explicit_stream():
+    """Batch results are correct on an explicit CUDA stream."""
+    mols = [Chem.RemoveHs(_embed_mol(s, num_confs=5))
+            for s in ["CCCC", "CCCCC"]]
+
+    s = torch.cuda.Stream()
+    results = GetConformerRMSMatrixBatch(mols, stream=s)
+    s.synchronize()
+
+    for mol, result in zip(mols, results):
+        ref = _numpy_rmsd_matrix(mol)
+        rms = result.numpy().tolist()
+        for g, r in zip(rms, ref):
+            assert abs(g - r) < 0.01
 
 
 def test_rmsd_zero_atoms():
