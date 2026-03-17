@@ -225,8 +225,12 @@ BOOST_PYTHON_MODULE(_conformerRmsd) {
       nvMolKit::AsyncDeviceVector<double> deviceCoords(numCoords, stream);
       hostCoords.copyToDevice(deviceCoords, stream);
 
-      // Allocate output
+      // Allocate output — check overflow before allocating so the user gets a
+      // descriptive error rather than a CUDA OOM for pathological conformer counts.
       const int64_t numPairs = static_cast<int64_t>(numConfs) * (numConfs - 1) / 2;
+      if (numPairs > static_cast<int64_t>(std::numeric_limits<int>::max())) {
+        throw std::overflow_error("Number of conformer pairs exceeds maximum kernel grid size");
+      }
       nvMolKit::AsyncDeviceVector<double> deviceRmsd(numPairs, stream);
 
       // Launch kernel
