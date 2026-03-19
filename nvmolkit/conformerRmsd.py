@@ -36,14 +36,22 @@ def GetConformerRMSMatrix(
 ) -> AsyncGpuResult:
     """Compute the pairwise RMSD matrix between all conformers of a molecule on GPU.
 
-    This is a GPU-accelerated equivalent of RDKit's ``AllChem.GetConformerRMSMatrix``.
-    For N conformers with M atoms, it computes N*(N-1)/2 pairwise RMSD values using
-    one GPU thread-block per pair.  When ``prealigned`` is False (default), each pair
-    is optimally superimposed via the Kabsch algorithm before computing RMSD.
+    GPU-accelerated equivalent of ``AllChem.GetConformerRMSMatrix(mol,
+    prealigned=prealigned)``.  For N conformers with M atoms, computes N*(N-1)/2
+    pairwise RMSD values using one GPU thread-block per pair.  When ``prealigned``
+    is False (default), each pair is optimally superimposed via the Kabsch algorithm
+    before computing RMSD.
+
+    **Differences from RDKit:**
+
+    * Zero-atom molecules always raise ``ValueError`` regardless of conformer count.
+      RDKit returns ``[nan]`` for exactly 2 zero-atom conformers and raises
+      ``ZeroDivisionError`` for 3 or more.
+    * Results are returned as an :class:`AsyncGpuResult` (device tensor) rather
+      than a Python list, to keep the conformer-selection pipeline on the GPU.
 
     The result can be passed directly to :func:`nvmolkit.clustering.butina` for
-    GPU-accelerated Butina clustering, keeping the entire conformer-selection
-    pipeline on the GPU.
+    GPU-accelerated Butina clustering.
 
     Args:
         mol: RDKit molecule with two or more conformers.  Strip hydrogens first
@@ -59,12 +67,12 @@ def GetConformerRMSMatrix(
         pair (i, j) with i > j is at index ``i*(i-1)//2 + j``.
 
     Raises:
-        ValueError: If ``mol`` is None.
+        ValueError: If ``mol`` is None or has conformers but no atoms.
         TypeError: If ``stream`` is not a ``torch.cuda.Stream`` or None.
 
     Example:
         >>> from rdkit import Chem
-        >>> from rdkit.Chem import rdDistGeom
+        >>> from rdkit.Chem import AllChem, rdDistGeom
         >>> from nvmolkit.conformerRmsd import GetConformerRMSMatrix
         >>> from nvmolkit.clustering import butina
         >>>
@@ -72,12 +80,11 @@ def GetConformerRMSMatrix(
         >>> rdDistGeom.EmbedMultipleConfs(mol, numConfs=50)
         >>> no_h = Chem.RemoveHs(mol)
         >>>
-        >>> # Compute RMSD matrix on GPU
+        >>> # GPU equivalent of: AllChem.GetConformerRMSMatrix(no_h)
         >>> rmsd_matrix = GetConformerRMSMatrix(no_h)
         >>>
         >>> # Reshape to square for GPU Butina clustering
         >>> import torch
-        >>> torch.cuda.synchronize()
         >>> n = no_h.GetNumConformers()
         >>> square = torch.zeros(n, n, device='cuda', dtype=torch.float64)
         >>> idx = torch.tril_indices(n, n, offset=-1)
