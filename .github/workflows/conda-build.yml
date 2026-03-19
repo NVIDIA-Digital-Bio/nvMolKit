@@ -54,22 +54,22 @@ jobs:
         shell: bash
         run: |
           set -xeuo pipefail
-          git clone --depth 1 https://github.com/conda-forge/nvmolkit-feedstock.git feedstock
+          git clone --depth 1 https://github.com/conda-forge/nvmolkit-feedstock.git nvmolkit-feedstock
 
       - name: Inject local source tree
         shell: bash
         run: |
           set -xeuo pipefail
-          mkdir -p feedstock/source
-          tar --exclude=.git -C source -cf - . | tar -C feedstock/source -xf -
-          grep -q '^source:' feedstock/recipe/recipe.yaml
+          mkdir -p nvmolkit-feedstock/source
+          tar --exclude=.git -C source -cf - . | tar -C nvmolkit-feedstock/source -xf -
+          grep -q '^source:' nvmolkit-feedstock/recipe/recipe.yaml
           sed -i '/^source:/,/^[^[:space:]]/{/^source:/!{/^[^[:space:]]/!d}}' \
-            feedstock/recipe/recipe.yaml
+            nvmolkit-feedstock/recipe/recipe.yaml
           sed -i '/^source:/a\  path: /home/conda/feedstock_root/source' \
-            feedstock/recipe/recipe.yaml
+            nvmolkit-feedstock/recipe/recipe.yaml
 
       - name: Build feedstock package
-        working-directory: feedstock
+        working-directory: nvmolkit-feedstock
         shell: bash
         run: |
           set -xeuo pipefail
@@ -81,8 +81,8 @@ jobs:
         with:
           name: nvmolkit-conda-py${{ matrix.python }}-rdkit${{ matrix.rdkit }}-cuda${{ matrix.cuda }}
           path: |
-            feedstock/build_artifacts/**/*.conda
-            feedstock/build_artifacts/**/*.tar.bz2
+            nvmolkit-feedstock/build_artifacts/**/*.conda
+            nvmolkit-feedstock/build_artifacts/**/*.tar.bz2
           if-no-files-found: warn
 
       - name: Upload failure context
@@ -91,6 +91,6 @@ jobs:
         with:
           name: nvmolkit-conda-debug-py${{ matrix.python }}-rdkit${{ matrix.rdkit }}-cuda${{ matrix.cuda }}
           path: |
-            feedstock/recipe/recipe.yaml
-            feedstock/build_artifacts/**
+            nvmolkit-feedstock/recipe/recipe.yaml
+            nvmolkit-feedstock/build_artifacts/**
           if-no-files-found: warn
