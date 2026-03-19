@@ -132,3 +132,8 @@ target_include_directories(butina PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 add_library(conformer_rmsd conformer_rmsd.cu)
 target_link_libraries(conformer_rmsd PUBLIC device_vector PRIVATE cuda_error_check)
 target_include_directories(conformer_rmsd PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_library(conformer_rmsd_mol conformer_rmsd_mol.cpp)
+target_link_libraries(conformer_rmsd_mol PUBLIC device_vector conformer_rmsd
+                                         PRIVATE ${RDKit_LIBS})
+target_include_directories(conformer_rmsd_mol PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

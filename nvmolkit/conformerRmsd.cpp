@@ -16,17 +16,14 @@
 #include <boost/python.hpp>
 #include <boost/python/manage_new_object.hpp>
 #include <cstdint>
-#include <limits>
 #include <stdexcept>
 #include <vector>
 
 #include <GraphMol/GraphMol.h>
-#include <GraphMol/Conformer.h>
 
 #include "array_helpers.h"
-#include "conformer_rmsd.h"
+#include "conformer_rmsd_mol.h"
 #include "device.h"
-#include "utils/host_vector.h"
 
 namespace {
 
@@ -47,131 +44,29 @@ BOOST_PYTHON_MODULE(_conformerRmsd) {
       if (!streamOpt) {
         throw std::invalid_argument("Invalid CUDA stream");
       }
-      auto stream = *streamOpt;
 
       const int numMols = boost::python::len(mols);
       if (numMols == 0) {
         return boost::python::list();
       }
 
-      // Extract and validate molecules.
       std::vector<const RDKit::ROMol*> molsVec(numMols);
       for (int i = 0; i < numMols; ++i) {
         molsVec[i] = boost::python::extract<const RDKit::ROMol*>(
             boost::python::object(mols[i]));
-        if (molsVec[i] == nullptr) {
+        if (!molsVec[i]) {
           throw std::invalid_argument("Invalid molecule at index " + std::to_string(i));
         }
-        if (molsVec[i]->getNumAtoms() == 0 && molsVec[i]->getNumConformers() >= 2) {
-          throw std::invalid_argument("Molecule at index " + std::to_string(i) +
-                                      " has no atoms");
-        }
       }
 
-      // Build per-molecule metadata on the host.
-      nvMolKit::PinnedHostVector<int>    numConfsArr(numMols);
-      nvMolKit::PinnedHostVector<int>    numAtomsArr(numMols);
-      nvMolKit::PinnedHostVector<int>    pairOffsetsArr(numMols + 1);
-      nvMolKit::PinnedHostVector<size_t> coordOffsetsArr(numMols);
+      auto buffers = nvMolKit::conformerRmsdBatchMatrixMol(molsVec, prealigned, *streamOpt);
 
-      // pairOffsetsArr and totalPairs are intentionally 32-bit: the kernel
-      // launches one block per pair on the grid x-dimension, whose hardware
-      // limit is 2^31-1 — exactly INT_MAX.  The int64_t accumulation below
-      // exists solely to detect prefix-sum overflow before materializing the
-      // value in that launch/index type; an unchecked overflow would silently
-      // route blocks to the wrong molecule or write out of bounds.
-      pairOffsetsArr[0]   = 0;
-      size_t totalCoords  = 0;
-      for (int m = 0; m < numMols; ++m) {
-        const int nc    = molsVec[m]->getNumConformers();
-        const int na    = molsVec[m]->getNumAtoms();
-        numConfsArr[m]  = nc;
-        numAtomsArr[m]  = na;
-
-        coordOffsetsArr[m]  = totalCoords;
-        totalCoords        += static_cast<size_t>(nc) * na * 3;
-
-        const int64_t numPairs64    = (nc >= 2) ? static_cast<int64_t>(nc) * (nc - 1) / 2 : 0;
-        const int64_t newPairOffset = static_cast<int64_t>(pairOffsetsArr[m]) + numPairs64;
-        if (newPairOffset > static_cast<int64_t>(std::numeric_limits<int>::max())) {
-          throw std::overflow_error("Cumulative conformer pairs exceed int range by molecule index " +
-                                    std::to_string(m));
-        }
-        pairOffsetsArr[m + 1] = static_cast<int>(newPairOffset);
-      }
-      const int totalPairs = pairOffsetsArr[numMols];
-
-      // Pack all conformer coordinates into a single flat pinned buffer.
-      nvMolKit::PinnedHostVector<double> hostCoords(totalCoords > 0 ? totalCoords : 1);
-      for (int m = 0; m < numMols; ++m) {
-        const RDKit::ROMol& mol = *molsVec[m];
-        const int na            = numAtomsArr[m];
-        int confIdx             = 0;
-        for (auto it = mol.beginConformers(); it != mol.endConformers(); ++it, ++confIdx) {
-          const RDKit::Conformer& conf = **it;
-          for (int a = 0; a < na; ++a) {
-            const auto&  pos  = conf.getAtomPos(a);
-            const size_t base = coordOffsetsArr[m] +
-                                static_cast<size_t>(confIdx) * na * 3 +
-                                static_cast<size_t>(a) * 3;
-            hostCoords[base + 0] = pos.x;
-            hostCoords[base + 1] = pos.y;
-            hostCoords[base + 2] = pos.z;
-          }
-        }
-      }
-
-      // Transfer coordinates and metadata to device.
-      nvMolKit::AsyncDeviceVector<double> devCoords(totalCoords > 0 ? totalCoords : 1, stream);
-      nvMolKit::AsyncDeviceVector<int>    devNumConfs(numMols, stream);
-      nvMolKit::AsyncDeviceVector<int>    devNumAtoms(numMols, stream);
-      nvMolKit::AsyncDeviceVector<int>    devPairOffsets(numMols + 1, stream);
-      nvMolKit::AsyncDeviceVector<size_t> devCoordOffsets(numMols, stream);
-
-      if (totalCoords > 0) hostCoords.copyToDevice(devCoords, stream);
-      numConfsArr.copyToDevice(devNumConfs, stream);
-      numAtomsArr.copyToDevice(devNumAtoms, stream);
-      pairOffsetsArr.copyToDevice(devPairOffsets, stream);
-      coordOffsetsArr.copyToDevice(devCoordOffsets, stream);
-
-      // Allocate per-molecule output buffers; collect their raw device pointers.
-      // Always allocate at least 1 element so that devRmsdPtrs never contains a
-      // null pointer — zero-pair molecules dispatch 0 blocks and their slot is
-      // never written, but a null in the array would be a latent hazard if the
-      // kernel dispatch logic ever changes.
-      std::vector<nvMolKit::AsyncDeviceVector<double>> devRmsdVecs;
-      devRmsdVecs.reserve(numMols);
-      nvMolKit::PinnedHostVector<double*> hostRmsdPtrs(numMols);
-      for (int m = 0; m < numMols; ++m) {
-        const int numPairs = pairOffsetsArr[m + 1] - pairOffsetsArr[m];
-        devRmsdVecs.emplace_back(numPairs > 0 ? numPairs : 1, stream);
-        hostRmsdPtrs[m] = devRmsdVecs.back().data();
-      }
-
-      nvMolKit::AsyncDeviceVector<double*> devRmsdPtrs(numMols, stream);
-      hostRmsdPtrs.copyToDevice(devRmsdPtrs, stream);
-
-      // Launch a single kernel covering all pairs from all molecules.
-      if (totalPairs > 0) {
-        nvMolKit::conformerRmsdBatchMatrixGpu(
-            toSpan(devCoords),
-            toSpan(devRmsdPtrs),
-            toSpan(devPairOffsets),
-            toSpan(devCoordOffsets),
-            toSpan(devNumConfs),
-            toSpan(devNumAtoms),
-            numMols,
-            totalPairs,
-            prealigned,
-            stream);
-      }
-
-      // Return a Python list of per-molecule PyArray objects.
       boost::python::list results;
       for (int m = 0; m < numMols; ++m) {
-        const int numPairs = pairOffsetsArr[m + 1] - pairOffsetsArr[m];
+        const int nc       = molsVec[m]->getNumConformers();
+        const int numPairs = nc >= 2 ? nc * (nc - 1) / 2 : 0;
         results.append(toOwnedPyArray(
-            nvMolKit::makePyArray(devRmsdVecs[m], boost::python::make_tuple(numPairs))));
+            nvMolKit::makePyArray(buffers[m], boost::python::make_tuple(numPairs))));
       }
       return results;
     },
@@ -184,60 +79,15 @@ BOOST_PYTHON_MODULE(_conformerRmsd) {
     +[](RDKit::ROMol& mol,
         const bool     prealigned,
         std::uintptr_t streamPtr) -> boost::python::object {
-      const int numConfs = mol.getNumConformers();
-      if (numConfs <= 1) {
-        nvMolKit::AsyncDeviceVector<double> empty(0);
-        return toOwnedPyArray(nvMolKit::makePyArray(empty, boost::python::make_tuple(0)));
-      }
-
       auto streamOpt = nvMolKit::acquireExternalStream(streamPtr);
       if (!streamOpt) {
         throw std::invalid_argument("Invalid CUDA stream");
       }
-      auto stream = *streamOpt;
 
-      const int numAtoms = mol.getNumAtoms();
-      if (numAtoms == 0) {
-        // Intentional divergence from RDKit, which returns [nan] for exactly 2
-        // zero-atom conformers and raises ZeroDivisionError for 3+. We fail fast
-        // with a consistent error for all degenerate zero-atom inputs.
-        throw std::invalid_argument("Molecule has no atoms");
-      }
-
-      // Extract coordinates from all conformers into a flat pinned host buffer.
-      // Layout: coords[conf * numAtoms * 3 + atom * 3 + xyz]
-      // Pinned memory allows the DMA engine to transfer directly to the device
-      // without a staging copy, and the PinnedHostVector destructor handles
-      // cleanup safely after all stream work has been submitted.
-      const size_t numCoords = static_cast<size_t>(numConfs) * numAtoms * 3;
-      nvMolKit::PinnedHostVector<double> hostCoords(numCoords);
-      int confIdx = 0;
-      for (auto it = mol.beginConformers(); it != mol.endConformers(); ++it, ++confIdx) {
-        const RDKit::Conformer& conf = **it;
-        for (int a = 0; a < numAtoms; ++a) {
-          const auto& pos                                  = conf.getAtomPos(a);
-          hostCoords[confIdx * numAtoms * 3 + a * 3 + 0] = pos.x;
-          hostCoords[confIdx * numAtoms * 3 + a * 3 + 1] = pos.y;
-          hostCoords[confIdx * numAtoms * 3 + a * 3 + 2] = pos.z;
-        }
-      }
-
-      nvMolKit::AsyncDeviceVector<double> deviceCoords(numCoords, stream);
-      hostCoords.copyToDevice(deviceCoords, stream);
-
-      // Allocate output — check overflow before allocating so the user gets a
-      // descriptive error rather than a CUDA OOM for pathological conformer counts.
-      const int64_t numPairs = static_cast<int64_t>(numConfs) * (numConfs - 1) / 2;
-      if (numPairs > static_cast<int64_t>(std::numeric_limits<int>::max())) {
-        throw std::overflow_error("Number of conformer pairs exceeds maximum kernel grid size");
-      }
-      nvMolKit::AsyncDeviceVector<double> deviceRmsd(numPairs, stream);
-
-      // Launch kernel
-      nvMolKit::conformerRmsdMatrixGpu(
-          toSpan(deviceCoords), toSpan(deviceRmsd), numConfs, numAtoms, prealigned, stream);
-
-      return toOwnedPyArray(nvMolKit::makePyArray(deviceRmsd, boost::python::make_tuple(numPairs)));
+      const int     numConfs = mol.getNumConformers();
+      const int64_t numPairs = numConfs >= 2 ? static_cast<int64_t>(numConfs) * (numConfs - 1) / 2 : 0;
+      auto buffer = nvMolKit::conformerRmsdMatrixMol(mol, prealigned, *streamOpt);
+      return toOwnedPyArray(nvMolKit::makePyArray(buffer, boost::python::make_tuple(numPairs)));
     },
     (boost::python::arg("mol"),
      boost::python::arg("prealigned") = false,

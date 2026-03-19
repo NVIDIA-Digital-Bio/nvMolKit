@@ -72,7 +72,7 @@ target_include_directories(
   _conformerRmsd PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils ${Boost_INCLUDE_DIRS}
                         ${Python_INCLUDE_DIRS})
 target_link_libraries(_conformerRmsd PUBLIC ${Boost_LIBRARIES} ${PYTHON_LIBRARIES}
-                                            device_vector conformer_rmsd device)
+                                            device_vector conformer_rmsd_mol device)
 target_link_libraries(_conformerRmsd PRIVATE ${RDKit_LIBS})
 installpythontarget(_conformerRmsd ./)
 
