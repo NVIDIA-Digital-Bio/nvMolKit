@@ -91,6 +91,7 @@ jobs:
         with:
           name: nvmolkit-conda-debug-py${{ matrix.python }}-rdkit${{ matrix.rdkit }}-cuda${{ matrix.cuda }}
           path: |
-            nvmolkit-feedstock/recipe/recipe.yaml
-            nvmolkit-feedstock/build_artifacts/**
+            feedstock/recipe/recipe.yaml
+            feedstock/build_artifacts/**/build_env_setup.sh
+            feedstock/build_artifacts/**/*.log
           if-no-files-found: warn
