@@ -18,6 +18,7 @@
 
 #include <climits>
 #include <cmath>
+#include <cub/cub.cuh>
 #include <cuda/std/span>
 
 namespace nvMolKit {
@@ -34,20 +35,25 @@ __device__ __forceinline__ void symmetricEigenvalues3x3(const double a00, const 
                                                         double& e0, double& e1, double& e2) {
   // Characteristic polynomial:  λ³ - p λ² + q λ - r = 0
   const double p = a00 + a11 + a22;                                           // trace
-  const double q = a00 * a11 + a00 * a22 + a11 * a22 - a01 * a01 - a02 * a02 - a12 * a12;
-  const double r = a00 * a11 * a22 + 2.0 * a01 * a02 * a12 - a00 * a12 * a12 - a11 * a02 * a02 - a22 * a01 * a01;
+  // Pre-compute pairwise products reused in both q and r.
+  const double a00_a11 = a00 * a11;
+  const double a00_a22 = a00 * a22;
+  const double a11_a22 = a11 * a22;
+  const double q = a00_a11 + a00_a22 + a11_a22 - a01 * a01 - a02 * a02 - a12 * a12;
+  const double r = a00_a11 * a22 + 2.0 * a01 * a02 * a12 - a00 * a12 * a12 - a11 * a02 * a02 - a22 * a01 * a01;
 
   // Shift to depressed cubic:  t³ + pt' + q' = 0  where λ = t + p/3
-  const double p3   = p / 3.0;
-  const double pp   = (p * p - 3.0 * q) / 9.0;  // -p'/3
-  const double qq   = (2.0 * p * p * p - 9.0 * p * q + 27.0 * r) / 54.0;
+  const double p3      = p / 3.0;
+  const double pp      = (p * p - 3.0 * q) / 9.0;  // -p'/3
+  const double qq      = (2.0 * p * p * p - 9.0 * p * q + 27.0 * r) / 54.0;
   // Three real roots (guaranteed for real symmetric matrices).  Near-degenerate
   // inputs are handled by the fmax guards on sqrtPP and the acos argument below.
-  const double sqrtPP = sqrt(fmax(pp, 0.0));
-  const double theta  = acos(fmin(fmax(qq / fmax(sqrtPP * sqrtPP * sqrtPP, 1e-30), -1.0), 1.0)) / 3.0;
-  e0                  = 2.0 * sqrtPP * cos(theta) + p3;
-  e1                  = 2.0 * sqrtPP * cos(theta - 2.0 * M_PI / 3.0) + p3;
-  e2                  = 2.0 * sqrtPP * cos(theta - 4.0 * M_PI / 3.0) + p3;
+  const double sqrtPP    = sqrt(fmax(pp, 0.0));
+  const double theta     = acos(fmin(fmax(qq / fmax(sqrtPP * sqrtPP * sqrtPP, 1e-30), -1.0), 1.0)) / 3.0;
+  const double twoSqrtPP = 2.0 * sqrtPP;
+  e0                     = twoSqrtPP * cos(theta) + p3;
+  e1                     = twoSqrtPP * cos(theta - 2.0 * M_PI / 3.0) + p3;
+  e2                     = twoSqrtPP * cos(theta - 4.0 * M_PI / 3.0) + p3;
 
   // Sort descending
   if (e1 > e0) { double t = e0; e0 = e1; e1 = t; }
@@ -61,41 +67,30 @@ __device__ __forceinline__ double det3x3(const double* H) {
          H[2] * (H[3] * H[7] - H[4] * H[6]);
 }
 
+// ---------------------------------------------------------------------------
+// Per-pair RMSD helper
+//
+// Called by both kernels after they resolve coordI, coordJ, and outRmsd from
+// their respective index schemes.  All shared memory is managed internally.
+//
+// Each block computes:
+//   1. Centroids of both conformers            (cub::BlockReduce, results broadcast)
+//   2. Centered inner products  Sp, Sq         (cub::BlockReduce, thread 0 only)
+//   3. Cross-covariance matrix  H = Pc^T Qc    (cub::BlockReduce, thread 0 only)
+//   4. Singular values of H via eigenvalues of H^T H  (thread 0, analytical)
+//   5. RMSD with optional Kabsch alignment      (thread 0)
+// ---------------------------------------------------------------------------
+
 constexpr int kRmsdBlockSize = 128;
+using RmsdBlockReduceT = cub::BlockReduce<double, kRmsdBlockSize>;
 
-// Block-wide sum reduction into *result_ptr.
-// Requires locals: tid (int), sReduce (double[kRmsdBlockSize]).
-#define BLOCK_REDUCE_SUM(val, result_ptr) \
-  sReduce[tid] = val; \
-  __syncthreads(); \
-  for (int s = kRmsdBlockSize / 2; s > 0; s >>= 1) { \
-    if (tid < s) sReduce[tid] += sReduce[tid + s]; \
-    __syncthreads(); \
-  } \
-  if (tid == 0) *result_ptr = sReduce[0]; \
-  __syncthreads();
-
-/// Compute RMSD for a single conformer pair.
-///
-/// Called by both kernels after they resolve coordI, coordJ, and outRmsd from
-/// their respective index schemes.  All shared-memory arguments must be
-/// allocated by the calling kernel.
-///
-/// @param coordI   Pointer to atom coordinates of the first conformer.
-/// @param coordJ   Pointer to atom coordinates of the second conformer.
-/// @param numAtoms Number of atoms.
-/// @param prealigned If true, skip Kabsch alignment (matches RDKit behavior).
-/// @param outRmsd  Output pointer (thread 0 writes the result).
-/// @param sReduce  Shared scratch for block reductions (double[kRmsdBlockSize]).
-/// @param sAccum   Shared accumulator: Sp, Sq, H[0..8]  (double[11]).
 __device__ __forceinline__ void computePairRmsd(const double* __restrict__ coordI,
                                                 const double* __restrict__ coordJ,
                                                 const int                  numAtoms,
                                                 const bool                 prealigned,
-                                                double*                    outRmsd,
-                                                double*                    sReduce,
-                                                double*                    sAccum) {
+                                                double*                    outRmsd) {
   const int tid = threadIdx.x;
+  __shared__ RmsdBlockReduceT::TempStorage reduceTmp;
 
   if (prealigned) {
     // ---- Simple RMSD without alignment (no centering, matches RDKit behavior) ----
@@ -106,10 +101,8 @@ __device__ __forceinline__ void computePairRmsd(const double* __restrict__ coord
       const double dz = coordI[a * 3 + 2] - coordJ[a * 3 + 2];
       sumSqDiff += dx * dx + dy * dy + dz * dz;
     }
-    BLOCK_REDUCE_SUM(sumSqDiff, &sAccum[0])
-    if (tid == 0) {
-      *outRmsd = sqrt(sAccum[0] / static_cast<double>(numAtoms));
-    }
+    const double total = RmsdBlockReduceT(reduceTmp).Sum(sumSqDiff);
+    if (tid == 0) *outRmsd = sqrt(total / static_cast<double>(numAtoms));
     return;
   }
 
@@ -119,33 +112,28 @@ __device__ __forceinline__ void computePairRmsd(const double* __restrict__ coord
 
   double sumIx = 0.0, sumIy = 0.0, sumIz = 0.0;
   double sumJx = 0.0, sumJy = 0.0, sumJz = 0.0;
-
   for (int a = tid; a < numAtoms; a += kRmsdBlockSize) {
-    sumIx += coordI[a * 3 + 0];
-    sumIy += coordI[a * 3 + 1];
-    sumIz += coordI[a * 3 + 2];
-    sumJx += coordJ[a * 3 + 0];
-    sumJy += coordJ[a * 3 + 1];
-    sumJz += coordJ[a * 3 + 2];
+    sumIx += coordI[a * 3 + 0];  sumIy += coordI[a * 3 + 1];  sumIz += coordI[a * 3 + 2];
+    sumJx += coordJ[a * 3 + 0];  sumJy += coordJ[a * 3 + 1];  sumJz += coordJ[a * 3 + 2];
   }
 
-  BLOCK_REDUCE_SUM(sumIx, &sCentI[0])
-  BLOCK_REDUCE_SUM(sumIy, &sCentI[1])
-  BLOCK_REDUCE_SUM(sumIz, &sCentI[2])
-  BLOCK_REDUCE_SUM(sumJx, &sCentJ[0])
-  BLOCK_REDUCE_SUM(sumJy, &sCentJ[1])
-  BLOCK_REDUCE_SUM(sumJz, &sCentJ[2])
-
-  if (tid == 0) {
-    const double invN = 1.0 / static_cast<double>(numAtoms);
-    sCentI[0] *= invN;
-    sCentI[1] *= invN;
-    sCentI[2] *= invN;
-    sCentJ[0] *= invN;
-    sCentJ[1] *= invN;
-    sCentJ[2] *= invN;
-  }
-  __syncthreads();
+  // Reduce centroid components; write results to shared memory for broadcast.
+  // Each __syncthreads() both allows TempStorage reuse and makes the previous
+  // shared-memory write visible to all threads before the next reduction.
+  const double invN = 1.0 / static_cast<double>(numAtoms);
+  sumIx = RmsdBlockReduceT(reduceTmp).Sum(sumIx);  __syncthreads();
+  if (tid == 0) sCentI[0] = sumIx * invN;
+  sumIy = RmsdBlockReduceT(reduceTmp).Sum(sumIy);  __syncthreads();
+  if (tid == 0) sCentI[1] = sumIy * invN;
+  sumIz = RmsdBlockReduceT(reduceTmp).Sum(sumIz);  __syncthreads();
+  if (tid == 0) sCentI[2] = sumIz * invN;
+  sumJx = RmsdBlockReduceT(reduceTmp).Sum(sumJx);  __syncthreads();
+  if (tid == 0) sCentJ[0] = sumJx * invN;
+  sumJy = RmsdBlockReduceT(reduceTmp).Sum(sumJy);  __syncthreads();
+  if (tid == 0) sCentJ[1] = sumJy * invN;
+  sumJz = RmsdBlockReduceT(reduceTmp).Sum(sumJz);  __syncthreads();
+  if (tid == 0) sCentJ[2] = sumJz * invN;
+  __syncthreads();  // broadcast sCentJ[2] and ensure all centroid writes are visible
 
   const double cIx = sCentI[0], cIy = sCentI[1], cIz = sCentI[2];
   const double cJx = sCentJ[0], cJy = sCentJ[1], cJz = sCentJ[2];
@@ -173,24 +161,25 @@ __device__ __forceinline__ void computePairRmsd(const double* __restrict__ coord
     localH[6] += pz * qx;  localH[7] += pz * qy;  localH[8] += pz * qz;
   }
 
-  // Reduce Sp, Sq, H[0..8]  (11 values total)
-  BLOCK_REDUCE_SUM(localSp,   &sAccum[0])
-  BLOCK_REDUCE_SUM(localSq,   &sAccum[1])
-  BLOCK_REDUCE_SUM(localH[0], &sAccum[2])
-  BLOCK_REDUCE_SUM(localH[1], &sAccum[3])
-  BLOCK_REDUCE_SUM(localH[2], &sAccum[4])
-  BLOCK_REDUCE_SUM(localH[3], &sAccum[5])
-  BLOCK_REDUCE_SUM(localH[4], &sAccum[6])
-  BLOCK_REDUCE_SUM(localH[5], &sAccum[7])
-  BLOCK_REDUCE_SUM(localH[6], &sAccum[8])
-  BLOCK_REDUCE_SUM(localH[7], &sAccum[9])
-  BLOCK_REDUCE_SUM(localH[8], &sAccum[10])
+  // Reduce all 11 values into thread 0.  Results in non-zero threads are
+  // undefined and unused; only thread 0 performs the RMSD computation below.
+  // __syncthreads() between calls allows TempStorage reuse.
+  localSp    = RmsdBlockReduceT(reduceTmp).Sum(localSp);    __syncthreads();
+  localSq    = RmsdBlockReduceT(reduceTmp).Sum(localSq);    __syncthreads();
+  localH[0]  = RmsdBlockReduceT(reduceTmp).Sum(localH[0]);  __syncthreads();
+  localH[1]  = RmsdBlockReduceT(reduceTmp).Sum(localH[1]);  __syncthreads();
+  localH[2]  = RmsdBlockReduceT(reduceTmp).Sum(localH[2]);  __syncthreads();
+  localH[3]  = RmsdBlockReduceT(reduceTmp).Sum(localH[3]);  __syncthreads();
+  localH[4]  = RmsdBlockReduceT(reduceTmp).Sum(localH[4]);  __syncthreads();
+  localH[5]  = RmsdBlockReduceT(reduceTmp).Sum(localH[5]);  __syncthreads();
+  localH[6]  = RmsdBlockReduceT(reduceTmp).Sum(localH[6]);  __syncthreads();
+  localH[7]  = RmsdBlockReduceT(reduceTmp).Sum(localH[7]);  __syncthreads();
+  localH[8]  = RmsdBlockReduceT(reduceTmp).Sum(localH[8]);
+  // No final sync: only thread 0 reads localSp, localSq, localH below.
 
   // ---- Thread 0: compute RMSD from Sp, Sq, singular values of H ----
   if (tid == 0) {
-    const double Sp = sAccum[0];
-    const double Sq = sAccum[1];
-    const double* H = &sAccum[2];
+    const double* H = localH;
 
     // G = H^T H  (3x3 symmetric positive semi-definite)
     const double g00 = H[0] * H[0] + H[3] * H[3] + H[6] * H[6];
@@ -210,35 +199,23 @@ __device__ __forceinline__ void computePairRmsd(const double* __restrict__ coord
     double       s2 = sqrt(fmax(ev2, 0.0));
 
     // Handle reflection: if det(H) < 0, negate the smallest singular value
-    if (det3x3(H) < 0.0) {
-      s2 = -s2;
-    }
+    if (det3x3(H) < 0.0) s2 = -s2;
 
     // RMSD^2 = (Sp + Sq - 2*(s0 + s1 + s2)) / N
-    const double invN    = 1.0 / static_cast<double>(numAtoms);
-    const double rmsdSq  = fmax((Sp + Sq - 2.0 * (s0 + s1 + s2)) * invN, 0.0);
-    *outRmsd             = sqrt(rmsdSq);
+    const double rmsdSq = fmax((localSp + localSq - 2.0 * (s0 + s1 + s2)) * invN, 0.0);
+    *outRmsd            = sqrt(rmsdSq);
   }
 }
 
-#undef BLOCK_REDUCE_SUM
-
 // ---------------------------------------------------------------------------
 // Kernel: one thread-block per conformer pair
-//
-// Each block computes:
-//   1. Centroids of both conformers            (parallel reduce)
-//   2. Centered inner products  Sp, Sq         (parallel reduce)
-//   3. Cross-covariance matrix  H = Pc^T Qc    (parallel reduce, 9 values)
-//   4. Singular values of H via eigenvalues of H^T H  (thread 0, analytical)
-//   5. RMSD with optional Kabsch alignment      (thread 0)
 // ---------------------------------------------------------------------------
 
 __global__ void conformerRmsdKernel(const double* __restrict__ coords,
-                                    double* __restrict__ rmsdOut,
-                                    const int numConformers,
-                                    const int numAtoms,
-                                    const bool prealigned) {
+                                    double* __restrict__       rmsdOut,
+                                    const int                  numConformers,
+                                    const int                  numAtoms,
+                                    const bool                 prealigned) {
   // Map blockIdx to pair (ci, cj) with ci > cj using lower-triangle indexing.
   const int pairIdx = blockIdx.x;
   // Inverse of pairIdx = ci*(ci-1)/2 + cj:  ci = floor((1 + sqrt(1 + 8*pairIdx)) / 2)
@@ -254,10 +231,7 @@ __global__ void conformerRmsdKernel(const double* __restrict__ coords,
   const double* coordI = coords + ci * stride;
   const double* coordJ = coords + cj * stride;
 
-  __shared__ double sReduce[kRmsdBlockSize];
-  __shared__ double sAccum[11]; // Sp, Sq, H[0..8]
-
-  computePairRmsd(coordI, coordJ, numAtoms, prealigned, &rmsdOut[pairIdx], sReduce, sAccum);
+  computePairRmsd(coordI, coordJ, numAtoms, prealigned, &rmsdOut[pairIdx]);
 }
 
 // ---------------------------------------------------------------------------
@@ -289,11 +263,11 @@ __global__ void conformerRmsdBatchKernel(const double* __restrict__  coords,
   }
   const int mol = lo;
 
-  const int localPairIdx   = globalPairIdx - pairOffsets[mol];
-  const int numConfs       = numConfsPerMol[mol];
-  const int numAtoms       = numAtomsPerMol[mol];
-  const double* molCoords  = coords + static_cast<ptrdiff_t>(coordOffsets[mol]);
-  double*       molRmsd    = rmsdOutputs[mol];
+  const int localPairIdx  = globalPairIdx - pairOffsets[mol];
+  const int numConfs      = numConfsPerMol[mol];
+  const int numAtoms      = numAtomsPerMol[mol];
+  const double* molCoords = coords + static_cast<ptrdiff_t>(coordOffsets[mol]);
+  double*       molRmsd   = rmsdOutputs[mol];
 
   // Map localPairIdx to (ci, cj) with ci > cj.
   // Precision note: double has 53-bit significand; localPairIdx is bounded by INT_MAX (~2^31),
@@ -303,18 +277,15 @@ __global__ void conformerRmsdBatchKernel(const double* __restrict__  coords,
 
   if (ci >= numConfs || cj < 0 || cj >= ci) return;
 
-  const int stride        = numAtoms * 3;
-  const double* coordI    = molCoords + ci * stride;
-  const double* coordJ    = molCoords + cj * stride;
+  const int stride     = numAtoms * 3;
+  const double* coordI = molCoords + ci * stride;
+  const double* coordJ = molCoords + cj * stride;
 
-  __shared__ double sReduce[kRmsdBlockSize];
-  __shared__ double sAccum[11];
-
-  computePairRmsd(coordI, coordJ, numAtoms, prealigned, &molRmsd[localPairIdx], sReduce, sAccum);
+  computePairRmsd(coordI, coordJ, numAtoms, prealigned, &molRmsd[localPairIdx]);
 }
 
 // ---------------------------------------------------------------------------
-// Host entry point
+// Host entry points
 // ---------------------------------------------------------------------------
 
 void conformerRmsdMatrixGpu(cuda::std::span<const double> coords,
