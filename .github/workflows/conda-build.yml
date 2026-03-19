@@ -65,7 +65,7 @@ jobs:
           grep -q '^source:' feedstock/recipe/recipe.yaml
           sed -i '/^source:/,/^[^[:space:]]/{/^source:/!{/^[^[:space:]]/!d}}' \
             feedstock/recipe/recipe.yaml
-          sed -i '/^source:/a\  path: ../source' \
+          sed -i '/^source:/a\  path: /home/conda/feedstock_root/source' \
             feedstock/recipe/recipe.yaml
 
       - name: Build feedstock package
