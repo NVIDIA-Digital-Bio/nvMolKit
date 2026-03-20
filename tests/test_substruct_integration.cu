@@ -92,18 +92,18 @@ const ThreadingConfig kThreadingConfigs[] = {
 // clang-format on
 
 constexpr DatasetConfig kDatasets[] = {
-  {           "pwalters_alert_collection_supported.txt",            "PwaltersAlertCollection"},
-  {         "openbabel_functional_groups_supported.txt",          "OpenBabelFunctionalGroups"},
-  {                     "BMS_2006_filter_supported.txt",                      "BMS2006Filter"},
-  {          "rdkit_fragment_descriptors_supported.txt",           "RDKitFragmentDescriptors"},
-  {           "rdkit_tautomer_transforms_supported.txt",            "RDKitTautomerTransforms"},
-  {           "rdkit_tautomer_transforms_supported.txt", "RDKitTautomerTransformsUniquified", true},
-  {         "rdkit_torsionPreferences_v2_supported.txt",          "RDKitTorsionPreferencesV2"},
-  { "rdkit_torsionPreferences_smallrings_supported.txt",  "RDKitTorsionPreferencesSmallRings"},
-  {           "rdkit_pattern_fingerprint_supported.txt",           "RDKitPatternFingerprints"},
+  {"pwalters_alert_collection_supported.txt", "PwaltersAlertCollection"},
+  {"openbabel_functional_groups_supported.txt", "OpenBabelFunctionalGroups"},
+  {"BMS_2006_filter_supported.txt", "BMS2006Filter"},
+  {"rdkit_fragment_descriptors_supported.txt", "RDKitFragmentDescriptors"},
+  {"rdkit_tautomer_transforms_supported.txt", "RDKitTautomerTransforms"},
+  {"rdkit_tautomer_transforms_supported.txt", "RDKitTautomerTransformsUniquified", /*uniquify=*/true},
+  {"rdkit_torsionPreferences_v2_supported.txt", "RDKitTorsionPreferencesV2"},
+  {"rdkit_torsionPreferences_smallrings_supported.txt", "RDKitTorsionPreferencesSmallRings"},
+  {"rdkit_pattern_fingerprint_supported.txt", "RDKitPatternFingerprints"},
   {"rdkit_torsionPreferences_macrocycles_supported.txt", "RDKitTorsionPreferencesMacrocycles"},
-  {                       "RLewis_smarts_supported.txt",                       "RLewisSMARTS"},
-  {                          "wehi_pains_supported.txt",                          "WEHIPAINS"},
+  {"RLewis_smarts_supported.txt", "RLewisSMARTS"},
+  {"wehi_pains_supported.txt", "WEHIPAINS"},
 };
 
 struct SmallestRepro {
@@ -231,13 +231,25 @@ void printSmallestRepros(const SmallestRepros&                             repro
                        gpuResults,
                        uniquify);
     if (repros.smallestQ.t != repros.smallestSum.t || repros.smallestQ.q != repros.smallestSum.q) {
-      printSmallestRepro(
-        "smallest q", repros.smallestQ, targetSmiles, querySmarts, targetMols, queryMols, gpuResults, uniquify);
+      printSmallestRepro("smallest q",
+                         repros.smallestQ,
+                         targetSmiles,
+                         querySmarts,
+                         targetMols,
+                         queryMols,
+                         gpuResults,
+                         uniquify);
     }
     if (repros.smallestT.t != repros.smallestSum.t || repros.smallestT.q != repros.smallestSum.q) {
       if (repros.smallestT.t != repros.smallestQ.t || repros.smallestT.q != repros.smallestQ.q) {
-        printSmallestRepro(
-          "smallest t", repros.smallestT, targetSmiles, querySmarts, targetMols, queryMols, gpuResults, uniquify);
+        printSmallestRepro("smallest t",
+                           repros.smallestT,
+                           targetSmiles,
+                           querySmarts,
+                           targetMols,
+                           queryMols,
+                           gpuResults,
+                           uniquify);
       }
     }
   }
@@ -502,8 +514,14 @@ TEST_P(SubstructureIntegrationTest, ChemblVsSmarts) {
           validationResult.mismatches,
           [](const auto& m) { return std::get<0>(m); },
           [](const auto& m) { return std::get<1>(m); });
-        printSmallestRepros(
-          repros, targetSmiles, querySmarts, targetMols, queryMols, results, "count mismatch", dataset().uniquify);
+        printSmallestRepros(repros,
+                            targetSmiles,
+                            querySmarts,
+                            targetMols,
+                            queryMols,
+                            results,
+                            "count mismatch",
+                            dataset().uniquify);
       }
 
       if (!validationResult.mappingMismatches.empty()) {
@@ -511,8 +529,14 @@ TEST_P(SubstructureIntegrationTest, ChemblVsSmarts) {
           validationResult.mappingMismatches,
           [](const auto& m) { return m.first; },
           [](const auto& m) { return m.second; });
-        printSmallestRepros(
-          repros, targetSmiles, querySmarts, targetMols, queryMols, results, "mapping mismatch", dataset().uniquify);
+        printSmallestRepros(repros,
+                            targetSmiles,
+                            querySmarts,
+                            targetMols,
+                            queryMols,
+                            results,
+                            "mapping mismatch",
+                            dataset().uniquify);
       }
     }
 
