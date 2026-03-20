@@ -65,6 +65,7 @@ std::unique_ptr<RDKit::ROMol> makeSmartsQuery(const std::string& smarts) {
 struct DatasetConfig {
   const char* smartsFile;
   const char* name;
+  bool        uniquify = false;
 };
 
 struct ThreadingConfig {
@@ -91,17 +92,18 @@ const ThreadingConfig kThreadingConfigs[] = {
 // clang-format on
 
 constexpr DatasetConfig kDatasets[] = {
-  {           "pwalters_alert_collection_supported.txt",            "PwaltersAlertCollection"},
-  {         "openbabel_functional_groups_supported.txt",          "OpenBabelFunctionalGroups"},
-  {                     "BMS_2006_filter_supported.txt",                      "BMS2006Filter"},
-  {          "rdkit_fragment_descriptors_supported.txt",           "RDKitFragmentDescriptors"},
-  {           "rdkit_tautomer_transforms_supported.txt",            "RDKitTautomerTransforms"},
-  {         "rdkit_torsionPreferences_v2_supported.txt",          "RDKitTorsionPreferencesV2"},
-  { "rdkit_torsionPreferences_smallrings_supported.txt",  "RDKitTorsionPreferencesSmallRings"},
-  {           "rdkit_pattern_fingerprint_supported.txt",           "RDKitPatternFingerprints"},
+  {"pwalters_alert_collection_supported.txt", "PwaltersAlertCollection"},
+  {"openbabel_functional_groups_supported.txt", "OpenBabelFunctionalGroups"},
+  {"BMS_2006_filter_supported.txt", "BMS2006Filter"},
+  {"rdkit_fragment_descriptors_supported.txt", "RDKitFragmentDescriptors"},
+  {"rdkit_tautomer_transforms_supported.txt", "RDKitTautomerTransforms"},
+  {"rdkit_tautomer_transforms_supported.txt", "RDKitTautomerTransformsUniquified", /*uniquify=*/true},
+  {"rdkit_torsionPreferences_v2_supported.txt", "RDKitTorsionPreferencesV2"},
+  {"rdkit_torsionPreferences_smallrings_supported.txt", "RDKitTorsionPreferencesSmallRings"},
+  {"rdkit_pattern_fingerprint_supported.txt", "RDKitPatternFingerprints"},
   {"rdkit_torsionPreferences_macrocycles_supported.txt", "RDKitTorsionPreferencesMacrocycles"},
-  {                       "RLewis_smarts_supported.txt",                       "RLewisSMARTS"},
-  {                          "wehi_pains_supported.txt",                          "WEHIPAINS"},
+  {"RLewis_smarts_supported.txt", "RLewisSMARTS"},
+  {"wehi_pains_supported.txt", "WEHIPAINS"},
 };
 
 struct SmallestRepro {
@@ -181,12 +183,13 @@ void printSmallestRepro(const char*                                       label,
                         const std::vector<std::string>&                   querySmarts,
                         const std::vector<std::unique_ptr<RDKit::ROMol>>& targetMols,
                         const std::vector<std::unique_ptr<RDKit::ROMol>>& queryMols,
-                        const SubstructSearchResults&                     gpuResults) {
+                        const SubstructSearchResults&                     gpuResults,
+                        bool                                              uniquify) {
   std::cout << "  --- " << label << " (t=" << r.t << " q=" << r.q << " sum=" << (r.t + r.q) << ") ---\n";
   std::cout << "  Target[" << r.t << "]: " << targetSmiles[r.t] << "\n";
   std::cout << "  Query[" << r.q << "]:  " << querySmarts[r.q] << "\n";
 
-  auto rdkitMatches = nvMolKit::getRDKitSubstructMatches(*targetMols[r.t], *queryMols[r.q], false);
+  auto rdkitMatches = nvMolKit::getRDKitSubstructMatches(*targetMols[r.t], *queryMols[r.q], uniquify);
   printMatches("Expected (RDKit)", rdkitMatches);
 
   const int numQueryAtoms = static_cast<int>(queryMols[r.q]->getNumAtoms());
@@ -202,7 +205,8 @@ void printSmallestRepros(const SmallestRepros&                             repro
                          const std::vector<std::unique_ptr<RDKit::ROMol>>& targetMols,
                          const std::vector<std::unique_ptr<RDKit::ROMol>>& queryMols,
                          const SubstructSearchResults&                     gpuResults,
-                         const std::string&                                category) {
+                         const std::string&                                category,
+                         bool                                              uniquify) {
   if (!repros.hasAny())
     return;
 
@@ -215,7 +219,8 @@ void printSmallestRepros(const SmallestRepros&                             repro
                        querySmarts,
                        targetMols,
                        queryMols,
-                       gpuResults);
+                       gpuResults,
+                       uniquify);
   } else {
     printSmallestRepro("smallest sum (t+q)",
                        repros.smallestSum,
@@ -223,9 +228,17 @@ void printSmallestRepros(const SmallestRepros&                             repro
                        querySmarts,
                        targetMols,
                        queryMols,
-                       gpuResults);
+                       gpuResults,
+                       uniquify);
     if (repros.smallestQ.t != repros.smallestSum.t || repros.smallestQ.q != repros.smallestSum.q) {
-      printSmallestRepro("smallest q", repros.smallestQ, targetSmiles, querySmarts, targetMols, queryMols, gpuResults);
+      printSmallestRepro("smallest q",
+                         repros.smallestQ,
+                         targetSmiles,
+                         querySmarts,
+                         targetMols,
+                         queryMols,
+                         gpuResults,
+                         uniquify);
     }
     if (repros.smallestT.t != repros.smallestSum.t || repros.smallestT.q != repros.smallestSum.q) {
       if (repros.smallestT.t != repros.smallestQ.t || repros.smallestT.q != repros.smallestQ.q) {
@@ -235,7 +248,8 @@ void printSmallestRepros(const SmallestRepros&                             repro
                            querySmarts,
                            targetMols,
                            queryMols,
-                           gpuResults);
+                           gpuResults,
+                           uniquify);
       }
     }
   }
@@ -378,18 +392,21 @@ TEST_P(SubstructureIntegrationTest, ChemblVsSmarts) {
     EXPECT_EQ(mismatches, 0) << "HasSubstructMatch results do not match RDKit for algorithm "
                              << algorithmName(algorithm());
   } else if (mode() == SubstructMode::CountMatches) {
+    auto config     = threading().config;
+    config.uniquify = dataset().uniquify;
+
     std::vector<int> counts;
     countSubstructMatches(makeMolsView(targetMols),
                           makeMolsView(queryMols),
                           counts,
                           algorithm(),
                           stream_.stream(),
-                          threading().config);
+                          config);
 
     EXPECT_EQ(counts.size(), static_cast<size_t>(numTargets * numQueries));
 
     RDKit::SubstructMatchParameters params;
-    params.uniquify   = false;
+    params.uniquify   = dataset().uniquify;
     params.maxMatches = 0;
 
     int                              mismatches = 0;
@@ -428,13 +445,16 @@ TEST_P(SubstructureIntegrationTest, ChemblVsSmarts) {
     EXPECT_EQ(mismatches, 0) << "CountSubstructMatches results do not match RDKit for algorithm "
                              << algorithmName(algorithm());
   } else {
+    auto config     = threading().config;
+    config.uniquify = dataset().uniquify;
+
     SubstructSearchResults results;
     getSubstructMatches(makeMolsView(targetMols),
                         makeMolsView(queryMols),
                         results,
                         algorithm(),
                         stream_.stream(),
-                        threading().config);
+                        config);
 
     EXPECT_EQ(results.numTargets, numTargets);
     EXPECT_EQ(results.numQueries, numQueries);
@@ -476,7 +496,7 @@ TEST_P(SubstructureIntegrationTest, ChemblVsSmarts) {
       }
     }
 
-    auto validationResult = validateAgainstRDKit(results, targetMols, queryMols);
+    auto validationResult = validateAgainstRDKit(results, targetMols, queryMols, dataset().uniquify);
 
     if (!validationResult.allMatch) {
       printValidationResultDetailed(validationResult,
@@ -485,14 +505,23 @@ TEST_P(SubstructureIntegrationTest, ChemblVsSmarts) {
                                     queryMols,
                                     targetSmiles,
                                     querySmarts,
-                                    algorithmName(algorithm()));
+                                    algorithmName(algorithm()),
+                                    5,
+                                    dataset().uniquify);
 
       if (!validationResult.mismatches.empty()) {
         auto repros = findSmallestRepros(
           validationResult.mismatches,
           [](const auto& m) { return std::get<0>(m); },
           [](const auto& m) { return std::get<1>(m); });
-        printSmallestRepros(repros, targetSmiles, querySmarts, targetMols, queryMols, results, "count mismatch");
+        printSmallestRepros(repros,
+                            targetSmiles,
+                            querySmarts,
+                            targetMols,
+                            queryMols,
+                            results,
+                            "count mismatch",
+                            dataset().uniquify);
       }
 
       if (!validationResult.mappingMismatches.empty()) {
@@ -500,7 +529,14 @@ TEST_P(SubstructureIntegrationTest, ChemblVsSmarts) {
           validationResult.mappingMismatches,
           [](const auto& m) { return m.first; },
           [](const auto& m) { return m.second; });
-        printSmallestRepros(repros, targetSmiles, querySmarts, targetMols, queryMols, results, "mapping mismatch");
+        printSmallestRepros(repros,
+                            targetSmiles,
+                            querySmarts,
+                            targetMols,
+                            queryMols,
+                            results,
+                            "mapping mismatch",
+                            dataset().uniquify);
       }
     }
 

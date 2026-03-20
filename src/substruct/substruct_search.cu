@@ -921,9 +921,7 @@ void uniquifyResults(SubstructSearchResults& results) {
       }
     }
 
-    if (uniqueMatches.size() < matchList.size()) {
-      matchList = std::move(uniqueMatches);
-    }
+    matchList = std::move(uniqueMatches);
   }
 }
 

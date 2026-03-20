@@ -77,16 +77,16 @@ struct SubstructValidationResult {
 /**
  * @brief Compare GPU substructure match results against RDKit ground truth.
  *
- * Uses uniquify=false to match our non-uniquifying GPU algorithm.
- *
  * @param results GPU results from getSubstructMatches
  * @param targetMols Target molecules (parallel to results.numTargets)
  * @param queryMols Query molecules (parallel to results.numQueries)
+ * @param uniquify If true, compare against uniquified RDKit matches
  * @return Validation result with mismatch details
  */
 SubstructValidationResult validateAgainstRDKit(const SubstructSearchResults&                     results,
                                                const std::vector<std::unique_ptr<RDKit::ROMol>>& targetMols,
-                                               const std::vector<std::unique_ptr<RDKit::ROMol>>& queryMols);
+                                               const std::vector<std::unique_ptr<RDKit::ROMol>>& queryMols,
+                                               bool                                              uniquify = false);
 
 /**
  * @brief Print validation results to stdout.
@@ -113,7 +113,8 @@ void printValidationResultDetailed(const SubstructValidationResult&             
                                    const std::vector<std::string>&                   targetSmiles,
                                    const std::vector<std::string>&                   querySmarts,
                                    const std::string&                                algorithmName = "",
-                                   int                                               maxDetails    = 5);
+                                   int                                               maxDetails    = 5,
+                                   bool                                              uniquify      = false);
 
 /**
  * @brief Compute the expected label matrix using RDKit atom matching.
