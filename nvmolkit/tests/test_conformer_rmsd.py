@@ -22,7 +22,19 @@ from rdkit import Chem
 from rdkit.Chem import AllChem, rdDistGeom
 
 from nvmolkit.conformerRmsd import GetConformerRMSMatrix, GetConformerRMSMatrixBatch
-from nvmolkit.tests.kabsch_reference import numpy_kabsch_rmsd
+
+
+def _numpy_kabsch_rmsd(p, q):
+    """Independent Kabsch RMSD using numpy SVD (gold reference)."""
+    p_c = p - p.mean(axis=0)
+    q_c = q - q.mean(axis=0)
+    H = p_c.T @ q_c
+    U, S, Vt = np.linalg.svd(H)
+    d = np.sign(np.linalg.det(H))
+    S[-1] *= d if d != 0.0 else 1.0
+    Sp = np.sum(p_c ** 2)
+    Sq = np.sum(q_c ** 2)
+    return np.sqrt(max((Sp + Sq - 2.0 * np.sum(S)) / len(p), 0.0))
 
 
 def _embed_mol(smiles, num_confs=10, seed=42):
@@ -52,7 +64,7 @@ def _numpy_rmsd_matrix(mol, prealigned=False):
                 diff = coords[i] - coords[j]
                 rmsd = np.sqrt(np.sum(diff ** 2) / len(coords[i]))
             else:
-                rmsd = numpy_kabsch_rmsd(coords[i], coords[j])
+                rmsd = _numpy_kabsch_rmsd(coords[i], coords[j])
             result.append(rmsd)
     return result
 
