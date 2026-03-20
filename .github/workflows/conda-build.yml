@@ -1,0 +1,97 @@
+name: Conda Forge Local Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: conda-forge-build-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conda-forge-build:
+    name: py${{ matrix.python }} rdkit${{ matrix.rdkit }} cuda${{ matrix.cuda }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: "3.10"
+            rdkit: "2024.9.6"
+            cuda: "12.9"
+            config: linux_64_c_stdlib_version2.17cuda_compiler_version12.9librdkit_dev2024.9.6python3.10.____cpython
+          - python: "3.11"
+            rdkit: "2025.3.2"
+            cuda: "12.9"
+            config: linux_64_c_stdlib_version2.17cuda_compiler_version12.9librdkit_dev2025.3.2python3.11.____cpython
+          - python: "3.12"
+            rdkit: "2025.3.6"
+            cuda: "12.9"
+            config: linux_64_c_stdlib_version2.17cuda_compiler_version12.9librdkit_dev2025.3.6python3.12.____cpython
+          - python: "3.13"
+            rdkit: "2025.9.2"
+            cuda: "12.9"
+            config: linux_64_c_stdlib_version2.17cuda_compiler_version12.9librdkit_dev2025.9.2python3.13.____cp313
+          - python: "3.13"
+            rdkit: "2025.9.5"
+            cuda: "13.0"
+            config: linux_64_c_stdlib_version2.28cuda_compiler_version13.0librdkit_dev2025.9.5python3.13.____cp313
+
+    steps:
+      - name: Check out source tree
+        uses: actions/checkout@v4
+        with:
+          path: source
+
+      - name: Clone feedstock
+        shell: bash
+        run: |
+          set -xeuo pipefail
+          git clone --depth 1 https://github.com/conda-forge/nvmolkit-feedstock.git nvmolkit-feedstock
+
+      - name: Inject local source tree
+        shell: bash
+        run: |
+          set -xeuo pipefail
+          mkdir -p nvmolkit-feedstock/source
+          tar --exclude=.git -C source -cf - . | tar -C nvmolkit-feedstock/source -xf -
+          grep -q '^source:' nvmolkit-feedstock/recipe/recipe.yaml
+          sed -i '/^source:/,/^[^[:space:]]/{/^source:/!{/^[^[:space:]]/!d}}' \
+            nvmolkit-feedstock/recipe/recipe.yaml
+          sed -i '/^source:/a\  path: /home/conda/feedstock_root/source' \
+            nvmolkit-feedstock/recipe/recipe.yaml
+
+      - name: Build feedstock package
+        working-directory: nvmolkit-feedstock
+        shell: bash
+        run: |
+          set -xeuo pipefail
+          python3 build-locally.py "${{ matrix.config }}"
+
+      - name: Upload conda artifacts
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nvmolkit-conda-py${{ matrix.python }}-rdkit${{ matrix.rdkit }}-cuda${{ matrix.cuda }}
+          path: |
+            nvmolkit-feedstock/build_artifacts/**/*.conda
+            nvmolkit-feedstock/build_artifacts/**/*.tar.bz2
+          if-no-files-found: warn
+
+      - name: Upload failure context
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nvmolkit-conda-debug-py${{ matrix.python }}-rdkit${{ matrix.rdkit }}-cuda${{ matrix.cuda }}
+          path: |
+            nvmolkit-feedstock/recipe/recipe.yaml
+            nvmolkit-feedstock/build_artifacts/**/build_env_setup.sh
+            nvmolkit-feedstock/build_artifacts/**/*.log
+          if-no-files-found: warn
