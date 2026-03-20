@@ -89,13 +89,14 @@ std::vector<std::vector<int>> extractGpuMatches(const SubstructSearchResults& re
 
 SubstructValidationResult validateAgainstRDKit(const SubstructSearchResults&                     results,
                                                const std::vector<std::unique_ptr<RDKit::ROMol>>& targetMols,
-                                               const std::vector<std::unique_ptr<RDKit::ROMol>>& queryMols) {
+                                               const std::vector<std::unique_ptr<RDKit::ROMol>>& queryMols,
+                                               bool                                              uniquify) {
   SubstructValidationResult validation;
   validation.totalPairs = results.numTargets * results.numQueries;
 
   for (int t = 0; t < results.numTargets; ++t) {
     for (int q = 0; q < results.numQueries; ++q) {
-      const auto rdkitMatches    = getRDKitSubstructMatches(*targetMols[t], *queryMols[q], false);
+      const auto rdkitMatches    = getRDKitSubstructMatches(*targetMols[t], *queryMols[q], uniquify);
       const int  gpuMatchCount   = results.matchCount(t, q);
       const int  rdkitMatchCount = static_cast<int>(rdkitMatches.size());
 
@@ -217,7 +218,8 @@ void printValidationResultDetailed(const SubstructValidationResult&             
                                    const std::vector<std::string>&                   targetSmiles,
                                    const std::vector<std::string>&                   querySmarts,
                                    const std::string&                                algoName,
-                                   int                                               maxDetails) {
+                                   int                                               maxDetails,
+                                   bool                                              uniquify) {
   std::string prefix = algoName.empty() ? "" : "[" + algoName + "] ";
 
   std::cout << prefix << "Validation: " << result.matchingPairs << "/" << result.totalPairs << " pairs match RDKit";
@@ -242,11 +244,9 @@ void printValidationResultDetailed(const SubstructValidationResult&             
       std::cout << "  Target[" << t << "]: " << targetSmiles[t] << std::endl;
       std::cout << "  Query[" << q << "]:  " << querySmarts[q] << std::endl;
 
-      // Get RDKit matches
-      auto rdkitMatches = getRDKitSubstructMatches(*targetMols[t], *queryMols[q], false);
+      auto rdkitMatches = getRDKitSubstructMatches(*targetMols[t], *queryMols[q], uniquify);
       printMatches("Expected (RDKit)", rdkitMatches);
 
-      // Get GPU matches
       const int numQueryAtoms = static_cast<int>(queryMols[q]->getNumAtoms());
       auto      gpuMatches    = extractGpuMatchesForPrint(gpuResults, t, q, numQueryAtoms);
       printMatches("Actual (GPU)", gpuMatches);
@@ -266,8 +266,7 @@ void printValidationResultDetailed(const SubstructValidationResult&             
       std::cout << "  Target[" << t << "]: " << targetSmiles[t] << std::endl;
       std::cout << "  Query[" << q << "]:  " << querySmarts[q] << std::endl;
 
-      // Get RDKit matches
-      auto rdkitMatches = getRDKitSubstructMatches(*targetMols[t], *queryMols[q], false);
+      auto rdkitMatches = getRDKitSubstructMatches(*targetMols[t], *queryMols[q], uniquify);
       printMatches("Expected (RDKit)", rdkitMatches);
 
       // Get GPU matches
