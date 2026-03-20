@@ -86,7 +86,7 @@ struct SubstructValidationResult {
 SubstructValidationResult validateAgainstRDKit(const SubstructSearchResults&                     results,
                                                const std::vector<std::unique_ptr<RDKit::ROMol>>& targetMols,
                                                const std::vector<std::unique_ptr<RDKit::ROMol>>& queryMols,
-                                               bool uniquify = false);
+                                               bool                                              uniquify = false);
 
 /**
  * @brief Print validation results to stdout.
