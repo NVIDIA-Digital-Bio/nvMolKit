@@ -18,7 +18,7 @@
 
 #include <GraphMol/DistGeomHelpers/Embedder.h>
 
-#include "dist_geom.h"
+#include "etk_batched_forcefield.h"
 #include "etkdg_impl.h"
 #include "minimizer/bfgs_minimize.h"
 
@@ -45,13 +45,15 @@ class ETKMinimizationStage final : public ETKDGStage {
 
  private:
   //! Re-sets the bounds for distance constraints based on the current positions.
-  void setReferenceValues(const ETKDGContext& ctx);
+  void setReferenceValues(const ETKDGContext& ctx, const ETKBatchedForcefield& forcefield);
 
-  nvMolKit::DistGeom::BatchedMolecular3DDeviceBuffers molSystemDevice;
-  nvMolKit::DistGeom::BatchedMolecularSystem3DHost    molSystemHost;
-  const RDKit::DGeomHelpers::EmbedParameters&         embedParam_;
-  BfgsBatchMinimizer&                                 minimizer_;
-  cudaStream_t                                        stream_;
+  BatchedForcefieldMetadata                        metadata_;
+  nvMolKit::DistGeom::BatchedMolecularSystem3DHost molSystemHost;
+  AsyncDeviceVector<double>                        grad_;
+  AsyncDeviceVector<double>                        energyOuts_;
+  const RDKit::DGeomHelpers::EmbedParameters&      embedParam_;
+  BfgsBatchMinimizer&                              minimizer_;
+  cudaStream_t                                     stream_;
 };
 
 }  // namespace detail

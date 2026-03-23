@@ -27,6 +27,9 @@ void confPosToVect(const RDKit::ROMol& mol, std::vector<double>& positions, int 
 //! Populate positions from a conformer.
 void confPosToVect(const RDKit::Conformer& conf, std::vector<double>& positions);
 void setFFPosFromConf(RDKit::ROMol& mol, ForceFields::ForceField* forcefield, int confId = -1);
+std::vector<std::vector<double>> splitGradients(const std::vector<double>& flatGrad,
+                                                const std::vector<int>&    atomStarts,
+                                                int                        dim);
 }  // namespace nvMolKit
 
 #endif  // NVMOLKIT_FF_UTILS_H

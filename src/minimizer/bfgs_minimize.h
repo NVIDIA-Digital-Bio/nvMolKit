@@ -26,6 +26,8 @@
 
 namespace nvMolKit {
 
+class BatchedForcefield;
+
 // Forward declarations for forcefield types
 namespace MMFF {
 struct BatchedMolecularDeviceBuffers;
@@ -73,6 +75,16 @@ struct BfgsBatchMinimizer {
                 GradFunctor                   gFunc,
                 const uint8_t*                activeThisStage = nullptr);
 
+  //! Run BFGS minimization with the batched forcefield abstraction.
+  //! Only valid for the batched backend.
+  bool minimize(int                        numIters,
+                double                     gradTol,
+                BatchedForcefield&         ff,
+                AsyncDeviceVector<double>& positions,
+                AsyncDeviceVector<double>& grad,
+                AsyncDeviceVector<double>& energyOuts,
+                const uint8_t*             activeSystemMask = nullptr);
+
   //! Run BFGS minimization with MMFF forcefield.
   //! Returns 0 if all systems converged, 1 if some systems did not converge.
   bool minimizeWithMMFF(int                                  numIters,
@@ -104,6 +116,8 @@ struct BfgsBatchMinimizer {
                       double                                   chiralWeight,
                       double                                   fourthDimWeight,
                       const uint8_t*                           activeThisStage = nullptr);
+
+  BfgsBackend resolveBackend(const std::vector<int>& atomStartsHost) const;
 
   // Set up the minimizer for a new system.
   void initialize(const std::vector<int>& atomStartsHost,

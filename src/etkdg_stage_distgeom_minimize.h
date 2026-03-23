@@ -21,6 +21,7 @@
 #include <unordered_map>
 
 #include "bfgs_minimize.h"
+#include "dg_batched_forcefield.h"
 #include "dist_geom.h"
 #include "etkdg_impl.h"
 
@@ -74,8 +75,11 @@ class DistGeomMinimizeStage : public ETKDGStage {
     executeImpl(ctx, chiralWeight_, fourthDimWeight_, maxIters_, checkEnergy_);
   }
 
-  nvMolKit::DistGeom::BatchedMolecularDeviceBuffers molSystemDevice;
   nvMolKit::DistGeom::BatchedMolecularSystemHost    molSystemHost;
+  nvMolKit::DistGeom::BatchedMolecularDeviceBuffers molSystemDevice;
+  BatchedForcefieldMetadata                         metadata_;
+  AsyncDeviceVector<double>                         grad_;
+  AsyncDeviceVector<double>                         energyOuts_;
   const RDKit::DGeomHelpers::EmbedParameters&       embedParam_;
   BfgsBatchMinimizer&                               minimizer_;
   double                                            chiralWeight_;

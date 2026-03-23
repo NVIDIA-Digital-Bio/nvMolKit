@@ -18,6 +18,7 @@
 
 #include <vector>
 
+#include "../forcefields/mmff_properties.h"
 #include "../hardware_options.h"
 #include "bfgs_minimize.h"
 
@@ -35,9 +36,15 @@ namespace nvMolKit::MMFF {
 //! \param backend The BFGS backend to use (BATCHED, PER_MOLECULE, or HYBRID which auto-selects)
 //! \return A vector of vectors of energies, where each inner vector contains energies for conformers of one molecule
 std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKit::ROMol*>& mols,
-                                                                int                         maxIters           = 200,
-                                                                double                      nonBondedThreshold = 100.0,
-                                                                const BatchHardwareOptions& perfOptions        = {},
+                                                                int                         maxIters    = 200,
+                                                                const MMFFProperties&       properties  = {},
+                                                                const BatchHardwareOptions& perfOptions = {},
+                                                                BfgsBackend backend = BfgsBackend::HYBRID);
+
+std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKit::ROMol*>&        mols,
+                                                                int                                maxIters,
+                                                                const std::vector<MMFFProperties>& properties,
+                                                                const BatchHardwareOptions&        perfOptions = {},
                                                                 BfgsBackend backend = BfgsBackend::HYBRID);
 
 }  // namespace nvMolKit::MMFF

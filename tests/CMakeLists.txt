@@ -96,6 +96,7 @@ target_link_libraries(
   test_distgeom
   PRIVATE ${RDKit_LIBS}
           rdkit_dist_geom_flattened
+          batched_forcefield
           dist_geom
           device_vector
           ff_utils

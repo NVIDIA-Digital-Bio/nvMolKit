@@ -4,6 +4,7 @@
 #include <mutex>
 
 #include "mmff.h"
+#include "mmff_properties.h"
 
 namespace RDKit {
 class ROMol;
@@ -40,6 +41,10 @@ EnergyForceContribsHost constructForcefieldContribs(const RDKit::ROMol&         
                                                     double                          nonBondedThresh             = 100.0,
                                                     int                             confId                      = -1,
                                                     bool                            ignoreInterfragInteractions = true);
+
+EnergyForceContribsHost constructForcefieldContribs(RDKit::ROMol&               mol,
+                                                    const nvMolKit::MMFFProperties& props,
+                                                    int                             confId = -1);
 
 }  // namespace nvMolKit::MMFF
 

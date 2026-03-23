@@ -46,4 +46,17 @@ void setFFPosFromConf(RDKit::ROMol& mol, ForceFields::ForceField* forcefield, in
     forcefield->positions().push_back(&(conf.getAtomPos(i)));
   }
 }
+
+std::vector<std::vector<double>> splitGradients(const std::vector<double>& flatGrad,
+                                                const std::vector<int>&    atomStarts,
+                                                const int                  dim) {
+  std::vector<std::vector<double>> grads;
+  grads.reserve(atomStarts.size() - 1);
+  for (size_t molIdx = 0; molIdx + 1 < atomStarts.size(); ++molIdx) {
+    const int start = atomStarts[molIdx] * dim;
+    const int end   = atomStarts[molIdx + 1] * dim;
+    grads.emplace_back(flatGrad.begin() + start, flatGrad.begin() + end);
+  }
+  return grads;
+}
 }  // namespace nvMolKit

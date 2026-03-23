@@ -534,5 +534,24 @@ MMFF::EnergyForceContribsHost constructForcefieldContribs(RDKit::ROMol& mol,
   return constructForcefieldContribs(mol, &mmffMolProperties, nonBondedThresh, confId, ignoreInterfragInteractions);
 }
 
+MMFF::EnergyForceContribsHost constructForcefieldContribs(RDKit::ROMol&                mol,
+                                                          const nvMolKit::MMFFProperties& props,
+                                                          int                             confId) {
+  RDKit::MMFF::MMFFMolProperties mmffMolProperties(mol, props.variant);
+  PRECONDITION(mmffMolProperties.isValid(), "missing atom types - invalid force-field");
+  mmffMolProperties.setMMFFVariant(props.variant);
+  mmffMolProperties.setMMFFDielectricConstant(props.dielectricConstant);
+  mmffMolProperties.setMMFFDielectricModel(props.dielectricModel);
+  mmffMolProperties.setMMFFBondTerm(props.bondTerm);
+  mmffMolProperties.setMMFFAngleTerm(props.angleTerm);
+  mmffMolProperties.setMMFFStretchBendTerm(props.stretchBendTerm);
+  mmffMolProperties.setMMFFOopTerm(props.oopTerm);
+  mmffMolProperties.setMMFFTorsionTerm(props.torsionTerm);
+  mmffMolProperties.setMMFFVdWTerm(props.vdwTerm);
+  mmffMolProperties.setMMFFEleTerm(props.eleTerm);
+  return constructForcefieldContribs(
+    mol, &mmffMolProperties, props.nonBondedThreshold, confId, props.ignoreInterfragInteractions);
+}
+
 }  // namespace MMFF
 }  // namespace nvMolKit

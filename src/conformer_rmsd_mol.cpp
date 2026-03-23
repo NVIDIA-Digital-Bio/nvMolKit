@@ -150,7 +150,6 @@ std::vector<AsyncDeviceVector<double>> conformerRmsdBatchMatrixMol(
     coordOffsetsArr[m] = coordOffsetsVec[m];
     hostRmsdPtrs[m]    = devRmsdVecs[m].data();
 
-    const int nc = numConfsVec[m];
     const int na = numAtomsVec[m];
     int confIdx  = 0;
     for (auto it = mols[m]->beginConformers(); it != mols[m]->endConformers(); ++it, ++confIdx) {

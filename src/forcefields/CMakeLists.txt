@@ -30,3 +30,15 @@ target_link_libraries(
   dist_geom PRIVATE device_vector ff_kernel_utils ${RDKit_LIBS}
                     rdkit_bounds_matrix symmetricEigenSolver)
 target_include_directories(dist_geom PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_library(
+  batched_forcefield
+  mmff_batched_forcefield.cu
+  dg_batched_forcefield.cu
+  etk_batched_forcefield.cu)
+target_link_libraries(
+  batched_forcefield
+  PUBLIC mmff dist_geom
+  PRIVATE device_vector)
+target_include_directories(
+  batched_forcefield PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src)

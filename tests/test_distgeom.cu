@@ -30,6 +30,7 @@
 #include <random>
 
 #include "device_vector.h"
+#include "dg_batched_forcefield.h"
 #include "dist_geom.h"
 #include "dist_geom_flattened_builder.h"
 #include "dist_geom_kernels.h"
@@ -40,6 +41,39 @@
 
 using namespace nvMolKit::DistGeom;
 using nvMolKit::AsyncDeviceVector;
+
+namespace {
+
+double computeEnergyViaForcefield(nvMolKit::DistGeom::BatchedMolecularSystemHost& systemHost,
+                                  const std::vector<int>&                         atomStartsHost,
+                                  AsyncDeviceVector<double>&                      positionsDevice,
+                                  const uint8_t*                                  activeSystemMask = nullptr) {
+  nvMolKit::DGBatchedForcefield forcefield(systemHost, atomStartsHost, 1.0, 0.1);
+  AsyncDeviceVector<double>     energyOutsDevice;
+  energyOutsDevice.resize(atomStartsHost.size() - 1);
+  energyOutsDevice.zero();
+  CHECK_CUDA_RETURN(forcefield.computeEnergy(energyOutsDevice.data(), positionsDevice.data(), activeSystemMask));
+  double energy = 0.0;
+  CHECK_CUDA_RETURN(cudaMemcpy(&energy, energyOutsDevice.data(), sizeof(double), cudaMemcpyDeviceToHost));
+  return energy;
+}
+
+std::vector<double> computeGradientViaForcefield(nvMolKit::DistGeom::BatchedMolecularSystemHost& systemHost,
+                                                 const std::vector<int>&                         atomStartsHost,
+                                                 AsyncDeviceVector<double>&                      positionsDevice,
+                                                 const uint8_t* activeSystemMask = nullptr) {
+  nvMolKit::DGBatchedForcefield forcefield(systemHost, atomStartsHost, 1.0, 0.1);
+  AsyncDeviceVector<double>     gradDevice;
+  gradDevice.resize(positionsDevice.size());
+  gradDevice.zero();
+  CHECK_CUDA_RETURN(forcefield.computeGradients(gradDevice.data(), positionsDevice.data(), activeSystemMask));
+  std::vector<double> grad(positionsDevice.size(), 0.0);
+  gradDevice.copyToHost(grad);
+  cudaDeviceSynchronize();
+  return grad;
+}
+
+}  // namespace
 
 using ETKDGTestParams = std::tuple<ETKDGOption, int>;
 
@@ -110,10 +144,7 @@ TEST_P(ETKDGFFGpuTestFixture, CombinedEnergies) {
 
   if (std::get<1>(GetParam()) == -1) {
     double wantEnergy = field_->calcEnergy();
-    // Test without active stage parameters
-    CHECK_CUDA_RETURN(computeEnergy(systemDevice_, atomStartsDevice_, positionsDevice_, 1.0, 0.1));
-    CHECK_CUDA_RETURN(
-      cudaMemcpy(&gotEnergy, systemDevice_.energyOuts.data() + 0, sizeof(double), cudaMemcpyDeviceToHost));
+    gotEnergy         = computeEnergyViaForcefield(systemHost_, atomStartsHost_, positionsDevice_);
     EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
   } else {
     // Test with active stage parameters
@@ -121,10 +152,7 @@ TEST_P(ETKDGFFGpuTestFixture, CombinedEnergies) {
     nvMolKit::AsyncDeviceVector<uint8_t> d_activeThisStage;
     d_activeThisStage.setFromVector(h_activeThisStage);
 
-    CHECK_CUDA_RETURN(
-      computeEnergy(systemDevice_, atomStartsDevice_, positionsDevice_, 1.0, 0.1, d_activeThisStage.data()));
-    CHECK_CUDA_RETURN(
-      cudaMemcpy(&gotEnergy, systemDevice_.energyOuts.data() + 0, sizeof(double), cudaMemcpyDeviceToHost));
+    gotEnergy = computeEnergyViaForcefield(systemHost_, atomStartsHost_, positionsDevice_, d_activeThisStage.data());
 
     if (std::get<1>(GetParam()) == 1) {
       double wantEnergy = field_->calcEnergy();
@@ -140,11 +168,7 @@ TEST_P(ETKDGFFGpuTestFixture, CombinedGradients) {
   if (std::get<1>(GetParam()) == -1) {
     std::vector<double> wantGradients(field_->dimension() * field_->positions().size(), 0.0);
     field_->calcGrad(wantGradients.data());
-    // Test without active stage parameters
-    CHECK_CUDA_RETURN(computeGradients(systemDevice_, atomStartsDevice_, positionsDevice_, 1.0, 0.1));
-    std::vector<double> gotGrad(positionsHost_.size(), 0.0);
-    systemDevice_.grad.copyToHost(gotGrad);
-    cudaDeviceSynchronize();
+    std::vector<double> gotGrad = computeGradientViaForcefield(systemHost_, atomStartsHost_, positionsDevice_);
     EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients));
   } else {
     // Test with active stage parameters
@@ -152,11 +176,8 @@ TEST_P(ETKDGFFGpuTestFixture, CombinedGradients) {
     nvMolKit::AsyncDeviceVector<uint8_t> d_activeThisStage;
     d_activeThisStage.setFromVector(h_activeThisStage);
 
-    CHECK_CUDA_RETURN(
-      computeGradients(systemDevice_, atomStartsDevice_, positionsDevice_, 1.0, 0.1, d_activeThisStage.data()));
-    std::vector<double> gotGrad(positionsHost_.size(), 0.0);
-    systemDevice_.grad.copyToHost(gotGrad);
-    cudaDeviceSynchronize();
+    std::vector<double> gotGrad =
+      computeGradientViaForcefield(systemHost_, atomStartsHost_, positionsDevice_, d_activeThisStage.data());
 
     if (std::get<1>(GetParam()) == 1) {
       std::vector<double> wantGradients(field_->dimension() * field_->positions().size(), 0.0);
@@ -221,10 +242,7 @@ INSTANTIATE_TEST_SUITE_P(ETKDGFFOneTwoAtoms,
 // Test energy calculation
 TEST_P(ETKDGFFGpuEdgeCases, CombinedEnergies) {
   double wantEnergy = field_->calcEnergy();
-  CHECK_CUDA_RETURN(computeEnergy(systemDevice_, atomStartsDevice_, positionsDevice_, 1.0, 0.1));
-  double gotEnergy;
-  CHECK_CUDA_RETURN(
-    cudaMemcpy(&gotEnergy, systemDevice_.energyOuts.data() + 0, sizeof(double), cudaMemcpyDeviceToHost));
+  double gotEnergy  = computeEnergyViaForcefield(systemHost_, atomStartsHost_, positionsDevice_);
   EXPECT_NEAR(gotEnergy, wantEnergy, 1e-6);
 }
 
@@ -233,10 +251,7 @@ TEST_P(ETKDGFFGpuEdgeCases, CombinedGradients) {
   std::vector<double> wantGradients(field_->dimension() * field_->positions().size(), 0.0);
   field_->calcGrad(wantGradients.data());
 
-  CHECK_CUDA_RETURN(computeGradients(systemDevice_, atomStartsDevice_, positionsDevice_, 1.0, 0.1));
-  std::vector<double> gotGrad(positionsHost_.size(), 0.0);
-  systemDevice_.grad.copyToHost(gotGrad);
-  cudaDeviceSynchronize();
+  std::vector<double> gotGrad = computeGradientViaForcefield(systemHost_, atomStartsHost_, positionsDevice_);
   EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::FloatNear(1e-4), wantGradients));
 }
 
@@ -362,21 +377,21 @@ void runTestInBatch(const std::vector<std::unique_ptr<RDKit::ROMol>>& mols,
     addMoleculeToBatch(ffParams, eargs.posVec, systemHost, eargs.dim, atomStartsHost, positionsHost);
   }
 
-  sendContribsAndIndicesToDevice(systemHost, systemDevice);
   sendContextToDevice(positionsHost, positionsDevice, atomStartsHost, atomStartsDevice);
-  setupDeviceBuffers(systemHost, systemDevice, positionsHost, atomStartsHost.size() - 1);
+  nvMolKit::DGBatchedForcefield forcefield(systemHost, atomStartsHost, 1.0, 0.1);
+  AsyncDeviceVector<double>     energyOutsDevice;
+  AsyncDeviceVector<double>     gradDevice;
+  energyOutsDevice.resize(atomStartsHost.size() - 1);
+  energyOutsDevice.zero();
+  gradDevice.resize(positionsHost.size());
+  gradDevice.zero();
 
-  if (d_activeThisStage) {
-    computeEnergy(systemDevice, atomStartsDevice, positionsDevice, 1.0, 0.1, d_activeThisStage);
-    computeGradients(systemDevice, atomStartsDevice, positionsDevice, 1.0, 0.1, d_activeThisStage);
-  } else {
-    computeEnergy(systemDevice, atomStartsDevice, positionsDevice, 1.0, 0.1);
-    computeGradients(systemDevice, atomStartsDevice, positionsDevice, 1.0, 0.1);
-  }
-  std::vector<double> gotEnergies(systemDevice.energyOuts.size(), 0.0);
-  systemDevice.energyOuts.copyToHost(gotEnergies);
+  CHECK_CUDA_RETURN(forcefield.computeEnergy(energyOutsDevice.data(), positionsDevice.data(), d_activeThisStage));
+  CHECK_CUDA_RETURN(forcefield.computeGradients(gradDevice.data(), positionsDevice.data(), d_activeThisStage));
+  std::vector<double> gotEnergies(energyOutsDevice.size(), 0.0);
+  energyOutsDevice.copyToHost(gotEnergies);
   std::vector<double> gotGradFlat(positionsHost.size(), 0.0);
-  systemDevice.grad.copyToHost(gotGradFlat);
+  gradDevice.copyToHost(gotGradFlat);
   std::vector<std::vector<double>> gotGradFormatted;
   for (int i = 0; i < numMols; i++) {
     const int posStart = atomStartsHost[i] * systemHost.dimension;
@@ -433,25 +448,25 @@ void runTestInSerial(const std::vector<std::unique_ptr<RDKit::ROMol>>& mols,
     nvMolKit::DGeomHelpers::setupRDKitFFWithPos(mol.get(), params, field, eargs, positions);
     auto ffParams = constructForceFieldContribs(eargs.dim, *eargs.mmat, eargs.chiralCenters);
 
-    BatchedMolecularSystemHost    systemHost;
-    BatchedMolecularDeviceBuffers systemDevice;
-    std::vector<int>              atomStartsHost = {0};
-    AsyncDeviceVector<int>        atomStartsDevice;
-    std::vector<double>           positionsHost;
-    AsyncDeviceVector<double>     positionsDevice;
+    BatchedMolecularSystemHost systemHost;
+    std::vector<int>           atomStartsHost = {0};
+    AsyncDeviceVector<int>     atomStartsDevice;
+    std::vector<double>        positionsHost;
+    AsyncDeviceVector<double>  positionsDevice;
     addMoleculeToBatch(ffParams, eargs.posVec, systemHost, eargs.dim, atomStartsHost, positionsHost);
-    sendContribsAndIndicesToDevice(systemHost, systemDevice);
     sendContextToDevice(positionsHost, positionsDevice, atomStartsHost, atomStartsDevice);
-    setupDeviceBuffers(systemHost, systemDevice, positionsHost, atomStartsHost.size() - 1);
+    nvMolKit::DGBatchedForcefield forcefield(systemHost, atomStartsHost, 1.0, 0.1);
 
     // Check energies first.
     double      wantEnergy = field->calcEnergy();
     double      gotEnergy  = 0.0;
     std::string exceptionStr;
     try {
-      CHECK_CUDA_RETURN(computeEnergy(systemDevice, atomStartsDevice, positionsDevice, 1.0, 0.1));
-      CHECK_CUDA_RETURN(
-        cudaMemcpy(&gotEnergy, systemDevice.energyOuts.data() + 0, sizeof(double), cudaMemcpyDeviceToHost));
+      AsyncDeviceVector<double> energyOutsDevice;
+      energyOutsDevice.resize(1);
+      energyOutsDevice.zero();
+      CHECK_CUDA_RETURN(forcefield.computeEnergy(energyOutsDevice.data(), positionsDevice.data()));
+      CHECK_CUDA_RETURN(cudaMemcpy(&gotEnergy, energyOutsDevice.data(), sizeof(double), cudaMemcpyDeviceToHost));
     } catch (const std::runtime_error& e) {
       exceptionStr = e.what();
     };
@@ -467,10 +482,12 @@ void runTestInSerial(const std::vector<std::unique_ptr<RDKit::ROMol>>& mols,
     // Check gradients
     std::vector<double> wantGrad(field->dimension() * mol->getNumAtoms(), 0.0);
     field->calcGrad(wantGrad.data());
-    systemDevice.grad.zero();
-    CHECK_CUDA_RETURN(computeGradients(systemDevice, atomStartsDevice, positionsDevice, 1.0, 0.1));
+    AsyncDeviceVector<double> gradDevice;
+    gradDevice.resize(positionsHost.size());
+    gradDevice.zero();
+    CHECK_CUDA_RETURN(forcefield.computeGradients(gradDevice.data(), positionsDevice.data()));
     std::vector<double> gotGrad(positionsHost.size(), 0.0);
-    systemDevice.grad.copyToHost(gotGrad);
+    gradDevice.copyToHost(gotGrad);
     cudaDeviceSynchronize();
 
     for (size_t i = 0; i < wantGrad.size(); i++) {

@@ -99,6 +99,7 @@ target_link_libraries(
   PUBLIC bfgs
   PRIVATE device_vector
           ${RDKit_LIBS}
+          batched_forcefield
           ff_kernel_utils
           dist_geom
           rdkit_dist_geom_flattened

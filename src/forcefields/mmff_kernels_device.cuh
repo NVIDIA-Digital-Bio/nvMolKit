@@ -622,7 +622,7 @@ static __device__ __forceinline__ double eleEnergy(const double* pos,
 static __device__ __forceinline__ void eleGrad(const double* pos,
                                                const int     idx1,
                                                const int     idx2,
-                                               const float   chargeTerm,
+                                               const double  chargeTerm,
                                                const int     dielModel,
                                                const bool    is1_4,
                                                double*       grad) {
