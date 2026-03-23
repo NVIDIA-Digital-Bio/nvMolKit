@@ -55,6 +55,19 @@ target_include_directories(_mmffOptimization SYSTEM
                            PUBLIC ${Boost_INCLUDE_DIRS})
 installpythontarget(_mmffOptimization ./)
 
+add_library(_batchedForcefield MODULE batchedForcefield.cpp)
+target_link_libraries(_batchedForcefield PUBLIC ${Boost_LIBRARIES}
+                                                ${PYTHON_LIBRARIES})
+target_link_libraries(
+  _batchedForcefield PRIVATE ${RDKit_LIBS} batched_forcefield rdkit_mmff_flattened
+                             device_vector ff_utils)
+target_include_directories(
+  _batchedForcefield PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils
+                            ${Python_INCLUDE_DIRS})
+target_include_directories(_batchedForcefield SYSTEM
+                           PUBLIC ${Boost_INCLUDE_DIRS})
+installpythontarget(_batchedForcefield ./)
+
 add_library(_embedMolecules MODULE embedMolecules.cpp)
 target_link_libraries(_embedMolecules PUBLIC ${Boost_LIBRARIES}
                                              ${PYTHON_LIBRARIES} device_vector)
