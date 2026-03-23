@@ -190,6 +190,106 @@ cudaError_t launchEleGradientKernel(int            numEles,
                                     double*        grad,
                                     cudaStream_t   stream = 0);
 
+cudaError_t launchDistanceConstraintEnergyKernel(int           numConstraints,
+                                                 const int*    idx1,
+                                                 const int*    idx2,
+                                                 const double* minLen,
+                                                 const double* maxLen,
+                                                 const double* forceConstant,
+                                                 const double* pos,
+                                                 double*       energyBuffer,
+                                                 const int*    energyBufferStarts,
+                                                 const int*    atomBatchMap,
+                                                 const int*    termBatchStarts,
+                                                 cudaStream_t  stream = 0);
+
+cudaError_t launchDistanceConstraintGradientKernel(int           numConstraints,
+                                                   const int*    idx1,
+                                                   const int*    idx2,
+                                                   const double* minLen,
+                                                   const double* maxLen,
+                                                   const double* forceConstant,
+                                                   const double* pos,
+                                                   double*       grad,
+                                                   cudaStream_t  stream = 0);
+
+cudaError_t launchPositionConstraintEnergyKernel(int           numConstraints,
+                                                 const int*    idx,
+                                                 const double* refX,
+                                                 const double* refY,
+                                                 const double* refZ,
+                                                 const double* maxDispl,
+                                                 const double* forceConstant,
+                                                 const double* pos,
+                                                 double*       energyBuffer,
+                                                 const int*    energyBufferStarts,
+                                                 const int*    atomBatchMap,
+                                                 const int*    termBatchStarts,
+                                                 cudaStream_t  stream = 0);
+
+cudaError_t launchPositionConstraintGradientKernel(int           numConstraints,
+                                                   const int*    idx,
+                                                   const double* refX,
+                                                   const double* refY,
+                                                   const double* refZ,
+                                                   const double* maxDispl,
+                                                   const double* forceConstant,
+                                                   const double* pos,
+                                                   double*       grad,
+                                                   cudaStream_t  stream = 0);
+
+cudaError_t launchAngleConstraintEnergyKernel(int           numConstraints,
+                                              const int*    idx1,
+                                              const int*    idx2,
+                                              const int*    idx3,
+                                              const double* minAngleDeg,
+                                              const double* maxAngleDeg,
+                                              const double* forceConstant,
+                                              const double* pos,
+                                              double*       energyBuffer,
+                                              const int*    energyBufferStarts,
+                                              const int*    atomBatchMap,
+                                              const int*    termBatchStarts,
+                                              cudaStream_t  stream = 0);
+
+cudaError_t launchAngleConstraintGradientKernel(int           numConstraints,
+                                                const int*    idx1,
+                                                const int*    idx2,
+                                                const int*    idx3,
+                                                const double* minAngleDeg,
+                                                const double* maxAngleDeg,
+                                                const double* forceConstant,
+                                                const double* pos,
+                                                double*       grad,
+                                                cudaStream_t  stream = 0);
+
+cudaError_t launchTorsionConstraintEnergyKernel(int           numConstraints,
+                                                const int*    idx1,
+                                                const int*    idx2,
+                                                const int*    idx3,
+                                                const int*    idx4,
+                                                const double* minDihedralDeg,
+                                                const double* maxDihedralDeg,
+                                                const double* forceConstant,
+                                                const double* pos,
+                                                double*       energyBuffer,
+                                                const int*    energyBufferStarts,
+                                                const int*    atomBatchMap,
+                                                const int*    termBatchStarts,
+                                                cudaStream_t  stream = 0);
+
+cudaError_t launchTorsionConstraintGradientKernel(int           numConstraints,
+                                                  const int*    idx1,
+                                                  const int*    idx2,
+                                                  const int*    idx3,
+                                                  const int*    idx4,
+                                                  const double* minDihedralDeg,
+                                                  const double* maxDihedralDeg,
+                                                  const double* forceConstant,
+                                                  const double* pos,
+                                                  double*       grad,
+                                                  cudaStream_t  stream = 0);
+
 //! Reduce the energy buffer to the output energies.
 //!
 //! Energies written to energyBuffer are accumulated in outs, with one term in outs corresponding to each molecule in
@@ -269,6 +369,42 @@ struct EleTermsDevicePtr {
   uint8_t* is1_4      = nullptr;
 };
 
+struct DistanceConstraintTermsDevicePtr {
+  int*    idx1          = nullptr;
+  int*    idx2          = nullptr;
+  double* minLen        = nullptr;
+  double* maxLen        = nullptr;
+  double* forceConstant = nullptr;
+};
+
+struct PositionConstraintTermsDevicePtr {
+  int*    idx           = nullptr;
+  double* refX          = nullptr;
+  double* refY          = nullptr;
+  double* refZ          = nullptr;
+  double* maxDispl      = nullptr;
+  double* forceConstant = nullptr;
+};
+
+struct AngleConstraintTermsDevicePtr {
+  int*    idx1          = nullptr;
+  int*    idx2          = nullptr;
+  int*    idx3          = nullptr;
+  double* minAngleDeg   = nullptr;
+  double* maxAngleDeg   = nullptr;
+  double* forceConstant = nullptr;
+};
+
+struct TorsionConstraintTermsDevicePtr {
+  int*    idx1           = nullptr;
+  int*    idx2           = nullptr;
+  int*    idx3           = nullptr;
+  int*    idx4           = nullptr;
+  double* minDihedralDeg = nullptr;
+  double* maxDihedralDeg = nullptr;
+  double* forceConstant  = nullptr;
+};
+
 struct EnergyForceContribsDevicePtr {
   BondStretchContribTermsDevicePtr bondTerms;
   AngleBendTermsDevicePtr          angleTerms;
@@ -277,17 +413,25 @@ struct EnergyForceContribsDevicePtr {
   TorsionContribTermsDevicePtr     torsionTerms;
   VdwTermsDevicePtr                vdwTerms;
   EleTermsDevicePtr                eleTerms;
+  DistanceConstraintTermsDevicePtr distanceConstraintTerms;
+  PositionConstraintTermsDevicePtr positionConstraintTerms;
+  AngleConstraintTermsDevicePtr    angleConstraintTerms;
+  TorsionConstraintTermsDevicePtr  torsionConstraintTerms;
 };
 
 struct BatchedIndicesDevicePtr {
-  int* atomStarts        = nullptr;
-  int* bondTermStarts    = nullptr;
-  int* angleTermStarts   = nullptr;
-  int* bendTermStarts    = nullptr;
-  int* oopTermStarts     = nullptr;
-  int* torsionTermStarts = nullptr;
-  int* vdwTermStarts     = nullptr;
-  int* eleTermStarts     = nullptr;
+  int* atomStarts                   = nullptr;
+  int* bondTermStarts               = nullptr;
+  int* angleTermStarts              = nullptr;
+  int* bendTermStarts               = nullptr;
+  int* oopTermStarts                = nullptr;
+  int* torsionTermStarts            = nullptr;
+  int* vdwTermStarts                = nullptr;
+  int* eleTermStarts                = nullptr;
+  int* distanceConstraintTermStarts = nullptr;
+  int* positionConstraintTermStarts = nullptr;
+  int* angleConstraintTermStarts    = nullptr;
+  int* torsionConstraintTermStarts  = nullptr;
 };
 
 cudaError_t launchBlockPerMolEnergyKernel(int                                 numMols,
