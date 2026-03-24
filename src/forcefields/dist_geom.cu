@@ -260,15 +260,9 @@ void addMoleculeToMolecularSystem(const EnergyForceContribsHost& contribs,
                                   BatchedMolecularSystemHost&    molSystem,
                                   BatchedForcefieldMetadata&     metadata,
                                   const int                      moleculeIdx,
-                                  const int                      conformerIdx,
-                                  const std::vector<double>&     positions,
-                                  const ForcefieldModifier&      customization) {
-  EnergyForceContribsHost contribsCopy = contribs;
-  const BatchedSystemInfo systemInfo   = metadata.recordSystem(moleculeIdx, conformerIdx);
-  if (customization) {
-    customization(systemInfo, dimension, positions, contribsCopy);
-  }
-  addMoleculeToMolecularSystem(contribsCopy, numAtoms, dimension, ctxAtomStarts, molSystem);
+                                  const int                      conformerIdx) {
+  metadata.recordSystem(moleculeIdx, conformerIdx);
+  addMoleculeToMolecularSystem(contribs, numAtoms, dimension, ctxAtomStarts, molSystem);
 }
 
 void addMoleculeToMolecularSystem3D(const Energy3DForceContribsHost& contribs,
@@ -496,15 +490,9 @@ void addMoleculeToMolecularSystem3D(const Energy3DForceContribsHost& contribs,
                                     BatchedMolecularSystem3DHost&    molSystem,
                                     BatchedForcefieldMetadata&       metadata,
                                     const int                        moleculeIdx,
-                                    const int                        conformerIdx,
-                                    const std::vector<double>&       positions,
-                                    const ForcefieldModifier3D&      customization) {
-  Energy3DForceContribsHost contribsCopy = contribs;
-  const BatchedSystemInfo   systemInfo   = metadata.recordSystem(moleculeIdx, conformerIdx);
-  if (customization) {
-    customization(systemInfo, positions, contribsCopy);
-  }
-  addMoleculeToMolecularSystem3D(contribsCopy, ctxAtomStarts, molSystem);
+                                    const int                        conformerIdx) {
+  metadata.recordSystem(moleculeIdx, conformerIdx);
+  addMoleculeToMolecularSystem3D(contribs, ctxAtomStarts, molSystem);
 }
 
 void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
@@ -528,8 +516,7 @@ void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
                         std::vector<double>&           ctxPositions,
                         BatchedForcefieldMetadata&     metadata,
                         const int                      moleculeIdx,
-                        const int                      conformerIdx,
-                        const ForcefieldModifier&      customization) {
+                        const int                      conformerIdx) {
   addMoleculeToContextWithPositions(positions, dimension, ctxAtomStarts, ctxPositions);
   addMoleculeToMolecularSystem(contribs,
                                positions.size() / dimension,
@@ -538,9 +525,7 @@ void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
                                molSystem,
                                metadata,
                                moleculeIdx,
-                               conformerIdx,
-                               positions,
-                               customization);
+                               conformerIdx);
 }
 
 void addMoleculeToBatch3D(const Energy3DForceContribsHost& contribs,
@@ -562,17 +547,14 @@ void addMoleculeToBatch3D(const Energy3DForceContribsHost& contribs,
                           std::vector<double>&             ctxPositions,
                           BatchedForcefieldMetadata&       metadata,
                           const int                        moleculeIdx,
-                          const int                        conformerIdx,
-                          const ForcefieldModifier3D&      customization) {
+                          const int                        conformerIdx) {
   addMoleculeToContextWithPositions(positions, 3, ctxAtomStarts, ctxPositions);
   addMoleculeToMolecularSystem3D(contribs,
                                  ctxAtomStarts,
                                  molSystem,
                                  metadata,
                                  moleculeIdx,
-                                 conformerIdx,
-                                 positions,
-                                 customization);
+                                 conformerIdx);
 }
 
 void sendContribsAndIndicesToDevice(const BatchedMolecularSystemHost& molSystemHost,

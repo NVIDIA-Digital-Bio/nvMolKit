@@ -21,7 +21,6 @@
 #include <unordered_map>
 
 #include "bfgs_minimize.h"
-#include "dg_batched_forcefield.h"
 #include "dist_geom.h"
 #include "etkdg_impl.h"
 

@@ -17,7 +17,6 @@
 #define NVMOLKIT_DISTGEOM_H
 
 #include <cstdint>
-#include <functional>
 #include <vector>
 
 #include "batched_forcefield.h"
@@ -55,9 +54,6 @@ struct EnergyForceContribsHost {
   ChiralViolationContribTerms chiralTerms;
   FourthDimContribTerms       fourthTerms;
 };
-
-using ForcefieldModifier =
-  std::function<void(const BatchedSystemInfo&, int, const std::vector<double>&, EnergyForceContribsHost&)>;
 
 // ------------------------------------
 // Experimental Torsion Knowledge (ETK)
@@ -132,9 +128,6 @@ struct Energy3DForceContribsHost {
   // Long range distance terms (from addLongRangeDistanceConstraints)
   DistanceConstraintContribTerms longRangeDistTerms;
 };
-
-using ForcefieldModifier3D =
-  std::function<void(const BatchedSystemInfo&, const std::vector<double>&, Energy3DForceContribsHost&)>;
 
 struct BatchedIndicesHost {
   //! Defines the start of each molecule's energy buffer region that will be added to then reduced.
@@ -384,9 +377,7 @@ void addMoleculeToMolecularSystem(const EnergyForceContribsHost& contribs,
                                   BatchedMolecularSystemHost&    molSystem,
                                   BatchedForcefieldMetadata&     metadata,
                                   int                            moleculeIdx,
-                                  int                            conformerIdx,
-                                  const std::vector<double>&     positions,
-                                  const ForcefieldModifier&      customization = {});
+                                  int                            conformerIdx);
 
 //! Add a molecule to the molecular system.
 void addMoleculeToMolecularSystem3D(const Energy3DForceContribsHost& contribs,
@@ -398,9 +389,7 @@ void addMoleculeToMolecularSystem3D(const Energy3DForceContribsHost& contribs,
                                     BatchedMolecularSystem3DHost&    molSystem,
                                     BatchedForcefieldMetadata&       metadata,
                                     int                              moleculeIdx,
-                                    int                              conformerIdx,
-                                    const std::vector<double>&       positions,
-                                    const ForcefieldModifier3D&      customization = {});
+                                    int                              conformerIdx);
 
 //! Add a molecule to the batched molecular system.
 //! Populates the molSystem with the molecule's energy force contribs, and adds the current positions.
@@ -419,8 +408,7 @@ void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
                         std::vector<double>&           ctxPositions,
                         BatchedForcefieldMetadata&     metadata,
                         int                            moleculeIdx,
-                        int                            conformerIdx,
-                        const ForcefieldModifier&      customization = {});
+                        int                            conformerIdx);
 
 //! Add a molecule to the batched molecular system.
 //! Populates the molSystem with the molecule's energy force contribs, and adds the current positions.
@@ -437,8 +425,7 @@ void addMoleculeToBatch3D(const Energy3DForceContribsHost& contribs,
                           std::vector<double>&             ctxPositions,
                           BatchedForcefieldMetadata&       metadata,
                           int                              moleculeIdx,
-                          int                              conformerIdx,
-                          const ForcefieldModifier3D&      customization = {});
+                          int                              conformerIdx);
 
 //! Send the batched molecular system to the device.
 void sendContribsAndIndicesToDevice(const BatchedMolecularSystemHost& molSystemHost,

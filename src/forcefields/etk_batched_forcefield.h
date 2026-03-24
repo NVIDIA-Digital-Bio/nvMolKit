@@ -6,29 +6,44 @@
 
 namespace nvMolKit {
 
+//! \brief Batched-forcefield adapter for ETK 3D systems.
+//!
+//! This wrapper exposes ETK host-side data through the generic
+//! `BatchedForcefield` interface so batched BFGS can evaluate ETK energies and
+//! gradients without ETK-specific dispatch in the minimizer.
 class ETKBatchedForcefield final : public BatchedForcefield {
  public:
+  //! \brief Builds a generic batched-forcefield view over ETK host data.
+  //! \param molSystemHost Flattened ETK host-side system description.
+  //! \param atomStartsHost Host-side atom offsets for the minimized systems.
+  //! \param useBasicKnowledge Selects ETK `ALL` terms or the `PLAIN` subset.
+  //! \param metadata Optional mapping from concrete systems back to logical molecules/conformers.
+  //! \param stream CUDA stream used for internal device allocations and uploads.
   ETKBatchedForcefield(const DistGeom::BatchedMolecularSystem3DHost& molSystemHost,
                        const std::vector<int>&                       atomStartsHost,
                        bool                                          useBasicKnowledge,
                        BatchedForcefieldMetadata                     metadata = {},
                        cudaStream_t                                  stream   = nullptr);
 
+  //! \brief Computes ETK energies through the generic batched-forcefield API.
   cudaError_t computeEnergy(double*        energyOuts,
                             const double*  positions,
                             const uint8_t* activeSystemMask = nullptr,
                             cudaStream_t   stream           = nullptr) override;
 
+  //! \brief Computes ETK gradients through the generic batched-forcefield API.
   cudaError_t computeGradients(double*        grad,
                                const double*  positions,
                                const uint8_t* activeSystemMask = nullptr,
                                cudaStream_t   stream           = nullptr) override;
 
+  //! \brief Computes the planar ETK subset used by the post-minimization check.
   cudaError_t computePlanarEnergy(double*        energyOuts,
                                   const double*  positions,
                                   const uint8_t* activeSystemMask = nullptr,
                                   cudaStream_t   stream           = nullptr);
 
+  //! \brief Returns the uploaded ETK contribution buffers for auxiliary kernels.
   const DistGeom::Energy3DForceContribsDevice& contribs() const { return systemDevice_.contribs; }
 
  private:

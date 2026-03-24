@@ -18,7 +18,7 @@
 
 #include <GraphMol/DistGeomHelpers/Embedder.h>
 
-#include "etk_batched_forcefield.h"
+#include "dist_geom.h"
 #include "etkdg_impl.h"
 #include "minimizer/bfgs_minimize.h"
 
@@ -45,7 +45,7 @@ class ETKMinimizationStage final : public ETKDGStage {
 
  private:
   //! Re-sets the bounds for distance constraints based on the current positions.
-  void setReferenceValues(const ETKDGContext& ctx, const ETKBatchedForcefield& forcefield);
+  void setReferenceValues(const ETKDGContext& ctx, const DistGeom::Energy3DForceContribsDevice& contribs);
 
   BatchedForcefieldMetadata                        metadata_;
   nvMolKit::DistGeom::BatchedMolecularSystem3DHost molSystemHost;

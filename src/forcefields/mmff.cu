@@ -604,6 +604,10 @@ cudaError_t computeGradients(BatchedMolecularDeviceBuffers& molSystemDevice,
     constexpr int blockSize = 256;
     const int     numTerms  = molSystemDevice.indices.atomIdxToBatchIdx.size() * 3;
     const int     numBlocks = (numTerms + blockSize - 1) / blockSize;
+    // TODO: Thread activeSystemMask through the MMFF term kernels so inactive
+    // systems can be skipped before gradient accumulation; energy kernels
+    // should follow the same early-filter path instead of relying on late
+    // masking.
     zeroInactiveGradientEntries<<<numBlocks, blockSize, 0, stream>>>(molSystemDevice.indices.atomIdxToBatchIdx.data(),
                                                                      activeSystemMask,
                                                                      molSystemDevice.indices.atomIdxToBatchIdx.size(),

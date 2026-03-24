@@ -6,8 +6,20 @@
 
 namespace nvMolKit {
 
+//! \brief Batched-forcefield adapter for 4D distance-geometry systems.
+//!
+//! This wrapper exposes DG host-side data through the generic
+//! `BatchedForcefield` interface so batched BFGS can call into DG energy and
+//! gradient evaluation without keeping DG-specific dispatch in the minimizer.
 class DGBatchedForcefield final : public BatchedForcefield {
  public:
+  //! \brief Builds a generic batched-forcefield view over DG host data.
+  //! \param molSystemHost Flattened DG host-side system description.
+  //! \param atomStartsHost Host-side atom offsets for the minimized systems.
+  //! \param chiralWeight Weight applied to the DG chirality term.
+  //! \param fourthDimWeight Weight applied to the DG fourth-dimension term.
+  //! \param metadata Optional mapping from concrete systems back to logical molecules/conformers.
+  //! \param stream CUDA stream used for internal device allocations and uploads.
   DGBatchedForcefield(const DistGeom::BatchedMolecularSystemHost& molSystemHost,
                       const std::vector<int>&                     atomStartsHost,
                       double                                      chiralWeight,
@@ -15,11 +27,13 @@ class DGBatchedForcefield final : public BatchedForcefield {
                       BatchedForcefieldMetadata                   metadata = {},
                       cudaStream_t                                stream   = nullptr);
 
+  //! \brief Computes DG energies through the generic batched-forcefield API.
   cudaError_t computeEnergy(double*        energyOuts,
                             const double*  positions,
                             const uint8_t* activeSystemMask = nullptr,
                             cudaStream_t   stream           = nullptr) override;
 
+  //! \brief Computes DG gradients through the generic batched-forcefield API.
   cudaError_t computeGradients(double*        grad,
                                const double*  positions,
                                const uint8_t* activeSystemMask = nullptr,

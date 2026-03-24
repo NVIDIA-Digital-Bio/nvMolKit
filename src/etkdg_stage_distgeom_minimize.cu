@@ -17,12 +17,12 @@
 
 #include <unordered_map>
 
+#include "dg_batched_forcefield.h"
 #include "dist_geom.h"
 #include "dist_geom_flattened_builder.h"
 #include "etkdg_impl.h"
 #include "etkdg_stage_distgeom_minimize.h"
 #include "forcefields/kernel_utils.cuh"
-#include "minimizer/bfgs_distgeom.h"
 #include "nvtx.h"
 
 using ::nvMolKit::detail::ETKDGContext;
@@ -48,6 +48,29 @@ __global__ void checkMinimizedEnergiesKernel(const int     molNum,
   if (energyPerAtom >= nvMolKit::detail::MAX_MINIMIZED_E_PER_ATOM) {
     failedThisStage[idx] = 1;
   }
+}
+
+template <typename MinimizeStep> void repeatUntilConverged(MinimizeStep&& minimizeStep) {
+  bool needsMore = minimizeStep();
+  while (needsMore) {
+    needsMore = minimizeStep();
+  }
+}
+
+void checkMinimizedEnergies(const AsyncDeviceVector<double>& energyOuts,
+                            const AsyncDeviceVector<int>&    atomStarts,
+                            AsyncDeviceVector<uint8_t>&      failedThisStage,
+                            cudaStream_t                     stream) {
+  const int molNum = energyOuts.size();
+  if (molNum == 0) {
+    return;
+  }
+  const int gridSize = (molNum + kBlockSize - 1) / kBlockSize;
+  checkMinimizedEnergiesKernel<<<gridSize, kBlockSize, 0, stream>>>(molNum,
+                                                                     energyOuts.data(),
+                                                                     atomStarts.data(),
+                                                                     failedThisStage.data());
+  cudaCheckError(cudaGetLastError());
 }
 }  // namespace
 
@@ -80,7 +103,9 @@ DistGeomMinimizeStage::DistGeomMinimizeStage(
   }
 
   // Preallocate memory based on first molecule (if available)
-  bool                                         preallocated = false;
+  bool preallocated = false;
+  // Repeated entries can point at the same ROMol, so collapse them onto one
+  // molecule slot and treat later occurrences as additional conformers.
   std::unordered_map<const RDKit::ROMol*, int> moleculeSlots;
   std::unordered_map<const RDKit::ROMol*, int> conformerCounts;
 
@@ -142,8 +167,7 @@ DistGeomMinimizeStage::DistGeomMinimizeStage(
                                                      molSystemHost,
                                                      metadata_,
                                                      moleculeIdx,
-                                                     conformerIdx,
-                                                     embedArg.posVec);
+                                                     conformerIdx);
   }
   DistGeom::setStreams(molSystemDevice, stream_);
   grad_.setStream(stream_);
@@ -156,7 +180,6 @@ void DistGeomMinimizeStage::executeImpl(ETKDGContext& ctx,
                                         int           maxIters,
                                         bool          checkEnergy) {
   const auto effectiveBackend = minimizer_.resolveBackend(ctx.systemHost.atomStarts);
-  bool       needsMore        = false;
 
   if (effectiveBackend == BfgsBackend::BATCHED) {
     DGBatchedForcefield forcefield(molSystemHost,
@@ -169,35 +192,20 @@ void DistGeomMinimizeStage::executeImpl(ETKDGContext& ctx,
     grad_.zero();
     energyOuts_.resize(ctx.systemHost.atomStarts.size() - 1);
     energyOuts_.zero();
-    needsMore = minimizer_.minimize(maxIters,
-                                    embedParam_.optimizerForceTol,
-                                    forcefield,
-                                    ctx.systemDevice.positions,
-                                    grad_,
-                                    energyOuts_,
-                                    ctx.activeThisStage.data());
-
-    while (needsMore) {
-      energyOuts_.zero();
-      needsMore = minimizer_.minimize(maxIters,
-                                      embedParam_.optimizerForceTol,
-                                      forcefield,
-                                      ctx.systemDevice.positions,
-                                      grad_,
-                                      energyOuts_,
-                                      ctx.activeThisStage.data());
-    }
+    repeatUntilConverged([&]() {
+      return minimizer_.minimize(maxIters,
+                                 embedParam_.optimizerForceTol,
+                                 forcefield,
+                                 ctx.systemDevice.positions,
+                                 grad_,
+                                 energyOuts_,
+                                 ctx.activeThisStage.data());
+    });
 
     if (checkEnergy) {
       energyOuts_.zero();
       forcefield.computeEnergy(energyOuts_.data(), ctx.systemDevice.positions.data(), nullptr, stream_);
-      const int molNum   = energyOuts_.size();
-      const int gridSize = (molNum + kBlockSize - 1) / kBlockSize;
-
-      checkMinimizedEnergiesKernel<<<gridSize, kBlockSize, 0, stream_>>>(molNum,
-                                                                         energyOuts_.data(),
-                                                                         ctx.systemDevice.atomStarts.data(),
-                                                                         ctx.failedThisStage.data());
+      checkMinimizedEnergies(energyOuts_, ctx.systemDevice.atomStarts, ctx.failedThisStage, stream_);
     }
 
     molSystemDevice.energyOuts.resize(energyOuts_.size());
@@ -214,26 +222,17 @@ void DistGeomMinimizeStage::executeImpl(ETKDGContext& ctx,
                                  ctx.systemHost.positions,
                                  static_cast<int>(ctx.systemHost.atomStarts.size() - 1));
 
-    needsMore = minimizer_.minimizeWithDG(maxIters,
-                                          embedParam_.optimizerForceTol,
-                                          ctx.systemHost.atomStarts,
-                                          ctx.systemDevice.atomStarts,
-                                          ctx.systemDevice.positions,
-                                          molSystemDevice,
-                                          chiralWeight,
-                                          fourthDimWeight,
-                                          ctx.activeThisStage.data());
-    while (needsMore) {
-      needsMore = minimizer_.minimizeWithDG(maxIters,
-                                            embedParam_.optimizerForceTol,
-                                            ctx.systemHost.atomStarts,
-                                            ctx.systemDevice.atomStarts,
-                                            ctx.systemDevice.positions,
-                                            molSystemDevice,
-                                            chiralWeight,
-                                            fourthDimWeight,
-                                            ctx.activeThisStage.data());
-    }
+    repeatUntilConverged([&]() {
+      return minimizer_.minimizeWithDG(maxIters,
+                                       embedParam_.optimizerForceTol,
+                                       ctx.systemHost.atomStarts,
+                                       ctx.systemDevice.atomStarts,
+                                       ctx.systemDevice.positions,
+                                       molSystemDevice,
+                                       chiralWeight,
+                                       fourthDimWeight,
+                                       ctx.activeThisStage.data());
+    });
 
     if (checkEnergy) {
       nvMolKit::DistGeom::computeEnergy(molSystemDevice,
@@ -244,13 +243,7 @@ void DistGeomMinimizeStage::executeImpl(ETKDGContext& ctx,
                                         nullptr,
                                         nullptr,
                                         stream_);
-      const int molNum   = molSystemDevice.energyOuts.size();
-      const int gridSize = (molNum + kBlockSize - 1) / kBlockSize;
-
-      checkMinimizedEnergiesKernel<<<gridSize, kBlockSize, 0, stream_>>>(molNum,
-                                                                         molSystemDevice.energyOuts.data(),
-                                                                         ctx.systemDevice.atomStarts.data(),
-                                                                         ctx.failedThisStage.data());
+      checkMinimizedEnergies(molSystemDevice.energyOuts, ctx.systemDevice.atomStarts, ctx.failedThisStage, stream_);
     }
   }
 }

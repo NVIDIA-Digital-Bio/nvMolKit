@@ -10,101 +10,118 @@
 
 namespace nvMolKit {
 
+//! Identifies a concrete batched system and the logical molecule/conformer it belongs to.
 struct BatchedSystemInfo {
+  //! Index of this system in the flattened batched arrays.
   int systemIdx    = -1;
+  //! Index of the logical molecule shared by one or more systems.
   int moleculeIdx  = -1;
+  //! Index of this conformer within its logical molecule.
   int conformerIdx = -1;
 };
 
+//! Stores mappings between concrete batched systems and logical molecules.
 struct BatchedForcefieldMetadata {
+  //! Maps each system index to the logical molecule it belongs to.
   std::vector<int>              systemToMoleculeIdx;
+  //! Maps each system index to its conformer index within the logical molecule.
   std::vector<int>              systemToConformerIdx;
+  //! Lists all system indices associated with each logical molecule.
   std::vector<std::vector<int>> moleculeToSystemIndices;
 
-  void reserveSystems(const int numSystems) {
-    systemToMoleculeIdx.reserve(numSystems);
-    systemToConformerIdx.reserve(numSystems);
-  }
+  //! Reserves storage for per-system metadata.
+  //! \param numSystems Number of concrete systems expected in the batch.
+  void reserveSystems(const int numSystems);
 
-  void ensureMolecule(const int moleculeIdx) {
-    if (moleculeIdx >= static_cast<int>(moleculeToSystemIndices.size())) {
-      moleculeToSystemIndices.resize(moleculeIdx + 1);
-    }
-  }
+  //! Ensures metadata storage exists for the requested logical molecule.
+  //! \param moleculeIdx Logical molecule index that will receive system entries.
+  void ensureMolecule(const int moleculeIdx);
 
-  BatchedSystemInfo recordSystem(const int moleculeIdx, const int conformerIdx) {
-    const int systemIdx = static_cast<int>(systemToMoleculeIdx.size());
-    ensureMolecule(moleculeIdx);
-    systemToMoleculeIdx.push_back(moleculeIdx);
-    systemToConformerIdx.push_back(conformerIdx);
-    moleculeToSystemIndices[moleculeIdx].push_back(systemIdx);
-    BatchedSystemInfo info;
-    info.systemIdx    = systemIdx;
-    info.moleculeIdx  = moleculeIdx;
-    info.conformerIdx = conformerIdx;
-    return info;
-  }
+  //! Records a concrete system for a logical molecule/conformer pair.
+  //! \param moleculeIdx Logical molecule index for the system.
+  //! \param conformerIdx Conformer index within the logical molecule.
+  //! \return The fully populated system metadata for the newly appended system.
+  BatchedSystemInfo recordSystem(const int moleculeIdx, const int conformerIdx);
 
-  int numSystems() const { return static_cast<int>(systemToMoleculeIdx.size()); }
-  int numLogicalMolecules() const { return static_cast<int>(moleculeToSystemIndices.size()); }
+  //! Returns the number of concrete systems currently recorded.
+  int numSystems() const;
 
-  static BatchedForcefieldMetadata identity(const int numSystems) {
-    BatchedForcefieldMetadata metadata;
-    metadata.reserveSystems(numSystems);
-    metadata.moleculeToSystemIndices.resize(numSystems);
-    for (int systemIdx = 0; systemIdx < numSystems; ++systemIdx) {
-      metadata.systemToMoleculeIdx.push_back(systemIdx);
-      metadata.systemToConformerIdx.push_back(0);
-      metadata.moleculeToSystemIndices[systemIdx].push_back(systemIdx);
-    }
-    return metadata;
-  }
+  //! Returns the number of logical molecules currently tracked.
+  int numLogicalMolecules() const;
 };
 
+//! Builds metadata for the one-system-per-molecule case.
+//! \param numSystems Number of concrete systems and logical molecules.
+//! \return Identity metadata where each system maps to its own molecule.
+BatchedForcefieldMetadata makeIdentityBatchedForcefieldMetadata(const int numSystems);
+
+//! Abstract base class for forcefields evaluated over a batch of molecular systems.
 class BatchedForcefield {
  public:
-  virtual ~BatchedForcefield() = default;
+  virtual ~BatchedForcefield();
 
+  //! Computes energies for each concrete system in the batch.
+  //! \param energyOuts Output buffer with one energy value per system.
+  //! \param positions Flattened position buffer for the full batch.
+  //! \param activeSystemMask Optional mask selecting which systems participate.
+  //! \param stream CUDA stream used for the computation.
+  //! \return CUDA status for the launch and any immediate setup work.
   virtual cudaError_t computeEnergy(double*        energyOuts,
                                     const double*  positions,
                                     const uint8_t* activeSystemMask = nullptr,
                                     cudaStream_t   stream           = nullptr) = 0;
 
+  //! Computes gradients for each concrete system in the batch.
+  //! \param grad Output gradient buffer matching the flattened position layout.
+  //! \param positions Flattened position buffer for the full batch.
+  //! \param activeSystemMask Optional mask selecting which systems participate.
+  //! \param stream CUDA stream used for the computation.
+  //! \return CUDA status for the launch and any immediate setup work.
   virtual cudaError_t computeGradients(double*        grad,
                                        const double*  positions,
                                        const uint8_t* activeSystemMask = nullptr,
                                        cudaStream_t   stream           = nullptr) = 0;
 
-  int                              numMolecules() const { return numMolecules_; }
-  int                              dataDim() const { return dataDim_; }
-  int                              totalPositions() const { return totalPositions_; }
-  const std::vector<int>&          atomStartsHost() const { return atomStartsHost_; }
-  const int*                       atomStartsDevice() const { return atomStartsDevice_; }
-  ForceFieldType                   type() const { return type_; }
-  const BatchedForcefieldMetadata& metadata() const { return metadata_; }
-  int                              numLogicalMolecules() const { return metadata_.numLogicalMolecules(); }
-  const std::vector<int>&          systemToMoleculeIdx() const { return metadata_.systemToMoleculeIdx; }
-  const std::vector<int>&          systemToConformerIdx() const { return metadata_.systemToConformerIdx; }
-  const std::vector<int>&          systemsForMolecule(const int moleculeIdx) const {
-    return metadata_.moleculeToSystemIndices[moleculeIdx];
-  }
+  //! Returns the number of concrete systems represented by this batch.
+  int                              numMolecules() const;
+  //! Returns the coordinate dimensionality stored per atom.
+  int                              dataDim() const;
+  //! Returns the total number of scalar coordinates in the flattened position buffer.
+  int                              totalPositions() const;
+  //! Returns host-side atom start offsets for each concrete system.
+  const std::vector<int>&          atomStartsHost() const;
+  //! Returns device-side atom start offsets for each concrete system.
+  const int*                       atomStartsDevice() const;
+  //! Returns the concrete forcefield implementation type.
+  ForceFieldType                   type() const;
+  //! Returns metadata relating concrete systems to logical molecules.
+  const BatchedForcefieldMetadata& metadata() const;
+  //! Returns the number of logical molecules represented in the batch.
+  int                              numLogicalMolecules() const;
+  //! Returns the logical molecule index for each concrete system.
+  const std::vector<int>&          systemToMoleculeIdx() const;
+  //! Returns the conformer index for each concrete system.
+  const std::vector<int>&          systemToConformerIdx() const;
+  //! Returns all concrete systems that belong to a logical molecule.
+  //! \param moleculeIdx Logical molecule index to query.
+  const std::vector<int>&          systemsForMolecule(const int moleculeIdx) const;
 
  protected:
+  //! Constructs a batched forcefield view over host/device atom ranges.
+  //! \param type Forcefield implementation type.
+  //! \param dataDim Coordinate dimensionality per atom.
+  //! \param atomStartsHost Host-side atom start offsets for each concrete system.
+  //! \param atomStartsDevice Device-side atom start offsets for each concrete system.
+  //! \param metadata Optional mapping from systems to logical molecules.
   BatchedForcefield(ForceFieldType            type,
                     int                       dataDim,
                     std::vector<int>          atomStartsHost,
                     const int*                atomStartsDevice,
-                    BatchedForcefieldMetadata metadata = {})
-      : numMolecules_(static_cast<int>(atomStartsHost.size()) - 1),
-        dataDim_(dataDim),
-        totalPositions_(atomStartsHost.empty() ? 0 : atomStartsHost.back() * dataDim),
-        atomStartsHost_(std::move(atomStartsHost)),
-        atomStartsDevice_(atomStartsDevice),
-        metadata_(metadata.numSystems() == 0 ? BatchedForcefieldMetadata::identity(numMolecules_) :
-                                               std::move(metadata)),
-        type_(type) {}
+                    BatchedForcefieldMetadata metadata = {});
 
-  void setAtomStartsDevice(const int* atomStartsDevice) { atomStartsDevice_ = atomStartsDevice; }
+  //! Updates the device atom-start pointer after device buffers are initialized.
+  //! \param atomStartsDevice Device pointer to system atom-start offsets.
+  void setAtomStartsDevice(const int* atomStartsDevice);
 
  private:
   int                       numMolecules_   = 0;

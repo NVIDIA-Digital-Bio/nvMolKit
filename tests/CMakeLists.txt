@@ -84,6 +84,7 @@ target_link_libraries(
           bfgs_mmff
           rdkit_mmff_flattened
           mmff
+          mmff_batched_forcefield
           mmff_builder
           mmff_contribs
           mmff_optimize
@@ -97,6 +98,7 @@ target_link_libraries(
   PRIVATE ${RDKit_LIBS}
           rdkit_dist_geom_flattened
           batched_forcefield
+          dg_batched_forcefield
           dist_geom
           device_vector
           ff_utils
@@ -163,8 +165,8 @@ target_link_libraries(
 
 add_executable(test_bfgs_minimizer test_bfgs_minimizer.cu)
 target_link_libraries(
-  test_bfgs_minimizer PRIVATE bfgs device_vector ${RDKit_LIBS} test_utils mmff
-                              device)
+  test_bfgs_minimizer PRIVATE bfgs batched_forcefield mmff_batched_forcefield
+                              device_vector ${RDKit_LIBS} test_utils mmff device)
 
 add_executable(test_bfgs_hessian test_bfgs_hessian.cpp)
 target_link_libraries(test_bfgs_hessian PRIVATE bfgs device_vector)

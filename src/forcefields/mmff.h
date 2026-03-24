@@ -104,6 +104,9 @@ struct EnergyForceContribsHost {
   EleTerms                eleTerms;
 };
 
+//! Modifies a single MMFF system's contribs before they are flattened into the batched buffers.
+//! The callback receives the recorded system metadata, the source coordinates for that system,
+//! and a mutable copy of the per-system MMFF contribs.
 using ForcefieldModifier =
   std::function<void(const BatchedSystemInfo&, const std::vector<double>&, EnergyForceContribsHost&)>;
 
@@ -268,6 +271,15 @@ void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
                         const std::vector<double>&     positions,
                         BatchedMolecularSystemHost&    molSystem);
 
+//! Adds a molecule while recording its logical molecule/conformer mapping.
+//! \param contribs MMFF terms for the molecule before flattening into the batch.
+//! \param positions Source coordinates for the molecule.
+//! \param molSystem Output batched molecular system.
+//! \param metadata Output metadata that maps batch systems back to logical molecules.
+//! \param moleculeIdx Logical molecule index to associate with the new system.
+//! \param conformerIdx Conformer index within the logical molecule.
+//! \param customization Optional callback that runs after the system metadata is
+//! recorded and before the contribs are flattened into the batch.
 void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
                         const std::vector<double>&     positions,
                         BatchedMolecularSystemHost&    molSystem,

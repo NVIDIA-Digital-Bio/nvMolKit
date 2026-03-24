@@ -22,12 +22,9 @@
 #include "bfgs_minimize_permol_kernels.h"
 #include "cub_helpers.cuh"
 #include "device_vector.h"
-#include "dg_batched_forcefield.h"
 #include "dist_geom.h"
 #include "dist_geom_kernels.h"
-#include "etk_batched_forcefield.h"
 #include "mmff.h"
-#include "mmff_batched_forcefield.h"
 #include "mmff_kernels.h"
 #include "nvtx.h"
 
@@ -970,50 +967,45 @@ void BfgsBatchMinimizer::collectDebugData() {
   stepwiseEnergies.push_back(std::move(energiesHost));
 }
 
-bool BfgsBatchMinimizer::minimize(const int                     numIters,
-                                  const double                  gradTol,
-                                  const std::vector<int>&       atomStartsHost,
-                                  const AsyncDeviceVector<int>& atomStarts,
-                                  AsyncDeviceVector<double>&    positions,
-                                  AsyncDeviceVector<double>&    grad,
-                                  AsyncDeviceVector<double>&    energyOuts,
-                                  AsyncDeviceVector<double>&    energyBuffer,
-                                  EnergyFunctor                 eFunc,
-                                  GradFunctor                   gFunc,
-                                  const uint8_t*                activeThisStage) {
+bool BfgsBatchMinimizer::minimize(const int                  numIters,
+                                  const double               gradTol,
+                                  const std::vector<int>&    atomStartsHost,
+                                  const int*                 atomStarts,
+                                  AsyncDeviceVector<double>& positions,
+                                  AsyncDeviceVector<double>& grad,
+                                  AsyncDeviceVector<double>& energyOuts,
+                                  EnergyFunctor              eFunc,
+                                  GradFunctor                gFunc,
+                                  const uint8_t*             activeThisStage) {
   gradTol_             = gradTol;
   const int numSystems = atomStartsHost.size() - 1;
 
-  // Note: PER_MOLECULE backend currently only supports MMFF with specific data structures
-  // For generic functors, must use BATCHED backend
   if (backend_ == BfgsBackend::PER_MOLECULE) {
     throw std::runtime_error(
-      "PER_MOLECULE backend not yet integrated with generic functor interface. "
-      "Use minimizeWithMMFF() or switch to BATCHED backend.");
+      "PER_MOLECULE backend is only supported through the forcefield-specific entry points. "
+      "Use minimizeWithMMFF(), minimizeWithETK(), minimizeWithDG(), or switch to BATCHED backend.");
   }
 
   {
     const ScopedNvtxRange bfgsFullInitialize("BfgsBatchMinimizer::fullInitialize");
     initialize(atomStartsHost,
-               atomStarts.data(),
+               atomStarts,
                positions.data(),
                grad.data(),
                energyOuts.data(),
                BfgsBackend::BATCHED,
                activeThisStage);
 
-    // Set up Hessian. Offsets are n X n, where atomstarts were n.
     setHessianToIdentity();
 
-    // Initial E and F
+    energyOuts.zero();
     eFunc(nullptr);
+    grad.zero();
     gFunc();
     scaleGrad(/*preLoop=*/true);
 
     collectDebugData();
-    // Set up xi as negative grad.
     copyAndInvert(grad, lineSearchDir_);
-
     setMaxStep();
   }
 
@@ -1025,14 +1017,7 @@ bool BfgsBatchMinimizer::minimize(const int                     numIters,
       int              lineSearchIter         = 0;
       constexpr double MAX_ITER_LINEAR_SEARCH = 1000;
       while (lineSearchIter < MAX_ITER_LINEAR_SEARCH && lineSearchCountFinished() < numSystems) {
-        // The RDKit algorithm has 3 energy terms. First is oldVal, which is the original energy before line search.
-        // That's copied above as lineSearchStoredEnergy_ and not modified.
-        // The other two are the current energy at the putative position (newVal) and the energy at the previous attempt
-        // at position (val2). These are buffers.energyOuts and lineSearchEnergyScratch_, respectively. At the end of
-        // each line search iteration, energyout is copied into energy scratch. This happens in kernel. Populate scratch
-        // positions with perturbed positions, based on dir and lambda.
         doLineSearchPerturb();
-        energyBuffer.zero();
         energyOuts.zero();
         eFunc(scratchPositions_.data());
         doLineSearchPostEnergy(lineSearchIter);
@@ -1050,12 +1035,12 @@ bool BfgsBatchMinimizer::minimize(const int                     numIters,
     }
 
     updateDGrad();
-
     updateHessian();
-
     collectDebugData();
   }
 
+  energyOuts.zero();
+  eFunc(nullptr);
   return compactAndCountConverged() == numSystems ? 0 : 1;
 }
 
@@ -1066,71 +1051,28 @@ bool BfgsBatchMinimizer::minimize(const int                  numIters,
                                   AsyncDeviceVector<double>& grad,
                                   AsyncDeviceVector<double>& energyOuts,
                                   const uint8_t*             activeSystemMask) {
-  gradTol_                   = gradTol;
   const auto& atomStartsHost = ff.atomStartsHost();
-  const int   numSystems     = atomStartsHost.size() - 1;
 
   if (resolveBackend(atomStartsHost) != BfgsBackend::BATCHED) {
     throw std::runtime_error("BatchedForcefield minimization is only supported on the BATCHED backend");
   }
 
-  {
-    const ScopedNvtxRange bfgsFullInitialize("BfgsBatchMinimizer::fullInitializeBatchedForcefield");
-    initialize(atomStartsHost,
-               ff.atomStartsDevice(),
-               positions.data(),
-               grad.data(),
-               energyOuts.data(),
-               BfgsBackend::BATCHED,
-               activeSystemMask);
+  auto eFunc = [&](const double* evalPositions) {
+    const double* positionsToEvaluate = evalPositions != nullptr ? evalPositions : positions.data();
+    ff.computeEnergy(energyOuts.data(), positionsToEvaluate, activeSystemMask, stream_);
+  };
+  auto gFunc = [&]() { ff.computeGradients(grad.data(), positions.data(), activeSystemMask, stream_); };
 
-    setHessianToIdentity();
-
-    energyOuts.zero();
-    ff.computeEnergy(energyOuts.data(), positions.data(), activeSystemMask, stream_);
-    grad.zero();
-    ff.computeGradients(grad.data(), positions.data(), activeSystemMask, stream_);
-    scaleGrad(/*preLoop=*/true);
-
-    collectDebugData();
-    copyAndInvert(grad, lineSearchDir_);
-    setMaxStep();
-  }
-
-  for (int currIter = 0; currIter < numIters && compactAndCountConverged() < numSystems; currIter++) {
-    {
-      const ScopedNvtxRange bfgsLineSearch("BfgsBatchMinimizer::lineSearchBatchedForcefield");
-      doLineSearchSetup(energyOuts.data());
-
-      int              lineSearchIter         = 0;
-      constexpr double MAX_ITER_LINEAR_SEARCH = 1000;
-      while (lineSearchIter < MAX_ITER_LINEAR_SEARCH && lineSearchCountFinished() < numSystems) {
-        doLineSearchPerturb();
-        energyOuts.zero();
-        ff.computeEnergy(energyOuts.data(), scratchPositions_.data(), activeSystemMask, stream_);
-        doLineSearchPostEnergy(lineSearchIter);
-        lineSearchIter++;
-      }
-      doLineSearchPostLoop();
-    }
-
-    setDirection();
-
-    {
-      const ScopedNvtxRange bfgsGetAndScaleGrad("BfgsBatchMinimizer::getAndScaleGradBatchedForcefield");
-      grad.zero();
-      ff.computeGradients(grad.data(), positions.data(), activeSystemMask, stream_);
-      scaleGrad(/*preLoop=*/false);
-    }
-
-    updateDGrad();
-    updateHessian();
-    collectDebugData();
-  }
-
-  energyOuts.zero();
-  ff.computeEnergy(energyOuts.data(), positions.data(), activeSystemMask, stream_);
-  return compactAndCountConverged() == numSystems ? 0 : 1;
+  return minimize(numIters,
+                  gradTol,
+                  atomStartsHost,
+                  ff.atomStartsDevice(),
+                  positions,
+                  grad,
+                  energyOuts,
+                  eFunc,
+                  gFunc,
+                  activeSystemMask);
 }
 
 bool BfgsBatchMinimizer::minimizeWithMMFF(const int                            numIters,
@@ -1142,26 +1084,7 @@ bool BfgsBatchMinimizer::minimizeWithMMFF(const int                            n
   const BfgsBackend effectiveBackend = resolveBackend(atomStartsHost);
 
   if (effectiveBackend == BfgsBackend::BATCHED) {
-    auto eFunc = [&](const double* positions) { MMFF::computeEnergy(systemDevice, positions, stream_); };
-    auto gFunc = [&]() { MMFF::computeGradients(systemDevice, stream_); };
-
-    bool result = minimize(numIters,
-                           gradTol,
-                           atomStartsHost,
-                           systemDevice.indices.atomStarts,
-                           systemDevice.positions,
-                           systemDevice.grad,
-                           systemDevice.energyOuts,
-                           systemDevice.energyBuffer,
-                           eFunc,
-                           gFunc,
-                           activeThisStage);
-
-    systemDevice.energyBuffer.zero();
-    systemDevice.energyOuts.zero();
-    MMFF::computeEnergy(systemDevice, nullptr, stream_);
-
-    return result;
+    throw std::runtime_error("Use minimize(..., BatchedForcefield&) for batched MMFF minimization");
   }
 
   initialize(atomStartsHost,
@@ -1219,31 +1142,12 @@ bool BfgsBatchMinimizer::minimizeWithETK(const int                              
                                          const AsyncDeviceVector<int>&              atomStarts,
                                          AsyncDeviceVector<double>&                 positions,
                                          DistGeom::BatchedMolecular3DDeviceBuffers& systemDevice,
-                                         bool                                       useBasicKnowledge,
                                          const uint8_t*                             activeThisStage) {
   const int         numSystems       = atomStartsHost.size() - 1;
-  const auto        etkTerm          = useBasicKnowledge ? DistGeom::ETKTerm::ALL : DistGeom::ETKTerm::PLAIN;
   const BfgsBackend effectiveBackend = resolveBackend(atomStartsHost);
 
   if (effectiveBackend == BfgsBackend::BATCHED) {
-    auto eFunc = [&](const double* pos) {
-      DistGeom::computeEnergyETK(systemDevice, atomStarts, positions, activeThisStage, pos, etkTerm, stream_);
-    };
-    auto gFunc = [&]() {
-      DistGeom::computeGradientsETK(systemDevice, atomStarts, positions, activeThisStage, etkTerm, stream_);
-    };
-
-    return minimize(numIters,
-                    gradTol,
-                    atomStartsHost,
-                    atomStarts,
-                    positions,
-                    systemDevice.grad,
-                    systemDevice.energyOuts,
-                    systemDevice.energyBuffer,
-                    eFunc,
-                    gFunc,
-                    activeThisStage);
+    throw std::runtime_error("Use minimize(..., BatchedForcefield&) for batched ETK minimization");
   }
 
   initialize(atomStartsHost,
@@ -1313,37 +1217,7 @@ bool BfgsBatchMinimizer::minimizeWithDG(const int                               
   const BfgsBackend effectiveBackend = resolveBackend(atomStartsHost);
 
   if (effectiveBackend == BfgsBackend::BATCHED) {
-    auto eFunc = [&](const double* pos) {
-      DistGeom::computeEnergy(systemDevice,
-                              atomStarts,
-                              positions,
-                              chiralWeight,
-                              fourthDimWeight,
-                              activeThisStage,
-                              pos,
-                              stream_);
-    };
-    auto gFunc = [&]() {
-      DistGeom::computeGradients(systemDevice,
-                                 atomStarts,
-                                 positions,
-                                 chiralWeight,
-                                 fourthDimWeight,
-                                 activeThisStage,
-                                 stream_);
-    };
-
-    return minimize(numIters,
-                    gradTol,
-                    atomStartsHost,
-                    atomStarts,
-                    positions,
-                    systemDevice.grad,
-                    systemDevice.energyOuts,
-                    systemDevice.energyBuffer,
-                    eFunc,
-                    gFunc,
-                    activeThisStage);
+    throw std::runtime_error("Use minimize(..., BatchedForcefield&) for batched DG minimization");
   }
 
   initialize(atomStartsHost,
