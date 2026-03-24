@@ -36,8 +36,13 @@ target_link_libraries(test_device PRIVATE device cuda_error_check CUDA::cudart)
 
 add_executable(test_device_timings test_device_timings.cu)
 target_link_libraries(test_device_timings PRIVATE device_timings)
+block()
+# cmake-format and cmake-lint disagree on this wrapped property assignment.
+# cmake-lint: disable=C0307
 set_source_files_properties(
-  test_device_timings.cu PROPERTIES COMPILE_DEFINITIONS NVMOLKIT_ENABLE_DEVICE_TIMINGS=1)
+  test_device_timings.cu PROPERTIES COMPILE_DEFINITIONS
+                                    NVMOLKIT_ENABLE_DEVICE_TIMINGS=1)
+endblock()
 
 add_executable(test_device_vector test_device_vector.cpp)
 target_link_libraries(test_device_vector PRIVATE device_vector cuda_error_check
@@ -50,7 +55,7 @@ target_include_directories(test_flat_bit_vect SYSTEM
 
 add_executable(test_flat_bit_vect_device test_flat_bit_vect_device.cu)
 target_link_libraries(test_flat_bit_vect_device PRIVATE flatBitVect device
-        device_vector)
+                                                        device_vector)
 
 add_executable(test_work_splitting test_work_splitting.cpp)
 target_link_libraries(test_work_splitting PRIVATE work_splitting)
@@ -200,45 +205,57 @@ add_executable(test_boolean_tree test_boolean_tree.cu)
 target_link_libraries(test_boolean_tree PRIVATE substruct_definitions device)
 
 add_executable(test_molecules test_molecules.cu)
-target_link_libraries(test_molecules PRIVATE molecules cuda_error_check ${RDKit_LIBS})
+target_link_libraries(test_molecules PRIVATE molecules cuda_error_check
+                                             ${RDKit_LIBS})
 
 add_executable(test_query test_query.cu)
 target_link_libraries(test_query PRIVATE molecules device ${RDKit_LIBS})
 
 add_executable(test_graph_labeler test_graph_labeler.cu)
-target_link_libraries(test_graph_labeler PRIVATE molecules device substruct_validation ${RDKit_LIBS})
+target_link_libraries(
+  test_graph_labeler PRIVATE molecules device substruct_validation
+                             ${RDKit_LIBS})
 
 add_executable(test_graph_labeler_recursive test_graph_labeler_recursive.cu)
-target_link_libraries(test_graph_labeler_recursive PRIVATE substructure_search
-        molecules device
-        substruct_validation
-        ${RDKit_LIBS})
+target_link_libraries(
+  test_graph_labeler_recursive PRIVATE substructure_search molecules device
+                                       substruct_validation ${RDKit_LIBS})
 
 add_executable(test_minibatch_planner test_minibatch_planner.cpp)
-target_link_libraries(test_minibatch_planner PRIVATE substructure_search molecules ${RDKit_LIBS})
+target_link_libraries(test_minibatch_planner PRIVATE substructure_search
+                                                     molecules ${RDKit_LIBS})
 
 add_executable(test_recursive_preprocessor test_recursive_preprocessor.cu)
-target_link_libraries(test_recursive_preprocessor PRIVATE substructure_search molecules device ${RDKit_LIBS})
+target_link_libraries(
+  test_recursive_preprocessor PRIVATE substructure_search molecules device
+                                      ${RDKit_LIBS})
 
 add_executable(test_substructure_search test_substruct_search.cu)
 target_link_libraries(
-        test_substructure_search PRIVATE substructure_search molecules device
-        substruct_validation ${RDKit_LIBS})
+  test_substructure_search PRIVATE substructure_search molecules device
+                                   substruct_validation ${RDKit_LIBS})
 
 add_executable(test_substruct_algos test_substruct_algos.cu)
-target_link_libraries(test_substruct_algos PRIVATE
-        substruct_definitions molecules device flatBitVect device_vector device_timings)
+target_link_libraries(
+  test_substruct_algos PRIVATE substruct_definitions molecules device
+                               flatBitVect device_vector device_timings)
 
 add_executable(test_substructure_integration test_substruct_integration.cu)
 target_link_libraries(
-        test_substructure_integration PRIVATE substructure_search molecules device
-        substruct_validation test_utils molData
-        ${RDKit_LIBS})
+  test_substructure_integration
+  PRIVATE substructure_search
+          molecules
+          device
+          substruct_validation
+          test_utils
+          molData
+          ${RDKit_LIBS})
 
-add_executable(test_substruct_label_integration test_substruct_label_integration.cu)
+add_executable(test_substruct_label_integration
+               test_substruct_label_integration.cu)
 target_link_libraries(
-        test_substruct_label_integration PRIVATE substructure_search molecules device
-        test_utils molData ${RDKit_LIBS})
+  test_substruct_label_integration PRIVATE substructure_search molecules device
+                                           test_utils molData ${RDKit_LIBS})
 
 set(TEST_LIST
     test_boolean_tree

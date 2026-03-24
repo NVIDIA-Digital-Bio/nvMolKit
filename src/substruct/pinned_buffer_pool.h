@@ -46,9 +46,9 @@ size_t computePinnedHostBufferBytes(int maxBatchSize, int maxMatchIndicesEstimat
  * and can be copied to the device in a single memcpy operation.
  */
 struct ConsolidatedBufferInfo {
-  std::byte* basePtr    = nullptr;  ///< Start of consolidated region
-  size_t     totalBytes = 0;        ///< Total bytes in consolidated region
-  int        maxBatchSize = 0;      ///< Max batch size used to compute offsets
+  std::byte* basePtr      = nullptr;  ///< Start of consolidated region
+  size_t     totalBytes   = 0;        ///< Total bytes in consolidated region
+  int        maxBatchSize = 0;        ///< Max batch size used to compute offsets
 };
 
 /**

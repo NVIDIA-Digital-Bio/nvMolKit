@@ -13,13 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <GraphMol/GraphMol.h>
+
 #include <boost/python.hpp>
 #include <boost/python/manage_new_object.hpp>
 #include <cstdint>
 #include <stdexcept>
 #include <vector>
-
-#include <GraphMol/GraphMol.h>
 
 #include "array_helpers.h"
 #include "conformer_rmsd_mol.h"
@@ -37,9 +37,7 @@ boost::python::object toOwnedPyArray(nvMolKit::PyArray* array) {
 BOOST_PYTHON_MODULE(_conformerRmsd) {
   boost::python::def(
     "GetConformerRMSMatrixBatch",
-    +[](boost::python::list& mols,
-        const bool           prealigned,
-        std::uintptr_t       streamPtr) -> boost::python::object {
+    +[](boost::python::list& mols, const bool prealigned, std::uintptr_t streamPtr) -> boost::python::object {
       auto streamOpt = nvMolKit::acquireExternalStream(streamPtr);
       if (!streamOpt) {
         throw std::invalid_argument("Invalid CUDA stream");
@@ -52,8 +50,7 @@ BOOST_PYTHON_MODULE(_conformerRmsd) {
 
       std::vector<const RDKit::ROMol*> molsVec(numMols);
       for (int i = 0; i < numMols; ++i) {
-        molsVec[i] = boost::python::extract<const RDKit::ROMol*>(
-            boost::python::object(mols[i]));
+        molsVec[i] = boost::python::extract<const RDKit::ROMol*>(boost::python::object(mols[i]));
         if (!molsVec[i]) {
           throw std::invalid_argument("Invalid molecule at index " + std::to_string(i));
         }
@@ -65,20 +62,15 @@ BOOST_PYTHON_MODULE(_conformerRmsd) {
       for (int m = 0; m < numMols; ++m) {
         const int nc       = molsVec[m]->getNumConformers();
         const int numPairs = nc >= 2 ? nc * (nc - 1) / 2 : 0;
-        results.append(toOwnedPyArray(
-            nvMolKit::makePyArray(buffers[m], boost::python::make_tuple(numPairs))));
+        results.append(toOwnedPyArray(nvMolKit::makePyArray(buffers[m], boost::python::make_tuple(numPairs))));
       }
       return results;
     },
-    (boost::python::arg("mols"),
-     boost::python::arg("prealigned") = false,
-     boost::python::arg("stream")     = 0));
+    (boost::python::arg("mols"), boost::python::arg("prealigned") = false, boost::python::arg("stream") = 0));
 
   boost::python::def(
     "GetConformerRMSMatrix",
-    +[](RDKit::ROMol& mol,
-        const bool     prealigned,
-        std::uintptr_t streamPtr) -> boost::python::object {
+    +[](RDKit::ROMol& mol, const bool prealigned, std::uintptr_t streamPtr) -> boost::python::object {
       auto streamOpt = nvMolKit::acquireExternalStream(streamPtr);
       if (!streamOpt) {
         throw std::invalid_argument("Invalid CUDA stream");
@@ -86,10 +78,8 @@ BOOST_PYTHON_MODULE(_conformerRmsd) {
 
       const int     numConfs = mol.getNumConformers();
       const int64_t numPairs = numConfs >= 2 ? static_cast<int64_t>(numConfs) * (numConfs - 1) / 2 : 0;
-      auto buffer = nvMolKit::conformerRmsdMatrixMol(mol, prealigned, *streamOpt);
+      auto          buffer   = nvMolKit::conformerRmsdMatrixMol(mol, prealigned, *streamOpt);
       return toOwnedPyArray(nvMolKit::makePyArray(buffer, boost::python::make_tuple(numPairs)));
     },
-    (boost::python::arg("mol"),
-     boost::python::arg("prealigned") = false,
-     boost::python::arg("stream")     = 0));
+    (boost::python::arg("mol"), boost::python::arg("prealigned") = false, boost::python::arg("stream") = 0));
 }

@@ -108,8 +108,8 @@ std::unique_ptr<PinnedHostBuffer> PinnedHostBufferPool::createBuffer(int maxBatc
   auto                buffer = std::make_unique<PinnedHostBuffer>();
 
   // Allocate fixed-width buffers first (consolidated region for single H2D copy)
-  buffer->pairIndices              = allocator.allocate<int>(static_cast<size_t>(maxBatchSize));
-  buffer->consolidated.basePtr     = reinterpret_cast<std::byte*>(buffer->pairIndices.data());
+  buffer->pairIndices               = allocator.allocate<int>(static_cast<size_t>(maxBatchSize));
+  buffer->consolidated.basePtr      = reinterpret_cast<std::byte*>(buffer->pairIndices.data());
   buffer->consolidated.maxBatchSize = maxBatchSize;
 
   buffer->miniBatchPairMatchStarts = allocator.allocate<int>(static_cast<size_t>(maxBatchSize + 1));
