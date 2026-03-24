@@ -166,7 +166,7 @@ ETKMinimizationStage::ETKMinimizationStage(
     addMoleculeToMolecularSystem3D(*ffParams,
                                    ctx.systemHost.atomStarts,
                                    molSystemHost,
-                                   metadata_,
+                                   &metadata_,
                                    moleculeIdx,
                                    conformerIdx);
   }

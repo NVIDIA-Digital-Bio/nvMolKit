@@ -265,27 +265,22 @@ struct BatchedMolecularDeviceBuffers {
   nvMolKit::AsyncDeviceVector<double> energyOuts;
 };
 
-//! Add a molecule to the batched molecular system.
-//! Populates the molSystem with the molecule's energy force contribs, and adds the current positions.
-void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
-                        const std::vector<double>&     positions,
-                        BatchedMolecularSystemHost&    molSystem);
-
-//! Adds a molecule while recording its logical molecule/conformer mapping.
+//! \brief Adds a molecule to the batched MMFF system.
 //! \param contribs MMFF terms for the molecule before flattening into the batch.
 //! \param positions Source coordinates for the molecule.
 //! \param molSystem Output batched molecular system.
-//! \param metadata Output metadata that maps batch systems back to logical molecules.
-//! \param moleculeIdx Logical molecule index to associate with the new system.
-//! \param conformerIdx Conformer index within the logical molecule.
-//! \param customization Optional callback that runs after the system metadata is
-//! recorded and before the contribs are flattened into the batch.
+//! \param metadata Optional mapping from concrete systems back to logical molecules.
+//!        When null, no logical molecule metadata is recorded.
+//! \param moleculeIdx Logical molecule index to associate with the new system when metadata is provided.
+//! \param conformerIdx Conformer index within the logical molecule when metadata is provided.
+//! \param customization Optional callback that runs after any metadata is recorded and before
+//!        the contribs are flattened into the batch.
 void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
                         const std::vector<double>&     positions,
                         BatchedMolecularSystemHost&    molSystem,
-                        BatchedForcefieldMetadata&     metadata,
-                        int                            moleculeIdx,
-                        int                            conformerIdx,
+                        BatchedForcefieldMetadata*     metadata      = nullptr,
+                        int                            moleculeIdx   = -1,
+                        int                            conformerIdx  = -1,
                         const ForcefieldModifier&      customization = {});
 
 //! Send the batched molecular system to the device.

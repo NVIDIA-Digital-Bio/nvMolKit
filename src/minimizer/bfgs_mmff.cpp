@@ -205,7 +205,7 @@ std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKi
         currentAtomOffset += numAtoms;
 
         nvMolKit::confPosToVect(*confInfo.conformer, pos);
-        nvMolKit::MMFF::addMoleculeToBatch(ffParams, pos, systemHost, metadata, confInfo.molIdx, confInfo.confIdx);
+        nvMolKit::MMFF::addMoleculeToBatch(ffParams, pos, systemHost, &metadata, confInfo.molIdx, confInfo.confIdx);
       }
 
       // Get thread-local buffers and ensure they have enough capacity

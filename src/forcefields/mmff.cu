@@ -254,7 +254,24 @@ void sendContribsAndIndicesToDevice(const BatchedMolecularSystemHost& molSystemH
 
 void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
                         const std::vector<double>&     positions,
-                        BatchedMolecularSystemHost&    molSystem) {
+                        BatchedMolecularSystemHost&    molSystem,
+                        BatchedForcefieldMetadata*     metadata,
+                        const int                      moleculeIdx,
+                        const int                      conformerIdx,
+                        const ForcefieldModifier&      customization) {
+  if (metadata != nullptr || customization) {
+    EnergyForceContribsHost contribsCopy = contribs;
+    BatchedSystemInfo       systemInfo;
+    if (metadata != nullptr) {
+      systemInfo = metadata->recordSystem(moleculeIdx, conformerIdx);
+    }
+    if (customization) {
+      customization(systemInfo, positions, contribsCopy);
+    }
+    addMoleculeToBatch(contribsCopy, positions, molSystem, nullptr, moleculeIdx, conformerIdx, {});
+    return;
+  }
+
   const int previousLastAtomIndex = molSystem.indices.atomStarts.back();
   const int numBatches            = molSystem.indices.atomStarts.size() - 1;
   const int newNumAtoms           = positions.size() / 3;
@@ -355,21 +372,6 @@ void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
     contribHolder.eleTerms.dielModel.push_back(contribs.eleTerms.dielModel[i]);
     contribHolder.eleTerms.is1_4.push_back(contribs.eleTerms.is1_4[i]);
   }
-}
-
-void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
-                        const std::vector<double>&     positions,
-                        BatchedMolecularSystemHost&    molSystem,
-                        BatchedForcefieldMetadata&     metadata,
-                        const int                      moleculeIdx,
-                        const int                      conformerIdx,
-                        const ForcefieldModifier&      customization) {
-  EnergyForceContribsHost contribsCopy = contribs;
-  const BatchedSystemInfo systemInfo   = metadata.recordSystem(moleculeIdx, conformerIdx);
-  if (customization) {
-    customization(systemInfo, positions, contribsCopy);
-  }
-  addMoleculeToBatch(contribsCopy, positions, molSystem);
 }
 
 void allocateIntermediateBuffers(const BatchedMolecularSystemHost& molSystemHost,

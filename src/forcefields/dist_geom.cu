@@ -158,7 +158,13 @@ void addMoleculeToMolecularSystem(const EnergyForceContribsHost& contribs,
                                   const int                      numAtoms,
                                   const int                      dimension,
                                   const std::vector<int>&        ctxAtomStarts,
-                                  BatchedMolecularSystemHost&    molSystem) {
+                                  BatchedMolecularSystemHost&    molSystem,
+                                  BatchedForcefieldMetadata*     metadata,
+                                  const int                      moleculeIdx,
+                                  const int                      conformerIdx) {
+  if (metadata != nullptr) {
+    metadata->recordSystem(moleculeIdx, conformerIdx);
+  }
   // Use distTermStarts.size() - 1 to get the current batch index
   const int batchIdx              = molSystem.indices.distTermStarts.size() - 1;
   // Get the previous last atom index from ctxAtomStarts using the current batch index
@@ -253,21 +259,15 @@ void addMoleculeToMolecularSystem(const EnergyForceContribsHost& contribs,
   }
 }
 
-void addMoleculeToMolecularSystem(const EnergyForceContribsHost& contribs,
-                                  const int                      numAtoms,
-                                  const int                      dimension,
-                                  const std::vector<int>&        ctxAtomStarts,
-                                  BatchedMolecularSystemHost&    molSystem,
-                                  BatchedForcefieldMetadata&     metadata,
-                                  const int                      moleculeIdx,
-                                  const int                      conformerIdx) {
-  metadata.recordSystem(moleculeIdx, conformerIdx);
-  addMoleculeToMolecularSystem(contribs, numAtoms, dimension, ctxAtomStarts, molSystem);
-}
-
 void addMoleculeToMolecularSystem3D(const Energy3DForceContribsHost& contribs,
                                     const std::vector<int>&          ctxAtomStarts,
-                                    BatchedMolecularSystem3DHost&    molSystem) {
+                                    BatchedMolecularSystem3DHost&    molSystem,
+                                    BatchedForcefieldMetadata*       metadata,
+                                    const int                        moleculeIdx,
+                                    const int                        conformerIdx) {
+  if (metadata != nullptr) {
+    metadata->recordSystem(moleculeIdx, conformerIdx);
+  }
   // Use distTermStarts.size() - 1 to get the current batch index
   const int batchIdx              = molSystem.indices.experimentalTorsionTermStarts.size() - 1;
   // Get the previous last atom index from ctxAtomStarts using the current batch index
@@ -485,39 +485,19 @@ void addMoleculeToMolecularSystem3D(const Energy3DForceContribsHost& contribs,
                                                         contribs.longRangeDistTerms.forceConstant.end());
 }
 
-void addMoleculeToMolecularSystem3D(const Energy3DForceContribsHost& contribs,
-                                    const std::vector<int>&          ctxAtomStarts,
-                                    BatchedMolecularSystem3DHost&    molSystem,
-                                    BatchedForcefieldMetadata&       metadata,
-                                    const int                        moleculeIdx,
-                                    const int                        conformerIdx) {
-  metadata.recordSystem(moleculeIdx, conformerIdx);
-  addMoleculeToMolecularSystem3D(contribs, ctxAtomStarts, molSystem);
-}
-
-void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
-                        const std::vector<double>&     positions,
-                        BatchedMolecularSystemHost&    molSystem,
-                        const int                      dimension,
-                        std::vector<int>&              ctxAtomStarts,
-                        std::vector<double>&           ctxPositions) {
-  // First update context data
-  addMoleculeToContextWithPositions(positions, dimension, ctxAtomStarts, ctxPositions);
-
-  // Then update the molecular system
-  addMoleculeToMolecularSystem(contribs, positions.size() / dimension, dimension, ctxAtomStarts, molSystem);
-}
-
 void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
                         const std::vector<double>&     positions,
                         BatchedMolecularSystemHost&    molSystem,
                         const int                      dimension,
                         std::vector<int>&              ctxAtomStarts,
                         std::vector<double>&           ctxPositions,
-                        BatchedForcefieldMetadata&     metadata,
+                        BatchedForcefieldMetadata*     metadata,
                         const int                      moleculeIdx,
                         const int                      conformerIdx) {
+  // First update context data
   addMoleculeToContextWithPositions(positions, dimension, ctxAtomStarts, ctxPositions);
+
+  // Then update the molecular system
   addMoleculeToMolecularSystem(contribs,
                                positions.size() / dimension,
                                dimension,
@@ -532,23 +512,14 @@ void addMoleculeToBatch3D(const Energy3DForceContribsHost& contribs,
                           const std::vector<double>&       positions,
                           BatchedMolecularSystem3DHost&    molSystem,
                           std::vector<int>&                ctxAtomStarts,
-                          std::vector<double>&             ctxPositions) {
+                          std::vector<double>&             ctxPositions,
+                          BatchedForcefieldMetadata*       metadata,
+                          const int                        moleculeIdx,
+                          const int                        conformerIdx) {
   // First update context data
   addMoleculeToContextWithPositions(positions, 3, ctxAtomStarts, ctxPositions);
 
   // Then update the molecular system
-  addMoleculeToMolecularSystem3D(contribs, ctxAtomStarts, molSystem);
-}
-
-void addMoleculeToBatch3D(const Energy3DForceContribsHost& contribs,
-                          const std::vector<double>&       positions,
-                          BatchedMolecularSystem3DHost&    molSystem,
-                          std::vector<int>&                ctxAtomStarts,
-                          std::vector<double>&             ctxPositions,
-                          BatchedForcefieldMetadata&       metadata,
-                          const int                        moleculeIdx,
-                          const int                        conformerIdx) {
-  addMoleculeToContextWithPositions(positions, 3, ctxAtomStarts, ctxPositions);
   addMoleculeToMolecularSystem3D(contribs,
                                  ctxAtomStarts,
                                  molSystem,

@@ -368,64 +368,43 @@ void addMoleculeToMolecularSystem(const EnergyForceContribsHost& contribs,
                                   const int                      numAtoms,
                                   const int                      dimension,
                                   const std::vector<int>&        ctxAtomStarts,
-                                  BatchedMolecularSystemHost&    molSystem);
-
-void addMoleculeToMolecularSystem(const EnergyForceContribsHost& contribs,
-                                  const int                      numAtoms,
-                                  const int                      dimension,
-                                  const std::vector<int>&        ctxAtomStarts,
                                   BatchedMolecularSystemHost&    molSystem,
-                                  BatchedForcefieldMetadata&     metadata,
-                                  int                            moleculeIdx,
-                                  int                            conformerIdx);
+                                  BatchedForcefieldMetadata*     metadata     = nullptr,
+                                  int                            moleculeIdx  = -1,
+                                  int                            conformerIdx = -1);
 
 //! Add a molecule to the molecular system.
 void addMoleculeToMolecularSystem3D(const Energy3DForceContribsHost& contribs,
                                     const std::vector<int>&          ctxAtomStarts,
-                                    BatchedMolecularSystem3DHost&    molSystem);
-
-void addMoleculeToMolecularSystem3D(const Energy3DForceContribsHost& contribs,
-                                    const std::vector<int>&          ctxAtomStarts,
                                     BatchedMolecularSystem3DHost&    molSystem,
-                                    BatchedForcefieldMetadata&       metadata,
-                                    int                              moleculeIdx,
-                                    int                              conformerIdx);
+                                    BatchedForcefieldMetadata*       metadata     = nullptr,
+                                    int                              moleculeIdx  = -1,
+                                    int                              conformerIdx = -1);
 
-//! Add a molecule to the batched molecular system.
-//! Populates the molSystem with the molecule's energy force contribs, and adds the current positions.
-void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
-                        const std::vector<double>&     positions,
-                        BatchedMolecularSystemHost&    molSystem,
-                        int                            dimension,
-                        std::vector<int>&              ctxAtomStarts,
-                        std::vector<double>&           ctxPositions);
-
+//! \brief Adds a molecule to the batched DG system.
+//! \param metadata Optional mapping from concrete systems back to logical molecules.
+//!        When null, no logical molecule metadata is recorded.
 void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
                         const std::vector<double>&     positions,
                         BatchedMolecularSystemHost&    molSystem,
                         int                            dimension,
                         std::vector<int>&              ctxAtomStarts,
                         std::vector<double>&           ctxPositions,
-                        BatchedForcefieldMetadata&     metadata,
-                        int                            moleculeIdx,
-                        int                            conformerIdx);
+                        BatchedForcefieldMetadata*     metadata     = nullptr,
+                        int                            moleculeIdx  = -1,
+                        int                            conformerIdx = -1);
 
-//! Add a molecule to the batched molecular system.
-//! Populates the molSystem with the molecule's energy force contribs, and adds the current positions.
-void addMoleculeToBatch3D(const Energy3DForceContribsHost& contribs,
-                          const std::vector<double>&       positions,
-                          BatchedMolecularSystem3DHost&    molSystem,
-                          std::vector<int>&                ctxAtomStarts,
-                          std::vector<double>&             ctxPositions);
-
+//! \brief Adds a molecule to the batched ETK system.
+//! \param metadata Optional mapping from concrete systems back to logical molecules.
+//!        When null, no logical molecule metadata is recorded.
 void addMoleculeToBatch3D(const Energy3DForceContribsHost& contribs,
                           const std::vector<double>&       positions,
                           BatchedMolecularSystem3DHost&    molSystem,
                           std::vector<int>&                ctxAtomStarts,
                           std::vector<double>&             ctxPositions,
-                          BatchedForcefieldMetadata&       metadata,
-                          int                              moleculeIdx,
-                          int                              conformerIdx);
+                          BatchedForcefieldMetadata*       metadata     = nullptr,
+                          int                              moleculeIdx  = -1,
+                          int                              conformerIdx = -1);
 
 //! Send the batched molecular system to the device.
 void sendContribsAndIndicesToDevice(const BatchedMolecularSystemHost& molSystemHost,

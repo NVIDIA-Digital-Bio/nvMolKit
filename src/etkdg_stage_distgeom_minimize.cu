@@ -165,7 +165,7 @@ DistGeomMinimizeStage::DistGeomMinimizeStage(
                                                      embedArg.dim,
                                                      ctx.systemHost.atomStarts,
                                                      molSystemHost,
-                                                     metadata_,
+                                                     &metadata_,
                                                      moleculeIdx,
                                                      conformerIdx);
   }

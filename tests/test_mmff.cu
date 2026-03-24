@@ -489,9 +489,9 @@ TEST(BatchedForcefieldMetadata, TracksSystemsPerMoleculeAndConformer) {
 
   BatchedMolecularSystemHost          systemHost;
   nvMolKit::BatchedForcefieldMetadata metadata;
-  nvMolKit::MMFF::addMoleculeToBatch(ffParams, positions, systemHost, metadata, 0, 0);
-  nvMolKit::MMFF::addMoleculeToBatch(ffParams, positions, systemHost, metadata, 0, 1);
-  nvMolKit::MMFF::addMoleculeToBatch(ffParams, positions, systemHost, metadata, 1, 0);
+  nvMolKit::MMFF::addMoleculeToBatch(ffParams, positions, systemHost, &metadata, 0, 0);
+  nvMolKit::MMFF::addMoleculeToBatch(ffParams, positions, systemHost, &metadata, 0, 1);
+  nvMolKit::MMFF::addMoleculeToBatch(ffParams, positions, systemHost, &metadata, 1, 0);
 
   nvMolKit::MMFFBatchedForcefield forcefield(systemHost, metadata);
   EXPECT_EQ(forcefield.numMolecules(), 3);
@@ -524,7 +524,8 @@ TEST(BatchedForcefieldCustomization, AppliesForcefieldModifierBeforeFlattening) 
         kb *= 2.0;
       }
     };
-  nvMolKit::MMFF::addMoleculeToBatch(filteredContribs, positions, systemHostCustomized, metadata, 0, 0, customization);
+  nvMolKit::MMFF::addMoleculeToBatch(
+    filteredContribs, positions, systemHostCustomized, &metadata, 0, 0, customization);
   const double customizedEnergy = getCombinedEnergyViaForcefield(systemHostCustomized);
 
   EXPECT_NEAR(customizedEnergy, 2.0 * baselineEnergy, FUNCTION_E_TOL);
