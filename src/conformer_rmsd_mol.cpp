@@ -14,7 +14,6 @@
 // limitations under the License.
 
 #include "conformer_rmsd_mol.h"
-#include "utils/host_vector.h"
 
 #include <GraphMol/Conformer.h>
 
@@ -23,11 +22,11 @@
 #include <stdexcept>
 #include <string>
 
+#include "utils/host_vector.h"
+
 namespace nvMolKit {
 
-AsyncDeviceVector<double> conformerRmsdMatrixMol(const RDKit::ROMol& mol,
-                                                  const bool          prealigned,
-                                                  cudaStream_t        stream) {
+AsyncDeviceVector<double> conformerRmsdMatrixMol(const RDKit::ROMol& mol, const bool prealigned, cudaStream_t stream) {
   const int numConfs = mol.getNumConformers();
   if (numConfs <= 1) {
     return AsyncDeviceVector<double>(0);
@@ -58,14 +57,14 @@ AsyncDeviceVector<double> conformerRmsdMatrixMol(const RDKit::ROMol& mol,
   // Pinned memory allows the DMA engine to transfer directly without a staging
   // copy; the destructor handles cleanup safely after all stream work is submitted.
   PinnedHostVector<double> hostCoords(numCoords);
-  int confIdx = 0;
+  int                      confIdx = 0;
   for (auto it = mol.beginConformers(); it != mol.endConformers(); ++it, ++confIdx) {
     const RDKit::Conformer& conf = **it;
     for (int a = 0; a < numAtoms; ++a) {
-      const auto& pos                                   = conf.getAtomPos(a);
-      hostCoords[confIdx * numAtoms * 3 + a * 3 + 0]  = pos.x;
-      hostCoords[confIdx * numAtoms * 3 + a * 3 + 1]  = pos.y;
-      hostCoords[confIdx * numAtoms * 3 + a * 3 + 2]  = pos.z;
+      const auto& pos                                = conf.getAtomPos(a);
+      hostCoords[confIdx * numAtoms * 3 + a * 3 + 0] = pos.x;
+      hostCoords[confIdx * numAtoms * 3 + a * 3 + 1] = pos.y;
+      hostCoords[confIdx * numAtoms * 3 + a * 3 + 2] = pos.z;
     }
   }
 
@@ -74,12 +73,12 @@ AsyncDeviceVector<double> conformerRmsdMatrixMol(const RDKit::ROMol& mol,
   return devRmsd;
 }
 
-std::vector<AsyncDeviceVector<double>> conformerRmsdBatchMatrixMol(
-    const std::vector<const RDKit::ROMol*>& mols,
-    const bool                              prealigned,
-    cudaStream_t                            stream) {
+std::vector<AsyncDeviceVector<double>> conformerRmsdBatchMatrixMol(const std::vector<const RDKit::ROMol*>& mols,
+                                                                   const bool                              prealigned,
+                                                                   cudaStream_t                            stream) {
   const int numMols = static_cast<int>(mols.size());
-  if (numMols == 0) return {};
+  if (numMols == 0)
+    return {};
 
   // --- Validate inputs and compute per-molecule metadata ---
   // pairOffsets and totalPairs are intentionally 32-bit: the kernel launches one
@@ -102,27 +101,26 @@ std::vector<AsyncDeviceVector<double>> conformerRmsdBatchMatrixMol(
     if (na == 0 && nc >= 2) {
       throw std::invalid_argument("Molecule at index " + std::to_string(m) + " has no atoms");
     }
-    numConfsVec[m]    = nc;
-    numAtomsVec[m]    = na;
+    numConfsVec[m]     = nc;
+    numAtomsVec[m]     = na;
     coordOffsetsVec[m] = totalCoords;
-    totalCoords       += static_cast<size_t>(nc) * na * 3;
+    totalCoords += static_cast<size_t>(nc) * na * 3;
 
-    const int64_t numPairs64   = nc >= 2 ? static_cast<int64_t>(nc) * (nc - 1) / 2 : 0;
-    const int64_t newOffset    = static_cast<int64_t>(pairOffsetsVec[m]) + numPairs64;
+    const int64_t numPairs64 = nc >= 2 ? static_cast<int64_t>(nc) * (nc - 1) / 2 : 0;
+    const int64_t newOffset  = static_cast<int64_t>(pairOffsetsVec[m]) + numPairs64;
     if (newOffset > static_cast<int64_t>(std::numeric_limits<int>::max())) {
-      throw std::overflow_error("Cumulative conformer pairs exceed int range by molecule index " +
-                                std::to_string(m));
+      throw std::overflow_error("Cumulative conformer pairs exceed int range by molecule index " + std::to_string(m));
     }
     pairOffsetsVec[m + 1] = static_cast<int>(newOffset);
   }
   const int totalPairs = pairOffsetsVec[numMols];
 
   // --- Allocate device buffers first so GPU allocation overlaps CPU work below ---
-  AsyncDeviceVector<double>  devCoords(totalCoords > 0 ? totalCoords : 1, stream);
-  AsyncDeviceVector<int>     devNumConfs(numMols, stream);
-  AsyncDeviceVector<int>     devNumAtoms(numMols, stream);
-  AsyncDeviceVector<int>     devPairOffsets(numMols + 1, stream);
-  AsyncDeviceVector<size_t>  devCoordOffsets(numMols, stream);
+  AsyncDeviceVector<double> devCoords(totalCoords > 0 ? totalCoords : 1, stream);
+  AsyncDeviceVector<int>    devNumConfs(numMols, stream);
+  AsyncDeviceVector<int>    devNumAtoms(numMols, stream);
+  AsyncDeviceVector<int>    devPairOffsets(numMols + 1, stream);
+  AsyncDeviceVector<size_t> devCoordOffsets(numMols, stream);
 
   // Per-molecule output buffers.  Always allocate at least 1 element so that
   // devRmsdPtrs never contains a null — zero-pair molecules dispatch 0 blocks
@@ -150,16 +148,14 @@ std::vector<AsyncDeviceVector<double>> conformerRmsdBatchMatrixMol(
     coordOffsetsArr[m] = coordOffsetsVec[m];
     hostRmsdPtrs[m]    = devRmsdVecs[m].data();
 
-    const int nc = numConfsVec[m];
-    const int na = numAtomsVec[m];
-    int confIdx  = 0;
+    const int nc      = numConfsVec[m];
+    const int na      = numAtomsVec[m];
+    int       confIdx = 0;
     for (auto it = mols[m]->beginConformers(); it != mols[m]->endConformers(); ++it, ++confIdx) {
       const RDKit::Conformer& conf = **it;
       for (int a = 0; a < na; ++a) {
-        const auto&  pos  = conf.getAtomPos(a);
-        const size_t base = coordOffsetsVec[m] +
-                            static_cast<size_t>(confIdx) * na * 3 +
-                            static_cast<size_t>(a) * 3;
+        const auto&  pos     = conf.getAtomPos(a);
+        const size_t base    = coordOffsetsVec[m] + static_cast<size_t>(confIdx) * na * 3 + static_cast<size_t>(a) * 3;
         hostCoords[base + 0] = pos.x;
         hostCoords[base + 1] = pos.y;
         hostCoords[base + 2] = pos.z;
@@ -169,7 +165,8 @@ std::vector<AsyncDeviceVector<double>> conformerRmsdBatchMatrixMol(
   pairOffsetsArr[numMols] = pairOffsetsVec[numMols];
 
   // --- Transfer to device and launch ---
-  if (totalCoords > 0) hostCoords.copyToDevice(devCoords, stream);
+  if (totalCoords > 0)
+    hostCoords.copyToDevice(devCoords, stream);
   numConfsArr.copyToDevice(devNumConfs, stream);
   numAtomsArr.copyToDevice(devNumAtoms, stream);
   pairOffsetsArr.copyToDevice(devPairOffsets, stream);
@@ -177,17 +174,16 @@ std::vector<AsyncDeviceVector<double>> conformerRmsdBatchMatrixMol(
   hostRmsdPtrs.copyToDevice(devRmsdPtrs, stream);
 
   if (totalPairs > 0) {
-    conformerRmsdBatchMatrixGpu(
-        toSpan(devCoords),
-        toSpan(devRmsdPtrs),
-        toSpan(devPairOffsets),
-        toSpan(devCoordOffsets),
-        toSpan(devNumConfs),
-        toSpan(devNumAtoms),
-        numMols,
-        totalPairs,
-        prealigned,
-        stream);
+    conformerRmsdBatchMatrixGpu(toSpan(devCoords),
+                                toSpan(devRmsdPtrs),
+                                toSpan(devPairOffsets),
+                                toSpan(devCoordOffsets),
+                                toSpan(devNumConfs),
+                                toSpan(devNumAtoms),
+                                numMols,
+                                totalPairs,
+                                prealigned,
+                                stream);
   }
 
   return devRmsdVecs;
