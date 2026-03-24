@@ -15,7 +15,7 @@ ETKBatchedForcefield::ETKBatchedForcefield(const DistGeom::BatchedMolecularSyste
                                            const bool                                    useBasicKnowledge,
                                            BatchedForcefieldMetadata                     metadata,
                                            const cudaStream_t                            stream)
-    : BatchedForcefield(ForceFieldType::ETK, 4, atomStartsHost, nullptr, std::move(metadata)),
+    : BatchedForcefield(ForceFieldType::ETK, 3, atomStartsHost, nullptr, std::move(metadata)),
       term_(useBasicKnowledge ? DistGeom::ETKTerm::ALL : DistGeom::ETKTerm::PLAIN) {
   atomStartsDevice_.setStream(stream);
   DistGeom::setStreams(systemDevice_, stream);
