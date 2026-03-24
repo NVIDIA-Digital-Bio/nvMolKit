@@ -27,8 +27,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ca-certificates gnupg wget
           wget -qO - https://apt.llvm.org/llvm-snapshot.gpg.key | \
-            sudo gpg --dearmor -o /usr/share/keyrings/llvm-snapshot.gpg.gpg
-          echo "deb [signed-by=/usr/share/keyrings/llvm-snapshot.gpg.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-17 main" | \
+            sudo gpg --dearmor -o /usr/share/keyrings/llvm-snapshot.gpg
+          echo "deb [signed-by=/usr/share/keyrings/llvm-snapshot.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-17 main" | \
             sudo tee /etc/apt/sources.list.d/llvm.list >/dev/null
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang-format-17
