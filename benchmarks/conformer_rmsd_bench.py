@@ -41,7 +41,7 @@ def _numpy_kabsch_rmsd(p, q):
     p_c = p - p.mean(axis=0)
     q_c = q - q.mean(axis=0)
     H = p_c.T @ q_c
-    _, S, _ = np.linalg.svd(H)
+    S = np.linalg.svd(H, compute_uv=False)
     d = np.sign(np.linalg.det(H))
     S[-1] *= d if d != 0.0 else 1.0
     Sp = np.sum(p_c**2)

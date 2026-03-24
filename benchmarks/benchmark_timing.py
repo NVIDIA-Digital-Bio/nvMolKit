@@ -39,10 +39,10 @@ class TimingResult:
 
     @property
     def std_ms(self) -> float:
-        """Population standard deviation in milliseconds."""
+        """Sample standard deviation in milliseconds."""
         if len(self.times_ms) < 2:
             return 0.0
-        return statistics.pstdev(self.times_ms)
+        return statistics.stdev(self.times_ms)
 
     @property
     def median_s(self) -> float:
@@ -75,6 +75,9 @@ def time_it(func: Callable, runs: int = 3, warmups: int = 1, gpu_sync: bool = Fa
     for _ in range(warmups):
         func()
         sync()
+
+    if runs <= 0:
+        raise ValueError(f"runs must be positive, got {runs}")
 
     times_ms = []
     for _ in range(runs):

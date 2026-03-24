@@ -62,16 +62,15 @@ from typing import Callable
 
 import nvtx
 import pandas as pd
+from benchmark_timing import time_it as _time_it
 from rdkit import Chem, RDLogger
 from rdkit.Chem import rdSubstructLibrary
 from tqdm.contrib.concurrent import process_map
 
-from benchmark_timing import time_it as _time_it
 
-
-def time_it(func: Callable, runs: int = 1) -> tuple[float, float]:
+def time_it(func: Callable, runs: int = 1, gpu_sync: bool = False) -> tuple[float, float]:
     """Time a function and return (avg_ms, std_ms)."""
-    result = _time_it(func, runs=runs, warmups=0)
+    result = _time_it(func, runs=runs, warmups=0, gpu_sync=gpu_sync)
     return result.mean_ms, result.std_ms
 
 
@@ -330,9 +329,7 @@ def bench_nvmolkit(
     mols: list[Chem.Mol], queries: list[Chem.Mol], runs: int, mode: str, config
 ) -> tuple[float, float, object]:
     """Benchmark nvmolkit GPU substructure search."""
-    import torch
-
-    from nvmolkit.substructure import countSubstructMatches, hasSubstructMatch, getSubstructMatches
+    from nvmolkit.substructure import countSubstructMatches, getSubstructMatches, hasSubstructMatch
 
     results_data: object = None
 
@@ -341,15 +338,12 @@ def bench_nvmolkit(
         nonlocal results_data
         if mode == "hasSubstructMatch":
             results_data = hasSubstructMatch(mols, queries, config)
-            torch.cuda.synchronize()
         elif mode == "countSubstructMatches":
             results_data = countSubstructMatches(mols, queries, config)
-            torch.cuda.synchronize()
         else:
             results_data = getSubstructMatches(mols, queries, config)
-            torch.cuda.synchronize()
 
-    avg_ms, std_ms = time_it(run, runs)
+    avg_ms, std_ms = time_it(run, runs, gpu_sync=True)
     return avg_ms, std_ms, results_data
 
 
@@ -526,13 +520,14 @@ def main():
 
         if not args.no_nvmolkit:
             try:
+                import torch
+
                 from nvmolkit.substructure import (
                     SubstructSearchConfig,
                     countSubstructMatches,
-                    hasSubstructMatch,
                     getSubstructMatches,
+                    hasSubstructMatch,
                 )
-                import torch
 
                 config = SubstructSearchConfig()
                 config.batchSize = config_row["batch_size"]
