@@ -36,3 +36,18 @@ target_link_libraries(
           cccl_interface)
 target_include_directories(bfgs_mmff PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
                                             ${CMAKE_SOURCE_DIR}/src/forcefields)
+
+add_library(bfgs_uff bfgs_uff.cpp)
+target_link_libraries(
+  bfgs_uff
+  PUBLIC bfgs
+  PRIVATE ${RDKit_LIBS}
+          uff_batched_forcefield
+          rdkit_uff_flattened
+          device
+          device_vector
+          OpenMP::OpenMP_CXX
+          openmp_helpers
+          cccl_interface)
+target_include_directories(bfgs_uff PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
+                                           ${CMAKE_SOURCE_DIR}/src/forcefields)

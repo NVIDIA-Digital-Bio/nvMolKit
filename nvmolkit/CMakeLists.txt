@@ -55,6 +55,16 @@ target_include_directories(_mmffOptimization SYSTEM
                            PUBLIC ${Boost_INCLUDE_DIRS})
 installpythontarget(_mmffOptimization ./)
 
+add_library(_uffOptimization MODULE uffOptimization.cpp)
+target_link_libraries(_uffOptimization PUBLIC ${Boost_LIBRARIES}
+                                              ${PYTHON_LIBRARIES})
+target_link_libraries(_uffOptimization PRIVATE ${RDKit_LIBS} bfgs_uff ff_utils)
+target_include_directories(
+  _uffOptimization PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils
+                          ${Python_INCLUDE_DIRS})
+target_include_directories(_uffOptimization SYSTEM PUBLIC ${Boost_INCLUDE_DIRS})
+installpythontarget(_uffOptimization ./)
+
 add_library(_batchedForcefield MODULE batchedForcefield.cpp)
 target_link_libraries(_batchedForcefield PUBLIC ${Boost_LIBRARIES}
                                                 ${PYTHON_LIBRARIES})
