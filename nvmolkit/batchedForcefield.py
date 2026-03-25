@@ -1,4 +1,13 @@
-"""Python API for batched forcefield energy and gradient evaluation."""
+"""Python API for batched forcefield energy and gradient evaluation.
+
+.. note::
+   Calling :meth:`~MMFFBatchedForcefield.compute_energy` or
+   :meth:`~MMFFBatchedForcefield.compute_gradients` individually from Python
+   incurs per-call overhead that dominates the GPU computation time.
+   Acceleration over RDKit should only be expected when these evaluations run
+   inside the minimizer, where the native loop avoids repeated Python
+   round-trips.
+"""
 
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
@@ -111,14 +120,22 @@ class MMFFBatchedForcefield:
             self._build()
 
     def compute_energy(self) -> list[float]:
-        """Compute one MMFF energy value per molecule in the batch."""
+        """Compute one MMFF energy value per molecule in the batch.
+
+        Note: Per-call Python overhead makes standalone calls slower than
+        expected.  Prefer the minimizer for performance-sensitive workloads.
+        """
         if not self._molecules:
             return []
         self._ensure_built()
         return self._native_ff.computeEnergy()
 
     def compute_gradients(self) -> list[list[float]]:
-        """Compute one flattened 3D gradient vector per molecule in the batch."""
+        """Compute one flattened 3D gradient vector per molecule in the batch.
+
+        Note: Per-call Python overhead makes standalone calls slower than
+        expected.  Prefer the minimizer for performance-sensitive workloads.
+        """
         if not self._molecules:
             return []
         self._ensure_built()

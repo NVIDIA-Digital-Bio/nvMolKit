@@ -15,9 +15,7 @@
 
 #include <GraphMol/ROMol.h>
 
-#include <algorithm>
 #include <boost/python.hpp>
-#include <cmath>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -82,11 +80,10 @@ static void throwIfCudaError(cudaError_t err, const std::string& context) {
   }
 }
 
-template <typename T> static std::vector<T> copyDeviceVector(nvMolKit::AsyncDeviceVector<T>& deviceVec) {
+template <typename T> std::vector<T> copyDeviceVector(nvMolKit::AsyncDeviceVector<T>& deviceVec) {
   std::vector<T> hostVec(deviceVec.size());
-  cudaDeviceSynchronize();
   deviceVec.copyToHost(hostVec);
-  cudaDeviceSynchronize();
+  cudaStreamSynchronize(deviceVec.stream());
   return hostVec;
 }
 
@@ -139,16 +136,18 @@ class NativeMMFFBatchedForcefield {
     const auto props    = extractMMFFPropertiesList(properties, numMols);
     const auto confList = extractIntList(confIds, numMols, "conf_id");
 
+    nvMolKit::MMFF::BatchedMolecularSystemHost systemHost;
+    nvMolKit::BatchedForcefieldMetadata        metadata;
     for (int molIdx = 0; molIdx < numMols; ++molIdx) {
       std::vector<double> positions;
       nvMolKit::confPosToVect(*mols[molIdx], positions, confList[molIdx]);
       auto ffParams = nvMolKit::MMFF::constructForcefieldContribs(*mols[molIdx], props[molIdx], confList[molIdx]);
-      nvMolKit::MMFF::addMoleculeToBatch(ffParams, positions, systemHost_, &metadata_, molIdx, 0);
+      nvMolKit::MMFF::addMoleculeToBatch(ffParams, positions, systemHost, &metadata, molIdx, 0);
     }
-    forcefield_ = std::make_unique<nvMolKit::MMFFBatchedForcefield>(systemHost_, metadata_);
-    positionsDevice_.setFromVector(systemHost_.positions);
-    gradDevice_.resize(systemHost_.positions.size());
-    energyOutsDevice_.resize(numMols);
+    forcefield_ = std::make_unique<nvMolKit::MMFFBatchedForcefield>(systemHost, metadata);
+    positionsDevice_.setFromVector(systemHost.positions);
+    gradDevice_.resize(forcefield_->totalPositions());
+    energyOutsDevice_.resize(forcefield_->numMolecules());
   }
 
   bp::list computeEnergy() {
@@ -160,65 +159,16 @@ class NativeMMFFBatchedForcefield {
   bp::list computeGradients() {
     gradDevice_.zero();
     throwIfCudaError(forcefield_->computeGradients(gradDevice_.data(), positionsDevice_.data()), "computeGradients");
-    return vectorOfVectorsToList(splitGradients(copyDeviceVector(gradDevice_), systemHost_.indices.atomStarts, 3));
+    return vectorOfVectorsToList(
+      splitGradients(copyDeviceVector(gradDevice_), forcefield_->atomStartsHost(), 3));
   }
 
  private:
-  nvMolKit::MMFF::BatchedMolecularSystemHost       systemHost_;
-  nvMolKit::BatchedForcefieldMetadata              metadata_;
   std::unique_ptr<nvMolKit::MMFFBatchedForcefield> forcefield_;
   nvMolKit::AsyncDeviceVector<double>              positionsDevice_;
   nvMolKit::AsyncDeviceVector<double>              gradDevice_;
   nvMolKit::AsyncDeviceVector<double>              energyOutsDevice_;
 };
-
-static bp::list computeMMFFEnergies(const bp::list& molecules, const double nonBondedThreshold) {
-  auto                                       mols = extractMolecules(molecules);
-  nvMolKit::MMFF::BatchedMolecularSystemHost systemHost;
-  nvMolKit::BatchedForcefieldMetadata        metadata;
-
-  for (int i = 0; i < static_cast<int>(mols.size()); ++i) {
-    nvMolKit::MMFFProperties props;
-    props.nonBondedThreshold = nonBondedThreshold;
-    std::vector<double> positions;
-    nvMolKit::confPosToVect(*mols[i], positions);
-    auto ffParams = nvMolKit::MMFF::constructForcefieldContribs(*mols[i], props);
-    nvMolKit::MMFF::addMoleculeToBatch(ffParams, positions, systemHost, &metadata, i, 0);
-  }
-
-  nvMolKit::MMFFBatchedForcefield     forcefield(systemHost, metadata);
-  nvMolKit::AsyncDeviceVector<double> positionsDevice;
-  nvMolKit::AsyncDeviceVector<double> energyOutsDevice;
-  positionsDevice.setFromVector(systemHost.positions);
-  energyOutsDevice.resize(mols.size());
-  energyOutsDevice.zero();
-  throwIfCudaError(forcefield.computeEnergy(energyOutsDevice.data(), positionsDevice.data()), "MMFFComputeEnergies");
-  return vectorToList(copyDeviceVector(energyOutsDevice));
-}
-
-static bp::list computeMMFFGradients(const bp::list& molecules, const double nonBondedThreshold) {
-  auto                                       mols = extractMolecules(molecules);
-  nvMolKit::MMFF::BatchedMolecularSystemHost systemHost;
-  nvMolKit::BatchedForcefieldMetadata        metadata;
-
-  for (int i = 0; i < static_cast<int>(mols.size()); ++i) {
-    nvMolKit::MMFFProperties props;
-    props.nonBondedThreshold = nonBondedThreshold;
-    std::vector<double> positions;
-    nvMolKit::confPosToVect(*mols[i], positions);
-    auto ffParams = nvMolKit::MMFF::constructForcefieldContribs(*mols[i], props);
-    nvMolKit::MMFF::addMoleculeToBatch(ffParams, positions, systemHost, &metadata, i, 0);
-  }
-
-  nvMolKit::MMFFBatchedForcefield     forcefield(systemHost, metadata);
-  nvMolKit::AsyncDeviceVector<double> positionsDevice;
-  nvMolKit::AsyncDeviceVector<double> gradDevice;
-  positionsDevice.setFromVector(systemHost.positions);
-  gradDevice.resize(systemHost.positions.size());
-  gradDevice.zero();
-  throwIfCudaError(forcefield.computeGradients(gradDevice.data(), positionsDevice.data()), "MMFFComputeGradients");
-  return vectorOfVectorsToList(splitGradients(copyDeviceVector(gradDevice), systemHost.indices.atomStarts, 3));
-}
 
 BOOST_PYTHON_MODULE(_batchedForcefield) {
   bp::class_<nvMolKit::MMFFProperties>("MMFFProperties")
@@ -240,7 +190,4 @@ BOOST_PYTHON_MODULE(_batchedForcefield) {
     bp::init<const bp::list&, const bp::list&, const bp::list&>())
     .def("computeEnergy", &NativeMMFFBatchedForcefield::computeEnergy)
     .def("computeGradients", &NativeMMFFBatchedForcefield::computeGradients);
-
-  bp::def("MMFFComputeEnergies", computeMMFFEnergies, (bp::arg("molecules"), bp::arg("nonBondedThreshold") = 100.0));
-  bp::def("MMFFComputeGradients", computeMMFFGradients, (bp::arg("molecules"), bp::arg("nonBondedThreshold") = 100.0));
 }
