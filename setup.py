@@ -21,9 +21,7 @@ pyroot = os.getenv("CONDA_PREFIX")
 
 cmake_extra_args = []
 if pyroot:
-    cmake_extra_args.append(
-        f"-DCMAKE_PREFIX_PATH={pyroot}"
-    )
+    cmake_extra_args.append(f"-DCMAKE_PREFIX_PATH={pyroot}")
 
 # Detect if we're doing an install against pip rdkit
 nvmolkit_build_against_pip = os.getenv("NVMOLKIT_BUILD_AGAINST_PIP_RDKIT")
@@ -37,16 +35,17 @@ if nvmolkit_build_against_pip:
     NVMOLKIT_BUILD_AGAINST_PIP_BOOSTINCLUDEDIR = os.getenv("NVMOLKIT_BUILD_AGAINST_PIP_BOOSTINCLUDEDIR")
     if not NVMOLKIT_BUILD_AGAINST_PIP_BOOSTINCLUDEDIR:
         raise ValueError("NVMOLKIT_BUILD_AGAINST_PIP_BOOSTINCLUDEDIR must be set when building against pip rdkit")
-    cmake_extra_args.extend([
-        "-DNVMOLKIT_BUILD_AGAINST_PIP_RDKIT=ON",
-        f"-DNVMOLKIT_BUILD_AGAINST_PIP_LIBDIR={NVMOLKIT_BUILD_AGAINST_PIP_LIBDIR}",
-        f"-DNVMOLKIT_BUILD_AGAINST_PIP_INCDIR={NVMOLKIT_BUILD_AGAINST_PIP_INCDIR}",
-        f"-DNVMOLKIT_BUILD_AGAINST_PIP_BOOSTINCLUDEDIR={NVMOLKIT_BUILD_AGAINST_PIP_BOOSTINCLUDEDIR}"
-    ])
+    cmake_extra_args.extend(
+        [
+            "-DNVMOLKIT_BUILD_AGAINST_PIP_RDKIT=ON",
+            f"-DNVMOLKIT_BUILD_AGAINST_PIP_LIBDIR={NVMOLKIT_BUILD_AGAINST_PIP_LIBDIR}",
+            f"-DNVMOLKIT_BUILD_AGAINST_PIP_INCDIR={NVMOLKIT_BUILD_AGAINST_PIP_INCDIR}",
+            f"-DNVMOLKIT_BUILD_AGAINST_PIP_BOOSTINCLUDEDIR={NVMOLKIT_BUILD_AGAINST_PIP_BOOSTINCLUDEDIR}",
+        ]
+    )
 
 
 if __name__ == "__main__":
-
     setup(
         cmake_languages=("CXX", "CUDA"),
         cmake_args=[
@@ -56,8 +55,9 @@ if __name__ == "__main__":
             "-DNVMOLKIT_BUILD_BENCHMARKS=OFF",
             f"-DNVMOLKIT_CUDA_TARGET_MODE={os.getenv('NVMOLKIT_CUDA_TARGET_MODE', 'full')}",
             f"-DCMAKE_BUILD_TYPE={os.getenv('CMAKE_BUILD_TYPE', 'Release')}",
-            #"-DBoost_NO_BOOST_CMAKE=TRUE"
-        ] + cmake_extra_args,
+            # "-DBoost_NO_BOOST_CMAKE=TRUE"
+        ]
+        + cmake_extra_args,
         packages=["nvmolkit"],
         exclude_package_data={"nvmolkit": ["tests/*", "*.cpp"]},
         package_data={"nvmolkit": ["**/*.csv"]},

@@ -1,3 +1,4 @@
+#!/bin/bash
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -13,19 +14,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""nvMolKit - GPU-accelerated RDKit functionality.
 
-nvMolKit provides GPU-accelerated implementations of common RDKit operations
-to improve performance for large-scale cheminformatics workflows. APIs match
-RDKit as closely as possible, but expand to support batches of molecules, which
-is critical for GPU performance.
+# Runs ruff format over the codebase.
+# By default will modify files in-place. Use -d to do a dry-run.
 
-Currently supported functionality:
-- Batch Morgan Fingerprint calculation
-- Bulk tanimoto/cosine similarity calculations between fingerprints
-- ETKDG conformer generation for multiple molecules
-- MMFF optimization for multiple molecules and conformers
-"""
+set -ex
 
-VERSION = "0.4.0"
-__version__ = VERSION
+RUFF_ARGS=()
+while getopts ":d" opt; do
+  case ${opt} in
+    d )
+      RUFF_ARGS+=(--check)
+      ;;
+    \? )
+      echo "Usage: run_ruff_format.sh [-d]"
+      exit 1
+      ;;
+  esac
+done
+
+ROOT_DIR=$(git rev-parse --show-toplevel)
+
+echo "Running ruff format:"
+ruff format "${RUFF_ARGS[@]}" "$ROOT_DIR"

@@ -50,7 +50,7 @@ markers = [
 
 [tool.ruff]
 line-length = 119
-include = ["nvmolkit/tests/conftest.py"]
+include = ["nvmolkit/**/*.py", "benchmarks/**/*.py", "setup.py"]
 
 [tool.ruff.lint]
 ignore = [
