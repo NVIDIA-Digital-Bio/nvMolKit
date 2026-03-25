@@ -1,0 +1,67 @@
+name: Lint
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  clang-format:
+    name: clang-format
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source tree
+        uses: actions/checkout@v4
+
+      - name: Install clang-format 17
+        shell: bash
+        run: |
+          set -xeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ca-certificates gnupg wget
+          wget -qO - https://apt.llvm.org/llvm-snapshot.gpg.key | \
+            sudo gpg --dearmor -o /usr/share/keyrings/llvm-snapshot.gpg
+          echo "deb [signed-by=/usr/share/keyrings/llvm-snapshot.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-17 main" | \
+            sudo tee /etc/apt/sources.list.d/llvm.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-format-17
+
+      - name: Run clang-format check
+        shell: bash
+        run: |
+          set -xeuo pipefail
+          bash admin/run_clang_format.sh -d
+
+  cmake-format-lint:
+    name: cmake-format-lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source tree
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install cmakelang
+        shell: bash
+        run: |
+          set -xeuo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install cmakelang==0.6.13
+
+      - name: Run cmake-format and cmake-lint checks
+        shell: bash
+        run: |
+          set -xeuo pipefail
+          bash admin/run_cmake_format_lint.sh -d

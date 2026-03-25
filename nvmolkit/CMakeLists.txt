@@ -24,8 +24,14 @@ target_include_directories(_DataStructs PRIVATE ${Python_INCLUDE_DIRS})
 installpythontarget(_DataStructs ./)
 
 add_library(_Fingerprints MODULE fingerprints.cpp)
-target_link_libraries(_Fingerprints ${Boost_LIBRARIES} ${PYTHON_LIBRARIES}
-                      ${RDKit_LIBS} morganFingerprint device CUDA::cudart)
+target_link_libraries(
+  _Fingerprints
+  ${Boost_LIBRARIES}
+  ${PYTHON_LIBRARIES}
+  ${RDKit_LIBS}
+  morganFingerprint
+  device
+  CUDA::cudart)
 target_include_directories(_Fingerprints PRIVATE ${Python_INCLUDE_DIRS})
 installpythontarget(_Fingerprints ./)
 
@@ -71,17 +77,18 @@ add_library(_conformerRmsd MODULE conformerRmsd.cpp)
 target_include_directories(
   _conformerRmsd PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils ${Boost_INCLUDE_DIRS}
                         ${Python_INCLUDE_DIRS})
-target_link_libraries(_conformerRmsd PUBLIC ${Boost_LIBRARIES} ${PYTHON_LIBRARIES}
-                                            device_vector conformer_rmsd_mol device)
+target_link_libraries(
+  _conformerRmsd PUBLIC ${Boost_LIBRARIES} ${PYTHON_LIBRARIES} device_vector
+                        conformer_rmsd_mol device)
 target_link_libraries(_conformerRmsd PRIVATE ${RDKit_LIBS})
 installpythontarget(_conformerRmsd ./)
 
 add_library(_substructure MODULE substructure.cpp)
 target_include_directories(
-        _substructure PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils ${Boost_INCLUDE_DIRS}
-        ${Python_INCLUDE_DIRS}
-        ${CMAKE_SOURCE_DIR}/src/substruct)
+  _substructure PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils ${Boost_INCLUDE_DIRS}
+                       ${Python_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/src/substruct)
 target_link_libraries(_substructure PUBLIC ${Boost_LIBRARIES}
-        ${PYTHON_LIBRARIES})
-target_link_libraries(_substructure PRIVATE ${RDKit_LIBS} substructure_search pinned_host_allocator)
+                                           ${PYTHON_LIBRARIES})
+target_link_libraries(_substructure PRIVATE ${RDKit_LIBS} substructure_search
+                                            pinned_host_allocator)
 installpythontarget(_substructure ./)
