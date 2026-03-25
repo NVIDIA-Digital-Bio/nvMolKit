@@ -18,9 +18,9 @@
 
 #include <vector>
 
-#include "mmff_properties.h"
 #include "../hardware_options.h"
 #include "bfgs_minimize.h"
+#include "mmff_properties.h"
 
 namespace RDKit {
 class ROMol;

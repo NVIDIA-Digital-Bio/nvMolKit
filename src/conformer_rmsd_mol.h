@@ -16,10 +16,11 @@
 #ifndef NVMOLKIT_CONFORMER_RMSD_MOL_H
 #define NVMOLKIT_CONFORMER_RMSD_MOL_H
 
-#include "conformer_rmsd.h"
-
 #include <GraphMol/GraphMol.h>
+
 #include <vector>
+
+#include "conformer_rmsd.h"
 
 namespace nvMolKit {
 
@@ -40,8 +41,8 @@ namespace nvMolKit {
  * @throws std::overflow_error   if the number of pairs exceeds INT_MAX.
  */
 AsyncDeviceVector<double> conformerRmsdMatrixMol(const RDKit::ROMol& mol,
-                                                  bool                prealigned = false,
-                                                  cudaStream_t        stream     = nullptr);
+                                                 bool                prealigned = false,
+                                                 cudaStream_t        stream     = nullptr);
 
 /**
  * @brief Compute pairwise RMSD matrices for a batch of molecules on GPU.
@@ -59,10 +60,9 @@ AsyncDeviceVector<double> conformerRmsdMatrixMol(const RDKit::ROMol& mol,
  *                               but no atoms.
  * @throws std::overflow_error   if cumulative pair count exceeds INT_MAX.
  */
-std::vector<AsyncDeviceVector<double>> conformerRmsdBatchMatrixMol(
-    const std::vector<const RDKit::ROMol*>& mols,
-    bool                                    prealigned = false,
-    cudaStream_t                            stream     = nullptr);
+std::vector<AsyncDeviceVector<double>> conformerRmsdBatchMatrixMol(const std::vector<const RDKit::ROMol*>& mols,
+                                                                   bool         prealigned = false,
+                                                                   cudaStream_t stream     = nullptr);
 
 }  // namespace nvMolKit
 

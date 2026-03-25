@@ -25,8 +25,8 @@
 
 #include <random>
 
-#include "batched_forcefield.h"
 #include "../rdkit_extensions/mmff_flattened_builder.h"
+#include "batched_forcefield.h"
 #include "bfgs_minimize.h"
 #include "device.h"
 #include "mmff.h"
@@ -167,17 +167,22 @@ class BFGSMinimizerBackendTest : public BFGSMinimizerTestFixture,
 
 namespace {
 
-void minimizeMMFF(nvMolKit::BfgsBatchMinimizer&       minimizer,
-                  const int                           numIters,
-                  const double                        gradTol,
-                  const BatchedMolecularSystemHost&   systemHost,
-                  BatchedMolecularDeviceBuffers&      systemDevice,
-                  cudaStream_t                        stream          = nullptr,
-                  const uint8_t*                      activeThisStage = nullptr) {
+void minimizeMMFF(nvMolKit::BfgsBatchMinimizer&     minimizer,
+                  const int                         numIters,
+                  const double                      gradTol,
+                  const BatchedMolecularSystemHost& systemHost,
+                  BatchedMolecularDeviceBuffers&    systemDevice,
+                  cudaStream_t                      stream          = nullptr,
+                  const uint8_t*                    activeThisStage = nullptr) {
   if (minimizer.resolveBackend(systemHost.indices.atomStarts) == nvMolKit::BfgsBackend::BATCHED) {
     nvMolKit::MMFFBatchedForcefield forcefield(systemHost, {}, stream);
-    minimizer.minimize(
-      numIters, gradTol, forcefield, systemDevice.positions, systemDevice.grad, systemDevice.energyOuts, activeThisStage);
+    minimizer.minimize(numIters,
+                       gradTol,
+                       forcefield,
+                       systemDevice.positions,
+                       systemDevice.grad,
+                       systemDevice.energyOuts,
+                       activeThisStage);
     return;
   }
   minimizer.minimizeWithMMFF(numIters, gradTol, systemHost.indices.atomStarts, systemDevice, activeThisStage);
@@ -790,11 +795,11 @@ class QuarticBatchedForcefield final : public nvMolKit::BatchedForcefield {
   }
 
  private:
-  int         numTerms_        = 0;
-  const int*  outIdx_          = nullptr;
-  bool        computeLastDim_  = false;
-  int         numBlocks_       = 0;
-  int         blockSize_       = 0;
+  int        numTerms_       = 0;
+  const int* outIdx_         = nullptr;
+  bool       computeLastDim_ = false;
+  int        numBlocks_      = 0;
+  int        blockSize_      = 0;
 };
 
 class BFGSMinimizerHarmonicTestFixture : public ::testing::Test {
@@ -909,13 +914,7 @@ TEST_P(BFGSMinimizerTest4DTest, BFGSMinimizer4DQuartic) {
   nvMolKit::BfgsBatchMinimizer minimizer(dim_, nvMolKit::DebugLevel::STEPWISE, false);
   auto                         forcefield = makeForcefield();
 
-  minimizer.minimize(400,
-                     1e-5,
-                     forcefield,
-                     positionsDevice_,
-                     gradDevice_,
-                     energyOutsDevice_,
-                     nullptr);
+  minimizer.minimize(400, 1e-5, forcefield, positionsDevice_, gradDevice_, energyOutsDevice_, nullptr);
 
   std::vector<double> gotPositions = getPositionsFromDevice();
   verifyPositions(gotPositions, 0.1);
@@ -1073,13 +1072,7 @@ TEST_F(BFGSMinimizerHarmonicTestFixture, MultipleMinimizeCallsConvergedSystemUnc
   cudaStreamSynchronize(energyOutsDevice_.stream());
   ASSERT_THAT(energiesBefore, ::testing::Each(::testing::DoubleNear(0.0, 1e-5)));
   // Call minimize again on the converged system
-  minimizer.minimize(50,
-                     1e-4,
-                     forcefield,
-                     positionsDevice_,
-                     gradDevice_,
-                     energyOutsDevice_,
-                     nullptr);
+  minimizer.minimize(50, 1e-4, forcefield, positionsDevice_, gradDevice_, energyOutsDevice_, nullptr);
 
   std::vector<double> energiesAfter(energyOutsDevice_.size());
   energyOutsDevice_.copyToHost(energiesAfter);
@@ -1120,22 +1113,10 @@ TEST_F(BFGSMinimizerHarmonicTestFixture, MultipleMinimizeCallsEquivalentToSingle
   auto                         forcefield2 = makeForcefield();
 
   // First part of iterations
-  minimizer2.minimize(5,
-                      1e-4,
-                      forcefield2,
-                      positionsDevice_,
-                      gradDevice_,
-                      energyOutsDevice_,
-                      nullptr);
+  minimizer2.minimize(5, 1e-4, forcefield2, positionsDevice_, gradDevice_, energyOutsDevice_, nullptr);
 
   // Second half of iterations
-  minimizer2.minimize(45,
-                      1e-4,
-                      forcefield2,
-                      positionsDevice_,
-                      gradDevice_,
-                      energyOutsDevice_,
-                      nullptr);
+  minimizer2.minimize(45, 1e-4, forcefield2, positionsDevice_, gradDevice_, energyOutsDevice_, nullptr);
 
   std::vector<double>  doubleCallPositions = getPositionsFromDevice();
   std::vector<int16_t> doubleCallStatuses  = getStatusesFromDevice(minimizer2);

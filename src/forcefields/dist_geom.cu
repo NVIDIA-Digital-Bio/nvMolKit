@@ -520,12 +520,7 @@ void addMoleculeToBatch3D(const Energy3DForceContribsHost& contribs,
   addMoleculeToContextWithPositions(positions, 3, ctxAtomStarts, ctxPositions);
 
   // Then update the molecular system
-  addMoleculeToMolecularSystem3D(contribs,
-                                 ctxAtomStarts,
-                                 molSystem,
-                                 metadata,
-                                 moleculeIdx,
-                                 conformerIdx);
+  addMoleculeToMolecularSystem3D(contribs, ctxAtomStarts, molSystem, metadata, moleculeIdx, conformerIdx);
 }
 
 void sendContribsAndIndicesToDevice(const BatchedMolecularSystemHost& molSystemHost,

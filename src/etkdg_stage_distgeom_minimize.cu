@@ -67,9 +67,9 @@ void checkMinimizedEnergies(const AsyncDeviceVector<double>& energyOuts,
   }
   const int gridSize = (molNum + kBlockSize - 1) / kBlockSize;
   checkMinimizedEnergiesKernel<<<gridSize, kBlockSize, 0, stream>>>(molNum,
-                                                                     energyOuts.data(),
-                                                                     atomStarts.data(),
-                                                                     failedThisStage.data());
+                                                                    energyOuts.data(),
+                                                                    atomStarts.data(),
+                                                                    failedThisStage.data());
   cudaCheckError(cudaGetLastError());
 }
 }  // namespace
@@ -103,7 +103,7 @@ DistGeomMinimizeStage::DistGeomMinimizeStage(
   }
 
   // Preallocate memory based on first molecule (if available)
-  bool preallocated = false;
+  bool                                         preallocated = false;
   // Repeated entries can point at the same ROMol, so collapse them onto one
   // molecule slot and treat later occurrences as additional conformers.
   std::unordered_map<const RDKit::ROMol*, int> moleculeSlots;

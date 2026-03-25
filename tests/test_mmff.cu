@@ -524,8 +524,7 @@ TEST(BatchedForcefieldCustomization, AppliesForcefieldModifierBeforeFlattening) 
         kb *= 2.0;
       }
     };
-  nvMolKit::MMFF::addMoleculeToBatch(
-    filteredContribs, positions, systemHostCustomized, &metadata, 0, 0, customization);
+  nvMolKit::MMFF::addMoleculeToBatch(filteredContribs, positions, systemHostCustomized, &metadata, 0, 0, customization);
   const double customizedEnergy = getCombinedEnergyViaForcefield(systemHostCustomized);
 
   EXPECT_NEAR(customizedEnergy, 2.0 * baselineEnergy, FUNCTION_E_TOL);
