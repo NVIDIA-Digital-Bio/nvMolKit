@@ -18,6 +18,7 @@
 #include <boost/python.hpp>
 
 #include "bfgs_mmff.h"
+#include "mmff_properties.h"
 
 template <typename T> boost::python::list vectorToList(const std::vector<T>& vec) {
   boost::python::list list;
@@ -54,9 +55,9 @@ BOOST_PYTHON_MODULE(_mmffOptimization) {
         molsVec.push_back(mol);
       }
 
-      // Call the C++ function (uses HYBRID backend by default, which auto-selects based on max atoms)
-      auto result =
-        nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molsVec, maxIters, nonBondedThreshold, hardwareOptions);
+      nvMolKit::MMFFProperties properties;
+      properties.nonBondedThreshold = nonBondedThreshold;
+      auto result = nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molsVec, maxIters, properties, hardwareOptions);
 
       // Convert result back to Python list of lists
       return vectorOfVectorsToList(result);

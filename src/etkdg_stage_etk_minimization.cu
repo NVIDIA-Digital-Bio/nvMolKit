@@ -13,7 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <optional>
+#include <unordered_map>
+
 #include "dist_geom_flattened_builder.h"
+#include "etk_batched_forcefield.h"
 #include "etkdg_stage_etk_minimization.h"
 #include "minimizer/bfgs_minimize.h"
 
@@ -82,6 +86,19 @@ __global__ void planarToleranceCheck(const int      numSystems,
   }
 }
 
+void runPlanarToleranceCheck(const AsyncDeviceVector<double>& planarEnergies,
+                             const int*                       numImpropers,
+                             const ETKDGContext&              ctx,
+                             cudaStream_t                     stream) {
+  const int numSystems = ctx.systemHost.atomStarts.size() - 1;
+  planarToleranceCheck<<<(numSystems + 255) / 256, 256, 0, stream>>>(numSystems,
+                                                                     planarEnergies.data(),
+                                                                     numImpropers,
+                                                                     ctx.activeThisStage.data(),
+                                                                     ctx.failedThisStage.data());
+  cudaCheckError(cudaGetLastError());
+}
+
 }  // namespace
 
 ETKMinimizationStage::ETKMinimizationStage(
@@ -95,13 +112,16 @@ ETKMinimizationStage::ETKMinimizationStage(
     : embedParam_(embedParam),
       minimizer_(minimizer),
       stream_(stream) {
-  setStreams(molSystemDevice, stream);
+  grad_.setStream(stream);
+  energyOuts_.setStream(stream);
 
   const int totalNumAtoms = ctx.systemHost.atomStarts.back();
 
   std::vector<double> positions(totalNumAtoms * dim, 0.0);
 
-  bool preallocated = false;
+  bool                                         preallocated = false;
+  std::unordered_map<const RDKit::ROMol*, int> moleculeSlots;
+  std::unordered_map<const RDKit::ROMol*, int> conformerCounts;
   for (size_t i = 0; i < mols.size(); ++i) {
     const auto& mol          = mols[i];
     const auto& etkdgDetails = eargs[i].etkdgDetails;
@@ -141,71 +161,107 @@ ETKMinimizationStage::ETKMinimizationStage(
       preallocated = true;
     }
 
-    addMoleculeToMolecularSystem3D(*ffParams, ctx.systemHost.atomStarts, molSystemHost);
+    auto [slotIt, inserted] = moleculeSlots.emplace(mol, static_cast<int>(moleculeSlots.size()));
+    const int moleculeIdx   = slotIt->second;
+    const int conformerIdx  = conformerCounts[mol]++;
+    addMoleculeToMolecularSystem3D(*ffParams,
+                                   ctx.systemHost.atomStarts,
+                                   molSystemHost,
+                                   &metadata_,
+                                   moleculeIdx,
+                                   conformerIdx);
   }
-  setupDeviceBuffers3D(molSystemHost, molSystemDevice, positions, mols.size());
-  DistGeom::sendContribsAndIndicesToDevice3D(molSystemHost, molSystemDevice);
 }
 
-void ETKMinimizationStage::setReferenceValues(const ETKDGContext& ctx) {
-  const int numTerms12 = molSystemDevice.contribs.dist12Terms.idx1.size();
-  const int numTerms13 = molSystemDevice.contribs.dist13Terms.idx1.size();
+void ETKMinimizationStage::setReferenceValues(const ETKDGContext&                          ctx,
+                                              const DistGeom::Energy3DForceContribsDevice& contribs) {
+  const int numTerms12 = contribs.dist12Terms.idx1.size();
+  const int numTerms13 = contribs.dist13Terms.idx1.size();
 
   if (numTerms12 > 0) {
-    updateReferencePositionsKernel<<<(numTerms12 + 255) / 256, 256, 0, stream_>>>(
-      numTerms12,
-      ctx.systemDevice.positions.data(),
-      molSystemDevice.contribs.dist12Terms.idx1.data(),
-      molSystemDevice.contribs.dist12Terms.idx2.data(),
-      molSystemDevice.contribs.dist12Terms.minLen.data(),
-      molSystemDevice.contribs.dist12Terms.maxLen.data());
+    updateReferencePositionsKernel<<<(numTerms12 + 255) / 256, 256, 0, stream_>>>(numTerms12,
+                                                                                  ctx.systemDevice.positions.data(),
+                                                                                  contribs.dist12Terms.idx1.data(),
+                                                                                  contribs.dist12Terms.idx2.data(),
+                                                                                  contribs.dist12Terms.minLen.data(),
+                                                                                  contribs.dist12Terms.maxLen.data());
     cudaCheckError(cudaGetLastError());
   }
   if (numTerms13 > 0) {
     updateReferencePositionsKernel<<<(numTerms13 + 255) / 256, 256, 0, stream_>>>(
       numTerms13,
       ctx.systemDevice.positions.data(),
-      molSystemDevice.contribs.dist13Terms.idx1.data(),
-      molSystemDevice.contribs.dist13Terms.idx2.data(),
-      molSystemDevice.contribs.dist13Terms.minLen.data(),
-      molSystemDevice.contribs.dist13Terms.maxLen.data(),
-      molSystemDevice.contribs.dist13Terms.isImproperConstrained.data());
+      contribs.dist13Terms.idx1.data(),
+      contribs.dist13Terms.idx2.data(),
+      contribs.dist13Terms.minLen.data(),
+      contribs.dist13Terms.maxLen.data(),
+      contribs.dist13Terms.isImproperConstrained.data());
 
     cudaCheckError(cudaGetLastError());
   }
 }
 
 void ETKMinimizationStage::execute(ETKDGContext& ctx) {
+  const auto effectiveBackend = minimizer_.resolveBackend(ctx.systemHost.atomStarts);
+
   // 1. Update reference positions for start of loop.
-  setReferenceValues(ctx);
+  constexpr int                             maxIters = 300;  // Taken from hard-coded RDKit value.
+  DistGeom::BatchedMolecular3DDeviceBuffers molSystemDevice;
+  std::optional<ETKBatchedForcefield>       forcefield;
+  AsyncDeviceVector<double>*                planarEnergies = nullptr;
+  const int*                                numImpropers   = nullptr;
 
-  // 2. Minimize via BFGS - unified API handles backend selection internally
-  constexpr int maxIters = 300;  // Taken from hard-coded RDKit value.
-  minimizer_.minimizeWithETK(maxIters,
-                             embedParam_.optimizerForceTol,
-                             ctx.systemHost.atomStarts,
-                             ctx.systemDevice.atomStarts,
-                             ctx.systemDevice.positions,
-                             molSystemDevice,
-                             embedParam_.useBasicKnowledge,
-                             ctx.activeThisStage.data());
+  if (effectiveBackend == BfgsBackend::BATCHED) {
+    forcefield.emplace(molSystemHost, ctx.systemHost.atomStarts, embedParam_.useBasicKnowledge, metadata_, stream_);
+    setReferenceValues(ctx, forcefield->contribs());
+    grad_.resize(ctx.systemHost.positions.size());
+    grad_.zero();
+    energyOuts_.resize(ctx.systemHost.atomStarts.size() - 1);
+    energyOuts_.zero();
+    minimizer_.minimize(maxIters,
+                        embedParam_.optimizerForceTol,
+                        *forcefield,
+                        ctx.systemDevice.positions,
+                        grad_,
+                        energyOuts_,
+                        ctx.activeThisStage.data());
+    planarEnergies = &energyOuts_;
+    numImpropers   = forcefield->contribs().improperTorsionTerms.numImpropers.data();
+    if (embedParam_.useBasicKnowledge) {
+      planarEnergies->zero();
+      forcefield->computePlanarEnergy(planarEnergies->data(),
+                                      ctx.systemDevice.positions.data(),
+                                      ctx.activeThisStage.data(),
+                                      stream_);
+    }
+  } else {
+    setStreams(molSystemDevice, stream_);
+    std::vector<double> positions(ctx.systemHost.atomStarts.back() * dim, 0.0);
+    setupDeviceBuffers3D(molSystemHost, molSystemDevice, positions, ctx.systemHost.atomStarts.size() - 1);
+    DistGeom::sendContribsAndIndicesToDevice3D(molSystemHost, molSystemDevice);
+    setReferenceValues(ctx, molSystemDevice.contribs);
 
-  // 3. Check planar tolerance (only if useBasicKnowledge is true - ETKDG/KDG variants)
+    minimizer_.minimizeWithETK(maxIters,
+                               embedParam_.optimizerForceTol,
+                               ctx.systemHost.atomStarts,
+                               ctx.systemDevice.atomStarts,
+                               ctx.systemDevice.positions,
+                               molSystemDevice,
+                               ctx.activeThisStage.data());
+    planarEnergies = &molSystemDevice.energyOuts;
+    numImpropers   = molSystemDevice.contribs.improperTorsionTerms.numImpropers.data();
+    if (embedParam_.useBasicKnowledge) {
+      DistGeom::computePlanarEnergy(molSystemDevice,
+                                    ctx.systemDevice.atomStarts,
+                                    ctx.systemDevice.positions,
+                                    ctx.activeThisStage.data(),
+                                    nullptr,
+                                    stream_);
+    }
+  }
+
   if (embedParam_.useBasicKnowledge) {
-    DistGeom::computePlanarEnergy(molSystemDevice,
-                                  ctx.systemDevice.atomStarts,
-                                  ctx.systemDevice.positions,
-                                  ctx.activeThisStage.data(),
-                                  nullptr,
-                                  stream_);
-    const int numSystems = ctx.systemHost.atomStarts.size() - 1;
-    planarToleranceCheck<<<(numSystems + 255) / 256, 256, 0, stream_>>>(
-      numSystems,
-      molSystemDevice.energyOuts.data(),
-      molSystemDevice.contribs.improperTorsionTerms.numImpropers.data(),
-      ctx.activeThisStage.data(),
-      ctx.failedThisStage.data());
-    cudaCheckError(cudaGetLastError());
+    runPlanarToleranceCheck(*planarEnergies, numImpropers, ctx, stream_);
   }
 }
 

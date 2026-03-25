@@ -158,7 +158,13 @@ void addMoleculeToMolecularSystem(const EnergyForceContribsHost& contribs,
                                   const int                      numAtoms,
                                   const int                      dimension,
                                   const std::vector<int>&        ctxAtomStarts,
-                                  BatchedMolecularSystemHost&    molSystem) {
+                                  BatchedMolecularSystemHost&    molSystem,
+                                  BatchedForcefieldMetadata*     metadata,
+                                  const int                      moleculeIdx,
+                                  const int                      conformerIdx) {
+  if (metadata != nullptr) {
+    metadata->recordSystem(moleculeIdx, conformerIdx);
+  }
   // Use distTermStarts.size() - 1 to get the current batch index
   const int batchIdx              = molSystem.indices.distTermStarts.size() - 1;
   // Get the previous last atom index from ctxAtomStarts using the current batch index
@@ -255,7 +261,13 @@ void addMoleculeToMolecularSystem(const EnergyForceContribsHost& contribs,
 
 void addMoleculeToMolecularSystem3D(const Energy3DForceContribsHost& contribs,
                                     const std::vector<int>&          ctxAtomStarts,
-                                    BatchedMolecularSystem3DHost&    molSystem) {
+                                    BatchedMolecularSystem3DHost&    molSystem,
+                                    BatchedForcefieldMetadata*       metadata,
+                                    const int                        moleculeIdx,
+                                    const int                        conformerIdx) {
+  if (metadata != nullptr) {
+    metadata->recordSystem(moleculeIdx, conformerIdx);
+  }
   // Use distTermStarts.size() - 1 to get the current batch index
   const int batchIdx              = molSystem.indices.experimentalTorsionTermStarts.size() - 1;
   // Get the previous last atom index from ctxAtomStarts using the current batch index
@@ -478,24 +490,37 @@ void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
                         BatchedMolecularSystemHost&    molSystem,
                         const int                      dimension,
                         std::vector<int>&              ctxAtomStarts,
-                        std::vector<double>&           ctxPositions) {
+                        std::vector<double>&           ctxPositions,
+                        BatchedForcefieldMetadata*     metadata,
+                        const int                      moleculeIdx,
+                        const int                      conformerIdx) {
   // First update context data
   addMoleculeToContextWithPositions(positions, dimension, ctxAtomStarts, ctxPositions);
 
   // Then update the molecular system
-  addMoleculeToMolecularSystem(contribs, positions.size() / dimension, dimension, ctxAtomStarts, molSystem);
+  addMoleculeToMolecularSystem(contribs,
+                               positions.size() / dimension,
+                               dimension,
+                               ctxAtomStarts,
+                               molSystem,
+                               metadata,
+                               moleculeIdx,
+                               conformerIdx);
 }
 
 void addMoleculeToBatch3D(const Energy3DForceContribsHost& contribs,
                           const std::vector<double>&       positions,
                           BatchedMolecularSystem3DHost&    molSystem,
                           std::vector<int>&                ctxAtomStarts,
-                          std::vector<double>&             ctxPositions) {
+                          std::vector<double>&             ctxPositions,
+                          BatchedForcefieldMetadata*       metadata,
+                          const int                        moleculeIdx,
+                          const int                        conformerIdx) {
   // First update context data
   addMoleculeToContextWithPositions(positions, 3, ctxAtomStarts, ctxPositions);
 
   // Then update the molecular system
-  addMoleculeToMolecularSystem3D(contribs, ctxAtomStarts, molSystem);
+  addMoleculeToMolecularSystem3D(contribs, ctxAtomStarts, molSystem, metadata, moleculeIdx, conformerIdx);
 }
 
 void sendContribsAndIndicesToDevice(const BatchedMolecularSystemHost& molSystemHost,
@@ -742,24 +767,21 @@ void setupDeviceBuffers3D(BatchedMolecularSystem3DHost&    molSystemHost,
   molSystemDevice.grad.zero();
 }
 
-// TODO: More sophisticated error handling for energy and gradient.
-cudaError_t computeEnergy(BatchedMolecularDeviceBuffers&             molSystemDevice,
-                          const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
-                          const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
-                          const double                               chiralWeight,
-                          const double                               fourthDimWeight,
-                          const uint8_t*                             activeThisStage,
-                          const double*                              positions,
-                          cudaStream_t                               stream) {
-  // Prechecks - tempstorage allocated, energybuffer allocated
+cudaError_t computeEnergy(BatchedMolecularDeviceBuffers& molSystemDevice,
+                          double*                        energyOuts,
+                          const int*                     ctxAtomStarts,
+                          const double*                  ctxPositions,
+                          const double                   chiralWeight,
+                          const double                   fourthDimWeight,
+                          const uint8_t*                 activeSystemMask,
+                          const double*                  positions,
+                          cudaStream_t                   stream) {
   assert(molSystemDevice.energyBuffer.size() > 0);
-  assert(molSystemDevice.energyOuts.data() != nullptr);
+  assert(energyOuts != nullptr);
+  molSystemDevice.energyBuffer.zero();
 
-  // Use provided positions or fall back to context positions
-  const double* posData = positions ? positions : ctxPositionsDevice.data();
-
-  // Dispatch each term if there is a contrib for it.
-  const auto& contribs = molSystemDevice.contribs;
+  const double* posData  = positions ? positions : ctxPositions;
+  const auto&   contribs = molSystemDevice.contribs;
 
   cudaError_t err = cudaSuccess;
   if (contribs.distTerms.idx1.size() > 0) {
@@ -774,9 +796,9 @@ cudaError_t computeEnergy(BatchedMolecularDeviceBuffers&             molSystemDe
                                           molSystemDevice.indices.energyBufferStarts.data(),
                                           molSystemDevice.indices.atomIdxToBatchIdx.data(),
                                           molSystemDevice.indices.distTermStarts.data(),
-                                          ctxAtomStartsDevice.data(),
+                                          ctxAtomStarts,
                                           molSystemDevice.dimension,
-                                          activeThisStage,
+                                          activeSystemMask,
                                           stream);
   }
   if (err == cudaSuccess && contribs.chiralTerms.idx1.size() > 0) {
@@ -793,9 +815,9 @@ cudaError_t computeEnergy(BatchedMolecularDeviceBuffers&             molSystemDe
                                             molSystemDevice.indices.energyBufferStarts.data(),
                                             molSystemDevice.indices.atomIdxToBatchIdx.data(),
                                             molSystemDevice.indices.chiralTermStarts.data(),
-                                            ctxAtomStartsDevice.data(),
+                                            ctxAtomStarts,
                                             molSystemDevice.dimension,
-                                            activeThisStage,
+                                            activeSystemMask,
                                             stream);
   }
   if (err == cudaSuccess && contribs.fourthTerms.idx.size() > 0) {
@@ -807,31 +829,50 @@ cudaError_t computeEnergy(BatchedMolecularDeviceBuffers&             molSystemDe
                                       molSystemDevice.indices.energyBufferStarts.data(),
                                       molSystemDevice.indices.atomIdxToBatchIdx.data(),
                                       molSystemDevice.indices.fourthTermStarts.data(),
-                                      ctxAtomStartsDevice.data(),
+                                      ctxAtomStarts,
                                       molSystemDevice.dimension,
-                                      activeThisStage,
+                                      activeSystemMask,
                                       stream);
   }
   if (err == cudaSuccess) {
-    // Now reduce the energy buffer
     return launchReduceEnergiesKernel(molSystemDevice.indices.energyBufferBlockIdxToBatchIdx.size(),
                                       molSystemDevice.energyBuffer.data(),
                                       molSystemDevice.indices.energyBufferBlockIdxToBatchIdx.data(),
-                                      molSystemDevice.energyOuts.data(),
-                                      activeThisStage,
+                                      energyOuts,
+                                      activeSystemMask,
                                       stream);
   }
   return err;
 }
 
-cudaError_t computeGradients(BatchedMolecularDeviceBuffers&             molSystemDevice,
-                             const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
-                             const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
-                             const double                               chiralWeight,
-                             const double                               fourthDimWeight,
-                             const uint8_t*                             activeThisStage,
-                             cudaStream_t                               stream) {
-  // Dispatch each term if there is a contrib for it.
+// TODO: More sophisticated error handling for energy and gradient.
+cudaError_t computeEnergy(BatchedMolecularDeviceBuffers&             molSystemDevice,
+                          const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
+                          const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
+                          const double                               chiralWeight,
+                          const double                               fourthDimWeight,
+                          const uint8_t*                             activeThisStage,
+                          const double*                              positions,
+                          cudaStream_t                               stream) {
+  return computeEnergy(molSystemDevice,
+                       molSystemDevice.energyOuts.data(),
+                       ctxAtomStartsDevice.data(),
+                       ctxPositionsDevice.data(),
+                       chiralWeight,
+                       fourthDimWeight,
+                       activeThisStage,
+                       positions,
+                       stream);
+}
+
+cudaError_t computeGradients(BatchedMolecularDeviceBuffers& molSystemDevice,
+                             double*                        grad,
+                             const int*                     ctxAtomStarts,
+                             const double*                  ctxPositions,
+                             const double                   chiralWeight,
+                             const double                   fourthDimWeight,
+                             const uint8_t*                 activeSystemMask,
+                             cudaStream_t                   stream) {
   const auto& contribs = molSystemDevice.contribs;
 
   cudaError_t err = cudaSuccess;
@@ -842,12 +883,12 @@ cudaError_t computeGradients(BatchedMolecularDeviceBuffers&             molSyste
                                             contribs.distTerms.lb2.data(),
                                             contribs.distTerms.ub2.data(),
                                             contribs.distTerms.weight.data(),
-                                            ctxPositionsDevice.data(),
-                                            molSystemDevice.grad.data(),
+                                            ctxPositions,
+                                            grad,
                                             molSystemDevice.indices.atomIdxToBatchIdx.data(),
-                                            ctxAtomStartsDevice.data(),
+                                            ctxAtomStarts,
                                             molSystemDevice.dimension,
-                                            activeThisStage,
+                                            activeSystemMask,
                                             stream);
   }
   if (err == cudaSuccess && contribs.chiralTerms.idx1.size() > 0) {
@@ -859,45 +900,60 @@ cudaError_t computeGradients(BatchedMolecularDeviceBuffers&             molSyste
                                               contribs.chiralTerms.volLower.data(),
                                               contribs.chiralTerms.volUpper.data(),
                                               chiralWeight,
-                                              ctxPositionsDevice.data(),
-                                              molSystemDevice.grad.data(),
+                                              ctxPositions,
+                                              grad,
                                               molSystemDevice.indices.atomIdxToBatchIdx.data(),
-                                              ctxAtomStartsDevice.data(),
+                                              ctxAtomStarts,
                                               molSystemDevice.dimension,
-                                              activeThisStage,
+                                              activeSystemMask,
                                               stream);
   }
   if (err == cudaSuccess && contribs.fourthTerms.idx.size() > 0) {
     err = launchFourthDimGradientKernel(contribs.fourthTerms.idx.size(),
                                         contribs.fourthTerms.idx.data(),
                                         fourthDimWeight,
-                                        ctxPositionsDevice.data(),
-                                        molSystemDevice.grad.data(),
+                                        ctxPositions,
+                                        grad,
                                         molSystemDevice.indices.atomIdxToBatchIdx.data(),
-                                        ctxAtomStartsDevice.data(),
+                                        ctxAtomStarts,
                                         molSystemDevice.dimension,
-                                        activeThisStage,
+                                        activeSystemMask,
                                         stream);
   }
   return err;
 }
 
-cudaError_t computeEnergyETK(BatchedMolecular3DDeviceBuffers&           molSystemDevice,
+cudaError_t computeGradients(BatchedMolecularDeviceBuffers&             molSystemDevice,
                              const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
                              const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
+                             const double                               chiralWeight,
+                             const double                               fourthDimWeight,
                              const uint8_t*                             activeThisStage,
-                             const double*                              positions,
-                             const ETKTerm                              term,
                              cudaStream_t                               stream) {
-  // Prechecks - tempstorage allocated, energybuffer allocated
+  return computeGradients(molSystemDevice,
+                          molSystemDevice.grad.data(),
+                          ctxAtomStartsDevice.data(),
+                          ctxPositionsDevice.data(),
+                          chiralWeight,
+                          fourthDimWeight,
+                          activeThisStage,
+                          stream);
+}
+
+cudaError_t computeEnergyETK(BatchedMolecular3DDeviceBuffers& molSystemDevice,
+                             double*                          energyOuts,
+                             const int*                       ctxAtomStarts,
+                             const double*                    ctxPositions,
+                             const uint8_t*                   activeSystemMask,
+                             const double*                    positions,
+                             const ETKTerm                    term,
+                             cudaStream_t                     stream) {
   assert(molSystemDevice.energyBuffer.size() > 0);
-  assert(molSystemDevice.energyOuts.data() != nullptr);
+  assert(energyOuts != nullptr);
+  molSystemDevice.energyBuffer.zero();
 
-  // Use provided positions or fall back to context positions
-  const double* posData = positions ? positions : ctxPositionsDevice.data();
-
-  // Dispatch each term if there is a contrib for it.
-  const auto& contribs = molSystemDevice.contribs;
+  const double* posData  = positions ? positions : ctxPositions;
+  const auto&   contribs = molSystemDevice.contribs;
 
   cudaError_t err = cudaSuccess;
 
@@ -916,8 +972,8 @@ cudaError_t computeEnergyETK(BatchedMolecular3DDeviceBuffers&           molSyste
                                          molSystemDevice.indices.energyBufferStarts.data(),
                                          molSystemDevice.indices.atomIdxToBatchIdx.data(),
                                          molSystemDevice.indices.experimentalTorsionTermStarts.data(),
-                                         ctxAtomStartsDevice.data(),
-                                         activeThisStage,
+                                         ctxAtomStarts,
+                                         activeSystemMask,
                                          stream);
   }
 
@@ -940,8 +996,8 @@ cudaError_t computeEnergyETK(BatchedMolecular3DDeviceBuffers&           molSyste
                                       molSystemDevice.indices.energyBufferStarts.data(),
                                       molSystemDevice.indices.atomIdxToBatchIdx.data(),
                                       molSystemDevice.indices.improperTorsionTermStarts.data(),
-                                      ctxAtomStartsDevice.data(),
-                                      activeThisStage,
+                                      ctxAtomStarts,
+                                      activeSystemMask,
                                       stream);
   }
 
@@ -959,8 +1015,8 @@ cudaError_t computeEnergyETK(BatchedMolecular3DDeviceBuffers&           molSyste
                                                molSystemDevice.indices.energyBufferStarts.data(),
                                                molSystemDevice.indices.atomIdxToBatchIdx.data(),
                                                molSystemDevice.indices.dist12TermStarts.data(),
-                                               ctxAtomStartsDevice.data(),
-                                               activeThisStage,
+                                               ctxAtomStarts,
+                                               activeSystemMask,
                                                stream);
   }
 
@@ -978,8 +1034,8 @@ cudaError_t computeEnergyETK(BatchedMolecular3DDeviceBuffers&           molSyste
                                                molSystemDevice.indices.energyBufferStarts.data(),
                                                molSystemDevice.indices.atomIdxToBatchIdx.data(),
                                                molSystemDevice.indices.dist13TermStarts.data(),
-                                               ctxAtomStartsDevice.data(),
-                                               activeThisStage,
+                                               ctxAtomStarts,
+                                               activeSystemMask,
                                                stream);
   }
 
@@ -997,8 +1053,8 @@ cudaError_t computeEnergyETK(BatchedMolecular3DDeviceBuffers&           molSyste
                                             molSystemDevice.indices.energyBufferStarts.data(),
                                             molSystemDevice.indices.atomIdxToBatchIdx.data(),
                                             molSystemDevice.indices.angle13TermStarts.data(),
-                                            ctxAtomStartsDevice.data(),
-                                            activeThisStage,
+                                            ctxAtomStarts,
+                                            activeSystemMask,
                                             defaultAngleForceConstant,
                                             stream);
   }
@@ -1017,30 +1073,46 @@ cudaError_t computeEnergyETK(BatchedMolecular3DDeviceBuffers&           molSyste
                                                molSystemDevice.indices.energyBufferStarts.data(),
                                                molSystemDevice.indices.atomIdxToBatchIdx.data(),
                                                molSystemDevice.indices.longRangeDistTermStarts.data(),
-                                               ctxAtomStartsDevice.data(),
-                                               activeThisStage,
+                                               ctxAtomStarts,
+                                               activeSystemMask,
                                                stream);
   }
 
   if (err == cudaSuccess) {
-    // Now reduce the energy buffer
     return launchReduceEnergiesKernel(molSystemDevice.indices.energyBufferBlockIdxToBatchIdx.size(),
                                       molSystemDevice.energyBuffer.data(),
                                       molSystemDevice.indices.energyBufferBlockIdxToBatchIdx.data(),
-                                      molSystemDevice.energyOuts.data(),
-                                      activeThisStage,
+                                      energyOuts,
+                                      activeSystemMask,
                                       stream);
   }
   return err;
 }
 
-cudaError_t computeGradientsETK(BatchedMolecular3DDeviceBuffers&           molSystemDevice,
-                                const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
-                                const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
-                                const uint8_t*                             activeThisStage,
-                                const ETKTerm                              term,
-                                cudaStream_t                               stream) {
-  // Dispatch each term if there is a contrib for it.
+cudaError_t computeEnergyETK(BatchedMolecular3DDeviceBuffers&           molSystemDevice,
+                             const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
+                             const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
+                             const uint8_t*                             activeThisStage,
+                             const double*                              positions,
+                             const ETKTerm                              term,
+                             cudaStream_t                               stream) {
+  return computeEnergyETK(molSystemDevice,
+                          molSystemDevice.energyOuts.data(),
+                          ctxAtomStartsDevice.data(),
+                          ctxPositionsDevice.data(),
+                          activeThisStage,
+                          positions,
+                          term,
+                          stream);
+}
+
+cudaError_t computeGradientsETK(BatchedMolecular3DDeviceBuffers& molSystemDevice,
+                                double*                          grad,
+                                const int*                       ctxAtomStarts,
+                                const double*                    ctxPositions,
+                                const uint8_t*                   activeSystemMask,
+                                const ETKTerm                    term,
+                                cudaStream_t                     stream) {
   const auto& contribs = molSystemDevice.contribs;
 
   cudaError_t err = cudaSuccess;
@@ -1055,11 +1127,11 @@ cudaError_t computeGradientsETK(BatchedMolecular3DDeviceBuffers&           molSy
                                            contribs.experimentalTorsionTerms.idx4.data(),
                                            contribs.experimentalTorsionTerms.forceConstants.data(),
                                            contribs.experimentalTorsionTerms.signs.data(),
-                                           ctxPositionsDevice.data(),
-                                           molSystemDevice.grad.data(),
+                                           ctxPositions,
+                                           grad,
                                            molSystemDevice.indices.atomIdxToBatchIdx.data(),
-                                           ctxAtomStartsDevice.data(),
-                                           activeThisStage,
+                                           ctxAtomStarts,
+                                           activeSystemMask,
                                            stream);
   }
 
@@ -1077,11 +1149,11 @@ cudaError_t computeGradientsETK(BatchedMolecular3DDeviceBuffers&           molSy
                                         contribs.improperTorsionTerms.C1.data(),
                                         contribs.improperTorsionTerms.C2.data(),
                                         contribs.improperTorsionTerms.forceConstant.data(),
-                                        ctxPositionsDevice.data(),
-                                        molSystemDevice.grad.data(),
+                                        ctxPositions,
+                                        grad,
                                         molSystemDevice.indices.atomIdxToBatchIdx.data(),
-                                        ctxAtomStartsDevice.data(),
-                                        activeThisStage,
+                                        ctxAtomStarts,
+                                        activeSystemMask,
                                         stream);
   }
 
@@ -1094,11 +1166,11 @@ cudaError_t computeGradientsETK(BatchedMolecular3DDeviceBuffers&           molSy
                                                  contribs.dist12Terms.minLen.data(),
                                                  contribs.dist12Terms.maxLen.data(),
                                                  contribs.dist12Terms.forceConstant.data(),
-                                                 ctxPositionsDevice.data(),
-                                                 molSystemDevice.grad.data(),
+                                                 ctxPositions,
+                                                 grad,
                                                  molSystemDevice.indices.atomIdxToBatchIdx.data(),
-                                                 ctxAtomStartsDevice.data(),
-                                                 activeThisStage,
+                                                 ctxAtomStarts,
+                                                 activeSystemMask,
                                                  stream);
   }
 
@@ -1111,11 +1183,11 @@ cudaError_t computeGradientsETK(BatchedMolecular3DDeviceBuffers&           molSy
                                                  contribs.dist13Terms.minLen.data(),
                                                  contribs.dist13Terms.maxLen.data(),
                                                  contribs.dist13Terms.forceConstant.data(),
-                                                 ctxPositionsDevice.data(),
-                                                 molSystemDevice.grad.data(),
+                                                 ctxPositions,
+                                                 grad,
                                                  molSystemDevice.indices.atomIdxToBatchIdx.data(),
-                                                 ctxAtomStartsDevice.data(),
-                                                 activeThisStage,
+                                                 ctxAtomStarts,
+                                                 activeSystemMask,
                                                  stream);
   }
 
@@ -1128,11 +1200,11 @@ cudaError_t computeGradientsETK(BatchedMolecular3DDeviceBuffers&           molSy
                                               contribs.angle13Terms.idx3.data(),
                                               contribs.angle13Terms.minAngle.data(),
                                               contribs.angle13Terms.maxAngle.data(),
-                                              ctxPositionsDevice.data(),
-                                              molSystemDevice.grad.data(),
+                                              ctxPositions,
+                                              grad,
                                               molSystemDevice.indices.atomIdxToBatchIdx.data(),
-                                              ctxAtomStartsDevice.data(),
-                                              activeThisStage,
+                                              ctxAtomStarts,
+                                              activeSystemMask,
                                               defaultAngleForceConstant,
                                               stream);
   }
@@ -1146,34 +1218,45 @@ cudaError_t computeGradientsETK(BatchedMolecular3DDeviceBuffers&           molSy
                                                  contribs.longRangeDistTerms.minLen.data(),
                                                  contribs.longRangeDistTerms.maxLen.data(),
                                                  contribs.longRangeDistTerms.forceConstant.data(),
-                                                 ctxPositionsDevice.data(),
-                                                 molSystemDevice.grad.data(),
+                                                 ctxPositions,
+                                                 grad,
                                                  molSystemDevice.indices.atomIdxToBatchIdx.data(),
-                                                 ctxAtomStartsDevice.data(),
-                                                 activeThisStage,
+                                                 ctxAtomStarts,
+                                                 activeSystemMask,
                                                  stream);
   }
 
   return err;
 }
 
-cudaError_t computePlanarEnergy(BatchedMolecular3DDeviceBuffers&           molSystemDevice,
+cudaError_t computeGradientsETK(BatchedMolecular3DDeviceBuffers&           molSystemDevice,
                                 const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
                                 const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
                                 const uint8_t*                             activeThisStage,
-                                const double*                              positions,
-                                const cudaStream_t                         stream) {
-  // Prechecks - tempstorage allocated, energybuffer allocated
+                                const ETKTerm                              term,
+                                cudaStream_t                               stream) {
+  return computeGradientsETK(molSystemDevice,
+                             molSystemDevice.grad.data(),
+                             ctxAtomStartsDevice.data(),
+                             ctxPositionsDevice.data(),
+                             activeThisStage,
+                             term,
+                             stream);
+}
+
+cudaError_t computePlanarEnergy(BatchedMolecular3DDeviceBuffers& molSystemDevice,
+                                double*                          energyOuts,
+                                const int*                       ctxAtomStarts,
+                                const double*                    ctxPositions,
+                                const uint8_t*                   activeSystemMask,
+                                const double*                    positions,
+                                const cudaStream_t               stream) {
   assert(molSystemDevice.energyBuffer.size() > 0);
-  assert(molSystemDevice.energyOuts.data() != nullptr);
-  molSystemDevice.energyOuts.zero();
+  assert(energyOuts != nullptr);
   molSystemDevice.energyBuffer.zero();
 
-  // Use provided positions or fall back to context positions
-  const double* posData = positions ? positions : ctxPositionsDevice.data();
-
-  // Dispatch each term if there is a contrib for it.
-  const auto& contribs = molSystemDevice.contribs;
+  const double* posData  = positions ? positions : ctxPositions;
+  const auto&   contribs = molSystemDevice.contribs;
 
   cudaError_t err = cudaSuccess;
 
@@ -1189,8 +1272,8 @@ cudaError_t computePlanarEnergy(BatchedMolecular3DDeviceBuffers&           molSy
                                             molSystemDevice.indices.energyBufferStarts.data(),
                                             molSystemDevice.indices.atomIdxToBatchIdx.data(),
                                             molSystemDevice.indices.angle13TermStarts.data(),
-                                            ctxAtomStartsDevice.data(),
-                                            activeThisStage,
+                                            ctxAtomStarts,
+                                            activeSystemMask,
                                             /*forceConstant=*/10.0,
                                             stream);
   }
@@ -1213,21 +1296,37 @@ cudaError_t computePlanarEnergy(BatchedMolecular3DDeviceBuffers&           molSy
                                       molSystemDevice.indices.energyBufferStarts.data(),
                                       molSystemDevice.indices.atomIdxToBatchIdx.data(),
                                       molSystemDevice.indices.improperTorsionTermStarts.data(),
-                                      ctxAtomStartsDevice.data(),
-                                      activeThisStage,
+                                      ctxAtomStarts,
+                                      activeSystemMask,
                                       stream);
   }
 
   if (err == cudaSuccess) {
-    // Now reduce the energy buffer
     return launchReduceEnergiesKernel(molSystemDevice.indices.energyBufferBlockIdxToBatchIdx.size(),
                                       molSystemDevice.energyBuffer.data(),
                                       molSystemDevice.indices.energyBufferBlockIdxToBatchIdx.data(),
-                                      molSystemDevice.energyOuts.data(),
-                                      activeThisStage,
+                                      energyOuts,
+                                      activeSystemMask,
                                       stream);
   }
   return err;
+}
+
+cudaError_t computePlanarEnergy(BatchedMolecular3DDeviceBuffers&           molSystemDevice,
+                                const nvMolKit::AsyncDeviceVector<int>&    ctxAtomStartsDevice,
+                                const nvMolKit::AsyncDeviceVector<double>& ctxPositionsDevice,
+                                const uint8_t*                             activeThisStage,
+                                const double*                              positions,
+                                const cudaStream_t                         stream) {
+  molSystemDevice.energyOuts.zero();
+  molSystemDevice.energyBuffer.zero();
+  return computePlanarEnergy(molSystemDevice,
+                             molSystemDevice.energyOuts.data(),
+                             ctxAtomStartsDevice.data(),
+                             ctxPositionsDevice.data(),
+                             activeThisStage,
+                             positions,
+                             stream);
 }
 
 EnergyForceContribsDevicePtr toPointerStruct(const EnergyForceContribsDevice& src) {

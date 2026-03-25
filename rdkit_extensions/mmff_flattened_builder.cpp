@@ -1,3 +1,18 @@
+// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #include "mmff_flattened_builder.h"
 
 #include <ForceField/MMFF/Contribs.h>
@@ -532,6 +547,25 @@ MMFF::EnergyForceContribsHost constructForcefieldContribs(RDKit::ROMol& mol,
   RDKit::MMFF::MMFFMolProperties mmffMolProperties(mol);
   PRECONDITION(mmffMolProperties.isValid(), "missing atom types - invalid force-field");
   return constructForcefieldContribs(mol, &mmffMolProperties, nonBondedThresh, confId, ignoreInterfragInteractions);
+}
+
+MMFF::EnergyForceContribsHost constructForcefieldContribs(RDKit::ROMol&                mol,
+                                                          const nvMolKit::MMFFProperties& props,
+                                                          int                             confId) {
+  RDKit::MMFF::MMFFMolProperties mmffMolProperties(mol, props.variant);
+  PRECONDITION(mmffMolProperties.isValid(), "missing atom types - invalid force-field");
+  mmffMolProperties.setMMFFVariant(props.variant);
+  mmffMolProperties.setMMFFDielectricConstant(props.dielectricConstant);
+  mmffMolProperties.setMMFFDielectricModel(props.dielectricModel);
+  mmffMolProperties.setMMFFBondTerm(props.bondTerm);
+  mmffMolProperties.setMMFFAngleTerm(props.angleTerm);
+  mmffMolProperties.setMMFFStretchBendTerm(props.stretchBendTerm);
+  mmffMolProperties.setMMFFOopTerm(props.oopTerm);
+  mmffMolProperties.setMMFFTorsionTerm(props.torsionTerm);
+  mmffMolProperties.setMMFFVdWTerm(props.vdwTerm);
+  mmffMolProperties.setMMFFEleTerm(props.eleTerm);
+  return constructForcefieldContribs(
+    mol, &mmffMolProperties, props.nonBondedThreshold, confId, props.ignoreInterfragInteractions);
 }
 
 }  // namespace MMFF

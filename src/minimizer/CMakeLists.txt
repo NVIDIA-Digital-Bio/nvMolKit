@@ -18,8 +18,8 @@ add_library(bfgs bfgs_minimize.cu bfgs_hessian.cu
 target_link_libraries(
   bfgs
   PUBLIC host_vector device_vector
-  PRIVATE ${RDKit_LIBS} rdkit_mmff_flattened dist_geom cub_helpers
-          cccl_interface)
+  PRIVATE ${RDKit_LIBS} batched_forcefield rdkit_mmff_flattened dist_geom
+          cub_helpers cccl_interface)
 target_include_directories(bfgs PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(bfgs_mmff bfgs_mmff.cpp)
@@ -27,22 +27,12 @@ target_link_libraries(
   bfgs_mmff
   PUBLIC bfgs
   PRIVATE ${RDKit_LIBS}
+          mmff_batched_forcefield
           rdkit_mmff_flattened
           device
           device_vector
           OpenMP::OpenMP_CXX
           openmp_helpers
           cccl_interface)
-target_include_directories(bfgs_mmff PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-
-add_library(bfgs_distgeom bfgs_distgeom.cpp)
-target_link_libraries(
-  bfgs_distgeom
-  PRIVATE ${RDKit_LIBS}
-          dist_geom
-          rdkit_dist_geom_flattened
-          device_vector
-          etkdg
-          bfgs
-          cccl_interface)
-target_include_directories(bfgs_distgeom PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(bfgs_mmff PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
+                                            ${CMAKE_SOURCE_DIR}/src/forcefields)

@@ -201,11 +201,12 @@ cudaError_t launchEleGradientKernel(int            numEles,
 //! \param outs Output energies
 //! \param stream
 //! \return
-cudaError_t launchReduceEnergiesKernel(int           numBlocks,
-                                       const double* energyBuffer,
-                                       const int*    energyBufferBlockIdxToBatchIdx,
-                                       double*       outs,
-                                       cudaStream_t  stream = 0);
+cudaError_t launchReduceEnergiesKernel(int            numBlocks,
+                                       const double*  energyBuffer,
+                                       const int*     energyBufferBlockIdxToBatchIdx,
+                                       double*        outs,
+                                       const uint8_t* activeThisStage = nullptr,
+                                       cudaStream_t   stream          = 0);
 
 //! Pointer versions of contrib structs for kernel launches
 struct BondStretchContribTermsDevicePtr {

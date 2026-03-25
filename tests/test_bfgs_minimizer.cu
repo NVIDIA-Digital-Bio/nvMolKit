@@ -26,9 +26,11 @@
 #include <random>
 
 #include "../rdkit_extensions/mmff_flattened_builder.h"
+#include "batched_forcefield.h"
 #include "bfgs_minimize.h"
 #include "device.h"
 #include "mmff.h"
+#include "mmff_batched_forcefield.h"
 #include "test_utils.h"
 
 using ::nvMolKit::MMFF::BatchedMolecularDeviceBuffers;
@@ -164,6 +166,27 @@ class BFGSMinimizerBackendTest : public BFGSMinimizerTestFixture,
                                  public ::testing::WithParamInterface<nvMolKit::BfgsBackend> {};
 
 namespace {
+
+void minimizeMMFF(nvMolKit::BfgsBatchMinimizer&     minimizer,
+                  const int                         numIters,
+                  const double                      gradTol,
+                  const BatchedMolecularSystemHost& systemHost,
+                  BatchedMolecularDeviceBuffers&    systemDevice,
+                  cudaStream_t                      stream          = nullptr,
+                  const uint8_t*                    activeThisStage = nullptr) {
+  if (minimizer.resolveBackend(systemHost.indices.atomStarts) == nvMolKit::BfgsBackend::BATCHED) {
+    nvMolKit::MMFFBatchedForcefield forcefield(systemHost, {}, stream);
+    minimizer.minimize(numIters,
+                       gradTol,
+                       forcefield,
+                       systemDevice.positions,
+                       systemDevice.grad,
+                       systemDevice.energyOuts,
+                       activeThisStage);
+    return;
+  }
+  minimizer.minimizeWithMMFF(numIters, gradTol, systemHost.indices.atomStarts, systemDevice, activeThisStage);
+}
 
 void refLineSearchSetup(unsigned int  dim,
                         const double* oldPt,
@@ -471,7 +494,7 @@ TEST_P(BFGSMinimizerBackendTest, E2EMinimizationSingleSystemUnconvergedMatches) 
                                              stream.stream(),
                                              backend);
 
-  bfgsMinimizer.minimizeWithMMFF(maxIters, 1e-4, systemHost.indices.atomStarts, systemDevice);
+  minimizeMMFF(bfgsMinimizer, maxIters, 1e-4, systemHost, systemDevice, stream.stream());
 
   std::vector<double> refEnergies;
   for (auto& mol : mols) {
@@ -508,7 +531,7 @@ TEST_P(BFGSMinimizerBackendTest, E2EMinimizationSingleSystemConvergedMatches) {
 
   nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dataDim=*/3, nvMolKit::DebugLevel::STEPWISE, true, nullptr, backend);
 
-  bfgsMinimizer.minimizeWithMMFF(maxIters, 1e-4, systemHost.indices.atomStarts, systemDevice);
+  minimizeMMFF(bfgsMinimizer, maxIters, 1e-4, systemHost, systemDevice);
 
   std::vector<double> refEnergies;
   for (auto& mol : mols) {
@@ -545,7 +568,7 @@ TEST_P(BFGSMinimizerBackendTest, E2EMinimizationMultiSystemSameMolMatchesUnconve
 
   nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dim=*/3, nvMolKit::DebugLevel::STEPWISE, true, nullptr, backend);
 
-  bfgsMinimizer.minimizeWithMMFF(maxIters, 1e-4, systemHost.indices.atomStarts, systemDevice);
+  minimizeMMFF(bfgsMinimizer, maxIters, 1e-4, systemHost, systemDevice);
 
   std::vector<double> refEnergies;
   for (auto& mol : mols) {
@@ -582,7 +605,7 @@ TEST_P(BFGSMinimizerBackendTest, E2EMinimizationMultiSystemSameMolMatchesConverg
 
   nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dim=*/3, nvMolKit::DebugLevel::STEPWISE, true, nullptr, backend);
 
-  bfgsMinimizer.minimizeWithMMFF(maxIters, 1e-4, systemHost.indices.atomStarts, systemDevice);
+  minimizeMMFF(bfgsMinimizer, maxIters, 1e-4, systemHost, systemDevice);
 
   std::vector<double> refEnergies;
   for (auto& mol : mols) {
@@ -618,7 +641,7 @@ TEST_P(BFGSMinimizerBackendTest, E2EMinimizationMultiSystemMultiMolsMatchesConve
 
   nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dim=*/3, nvMolKit::DebugLevel::STEPWISE, true, nullptr, backend);
 
-  bfgsMinimizer.minimizeWithMMFF(maxIters, 1e-4, systemHost.indices.atomStarts, systemDevice);
+  minimizeMMFF(bfgsMinimizer, maxIters, 1e-4, systemHost, systemDevice);
 
   std::vector<double> refEnergies;
   for (auto& mol : mols) {
@@ -660,7 +683,7 @@ TEST_P(BFGSMinimizerBackendTest, E2EMinimizationLargePathMatches) {
   const int                    maxIters = 400;
   nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dim=*/3, nvMolKit::DebugLevel::STEPWISE, true, nullptr, backend);
 
-  bfgsMinimizer.minimizeWithMMFF(maxIters, 1e-4, systemHost.indices.atomStarts, systemDevice);
+  minimizeMMFF(bfgsMinimizer, maxIters, 1e-4, systemHost, systemDevice);
 
   std::vector<double> refEnergies;
   for (auto& mol : mols) {
@@ -725,6 +748,60 @@ template <bool computeLastDim> __global__ void quarticGFunc(const int numTerms, 
   }
 }
 
+class QuarticBatchedForcefield final : public nvMolKit::BatchedForcefield {
+ public:
+  QuarticBatchedForcefield(const std::vector<int>& atomStartsHost,
+                           const int*              atomStartsDevice,
+                           const int               numTerms,
+                           const int*              outIdx,
+                           const bool              computeLastDim,
+                           const int               numBlocks,
+                           const int               blockSize)
+      : BatchedForcefield(nvMolKit::ForceFieldType::DG, 4, atomStartsHost, atomStartsDevice),
+        numTerms_(numTerms),
+        outIdx_(outIdx),
+        computeLastDim_(computeLastDim),
+        numBlocks_(numBlocks),
+        blockSize_(blockSize) {}
+
+  cudaError_t computeEnergy(double*        energyOuts,
+                            const double*  positions,
+                            const uint8_t* activeSystemMask = nullptr,
+                            cudaStream_t   stream           = nullptr) override {
+    if (activeSystemMask != nullptr) {
+      return cudaErrorNotSupported;
+    }
+    if (computeLastDim_) {
+      quarticEFunc<true><<<numBlocks_, blockSize_, 0, stream>>>(numTerms_, outIdx_, positions, energyOuts);
+    } else {
+      quarticEFunc<false><<<numBlocks_, blockSize_, 0, stream>>>(numTerms_, outIdx_, positions, energyOuts);
+    }
+    return cudaGetLastError();
+  }
+
+  cudaError_t computeGradients(double*        grad,
+                               const double*  positions,
+                               const uint8_t* activeSystemMask = nullptr,
+                               cudaStream_t   stream           = nullptr) override {
+    if (activeSystemMask != nullptr) {
+      return cudaErrorNotSupported;
+    }
+    if (computeLastDim_) {
+      quarticGFunc<true><<<numBlocks_, blockSize_, 0, stream>>>(numTerms_, positions, grad);
+    } else {
+      quarticGFunc<false><<<numBlocks_, blockSize_, 0, stream>>>(numTerms_, positions, grad);
+    }
+    return cudaGetLastError();
+  }
+
+ private:
+  int        numTerms_       = 0;
+  const int* outIdx_         = nullptr;
+  bool       computeLastDim_ = false;
+  int        numBlocks_      = 0;
+  int        blockSize_      = 0;
+};
+
 class BFGSMinimizerHarmonicTestFixture : public ::testing::Test {
  protected:
   void setUpSystems(bool computeLastDim, int seed = 42) {
@@ -765,35 +842,14 @@ class BFGSMinimizerHarmonicTestFixture : public ::testing::Test {
     numBlocks_ = totalNumAtoms_ / blockSize_ + 1;
   }
 
-  std::function<void(const double*)> getEFunc() {
-    return [this](const double* pos) {
-      const double* posEntry = pos == nullptr ? positionsDevice_.data() : pos;
-      energyOutsDevice_.zero();
-      if (computeLastDim_) {
-        quarticEFunc<true><<<numBlocks_, blockSize_>>>(writeIndices_.size(),
-                                                       writeIndicesDevice_.data(),
-                                                       posEntry,
-                                                       energyOutsDevice_.data());
-      } else {
-        quarticEFunc<false><<<numBlocks_, blockSize_>>>(writeIndices_.size(),
-                                                        writeIndicesDevice_.data(),
-                                                        posEntry,
-                                                        energyOutsDevice_.data());
-      }
-    };
-  }
-
-  std::function<void()> getGFunc() {
-    return [this]() {
-      gradDevice_.zero();
-      if (computeLastDim_) {
-        quarticGFunc<true>
-          <<<numBlocks_, blockSize_>>>(writeIndices_.size(), positionsDevice_.data(), gradDevice_.data());
-      } else {
-        quarticGFunc<false>
-          <<<numBlocks_, blockSize_>>>(writeIndices_.size(), positionsDevice_.data(), gradDevice_.data());
-      }
-    };
+  QuarticBatchedForcefield makeForcefield() const {
+    return QuarticBatchedForcefield(atomStarts_,
+                                    atomStartsDevice_.data(),
+                                    static_cast<int>(writeIndices_.size()),
+                                    writeIndicesDevice_.data(),
+                                    computeLastDim_,
+                                    numBlocks_,
+                                    blockSize_);
   }
 
   void verifyPositions(const std::vector<double>& gotPositions, double tolerance = 1e-3) {
@@ -839,7 +895,6 @@ class BFGSMinimizerHarmonicTestFixture : public ::testing::Test {
 
   nvMolKit::AsyncDeviceVector<int>    atomStartsDevice_;
   nvMolKit::AsyncDeviceVector<double> energyOutsDevice_;
-  nvMolKit::AsyncDeviceVector<double> energyBufferDevice_;
   nvMolKit::AsyncDeviceVector<double> gradDevice_;
   nvMolKit::AsyncDeviceVector<double> positionsDevice_;
   nvMolKit::AsyncDeviceVector<int>    writeIndicesDevice_;
@@ -857,19 +912,9 @@ TEST_P(BFGSMinimizerTest4DTest, BFGSMinimizer4DQuartic) {
 
   // Run minimization
   nvMolKit::BfgsBatchMinimizer minimizer(dim_, nvMolKit::DebugLevel::STEPWISE, false);
-  auto                         eFunc = getEFunc();
-  auto                         gFunc = getGFunc();
+  auto                         forcefield = makeForcefield();
 
-  minimizer.minimize(400,
-                     1e-5,
-                     atomStarts_,
-                     atomStartsDevice_,
-                     positionsDevice_,
-                     gradDevice_,
-                     energyOutsDevice_,
-                     energyBufferDevice_,
-                     eFunc,
-                     gFunc);
+  minimizer.minimize(400, 1e-5, forcefield, positionsDevice_, gradDevice_, energyOutsDevice_, nullptr);
 
   std::vector<double> gotPositions = getPositionsFromDevice();
   verifyPositions(gotPositions, 0.1);
@@ -1008,19 +1053,15 @@ TEST_F(BFGSMinimizerHarmonicTestFixture, MultipleMinimizeCallsConvergedSystemUnc
 
   // First, fully converge the system
   nvMolKit::BfgsBatchMinimizer minimizer(dim_, nvMolKit::DebugLevel::STEPWISE, false);
-  auto                         eFunc = getEFunc();
-  auto                         gFunc = getGFunc();
+  auto                         forcefield = makeForcefield();
 
   minimizer.minimize(50,  // Assuming full convergence happens after 50 steps
                      1e-3,
-                     atomStarts_,
-                     atomStartsDevice_,
+                     forcefield,
                      positionsDevice_,
                      gradDevice_,
                      energyOutsDevice_,
-                     energyBufferDevice_,
-                     eFunc,
-                     gFunc);
+                     nullptr);
 
   // Verify convergence
   std::vector<int16_t> statuses = getStatusesFromDevice(minimizer);
@@ -1031,16 +1072,7 @@ TEST_F(BFGSMinimizerHarmonicTestFixture, MultipleMinimizeCallsConvergedSystemUnc
   cudaStreamSynchronize(energyOutsDevice_.stream());
   ASSERT_THAT(energiesBefore, ::testing::Each(::testing::DoubleNear(0.0, 1e-5)));
   // Call minimize again on the converged system
-  minimizer.minimize(50,
-                     1e-4,
-                     atomStarts_,
-                     atomStartsDevice_,
-                     positionsDevice_,
-                     gradDevice_,
-                     energyOutsDevice_,
-                     energyBufferDevice_,
-                     eFunc,
-                     gFunc);
+  minimizer.minimize(50, 1e-4, forcefield, positionsDevice_, gradDevice_, energyOutsDevice_, nullptr);
 
   std::vector<double> energiesAfter(energyOutsDevice_.size());
   energyOutsDevice_.copyToHost(energiesAfter);
@@ -1054,27 +1086,22 @@ TEST_F(BFGSMinimizerHarmonicTestFixture, MultipleMinimizeCallsEquivalentToSingle
 
   // Test Case 1: Single minimize call with N iterations
   nvMolKit::BfgsBatchMinimizer minimizer1(dim_, nvMolKit::DebugLevel::STEPWISE, false);
-  auto                         eFunc = getEFunc();
-  auto                         gFunc = getGFunc();
+  auto                         forcefield1 = makeForcefield();
 
   // A few of the systems will converge in 12 steps.
   minimizer1.minimize(50,  // N iterations
                       1e-3,
-                      atomStarts_,
-                      atomStartsDevice_,
+                      forcefield1,
                       positionsDevice_,
                       gradDevice_,
                       energyOutsDevice_,
-                      energyBufferDevice_,
-                      eFunc,
-                      gFunc);
+                      nullptr);
 
   std::vector<double>  singleCallPositions = getPositionsFromDevice();
   std::vector<int16_t> singleCallStatuses  = getStatusesFromDevice(minimizer1);
 
   energyOutsDevice_.zero();
-  energyBufferDevice_.zero();
-  eFunc(positionsDevice_.data());
+  CHECK_CUDA_RETURN(forcefield1.computeEnergy(energyOutsDevice_.data(), positionsDevice_.data()));
   std::vector<double> singleCallEnergies(energyOutsDevice_.size());
   energyOutsDevice_.copyToHost(singleCallEnergies);
 
@@ -1083,37 +1110,19 @@ TEST_F(BFGSMinimizerHarmonicTestFixture, MultipleMinimizeCallsEquivalentToSingle
   setUpSystems(false);  // This will reset positions to initial state
 
   nvMolKit::BfgsBatchMinimizer minimizer2(dim_, nvMolKit::DebugLevel::STEPWISE, false);
+  auto                         forcefield2 = makeForcefield();
 
   // First part of iterations
-  minimizer2.minimize(5,
-                      1e-4,
-                      atomStarts_,
-                      atomStartsDevice_,
-                      positionsDevice_,
-                      gradDevice_,
-                      energyOutsDevice_,
-                      energyBufferDevice_,
-                      eFunc,
-                      gFunc);
+  minimizer2.minimize(5, 1e-4, forcefield2, positionsDevice_, gradDevice_, energyOutsDevice_, nullptr);
 
   // Second half of iterations
-  minimizer2.minimize(45,
-                      1e-4,
-                      atomStarts_,
-                      atomStartsDevice_,
-                      positionsDevice_,
-                      gradDevice_,
-                      energyOutsDevice_,
-                      energyBufferDevice_,
-                      eFunc,
-                      gFunc);
+  minimizer2.minimize(45, 1e-4, forcefield2, positionsDevice_, gradDevice_, energyOutsDevice_, nullptr);
 
   std::vector<double>  doubleCallPositions = getPositionsFromDevice();
   std::vector<int16_t> doubleCallStatuses  = getStatusesFromDevice(minimizer2);
 
   energyOutsDevice_.zero();
-  energyBufferDevice_.zero();
-  eFunc(positionsDevice_.data());
+  CHECK_CUDA_RETURN(forcefield2.computeEnergy(energyOutsDevice_.data(), positionsDevice_.data()));
   std::vector<double> doubleCallEnergies(energyOutsDevice_.size());
   energyOutsDevice_.copyToHost(doubleCallEnergies);
 
@@ -1155,7 +1164,7 @@ TEST_P(BFGSMinimizerBackendTest, ReuseMinimizer_VariedSizes) {
   // Reference for system 1
   {
     nvMolKit::BfgsBatchMinimizer minimizer(3, nvMolKit::DebugLevel::NONE, true, nullptr, backend);
-    minimizer.minimizeWithMMFF(maxIters, 1e-4, system1Host.indices.atomStarts, system1Device);
+    minimizeMMFF(minimizer, maxIters, 1e-4, system1Host, system1Device);
     referenceEnergies[0].resize(system1Device.energyOuts.size());
     system1Device.energyOuts.copyToHost(referenceEnergies[0]);
     referencePositions[0].resize(system1Device.positions.size());
@@ -1165,7 +1174,7 @@ TEST_P(BFGSMinimizerBackendTest, ReuseMinimizer_VariedSizes) {
   // Reference for system 2
   {
     nvMolKit::BfgsBatchMinimizer minimizer(3, nvMolKit::DebugLevel::NONE, true, nullptr, backend);
-    minimizer.minimizeWithMMFF(maxIters, 1e-4, system2Host.indices.atomStarts, system2Device);
+    minimizeMMFF(minimizer, maxIters, 1e-4, system2Host, system2Device);
     referenceEnergies[1].resize(system2Device.energyOuts.size());
     system2Device.energyOuts.copyToHost(referenceEnergies[1]);
     referencePositions[1].resize(system2Device.positions.size());
@@ -1175,7 +1184,7 @@ TEST_P(BFGSMinimizerBackendTest, ReuseMinimizer_VariedSizes) {
   // Reference for system 3
   {
     nvMolKit::BfgsBatchMinimizer minimizer(3, nvMolKit::DebugLevel::NONE, true, nullptr, backend);
-    minimizer.minimizeWithMMFF(maxIters, 1e-4, system3Host.indices.atomStarts, system3Device);
+    minimizeMMFF(minimizer, maxIters, 1e-4, system3Host, system3Device);
     referenceEnergies[2].resize(system3Device.energyOuts.size());
     system3Device.energyOuts.copyToHost(referenceEnergies[2]);
     referencePositions[2].resize(system3Device.positions.size());
@@ -1211,21 +1220,21 @@ TEST_P(BFGSMinimizerBackendTest, ReuseMinimizer_VariedSizes) {
   nvMolKit::BfgsBatchMinimizer reusedMinimizer(3, nvMolKit::DebugLevel::NONE, true, nullptr, backend);
 
   // Minimize system 1 (small)
-  reusedMinimizer.minimizeWithMMFF(maxIters, 1e-4, system1Host.indices.atomStarts, system1Device);
+  minimizeMMFF(reusedMinimizer, maxIters, 1e-4, system1Host, system1Device);
   std::vector<double> energy1(system1Device.energyOuts.size());
   system1Device.energyOuts.copyToHost(energy1);
   EXPECT_THAT(energy1, ::testing::Pointwise(::testing::DoubleNear(1e-5), referenceEnergies[0]))
     << "System 1 (first run) energies should match reference";
 
   // Minimize system 2 (medium)
-  reusedMinimizer.minimizeWithMMFF(maxIters, 1e-4, system2Host.indices.atomStarts, system2Device);
+  minimizeMMFF(reusedMinimizer, maxIters, 1e-4, system2Host, system2Device);
   std::vector<double> energy2(system2Device.energyOuts.size());
   system2Device.energyOuts.copyToHost(energy2);
   EXPECT_THAT(energy2, ::testing::Pointwise(::testing::DoubleNear(1e-5), referenceEnergies[1]))
     << "System 2 (first run) energies should match reference";
 
   // Minimize system 3 (large)
-  reusedMinimizer.minimizeWithMMFF(maxIters, 1e-4, system3Host.indices.atomStarts, system3Device);
+  minimizeMMFF(reusedMinimizer, maxIters, 1e-4, system3Host, system3Device);
   std::vector<double> energy3(system3Device.energyOuts.size());
   system3Device.energyOuts.copyToHost(energy3);
   EXPECT_THAT(energy3, ::testing::Pointwise(::testing::DoubleNear(1e-5), referenceEnergies[2]))
@@ -1249,14 +1258,14 @@ TEST_P(BFGSMinimizerBackendTest, ReuseMinimizer_VariedSizes) {
   system1Device = std::move(systemDevice);
 
   // Minimize system 2 again (after system 3)
-  reusedMinimizer.minimizeWithMMFF(maxIters, 1e-4, system2Host.indices.atomStarts, system2Device);
+  minimizeMMFF(reusedMinimizer, maxIters, 1e-4, system2Host, system2Device);
   std::vector<double> energy2Second(system2Device.energyOuts.size());
   system2Device.energyOuts.copyToHost(energy2Second);
   EXPECT_THAT(energy2Second, ::testing::Pointwise(::testing::DoubleNear(1e-5), referenceEnergies[1]))
     << "System 2 (second run) energies should match reference";
 
   // Minimize system 1 again (after system 2)
-  reusedMinimizer.minimizeWithMMFF(maxIters, 1e-4, system1Host.indices.atomStarts, system1Device);
+  minimizeMMFF(reusedMinimizer, maxIters, 1e-4, system1Host, system1Device);
   std::vector<double> energy1Second(system1Device.energyOuts.size());
   system1Device.energyOuts.copyToHost(energy1Second);
   EXPECT_THAT(energy1Second, ::testing::Pointwise(::testing::DoubleNear(1e-5), referenceEnergies[0]))

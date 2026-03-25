@@ -87,6 +87,23 @@ BatchedIndicesDevicePtr toPointerStruct(const BatchedIndicesDevice& src) {
 
   return dst;
 }
+
+__global__ void zeroInactiveGradientEntries(const int*     atomIdxToBatchIdx,
+                                            const uint8_t* activeSystemMask,
+                                            const int      numAtoms,
+                                            const int      dataDim,
+                                            double*        grad) {
+  const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx >= numAtoms * dataDim) {
+    return;
+  }
+
+  const int atomIdx  = idx / dataDim;
+  const int batchIdx = atomIdxToBatchIdx[atomIdx];
+  if (activeSystemMask[batchIdx] == 0) {
+    grad[idx] = 0.0;
+  }
+}
 }  // namespace
 
 void setStreams(BatchedMolecularDeviceBuffers& molSystemDevice, cudaStream_t stream) {
@@ -237,7 +254,24 @@ void sendContribsAndIndicesToDevice(const BatchedMolecularSystemHost& molSystemH
 
 void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
                         const std::vector<double>&     positions,
-                        BatchedMolecularSystemHost&    molSystem) {
+                        BatchedMolecularSystemHost&    molSystem,
+                        BatchedForcefieldMetadata*     metadata,
+                        const int                      moleculeIdx,
+                        const int                      conformerIdx,
+                        const ForcefieldModifier&      customization) {
+  if (metadata != nullptr || customization) {
+    EnergyForceContribsHost contribsCopy = contribs;
+    BatchedSystemInfo       systemInfo;
+    if (metadata != nullptr) {
+      systemInfo = metadata->recordSystem(moleculeIdx, conformerIdx);
+    }
+    if (customization) {
+      customization(systemInfo, positions, contribsCopy);
+    }
+    addMoleculeToBatch(contribsCopy, positions, molSystem, nullptr, moleculeIdx, conformerIdx, {});
+    return;
+  }
+
   const int previousLastAtomIndex = molSystem.indices.atomStarts.back();
   const int numBatches            = molSystem.indices.atomStarts.size() - 1;
   const int newNumAtoms           = positions.size() / 3;
@@ -347,16 +381,16 @@ void allocateIntermediateBuffers(const BatchedMolecularSystemHost& molSystemHost
                                                        molSystemHost.indices.atomStarts.size() - 1);
 }
 
-// TODO: More sophisticated error handling for energy and gradient.
-cudaError_t computeEnergy(BatchedMolecularDeviceBuffers& molSystemDevice, const double* coords, cudaStream_t stream) {
-  // Prechecks - tempstorage allocated, energybuffer allocated
+cudaError_t computeEnergy(BatchedMolecularDeviceBuffers& molSystemDevice,
+                          double*                        energyOuts,
+                          const double*                  positions,
+                          const uint8_t*                 activeSystemMask,
+                          cudaStream_t                   stream) {
   assert(molSystemDevice.energyBuffer.size() > 0);
-  assert(molSystemDevice.energyOuts.data() != nullptr);
+  assert(energyOuts != nullptr);
+  molSystemDevice.energyBuffer.zero();
 
-  // Dispatch each term if there is a contrib for it.
   const auto& contribs = molSystemDevice.contribs;
-
-  const double* positions = coords != nullptr ? coords : molSystemDevice.positions.data();
 
   cudaError_t err = cudaSuccess;
   if (contribs.bondTerms.idx1.size() > 0) {
@@ -463,18 +497,27 @@ cudaError_t computeEnergy(BatchedMolecularDeviceBuffers& molSystemDevice, const 
   }
 
   if (err == cudaSuccess) {
-    // Now reduce the energy buffer
     return launchReduceEnergiesKernel(molSystemDevice.indices.energyBufferBlockIdxToBatchIdx.size(),
                                       molSystemDevice.energyBuffer.data(),
                                       molSystemDevice.indices.energyBufferBlockIdxToBatchIdx.data(),
-                                      molSystemDevice.energyOuts.data(),
+                                      energyOuts,
+                                      activeSystemMask,
                                       stream);
   }
   return err;
 }
 
-cudaError_t computeGradients(BatchedMolecularDeviceBuffers& molSystemDevice, cudaStream_t stream) {
-  // Dispatch each term if there is a contrib for it.
+// TODO: More sophisticated error handling for energy and gradient.
+cudaError_t computeEnergy(BatchedMolecularDeviceBuffers& molSystemDevice, const double* coords, cudaStream_t stream) {
+  const double* positions = coords != nullptr ? coords : molSystemDevice.positions.data();
+  return computeEnergy(molSystemDevice, molSystemDevice.energyOuts.data(), positions, nullptr, stream);
+}
+
+cudaError_t computeGradients(BatchedMolecularDeviceBuffers& molSystemDevice,
+                             const double*                  positions,
+                             double*                        grad,
+                             const uint8_t*                 activeSystemMask,
+                             cudaStream_t                   stream) {
   const auto& contribs = molSystemDevice.contribs;
 
   cudaError_t err = cudaSuccess;
@@ -484,8 +527,8 @@ cudaError_t computeGradients(BatchedMolecularDeviceBuffers& molSystemDevice, cud
                                           contribs.bondTerms.idx2.data(),
                                           contribs.bondTerms.r0.data(),
                                           contribs.bondTerms.kb.data(),
-                                          molSystemDevice.positions.data(),
-                                          molSystemDevice.grad.data(),
+                                          positions,
+                                          grad,
                                           stream);
   }
   if (err == cudaSuccess && contribs.angleTerms.idx1.size() > 0) {
@@ -496,8 +539,8 @@ cudaError_t computeGradients(BatchedMolecularDeviceBuffers& molSystemDevice, cud
                                         contribs.angleTerms.theta0.data(),
                                         contribs.angleTerms.ka.data(),
                                         contribs.angleTerms.isLinear.data(),
-                                        molSystemDevice.positions.data(),
-                                        molSystemDevice.grad.data(),
+                                        positions,
+                                        grad,
                                         stream);
   }
   if (err == cudaSuccess && contribs.bendTerms.idx1.size() > 0) {
@@ -510,8 +553,8 @@ cudaError_t computeGradients(BatchedMolecularDeviceBuffers& molSystemDevice, cud
                                           contribs.bendTerms.restLen2.data(),
                                           contribs.bendTerms.forceConst1.data(),
                                           contribs.bendTerms.forceConst2.data(),
-                                          molSystemDevice.positions.data(),
-                                          molSystemDevice.grad.data(),
+                                          positions,
+                                          grad,
                                           stream);
   }
   if (err == cudaSuccess && contribs.oopTerms.idx1.size() > 0) {
@@ -521,8 +564,8 @@ cudaError_t computeGradients(BatchedMolecularDeviceBuffers& molSystemDevice, cud
                                       contribs.oopTerms.idx3.data(),
                                       contribs.oopTerms.idx4.data(),
                                       contribs.oopTerms.koop.data(),
-                                      molSystemDevice.positions.data(),
-                                      molSystemDevice.grad.data(),
+                                      positions,
+                                      grad,
                                       stream);
   }
   if (err == cudaSuccess && contribs.torsionTerms.idx1.size() > 0) {
@@ -534,8 +577,8 @@ cudaError_t computeGradients(BatchedMolecularDeviceBuffers& molSystemDevice, cud
                                       contribs.torsionTerms.V1.data(),
                                       contribs.torsionTerms.V2.data(),
                                       contribs.torsionTerms.V3.data(),
-                                      molSystemDevice.positions.data(),
-                                      molSystemDevice.grad.data(),
+                                      positions,
+                                      grad,
                                       stream);
   }
   if (err == cudaSuccess && contribs.vdwTerms.idx1.size() > 0) {
@@ -544,8 +587,8 @@ cudaError_t computeGradients(BatchedMolecularDeviceBuffers& molSystemDevice, cud
                                   contribs.vdwTerms.idx2.data(),
                                   contribs.vdwTerms.R_ij_star.data(),
                                   contribs.vdwTerms.wellDepth.data(),
-                                  molSystemDevice.positions.data(),
-                                  molSystemDevice.grad.data(),
+                                  positions,
+                                  grad,
                                   stream);
   }
   if (err == cudaSuccess && contribs.eleTerms.idx1.size() > 0) {
@@ -555,11 +598,34 @@ cudaError_t computeGradients(BatchedMolecularDeviceBuffers& molSystemDevice, cud
                                   contribs.eleTerms.chargeTerm.data(),
                                   contribs.eleTerms.dielModel.data(),
                                   contribs.eleTerms.is1_4.data(),
-                                  molSystemDevice.positions.data(),
-                                  molSystemDevice.grad.data(),
+                                  positions,
+                                  grad,
                                   stream);
   }
+  if (err == cudaSuccess && activeSystemMask != nullptr && molSystemDevice.indices.atomIdxToBatchIdx.size() > 0) {
+    constexpr int blockSize = 256;
+    const int     numTerms  = molSystemDevice.indices.atomIdxToBatchIdx.size() * 3;
+    const int     numBlocks = (numTerms + blockSize - 1) / blockSize;
+    // TODO: Thread activeSystemMask through the MMFF term kernels so inactive
+    // systems can be skipped before gradient accumulation; energy kernels
+    // should follow the same early-filter path instead of relying on late
+    // masking.
+    zeroInactiveGradientEntries<<<numBlocks, blockSize, 0, stream>>>(molSystemDevice.indices.atomIdxToBatchIdx.data(),
+                                                                     activeSystemMask,
+                                                                     molSystemDevice.indices.atomIdxToBatchIdx.size(),
+                                                                     3,
+                                                                     grad);
+    err = cudaGetLastError();
+  }
   return err;
+}
+
+cudaError_t computeGradients(BatchedMolecularDeviceBuffers& molSystemDevice, cudaStream_t stream) {
+  return computeGradients(molSystemDevice,
+                          molSystemDevice.positions.data(),
+                          molSystemDevice.grad.data(),
+                          nullptr,
+                          stream);
 }
 
 cudaError_t computeEnergyBlockPerMol(BatchedMolecularDeviceBuffers& molSystemDevice,

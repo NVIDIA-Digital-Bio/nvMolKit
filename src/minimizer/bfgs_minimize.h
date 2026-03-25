@@ -26,6 +26,8 @@
 
 namespace nvMolKit {
 
+class BatchedForcefield;
+
 // Forward declarations for forcefield types
 namespace MMFF {
 struct BatchedMolecularDeviceBuffers;
@@ -36,9 +38,11 @@ struct BatchedMolecularDeviceBuffers;
 struct BatchedMolecular3DDeviceBuffers;
 }  // namespace DistGeom
 
-//! Compute energies, optionally on an external set of positions. If nullptr, expect to find in internal coordinates.
+//! \brief Computes energies, optionally on an external set of positions.
+//! \param positions Optional flattened coordinate buffer to evaluate.
+//!        When null, the implementation uses its internal position storage.
 using EnergyFunctor = std::function<void(const double*)>;
-//! Compute gradients on internal positions writing to internal buffer.
+//! \brief Computes gradients on the internal position buffer.
 using GradFunctor   = std::function<void()>;
 
 //! BFGS Batch Minimizer
@@ -59,42 +63,65 @@ struct BfgsBatchMinimizer {
                               BfgsBackend  backend    = BfgsBackend::BATCHED);
   ~BfgsBatchMinimizer();
 
-  //! Run up to numIters iterations of BFGS minimization
-  //! Returns 0 if all systems converged, 1 if some systems did not converge.
-  bool minimize(int                           numIters,
-                double                        gradTol,
-                const std::vector<int>&       atomStartsHost,
-                const AsyncDeviceVector<int>& atomStarts,
-                AsyncDeviceVector<double>&    positions,
-                AsyncDeviceVector<double>&    grad,
-                AsyncDeviceVector<double>&    energyOuts,
-                AsyncDeviceVector<double>&    energyBuffer,
-                EnergyFunctor                 eFunc,
-                GradFunctor                   gFunc,
-                const uint8_t*                activeThisStage = nullptr);
+  //! \brief Runs host-driven batched BFGS through the forcefield abstraction.
+  //! \param numIters Maximum number of BFGS iterations to perform.
+  //! \param gradTol Convergence tolerance applied to the scaled gradients.
+  //! \param ff Forcefield adapter used to evaluate energies and gradients.
+  //! \param positions Flattened coordinate buffer for the batch.
+  //! \param grad Gradient output buffer matching `positions`.
+  //! \param energyOuts Per-system energy output buffer.
+  //! \param activeSystemMask Optional per-system activity mask for staged minimization.
+  //! \return `false` when all systems converged and `true` when at least one system needs another cycle.
+  //! \note This overload is only valid for the batched backend.
+  bool minimize(int                        numIters,
+                double                     gradTol,
+                BatchedForcefield&         ff,
+                AsyncDeviceVector<double>& positions,
+                AsyncDeviceVector<double>& grad,
+                AsyncDeviceVector<double>& energyOuts,
+                const uint8_t*             activeSystemMask = nullptr);
 
-  //! Run BFGS minimization with MMFF forcefield.
-  //! Returns 0 if all systems converged, 1 if some systems did not converge.
+  //! \brief Runs MMFF minimization through the per-molecule CUDA kernels.
+  //! \param numIters Maximum number of BFGS iterations to perform.
+  //! \param gradTol Convergence tolerance applied to the scaled gradients.
+  //! \param atomStartsHost Host-side atom offsets for the flattened systems.
+  //! \param systemDevice MMFF device buffers used by the per-molecule kernels.
+  //! \param activeThisStage Optional per-system activity mask for staged minimization.
+  //! \return `false` when all systems converged and `true` when at least one system needs another cycle.
   bool minimizeWithMMFF(int                                  numIters,
                         double                               gradTol,
                         const std::vector<int>&              atomStartsHost,
                         MMFF::BatchedMolecularDeviceBuffers& systemDevice,
                         const uint8_t*                       activeThisStage = nullptr);
 
-  //! Run BFGS minimization with ETK forcefield.
-  //! \param useBasicKnowledge If true, uses ALL ETK terms; if false, uses PLAIN mode.
-  //! Returns 0 if all systems converged, 1 if some systems did not converge.
+  //! \brief Runs ETK minimization through the per-molecule CUDA kernels.
+  //! \param numIters Maximum number of BFGS iterations to perform.
+  //! \param gradTol Convergence tolerance applied to the scaled gradients.
+  //! \param atomStartsHost Host-side atom offsets for the flattened systems.
+  //! \param atomStarts Device-side atom offsets for the flattened systems.
+  //! \param positions Flattened coordinate buffer for the batch.
+  //! \param systemDevice ETK device buffers used by the per-molecule kernels.
+  //! \param activeThisStage Optional per-system activity mask for staged minimization.
+  //! \return `false` when all systems converged and `true` when at least one system needs another cycle.
   bool minimizeWithETK(int                                        numIters,
                        double                                     gradTol,
                        const std::vector<int>&                    atomStartsHost,
                        const AsyncDeviceVector<int>&              atomStarts,
                        AsyncDeviceVector<double>&                 positions,
                        DistGeom::BatchedMolecular3DDeviceBuffers& systemDevice,
-                       bool                                       useBasicKnowledge,
                        const uint8_t*                             activeThisStage = nullptr);
 
-  //! Run BFGS minimization with DG forcefield.
-  //! Returns 0 if all systems converged, 1 if some systems did not converge.
+  //! \brief Runs DG minimization through the per-molecule CUDA kernels.
+  //! \param numIters Maximum number of BFGS iterations to perform.
+  //! \param gradTol Convergence tolerance applied to the scaled gradients.
+  //! \param atomStartsHost Host-side atom offsets for the flattened systems.
+  //! \param atomStarts Device-side atom offsets for the flattened systems.
+  //! \param positions Flattened coordinate buffer for the batch.
+  //! \param systemDevice DG device buffers used by the per-molecule kernels.
+  //! \param chiralWeight Weight applied to the DG chirality term.
+  //! \param fourthDimWeight Weight applied to the DG fourth-dimension term.
+  //! \param activeThisStage Optional per-system activity mask for staged minimization.
+  //! \return `false` when all systems converged and `true` when at least one system needs another cycle.
   bool minimizeWithDG(int                                      numIters,
                       double                                   gradTol,
                       const std::vector<int>&                  atomStartsHost,
@@ -105,7 +132,19 @@ struct BfgsBatchMinimizer {
                       double                                   fourthDimWeight,
                       const uint8_t*                           activeThisStage = nullptr);
 
-  // Set up the minimizer for a new system.
+  //! \brief Resolves the effective backend for the provided batch.
+  //! \param atomStartsHost Host-side atom offsets for the systems under consideration.
+  //! \return The effective backend after applying the HYBRID size heuristic.
+  BfgsBackend resolveBackend(const std::vector<int>& atomStartsHost) const;
+
+  //! \brief Initializes persistent buffers for a new batch of systems.
+  //! \param atomStartsHost Host-side atom offsets for the batch.
+  //! \param atomStarts Device-side atom offsets for the batch.
+  //! \param positions Flattened coordinate buffer for the batch.
+  //! \param grad Gradient buffer matching `positions`.
+  //! \param energyOuts Per-system energy buffer.
+  //! \param effectiveBackend Backend that will be used for this run.
+  //! \param activeThisStage Optional per-system activity mask for staged minimization.
   void initialize(const std::vector<int>& atomStartsHost,
                   const int*              atomStarts,
                   double*                 positions,
@@ -114,26 +153,31 @@ struct BfgsBatchMinimizer {
                   BfgsBackend             effectiveBackend,
                   const uint8_t*          activeThisStage = nullptr);
 
-  //! Set Initial Hessian
+  //! \brief Sets the initial inverse Hessian approximation to the identity matrix.
   void setHessianToIdentity();
-  //! Determine max steps for each system.
+  //! \brief Determines the maximum line-search step for each active system.
   void setMaxStep();
-  //! Set up the line search.
+  //! \brief Initializes line-search buffers from the current energies.
   void doLineSearchSetup(const double* srcEnergies);
-  //! In-loop line search pre-energy position update.
+  //! \brief Perturbs positions along the current search direction.
   void doLineSearchPerturb();
-  //! In-loop line search post-energy lambda calculation
+  //! \brief Updates line-search lambdas after evaluating the perturbed energies.
   void doLineSearchPostEnergy(int iter);
-  //! Line search cleanup step.
+  //! \brief Finalizes line-search state before the next BFGS update.
   void doLineSearchPostLoop();
-  //! Count the number of finished line search systems.
+  //! \brief Counts the systems that have finished their current line search.
   int  lineSearchCountFinished() const;
+  //! \brief Updates the search direction from the current inverse Hessian and gradient.
   void setDirection();
-  //! Scale down gradients to match RDKit calcGradient in forcefield code.
+  //! \brief Scales gradients to match RDKit forcefield conventions.
   void scaleGrad(bool preLoop);
+  //! \brief Updates the gradient-difference buffer and convergence statuses.
   void updateDGrad();
+  //! \brief Compacts converged systems out of the active set and returns their count.
   int  compactAndCountConverged() const;
+  //! \brief Applies the BFGS inverse-Hessian update to all active systems.
   void updateHessian();
+  //! \brief Captures per-iteration debug data when stepwise debugging is enabled.
   void collectDebugData();
 
   AsyncDeviceVector<int> allSystemIndices_;
@@ -212,6 +256,27 @@ struct BfgsBatchMinimizer {
   std::vector<int> hessianStartsHost_;
 
   cudaStream_t stream_ = nullptr;
+
+ private:
+  //! \brief Shared host-driven batched BFGS implementation used by the public overload.
+  //! \param atomStartsHost Host-side atom offsets for the batch.
+  //! \param atomStarts Device-side atom offsets for the batch.
+  //! \param positions Flattened coordinate buffer for the batch.
+  //! \param grad Gradient buffer matching `positions`.
+  //! \param energyOuts Per-system energy output buffer.
+  //! \param eFunc Energy evaluation callback for the current forcefield.
+  //! \param gFunc Gradient evaluation callback for the current forcefield.
+  //! \param activeThisStage Optional per-system activity mask for staged minimization.
+  bool minimize(int                        numIters,
+                double                     gradTol,
+                const std::vector<int>&    atomStartsHost,
+                const int*                 atomStarts,
+                AsyncDeviceVector<double>& positions,
+                AsyncDeviceVector<double>& grad,
+                AsyncDeviceVector<double>& energyOuts,
+                EnergyFunctor              eFunc,
+                GradFunctor                gFunc,
+                const uint8_t*             activeThisStage = nullptr);
 };
 
 void copyAndInvert(const AsyncDeviceVector<double>& src, AsyncDeviceVector<double>& dst);

@@ -99,11 +99,12 @@ target_link_libraries(
   PUBLIC bfgs
   PRIVATE device_vector
           ${RDKit_LIBS}
+          dg_batched_forcefield
+          etk_batched_forcefield
           ff_kernel_utils
           dist_geom
           rdkit_dist_geom_flattened
-          etkdg
-          bfgs_distgeom)
+          etkdg)
 target_include_directories(etkdg_stages PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(etkdg etkdg.cpp)

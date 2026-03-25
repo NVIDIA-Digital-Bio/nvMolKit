@@ -17,8 +17,10 @@
 #define NVMOLKIT_MMFF_H
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
+#include "batched_forcefield.h"
 #include "device_vector.h"
 #include "mmff_kernels.h"
 namespace nvMolKit {
@@ -101,6 +103,12 @@ struct EnergyForceContribsHost {
   VdwTerms                vdwTerms;
   EleTerms                eleTerms;
 };
+
+//! Modifies a single MMFF system's contribs before they are flattened into the batched buffers.
+//! The callback receives the recorded system metadata, the source coordinates for that system,
+//! and a mutable copy of the per-system MMFF contribs.
+using ForcefieldModifier =
+  std::function<void(const BatchedSystemInfo&, const std::vector<double>&, EnergyForceContribsHost&)>;
 
 struct BatchedIndicesHost {
   //! Size n_molecules + 1, defines the start and end of each molecule in the batch.
@@ -257,11 +265,23 @@ struct BatchedMolecularDeviceBuffers {
   nvMolKit::AsyncDeviceVector<double> energyOuts;
 };
 
-//! Add a molecule to the batched molecular system.
-//! Populates the molSystem with the molecule's energy force contribs, and adds the current positions.
+//! \brief Adds a molecule to the batched MMFF system.
+//! \param contribs MMFF terms for the molecule before flattening into the batch.
+//! \param positions Source coordinates for the molecule.
+//! \param molSystem Output batched molecular system.
+//! \param metadata Optional mapping from concrete systems back to logical molecules.
+//!        When null, no logical molecule metadata is recorded.
+//! \param moleculeIdx Logical molecule index to associate with the new system when metadata is provided.
+//! \param conformerIdx Conformer index within the logical molecule when metadata is provided.
+//! \param customization Optional callback that runs after any metadata is recorded and before
+//!        the contribs are flattened into the batch.
 void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
                         const std::vector<double>&     positions,
-                        BatchedMolecularSystemHost&    molSystem);
+                        BatchedMolecularSystemHost&    molSystem,
+                        BatchedForcefieldMetadata*     metadata      = nullptr,
+                        int                            moleculeIdx   = -1,
+                        int                            conformerIdx  = -1,
+                        const ForcefieldModifier&      customization = {});
 
 //! Send the batched molecular system to the device.
 void sendContribsAndIndicesToDevice(const BatchedMolecularSystemHost& molSystemHost,
@@ -274,6 +294,14 @@ void setStreams(BatchedMolecularDeviceBuffers& molSystemDevice, cudaStream_t str
 //! These include the gradients, energy buffer, and energy outs.
 void allocateIntermediateBuffers(const BatchedMolecularSystemHost& molSystemHost,
                                  BatchedMolecularDeviceBuffers&    molSystemDevice);
+
+//! Compute energies into caller-provided output buffer.
+//! energyOuts and molSystemDevice.energyBuffer must be zeroed before calling.
+cudaError_t computeEnergy(BatchedMolecularDeviceBuffers& molSystemDevice,
+                          double*                        energyOuts,
+                          const double*                  positions,
+                          const uint8_t*                 activeSystemMask = nullptr,
+                          cudaStream_t                   stream           = nullptr);
 
 //! Compute the energy of the batched molecular system. This will populate the energyOuts buffer on device.
 //! energyOuts and energyBuffer must be zeroed before calling this function.
@@ -289,6 +317,12 @@ cudaError_t computeEnergyBlockPerMol(BatchedMolecularDeviceBuffers& molSystemDev
                                      cudaStream_t                   stream = nullptr);
 //! Compute the gradients of the batched molecular system. This will populate the grad buffer on device.
 //! grad must be zeroed before calling this function.
+cudaError_t computeGradients(BatchedMolecularDeviceBuffers& molSystemDevice,
+                             const double*                  positions,
+                             double*                        grad,
+                             const uint8_t*                 activeSystemMask = nullptr,
+                             cudaStream_t                   stream           = nullptr);
+
 cudaError_t computeGradients(BatchedMolecularDeviceBuffers& molSystemDevice, cudaStream_t stream = nullptr);
 
 cudaError_t computeGradBlockPerMol(BatchedMolecularDeviceBuffers& molSystemDevice, cudaStream_t stream = nullptr);

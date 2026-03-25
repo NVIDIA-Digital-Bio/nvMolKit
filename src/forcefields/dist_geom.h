@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "batched_forcefield.h"
 #include "device_vector.h"
 #include "dist_geom_kernels.h"
 
@@ -367,29 +368,43 @@ void addMoleculeToMolecularSystem(const EnergyForceContribsHost& contribs,
                                   const int                      numAtoms,
                                   const int                      dimension,
                                   const std::vector<int>&        ctxAtomStarts,
-                                  BatchedMolecularSystemHost&    molSystem);
+                                  BatchedMolecularSystemHost&    molSystem,
+                                  BatchedForcefieldMetadata*     metadata     = nullptr,
+                                  int                            moleculeIdx  = -1,
+                                  int                            conformerIdx = -1);
 
 //! Add a molecule to the molecular system.
 void addMoleculeToMolecularSystem3D(const Energy3DForceContribsHost& contribs,
                                     const std::vector<int>&          ctxAtomStarts,
-                                    BatchedMolecularSystem3DHost&    molSystem);
+                                    BatchedMolecularSystem3DHost&    molSystem,
+                                    BatchedForcefieldMetadata*       metadata     = nullptr,
+                                    int                              moleculeIdx  = -1,
+                                    int                              conformerIdx = -1);
 
-//! Add a molecule to the batched molecular system.
-//! Populates the molSystem with the molecule's energy force contribs, and adds the current positions.
+//! \brief Adds a molecule to the batched DG system.
+//! \param metadata Optional mapping from concrete systems back to logical molecules.
+//!        When null, no logical molecule metadata is recorded.
 void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
                         const std::vector<double>&     positions,
                         BatchedMolecularSystemHost&    molSystem,
                         int                            dimension,
                         std::vector<int>&              ctxAtomStarts,
-                        std::vector<double>&           ctxPositions);
+                        std::vector<double>&           ctxPositions,
+                        BatchedForcefieldMetadata*     metadata     = nullptr,
+                        int                            moleculeIdx  = -1,
+                        int                            conformerIdx = -1);
 
-//! Add a molecule to the batched molecular system.
-//! Populates the molSystem with the molecule's energy force contribs, and adds the current positions.
+//! \brief Adds a molecule to the batched ETK system.
+//! \param metadata Optional mapping from concrete systems back to logical molecules.
+//!        When null, no logical molecule metadata is recorded.
 void addMoleculeToBatch3D(const Energy3DForceContribsHost& contribs,
                           const std::vector<double>&       positions,
                           BatchedMolecularSystem3DHost&    molSystem,
                           std::vector<int>&                ctxAtomStarts,
-                          std::vector<double>&             ctxPositions);
+                          std::vector<double>&             ctxPositions,
+                          BatchedForcefieldMetadata*       metadata     = nullptr,
+                          int                              moleculeIdx  = -1,
+                          int                              conformerIdx = -1);
 
 //! Send the batched molecular system to the device.
 void sendContribsAndIndicesToDevice(const BatchedMolecularSystemHost& molSystemHost,
@@ -441,6 +456,16 @@ void allocateIntermediateBuffers(const BatchedMolecularSystemHost& molSystemHost
 void allocateIntermediateBuffers3D(const BatchedMolecularSystem3DHost& molSystemHost,
                                    BatchedMolecular3DDeviceBuffers&    molSystemDevice);
 
+cudaError_t computeEnergy(BatchedMolecularDeviceBuffers& molSystemDevice,
+                          double*                        energyOuts,
+                          const int*                     ctxAtomStarts,
+                          const double*                  ctxPositions,
+                          double                         chiralWeight,
+                          double                         fourthDimWeight,
+                          const uint8_t*                 activeSystemMask = nullptr,
+                          const double*                  positions        = nullptr,
+                          cudaStream_t                   stream           = nullptr);
+
 //! Compute the energy of the batched molecular system. This will populate the energyOuts buffer on device.
 //! energyOuts and energyBuffer must be zeroed before calling this function.
 cudaError_t computeEnergy(BatchedMolecularDeviceBuffers&             molSystemDevice,
@@ -452,6 +477,15 @@ cudaError_t computeEnergy(BatchedMolecularDeviceBuffers&             molSystemDe
                           const double*                              positions       = nullptr,
                           cudaStream_t                               stream          = nullptr);
 
+cudaError_t computeEnergyETK(BatchedMolecular3DDeviceBuffers& molSystemDevice,
+                             double*                          energyOuts,
+                             const int*                       ctxAtomStarts,
+                             const double*                    ctxPositions,
+                             const uint8_t*                   activeSystemMask = nullptr,
+                             const double*                    positions        = nullptr,
+                             ETKTerm                          term             = ETKTerm::ALL,
+                             cudaStream_t                     stream           = nullptr);
+
 //! Compute the energy of the batched molecular system. This will populate the energyOuts buffer on device.
 //! energyOuts and energyBuffer must be zeroed before calling this function.
 cudaError_t computeEnergyETK(BatchedMolecular3DDeviceBuffers&           molSystemDevice,
@@ -462,6 +496,15 @@ cudaError_t computeEnergyETK(BatchedMolecular3DDeviceBuffers&           molSyste
                              ETKTerm                                    term            = ETKTerm::ALL,
                              cudaStream_t                               stream          = nullptr);
 
+cudaError_t computeGradients(BatchedMolecularDeviceBuffers& molSystemDevice,
+                             double*                        grad,
+                             const int*                     ctxAtomStarts,
+                             const double*                  ctxPositions,
+                             double                         chiralWeight,
+                             double                         fourthDimWeight,
+                             const uint8_t*                 activeSystemMask = nullptr,
+                             cudaStream_t                   stream           = nullptr);
+
 //! Compute the gradients of the batched molecular system. This will populate the grad buffer on device.
 //! grad must be zeroed before calling this function.
 cudaError_t computeGradients(BatchedMolecularDeviceBuffers&             molSystemDevice,
@@ -471,6 +514,14 @@ cudaError_t computeGradients(BatchedMolecularDeviceBuffers&             molSyste
                              double                                     fourthDimWeight,
                              const uint8_t*                             activeThisStage = nullptr,
                              cudaStream_t                               stream          = nullptr);
+
+cudaError_t computeGradientsETK(BatchedMolecular3DDeviceBuffers& molSystemDevice,
+                                double*                          grad,
+                                const int*                       ctxAtomStarts,
+                                const double*                    ctxPositions,
+                                const uint8_t*                   activeSystemMask = nullptr,
+                                ETKTerm                          term             = ETKTerm::ALL,
+                                cudaStream_t                     stream           = nullptr);
 
 //! Compute the gradients of the batched molecular system. This will populate the grad buffer on device.
 //! grad must be zeroed before calling this function.
@@ -487,6 +538,14 @@ cudaError_t computePlanarEnergy(BatchedMolecular3DDeviceBuffers&           molSy
                                 const uint8_t*                             activeThisStage,
                                 const double*                              positions = nullptr,
                                 cudaStream_t                               stream    = nullptr);
+
+cudaError_t computePlanarEnergy(BatchedMolecular3DDeviceBuffers& molSystemDevice,
+                                double*                          energyOuts,
+                                const int*                       ctxAtomStarts,
+                                const double*                    ctxPositions,
+                                const uint8_t*                   activeSystemMask = nullptr,
+                                const double*                    positions        = nullptr,
+                                cudaStream_t                     stream           = nullptr);
 
 //! Compute the energy of DG terms using block-per-mol kernels.
 cudaError_t computeEnergyBlockPerMol(BatchedMolecularDeviceBuffers&             molSystemDevice,
