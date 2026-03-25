@@ -15,9 +15,8 @@
 
 #include <GraphMol/ROMol.h>
 
-#include <boost/python.hpp>
-
 #include <algorithm>
+#include <boost/python.hpp>
 #include <cmath>
 #include <memory>
 #include <stdexcept>
@@ -47,6 +46,21 @@ template <typename T> bp::list vectorOfVectorsToList(const std::vector<std::vect
   }
   return outerList;
 }
+
+namespace {
+std::vector<std::vector<double>> splitGradients(const std::vector<double>& flatGrad,
+                                                const std::vector<int>&    atomStarts,
+                                                int                        dim) {
+  std::vector<std::vector<double>> result;
+  result.reserve(atomStarts.size() - 1);
+  for (size_t i = 0; i + 1 < atomStarts.size(); ++i) {
+    const int start = atomStarts[i] * dim;
+    const int end   = atomStarts[i + 1] * dim;
+    result.emplace_back(flatGrad.begin() + start, flatGrad.begin() + end);
+  }
+  return result;
+}
+}  // namespace
 
 static std::vector<RDKit::ROMol*> extractMolecules(const bp::list& molecules) {
   const int                  n = bp::len(molecules);
@@ -90,7 +104,7 @@ static nvMolKit::MMFFProperties extractInternalMMFFProperties(const bp::object& 
 }
 
 static std::vector<nvMolKit::MMFFProperties> extractMMFFPropertiesList(const bp::list& properties, int numMols) {
-  const int                            n = bp::len(properties);
+  const int                             n = bp::len(properties);
   std::vector<nvMolKit::MMFFProperties> props;
   props.reserve(numMols);
   for (int i = 0; i < numMols; ++i) {
@@ -106,8 +120,8 @@ static std::vector<nvMolKit::MMFFProperties> extractMMFFPropertiesList(const bp:
 static std::vector<int> extractIntList(const bp::list& pyList, int expectedSize, const std::string& name) {
   const int n = bp::len(pyList);
   if (n != expectedSize) {
-    throw std::invalid_argument(name + " list size " + std::to_string(n) +
-                                " does not match expected size " + std::to_string(expectedSize));
+    throw std::invalid_argument(name + " list size " + std::to_string(n) + " does not match expected size " +
+                                std::to_string(expectedSize));
   }
   std::vector<int> result;
   result.reserve(n);
@@ -119,9 +133,7 @@ static std::vector<int> extractIntList(const bp::list& pyList, int expectedSize,
 
 class NativeMMFFBatchedForcefield {
  public:
-  NativeMMFFBatchedForcefield(const bp::list& molecules,
-                              const bp::list& properties,
-                              const bp::list& confIds) {
+  NativeMMFFBatchedForcefield(const bp::list& molecules, const bp::list& properties, const bp::list& confIds) {
     const auto mols     = extractMolecules(molecules);
     const int  numMols  = static_cast<int>(mols.size());
     const auto props    = extractMMFFPropertiesList(properties, numMols);
@@ -130,9 +142,8 @@ class NativeMMFFBatchedForcefield {
     for (int molIdx = 0; molIdx < numMols; ++molIdx) {
       std::vector<double> positions;
       nvMolKit::confPosToVect(*mols[molIdx], positions, confList[molIdx]);
-      auto ffParams =
-        nvMolKit::MMFF::constructForcefieldContribs(*mols[molIdx], props[molIdx], confList[molIdx]);
-      nvMolKit::MMFF::addMoleculeToBatch(ffParams, positions, systemHost_, metadata_, molIdx, 0);
+      auto ffParams = nvMolKit::MMFF::constructForcefieldContribs(*mols[molIdx], props[molIdx], confList[molIdx]);
+      nvMolKit::MMFF::addMoleculeToBatch(ffParams, positions, systemHost_, &metadata_, molIdx, 0);
     }
     forcefield_ = std::make_unique<nvMolKit::MMFFBatchedForcefield>(systemHost_, metadata_);
     positionsDevice_.setFromVector(systemHost_.positions);
@@ -149,17 +160,16 @@ class NativeMMFFBatchedForcefield {
   bp::list computeGradients() {
     gradDevice_.zero();
     throwIfCudaError(forcefield_->computeGradients(gradDevice_.data(), positionsDevice_.data()), "computeGradients");
-    return vectorOfVectorsToList(
-      nvMolKit::splitGradients(copyDeviceVector(gradDevice_), systemHost_.indices.atomStarts, 3));
+    return vectorOfVectorsToList(splitGradients(copyDeviceVector(gradDevice_), systemHost_.indices.atomStarts, 3));
   }
 
  private:
   nvMolKit::MMFF::BatchedMolecularSystemHost       systemHost_;
-  nvMolKit::BatchedForcefieldMetadata               metadata_;
-  std::unique_ptr<nvMolKit::MMFFBatchedForcefield>  forcefield_;
-  nvMolKit::AsyncDeviceVector<double>               positionsDevice_;
-  nvMolKit::AsyncDeviceVector<double>               gradDevice_;
-  nvMolKit::AsyncDeviceVector<double>               energyOutsDevice_;
+  nvMolKit::BatchedForcefieldMetadata              metadata_;
+  std::unique_ptr<nvMolKit::MMFFBatchedForcefield> forcefield_;
+  nvMolKit::AsyncDeviceVector<double>              positionsDevice_;
+  nvMolKit::AsyncDeviceVector<double>              gradDevice_;
+  nvMolKit::AsyncDeviceVector<double>              energyOutsDevice_;
 };
 
 static bp::list computeMMFFEnergies(const bp::list& molecules, const double nonBondedThreshold) {
@@ -173,7 +183,7 @@ static bp::list computeMMFFEnergies(const bp::list& molecules, const double nonB
     std::vector<double> positions;
     nvMolKit::confPosToVect(*mols[i], positions);
     auto ffParams = nvMolKit::MMFF::constructForcefieldContribs(*mols[i], props);
-    nvMolKit::MMFF::addMoleculeToBatch(ffParams, positions, systemHost, metadata, i, 0);
+    nvMolKit::MMFF::addMoleculeToBatch(ffParams, positions, systemHost, &metadata, i, 0);
   }
 
   nvMolKit::MMFFBatchedForcefield     forcefield(systemHost, metadata);
@@ -197,7 +207,7 @@ static bp::list computeMMFFGradients(const bp::list& molecules, const double non
     std::vector<double> positions;
     nvMolKit::confPosToVect(*mols[i], positions);
     auto ffParams = nvMolKit::MMFF::constructForcefieldContribs(*mols[i], props);
-    nvMolKit::MMFF::addMoleculeToBatch(ffParams, positions, systemHost, metadata, i, 0);
+    nvMolKit::MMFF::addMoleculeToBatch(ffParams, positions, systemHost, &metadata, i, 0);
   }
 
   nvMolKit::MMFFBatchedForcefield     forcefield(systemHost, metadata);
@@ -207,32 +217,30 @@ static bp::list computeMMFFGradients(const bp::list& molecules, const double non
   gradDevice.resize(systemHost.positions.size());
   gradDevice.zero();
   throwIfCudaError(forcefield.computeGradients(gradDevice.data(), positionsDevice.data()), "MMFFComputeGradients");
-  return vectorOfVectorsToList(
-    nvMolKit::splitGradients(copyDeviceVector(gradDevice), systemHost.indices.atomStarts, 3));
+  return vectorOfVectorsToList(splitGradients(copyDeviceVector(gradDevice), systemHost.indices.atomStarts, 3));
 }
 
 BOOST_PYTHON_MODULE(_batchedForcefield) {
   bp::class_<nvMolKit::MMFFProperties>("MMFFProperties")
-    .def_readwrite("variant",                     &nvMolKit::MMFFProperties::variant)
-    .def_readwrite("dielectricConstant",          &nvMolKit::MMFFProperties::dielectricConstant)
-    .def_readwrite("dielectricModel",             &nvMolKit::MMFFProperties::dielectricModel)
-    .def_readwrite("nonBondedThreshold",          &nvMolKit::MMFFProperties::nonBondedThreshold)
+    .def_readwrite("variant", &nvMolKit::MMFFProperties::variant)
+    .def_readwrite("dielectricConstant", &nvMolKit::MMFFProperties::dielectricConstant)
+    .def_readwrite("dielectricModel", &nvMolKit::MMFFProperties::dielectricModel)
+    .def_readwrite("nonBondedThreshold", &nvMolKit::MMFFProperties::nonBondedThreshold)
     .def_readwrite("ignoreInterfragInteractions", &nvMolKit::MMFFProperties::ignoreInterfragInteractions)
-    .def_readwrite("bondTerm",                    &nvMolKit::MMFFProperties::bondTerm)
-    .def_readwrite("angleTerm",                   &nvMolKit::MMFFProperties::angleTerm)
-    .def_readwrite("stretchBendTerm",             &nvMolKit::MMFFProperties::stretchBendTerm)
-    .def_readwrite("oopTerm",                     &nvMolKit::MMFFProperties::oopTerm)
-    .def_readwrite("torsionTerm",                 &nvMolKit::MMFFProperties::torsionTerm)
-    .def_readwrite("vdwTerm",                     &nvMolKit::MMFFProperties::vdwTerm)
-    .def_readwrite("eleTerm",                     &nvMolKit::MMFFProperties::eleTerm);
+    .def_readwrite("bondTerm", &nvMolKit::MMFFProperties::bondTerm)
+    .def_readwrite("angleTerm", &nvMolKit::MMFFProperties::angleTerm)
+    .def_readwrite("stretchBendTerm", &nvMolKit::MMFFProperties::stretchBendTerm)
+    .def_readwrite("oopTerm", &nvMolKit::MMFFProperties::oopTerm)
+    .def_readwrite("torsionTerm", &nvMolKit::MMFFProperties::torsionTerm)
+    .def_readwrite("vdwTerm", &nvMolKit::MMFFProperties::vdwTerm)
+    .def_readwrite("eleTerm", &nvMolKit::MMFFProperties::eleTerm);
 
-  bp::class_<NativeMMFFBatchedForcefield, boost::noncopyable>("NativeMMFFBatchedForcefield",
-                                                            bp::init<const bp::list&, const bp::list&, const bp::list&>())
-    .def("computeEnergy",    &NativeMMFFBatchedForcefield::computeEnergy)
+  bp::class_<NativeMMFFBatchedForcefield, boost::noncopyable>(
+    "NativeMMFFBatchedForcefield",
+    bp::init<const bp::list&, const bp::list&, const bp::list&>())
+    .def("computeEnergy", &NativeMMFFBatchedForcefield::computeEnergy)
     .def("computeGradients", &NativeMMFFBatchedForcefield::computeGradients);
 
-  bp::def("MMFFComputeEnergies",  computeMMFFEnergies,
-          (bp::arg("molecules"), bp::arg("nonBondedThreshold") = 100.0));
-  bp::def("MMFFComputeGradients", computeMMFFGradients,
-          (bp::arg("molecules"), bp::arg("nonBondedThreshold") = 100.0));
+  bp::def("MMFFComputeEnergies", computeMMFFEnergies, (bp::arg("molecules"), bp::arg("nonBondedThreshold") = 100.0));
+  bp::def("MMFFComputeGradients", computeMMFFGradients, (bp::arg("molecules"), bp::arg("nonBondedThreshold") = 100.0));
 }
