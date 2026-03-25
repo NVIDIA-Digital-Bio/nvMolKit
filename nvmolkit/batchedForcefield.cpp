@@ -159,8 +159,7 @@ class NativeMMFFBatchedForcefield {
   bp::list computeGradients() {
     gradDevice_.zero();
     throwIfCudaError(forcefield_->computeGradients(gradDevice_.data(), positionsDevice_.data()), "computeGradients");
-    return vectorOfVectorsToList(
-      splitGradients(copyDeviceVector(gradDevice_), forcefield_->atomStartsHost(), 3));
+    return vectorOfVectorsToList(splitGradients(copyDeviceVector(gradDevice_), forcefield_->atomStartsHost(), 3));
   }
 
  private:
