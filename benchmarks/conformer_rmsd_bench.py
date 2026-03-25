@@ -26,10 +26,10 @@ Usage:
 
 import argparse
 import copy
-import time
 
-import torch
 import numpy as np
+import torch
+from benchmark_timing import time_it
 from rdkit import Chem
 from rdkit.Chem import AllChem, rdDistGeom
 
@@ -41,13 +41,12 @@ def _numpy_kabsch_rmsd(p, q):
     p_c = p - p.mean(axis=0)
     q_c = q - q.mean(axis=0)
     H = p_c.T @ q_c
-    U, S, Vt = np.linalg.svd(H)
+    S = np.linalg.svd(H, compute_uv=False)
     d = np.sign(np.linalg.det(H))
     S[-1] *= d if d != 0.0 else 1.0
-    Sp = np.sum(p_c ** 2)
-    Sq = np.sum(q_c ** 2)
+    Sp = np.sum(p_c**2)
+    Sq = np.sum(q_c**2)
     return np.sqrt(max((Sp + Sq - 2.0 * np.sum(S)) / len(p), 0.0))
-
 
 
 def benchmark_cpu(mol, n_warmup=1, n_iter=5):
@@ -58,34 +57,18 @@ def benchmark_cpu(mol, n_warmup=1, n_iter=5):
     same molecule would measure already-aligned conformers and understate
     the true CPU cost.
     """
-    for _ in range(n_warmup):
-        AllChem.GetConformerRMSMatrix(copy.deepcopy(mol), prealigned=False)
-
-    times = []
-    for _ in range(n_iter):
-        mol_copy = copy.deepcopy(mol)
-        t0 = time.perf_counter()
-        AllChem.GetConformerRMSMatrix(mol_copy, prealigned=False)
-        t1 = time.perf_counter()
-        times.append(t1 - t0)
-    return np.median(times)
+    result = time_it(
+        lambda: AllChem.GetConformerRMSMatrix(copy.deepcopy(mol), prealigned=False), runs=n_iter, warmups=n_warmup
+    )
+    return result.median_s
 
 
 def benchmark_gpu(mol, n_warmup=2, n_iter=10):
     """Benchmark nvMolKit GPU GetConformerRMSMatrix."""
-    for _ in range(n_warmup):
-        result = GetConformerRMSMatrix(mol, prealigned=False)
-        torch.cuda.synchronize()
-
-    times = []
-    for _ in range(n_iter):
-        torch.cuda.synchronize()
-        t0 = time.perf_counter()
-        result = GetConformerRMSMatrix(mol, prealigned=False)
-        torch.cuda.synchronize()
-        t1 = time.perf_counter()
-        times.append(t1 - t0)
-    return np.median(times)
+    result = time_it(
+        lambda: GetConformerRMSMatrix(mol, prealigned=False), runs=n_iter, warmups=n_warmup, gpu_sync=True
+    )
+    return result.median_s
 
 
 def run_benchmark(smiles, num_confs_list, seed=42):
@@ -157,9 +140,9 @@ def main():
         "--smiles",
         nargs="+",
         default=[
-            "CC(=O)Oc1ccccc1C(=O)O",                                                  # aspirin (13 HA)
-            "Cc1ccc(-c2cc(C(F)(F)F)nn2-c2ccc(S(N)(=O)=O)cc2)cc1",                     # celecoxib (24 HA)
-            "C=CC(=O)Nc1cc(OC)c(Nc2nccc(-c3cn(C)c4ccccc34)n2)cc1N(C)CCN(C)C",         # osimertinib (33 HA)
+            "CC(=O)Oc1ccccc1C(=O)O",  # aspirin (13 HA)
+            "Cc1ccc(-c2cc(C(F)(F)F)nn2-c2ccc(S(N)(=O)=O)cc2)cc1",  # celecoxib (24 HA)
+            "C=CC(=O)Nc1cc(OC)c(Nc2nccc(-c3cn(C)c4ccccc34)n2)cc1N(C)CCN(C)C",  # osimertinib (33 HA)
             "CC(C)CC1NC(=O)C(CC(=O)O)NC(=O)C(Cc2ccc(O)cc2)NC(=O)C(CO)NC(=O)C(Cc2c[nH]c3ccccc23)NC1=O",  # cyclic pentapeptide (~48 HA)
         ],
         help="SMILES strings to benchmark",

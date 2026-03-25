@@ -56,28 +56,22 @@ import argparse
 import gc
 import pickle
 import sys
-import time
 from functools import partial
 from multiprocessing import Pool
 from typing import Callable
 
 import nvtx
 import pandas as pd
+from benchmark_timing import time_it as _time_it
 from rdkit import Chem, RDLogger
 from rdkit.Chem import rdSubstructLibrary
 from tqdm.contrib.concurrent import process_map
 
-def time_it(func: Callable, runs: int = 1) -> tuple[float, float]:
+
+def time_it(func: Callable, runs: int = 1, gpu_sync: bool = False) -> tuple[float, float]:
     """Time a function and return (avg_ms, std_ms)."""
-    times = []
-    for _ in range(runs):
-        start = time.perf_counter_ns()
-        func()
-        end = time.perf_counter_ns()
-        times.append((end - start) / 1.0e6)
-    avg_ms = sum(times) / len(times)
-    std_ms = (sum((t - avg_ms) ** 2 for t in times) / len(times)) ** 0.5
-    return avg_ms, std_ms
+    result = _time_it(func, runs=runs, warmups=0, gpu_sync=gpu_sync)
+    return result.mean_ms, result.std_ms
 
 
 def load_pickle(filepath: str, max_count: int = 0) -> list[Chem.Mol]:
@@ -110,11 +104,11 @@ def load_smiles(filepath: str, max_count: int = 0, sanitize: bool = True) -> lis
     """Load and parse molecules from a SMILES file."""
     mols = []
     smiles_list = []
-    
+
     # Use a 10% buffer to account for potential parse failures
     # "On parse failures continue down the file. Load 10% more molecules than needed"
     read_limit = int(max_count * 1.1) if max_count > 0 else 0
-    
+
     with open(filepath, "r") as f:
         for i, line in enumerate(f):
             if read_limit > 0 and (len(mols) + len(smiles_list)) >= read_limit:
@@ -122,7 +116,7 @@ def load_smiles(filepath: str, max_count: int = 0, sanitize: bool = True) -> lis
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            
+
             smi = line.split()[0]
             if i == 0:
                 # Try to parse line 0 quietly in case it's a header
@@ -134,18 +128,18 @@ def load_smiles(filepath: str, max_count: int = 0, sanitize: bool = True) -> lis
                 # If mol is None, we skip it and don't count as failure (potential header)
             else:
                 smiles_list.append(smi)
-    
+
     if smiles_list:
         parse_func = partial(_parse_smiles, sanitize=sanitize)
         parsed = process_map(parse_func, smiles_list, desc="Parsing molecules", chunksize=1000)
-        
+
         parse_failures = 0
         for mol in parsed:
             if mol is None:
                 parse_failures += 1
             else:
                 mols.append(mol)
-        
+
         if parse_failures > 0:
             print(f"    ({parse_failures} parse failures)")
 
@@ -162,7 +156,7 @@ def load_smarts(filepath: str, max_count: int = 0) -> tuple[list[Chem.Mol], list
     queries = []
     smarts_list = []
     parse_failures = 0
-    
+
     with open(filepath, "r") as f:
         for line in f:
             if max_count > 0 and len(queries) >= max_count:
@@ -177,7 +171,7 @@ def load_smarts(filepath: str, max_count: int = 0) -> tuple[list[Chem.Mol], list
                 continue
             queries.append(query)
             smarts_list.append(smarts)
-    
+
     print(f"  Loaded {len(queries)} SMARTS patterns from {filepath}")
     if parse_failures > 0:
         print(f"    ({parse_failures} parse failures)")
@@ -218,21 +212,16 @@ def _rdkit_worker_count(mol_binary: bytes) -> list[int]:
 
 @nvtx.annotate("bench_rdkit_substruct", color="green")
 def bench_rdkit_substruct(
-    mols: list[Chem.Mol], 
-    queries: list[Chem.Mol], 
-    runs: int,
-    mode: str,
-    max_matches: int,
-    threads: int = 1
+    mols: list[Chem.Mol], queries: list[Chem.Mol], runs: int, mode: str, max_matches: int, threads: int = 1
 ) -> tuple[float, float, list]:
     """Benchmark RDKit SubstructMatch API."""
     params = Chem.SubstructMatchParameters()
     params.uniquify = False
     if max_matches > 0:
         params.maxMatches = max_matches
-    
+
     results_data = []
-    
+
     if threads > 1:
         mol_binaries = [mol.ToBinary() for mol in mols]
         query_binaries = [q.ToBinary() for q in queries]
@@ -243,13 +232,14 @@ def bench_rdkit_substruct(
         else:
             worker_func = _rdkit_worker_get
         chunksize = max(1, len(mol_binaries) // (threads * 4))
-        
+
         @nvtx.annotate("substruct_run_mp", color="yellow")
         def run():
             nonlocal results_data
             with Pool(threads, initializer=_rdkit_worker_init, initargs=(query_binaries, max_matches)) as pool:
                 results_data = pool.map(worker_func, mol_binaries, chunksize=chunksize)
     else:
+
         @nvtx.annotate("substruct_run", color="yellow")
         def run():
             nonlocal results_data
@@ -273,24 +263,19 @@ def bench_rdkit_substruct(
                         matches = mol.GetSubstructMatches(query, params)
                         mol_results.append(matches)
                     results_data.append(mol_results)
-    
+
     avg_ms, std_ms = time_it(run, runs)
     return avg_ms, std_ms, results_data
 
 
 @nvtx.annotate("bench_rdkit_substructlib", color="green")
 def bench_rdkit_substructlib(
-    mols: list[Chem.Mol], 
-    queries: list[Chem.Mol], 
-    runs: int,
-    mode: str,
-    max_matches: int,
-    threads: int = 1
+    mols: list[Chem.Mol], queries: list[Chem.Mol], runs: int, mode: str, max_matches: int, threads: int = 1
 ) -> tuple[float, float, list]:
     """Benchmark RDKit SubstructLibrary API with native multithreading."""
     num_mols = len(mols)
     num_queries = len(queries)
-    
+
     params = Chem.SubstructMatchParameters()
     params.uniquify = False
     if max_matches > 0:
@@ -301,15 +286,15 @@ def bench_rdkit_substructlib(
     @nvtx.annotate("substructlib_run", color="yellow")
     def run():
         nonlocal results_data
-        
+
         mol_holder = rdSubstructLibrary.CachedMolHolder()
         fp_holder = rdSubstructLibrary.PatternHolder()
         lib = rdSubstructLibrary.SubstructLibrary(mol_holder, fp_holder)
         for mol in mols:
             lib.AddMol(mol)
-        
+
         results_data = [[None] * num_queries for _ in range(num_mols)]
-        
+
         if mode == "hasSubstructMatch":
             for q_idx, query in enumerate(queries):
                 matching_indices = lib.GetMatches(query, numThreads=threads)
@@ -334,40 +319,31 @@ def bench_rdkit_substructlib(
                         results_data[m_idx][q_idx] = mols[m_idx].GetSubstructMatches(query, params)
                     else:
                         results_data[m_idx][q_idx] = ()
-    
+
     avg_ms, std_ms = time_it(run, runs)
     return avg_ms, std_ms, results_data
 
 
 @nvtx.annotate("bench_nvmolkit", color="red")
 def bench_nvmolkit(
-    mols: list[Chem.Mol],
-    queries: list[Chem.Mol],
-    runs: int,
-    mode: str,
-    config
+    mols: list[Chem.Mol], queries: list[Chem.Mol], runs: int, mode: str, config
 ) -> tuple[float, float, object]:
     """Benchmark nvmolkit GPU substructure search."""
-    import torch
-    
-    from nvmolkit.substructure import countSubstructMatches, hasSubstructMatch, getSubstructMatches
-    
+    from nvmolkit.substructure import countSubstructMatches, getSubstructMatches, hasSubstructMatch
+
     results_data: object = None
-    
+
     @nvtx.annotate("nvmolkit_run", color="orange")
     def run():
         nonlocal results_data
         if mode == "hasSubstructMatch":
             results_data = hasSubstructMatch(mols, queries, config)
-            torch.cuda.synchronize()
         elif mode == "countSubstructMatches":
             results_data = countSubstructMatches(mols, queries, config)
-            torch.cuda.synchronize()
         else:
             results_data = getSubstructMatches(mols, queries, config)
-            torch.cuda.synchronize()
-    
-    avg_ms, std_ms = time_it(run, runs)
+
+    avg_ms, std_ms = time_it(run, runs, gpu_sync=True)
     return avg_ms, std_ms, results_data
 
 
@@ -376,9 +352,7 @@ def _load_config_dataframe(config_path: str) -> list[dict]:
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Substructure search benchmark: nvmolkit vs RDKit SubstructMatch"
-    )
+    parser = argparse.ArgumentParser(description="Substructure search benchmark: nvmolkit vs RDKit SubstructMatch")
     parser.add_argument("--smiles", "-s", help="Path to SMILES file with molecules to search")
     parser.add_argument("--pickle", help="Path to pickled molecules file (alternative to --smiles)")
     parser.add_argument("--smarts", "-q", help="Path to SMARTS file with query patterns")
@@ -391,18 +365,35 @@ def main():
     )
     parser.add_argument("--num_mols", "-n", type=int, default=0, help="Max number of molecules (default: 0 = all)")
     parser.add_argument("--sanitize", action="store_true", dest="sanitize", help="Sanitize SMILES during parsing")
-    parser.add_argument("--no_sanitize", action="store_false", dest="sanitize", help="Skip sanitization (preprocessed SMILES)")
+    parser.add_argument(
+        "--no_sanitize", action="store_false", dest="sanitize", help="Skip sanitization (preprocessed SMILES)"
+    )
     parser.set_defaults(sanitize=False)
     parser.add_argument("--runs", "-r", type=int, default=1, help="Number of timing runs (default: 1)")
-    parser.add_argument("--mode", "-m", choices=["hasSubstructMatch", "getSubstructMatches", "countSubstructMatches"], 
-                        default="hasSubstructMatch", help="Search mode (default: hasSubstructMatch)")
-    parser.add_argument("--max_matches", type=int, default=0, 
-                        help="Maximum matches per target/query pair, 0 = all (default: 0)")
+    parser.add_argument(
+        "--mode",
+        "-m",
+        choices=["hasSubstructMatch", "getSubstructMatches", "countSubstructMatches"],
+        default="hasSubstructMatch",
+        help="Search mode (default: hasSubstructMatch)",
+    )
+    parser.add_argument(
+        "--max_matches", type=int, default=0, help="Maximum matches per target/query pair, 0 = all (default: 0)"
+    )
     parser.add_argument("--no_nvmolkit", action="store_true", help="Skip nvmolkit benchmark")
     parser.add_argument("--no_rdkit", action="store_true", help="Skip RDKit benchmark")
-    parser.add_argument("--rdkit_match_mode", choices=["raw", "substructlib"], default="raw",
-                        help="RDKit matching mode: raw (direct API) or substructlib (SubstructLibrary) (default: raw)")
-    parser.add_argument("--rdkit_threads", type=int, default=1, help="RDKit threads (multiprocessing for raw, native for substructlib) (default: 1)")
+    parser.add_argument(
+        "--rdkit_match_mode",
+        choices=["raw", "substructlib"],
+        default="raw",
+        help="RDKit matching mode: raw (direct API) or substructlib (SubstructLibrary) (default: raw)",
+    )
+    parser.add_argument(
+        "--rdkit_threads",
+        type=int,
+        default=1,
+        help="RDKit threads (multiprocessing for raw, native for substructlib) (default: 1)",
+    )
     parser.add_argument("--batch_size", "-b", type=int, default=1024, help="nvmolkit batch size (default: 1024)")
     parser.add_argument("--workers", type=int, default=-1, help="nvmolkit GPU worker threads per GPU (-1 = auto)")
     parser.add_argument("--prep_threads", type=int, default=-1, help="nvmolkit preprocessing threads (-1 = auto)")
@@ -410,20 +401,22 @@ def main():
     parser.add_argument("--warmup", action="store_true", dest="warmup", help="Perform warmup run (default)")
     parser.add_argument("--no_warmup", action="store_false", dest="warmup", help="Skip warmup run")
     parser.set_defaults(warmup=True)
-    parser.add_argument("--validate", action="store_true", dest="validate", help="Validate nvmolkit vs RDKit (default)")
+    parser.add_argument(
+        "--validate", action="store_true", dest="validate", help="Validate nvmolkit vs RDKit (default)"
+    )
     parser.add_argument("--no_validate", action="store_false", dest="validate", help="Skip validation checks")
     parser.set_defaults(validate=True)
 
     args = parser.parse_args()
-    
+
     if not args.smiles and not args.pickle:
         print("Error: Either --smiles or --pickle is required")
         sys.exit(1)
-    
+
     if args.smiles and args.pickle:
         print("Error: Cannot specify both --smiles and --pickle")
         sys.exit(1)
-    
+
     if args.config and args.smarts:
         print("Error: --smarts cannot be used with --config")
         sys.exit(1)
@@ -465,17 +458,17 @@ def main():
             print(f"    num_gpus: {args.num_gpus}")
             print(f"    workers: {args.workers if args.workers >= 0 else 'auto'}")
             print(f"    prep_threads: {args.prep_threads if args.prep_threads >= 0 else 'auto'}")
-    
+
     print("\nLoading molecules...")
     if args.pickle:
         mols = load_pickle(args.pickle, args.num_mols)
     else:
         mols = load_smiles(args.smiles, args.num_mols, args.sanitize)
-    
+
     if len(mols) == 0:
         print("Error: No valid molecules loaded")
         sys.exit(1)
-    
+
     if args.config:
         config_rows = _load_config_dataframe(args.config)
     else:
@@ -527,8 +520,14 @@ def main():
 
         if not args.no_nvmolkit:
             try:
-                from nvmolkit.substructure import SubstructSearchConfig, countSubstructMatches, hasSubstructMatch, getSubstructMatches
                 import torch
+
+                from nvmolkit.substructure import (
+                    SubstructSearchConfig,
+                    countSubstructMatches,
+                    getSubstructMatches,
+                    hasSubstructMatch,
+                )
 
                 config = SubstructSearchConfig()
                 config.batchSize = config_row["batch_size"]
@@ -554,9 +553,7 @@ def main():
                         torch.cuda.synchronize()
 
                 print("Running nvmolkit GPU benchmark...")
-                nvmolkit_avg, nvmolkit_std, nvmolkit_results = bench_nvmolkit(
-                    mols, queries, args.runs, mode, config
-                )
+                nvmolkit_avg, nvmolkit_std, nvmolkit_results = bench_nvmolkit(mols, queries, args.runs, mode, config)
                 print(f"  nvmolkit:        {nvmolkit_avg:10.2f} ms (± {nvmolkit_std:.2f} ms)")
                 results["nvmolkit"] = (nvmolkit_avg, nvmolkit_std, nvmolkit_results)
                 torch.cuda.cudart().cudaProfilerStop()

@@ -17,12 +17,14 @@ import sys
 
 import pandas as pd
 import torch
+from benchmark_timing import time_it
 from rdkit.Chem import MolFromSmiles
 from rdkit.ML.Cluster.Butina import ClusterData
 
 from nvmolkit.clustering import butina as butina_nvmol
 from nvmolkit.fingerprints import MorganFingerprintGenerator as nvmolMorganGen
 from nvmolkit.similarity import crossTanimotoSimilarity
+
 
 def check_butina_correctness(hit_mat, clusts):
     hit_mat = hit_mat.clone()
@@ -73,29 +75,13 @@ def resize_and_fill(distance_mat: torch.Tensor, want_size):
     return full_mat
 
 
-def time_it(func, runs=3, warmups=1):
-    import time
-
-    for _ in range(warmups):
-        func()
-    times = []
-    for _ in range(runs):
-        start = time.time_ns()
-        func()
-        end = time.time_ns()
-        times.append(end - start)
-    avg_time = sum(times) / runs
-    std_time = (sum((t - avg_time) ** 2 for t in times) / runs) ** 0.5
-    return avg_time / 1.0e6, std_time / 1.0e6  # return in milliseconds
-
-
 def bench_rdkit(data, threshold):
-    return time_it(lambda: ClusterData(data, len(data), threshold, isDistData=True, reordering=True))
+    result = time_it(lambda: ClusterData(data, len(data), threshold, isDistData=True, reordering=True))
+    return result.mean_ms, result.std_ms
 
 
 def bench_nvmol_inner(data, threshold, neighborlist_max_size):
     butina_nvmol(data, threshold, neighborlist_max_size=neighborlist_max_size)
-    torch.cuda.synchronize()
 
 
 MAX_BENCH_SIZE = 40000
@@ -135,7 +121,8 @@ if __name__ == "__main__":
 
                 for max_nl in max_nl_sizes:
                     print(f"Running size {size} cutoff {cutoff} max_nl {max_nl}")
-                    nvmol_time, nvmol_std = time_it(lambda: bench_nvmol_inner(dist_mat, cutoff, max_nl))
+                    nvmol_result = time_it(lambda: bench_nvmol_inner(dist_mat, cutoff, max_nl), gpu_sync=True)
+                    nvmol_time, nvmol_std = nvmol_result.mean_ms, nvmol_result.std_ms
 
                     # Verify correctness
                     nvmol_res = butina_nvmol(dist_mat, cutoff, neighborlist_max_size=max_nl).torch()
