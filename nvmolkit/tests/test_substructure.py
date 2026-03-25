@@ -42,7 +42,7 @@ def get_rdkit_matches(target: Chem.Mol, query: Chem.Mol, uniquify: bool = False)
 
 def matches_equal(gpu_matches: list, rdkit_matches: list[tuple[int, ...]]) -> bool:
     """Compare GPU matches to RDKit matches (order-independent).
-    
+
     GPU matches can be numpy arrays or lists.
     """
     gpu_set = {tuple(m) for m in gpu_matches}
@@ -53,6 +53,7 @@ def matches_equal(gpu_matches: list, rdkit_matches: list[tuple[int, ...]]) -> bo
 # =============================================================================
 # Basic Tests
 # =============================================================================
+
 
 class TestBasicSubstructureSearch:
     """Basic substructure search functionality tests."""
@@ -126,13 +127,13 @@ class TestBasicSubstructureSearch:
             assert len(results[t_idx]) == 4
             for q_idx, query in enumerate(queries):
                 rdkit_matches = get_rdkit_matches(target, query)
-                assert len(results[t_idx][q_idx]) == len(rdkit_matches), \
-                    f"Mismatch at target {t_idx}, query {q_idx}"
+                assert len(results[t_idx][q_idx]) == len(rdkit_matches), f"Mismatch at target {t_idx}, query {q_idx}"
 
 
 # =============================================================================
 # Edge Cases
 # =============================================================================
+
 
 class TestEdgeCases:
     """Edge case tests for substructure search."""
@@ -162,8 +163,9 @@ class TestEdgeCases:
         for t_idx, target in enumerate(targets):
             for q_idx, query in enumerate(queries):
                 rdkit_matches = get_rdkit_matches(target, query)
-                assert len(results[t_idx][q_idx]) == len(rdkit_matches), \
+                assert len(results[t_idx][q_idx]) == len(rdkit_matches), (
                     f"Mismatch at target {t_idx}, query {q_idx}: GPU/fallback={len(results[t_idx][q_idx])}, RDKit={len(rdkit_matches)}"
+                )
 
     def test_mixed_size_targets(self):
         """Test batch with both normal and oversized targets."""
@@ -184,23 +186,21 @@ class TestEdgeCases:
 
     def test_buffer_overflow_rdkit_fallback(self):
         """Test that buffer overflow cases are handled via RDKit fallback.
-        
+
         CCCCCC with CC query produces 10 non-unique matches but the buffer
         only holds ~6 (target atom count). RDKit fallback should provide all matches.
         """
         target = Chem.MolFromSmiles("CCCCCC")  # 6 atoms
         query = Chem.MolFromSmarts("CC")  # 2 atom query
-        
+
         # Hexane with CC has 10 non-unique matches:
         # (0,1), (1,0), (1,2), (2,1), (2,3), (3,2), (3,4), (4,3), (4,5), (5,4)
         results = getSubstructMatches([target], [query])
         rdkit_matches = get_rdkit_matches(target, query)
-        
+
         assert len(rdkit_matches) == 10, "RDKit should find 10 matches"
-        assert len(results[0][0]) == 10, \
-            f"Should get all 10 matches via RDKit fallback, got {len(results[0][0])}"
-        assert matches_equal(results[0][0], rdkit_matches), \
-            "Matches should be identical to RDKit results"
+        assert len(results[0][0]) == 10, f"Should get all 10 matches via RDKit fallback, got {len(results[0][0])}"
+        assert matches_equal(results[0][0], rdkit_matches), "Matches should be identical to RDKit results"
 
     def test_no_match_possible(self):
         """Test when no match is possible."""
@@ -266,6 +266,7 @@ class TestEdgeCases:
 # Compound Query Tests (OR/NOT)
 # =============================================================================
 
+
 class TestCompoundQueries:
     """Tests for compound SMARTS queries with OR/NOT operators."""
 
@@ -307,6 +308,7 @@ class TestCompoundQueries:
 # Ring Queries
 # =============================================================================
 
+
 class TestRingQueries:
     """Tests for ring-related SMARTS queries."""
 
@@ -314,7 +316,7 @@ class TestRingQueries:
         """Test [R] any ring membership query."""
         targets = [
             Chem.MolFromSmiles("C1CCC1C"),  # Cyclobutane with methyl
-            Chem.MolFromSmiles("CCCCC"),     # Pentane (no rings)
+            Chem.MolFromSmiles("CCCCC"),  # Pentane (no rings)
         ]
         queries = [Chem.MolFromSmarts("[R]")]
 
@@ -344,6 +346,7 @@ class TestRingQueries:
 # Degree and Connectivity Queries
 # =============================================================================
 
+
 class TestDegreeQueries:
     """Tests for degree and connectivity SMARTS queries."""
 
@@ -351,7 +354,7 @@ class TestDegreeQueries:
         """Test [D3] degree query."""
         targets = [
             Chem.MolFromSmiles("CC(C)C"),  # Isobutane - central C has degree 3
-            Chem.MolFromSmiles("CCC"),      # Propane - no degree 3 atoms
+            Chem.MolFromSmiles("CCC"),  # Propane - no degree 3 atoms
         ]
         queries = [Chem.MolFromSmarts("[D3]")]
 
@@ -364,7 +367,7 @@ class TestDegreeQueries:
     def test_total_connectivity_x4(self):
         """Test [X4] total connectivity query."""
         targets = [
-            Chem.MolFromSmiles("CC"),   # Ethane - carbons have X4
+            Chem.MolFromSmiles("CC"),  # Ethane - carbons have X4
             Chem.MolFromSmiles("C=C"),  # Ethene - carbons have X3
         ]
         queries = [Chem.MolFromSmarts("[X4]")]
@@ -379,6 +382,7 @@ class TestDegreeQueries:
 # =============================================================================
 # maxMatches Configuration Tests
 # =============================================================================
+
 
 class TestMaxMatchesConfig:
     """Tests for maxMatches configuration parameter."""
@@ -426,6 +430,7 @@ class TestMaxMatchesConfig:
 # =============================================================================
 # Uniquify Tests
 # =============================================================================
+
 
 class TestUniquify:
     """Tests for the uniquify option that removes duplicate matches."""
@@ -532,7 +537,7 @@ class TestUniquify:
         """Test uniquify with batch of molecules and queries."""
         targets = [
             Chem.MolFromSmiles("C1CCCCC1"),  # cyclohexane
-            Chem.MolFromSmiles("CCOCC"),     # diethyl ether
+            Chem.MolFromSmiles("CCOCC"),  # diethyl ether
             Chem.MolFromSmiles("c1ccccc1"),  # benzene
         ]
         queries = [
@@ -549,8 +554,7 @@ class TestUniquify:
         for t_idx, target in enumerate(targets):
             for q_idx, query in enumerate(queries):
                 rdkit_matches = list(target.GetSubstructMatches(query, uniquify=True))
-                assert len(results[t_idx][q_idx]) == len(rdkit_matches), \
-                    f"Mismatch at target {t_idx}, query {q_idx}"
+                assert len(results[t_idx][q_idx]) == len(rdkit_matches), f"Mismatch at target {t_idx}, query {q_idx}"
 
     def test_uniquify_config_property(self):
         """Test that uniquify config property can be set."""
@@ -567,6 +571,7 @@ class TestUniquify:
 # =============================================================================
 # hasSubstructMatch Tests
 # =============================================================================
+
 
 class TestHasSubstructMatch:
     """Tests for hasSubstructMatch boolean API."""
@@ -638,6 +643,7 @@ class TestHasSubstructMatch:
 # countSubstructMatches Tests
 # =============================================================================
 
+
 class TestCountSubstructMatch:
     """Tests for countSubstructMatches count API."""
 
@@ -661,9 +667,9 @@ class TestCountSubstructMatch:
         for t_idx, target in enumerate(targets):
             for q_idx, query in enumerate(queries):
                 rdkit_count = len(target.GetSubstructMatches(query, uniquify=False))
-                assert results[t_idx, q_idx] == rdkit_count, \
-                    f"Mismatch at target {t_idx}, query {q_idx}: " \
-                    f"GPU={results[t_idx, q_idx]}, RDKit={rdkit_count}"
+                assert results[t_idx, q_idx] == rdkit_count, (
+                    f"Mismatch at target {t_idx}, query {q_idx}: GPU={results[t_idx, q_idx]}, RDKit={rdkit_count}"
+                )
 
         assert (results == 0).any(), "Test data should include zero-count pairs"
         assert (results > 0).any(), "Test data should include nonzero-count pairs"
@@ -687,8 +693,9 @@ class TestCountSubstructMatch:
 
         for t_idx in range(len(targets)):
             for q_idx in range(len(queries)):
-                assert counts[t_idx, q_idx] == len(matches[t_idx][q_idx]), \
+                assert counts[t_idx, q_idx] == len(matches[t_idx][q_idx]), (
                     f"Count/get mismatch at target {t_idx}, query {q_idx}"
+                )
 
     def test_count_multi_atom_query(self):
         """Test countSubstructMatches with multi-atom queries."""
@@ -766,13 +773,13 @@ class TestCountSubstructMatch:
         for t_idx, target in enumerate(targets):
             for q_idx, query in enumerate(queries):
                 rdkit_count = len(target.GetSubstructMatches(query, uniquify=False))
-                assert results[t_idx, q_idx] == rdkit_count, \
-                    f"Mismatch at target {t_idx}, query {q_idx}"
+                assert results[t_idx, q_idx] == rdkit_count, f"Mismatch at target {t_idx}, query {q_idx}"
 
 
 # =============================================================================
 # SubstructSearchConfig Tests
 # =============================================================================
+
 
 class TestSubstructSearchConfig:
     """Tests for SubstructSearchConfig parameters."""
@@ -820,20 +827,24 @@ class TestSubstructSearchConfig:
 # Integration Tests - Validate Against RDKit
 # =============================================================================
 
+
 class TestRDKitValidation:
     """Integration tests validating GPU results against RDKit."""
 
-    @pytest.mark.parametrize("smiles,smarts", [
-        ("CCO", "C"),
-        ("CCO", "O"),
-        ("CCO", "CC"),
-        ("c1ccccc1", "c"),
-        ("c1ccccc1", "[c,n]"),
-        ("CCN", "[C,N]"),
-        ("CCNO", "[!C]"),
-        ("CC(C)C", "[D3]"),
-        ("C1CCCCC1", "[R]"),
-    ])
+    @pytest.mark.parametrize(
+        "smiles,smarts",
+        [
+            ("CCO", "C"),
+            ("CCO", "O"),
+            ("CCO", "CC"),
+            ("c1ccccc1", "c"),
+            ("c1ccccc1", "[c,n]"),
+            ("CCN", "[C,N]"),
+            ("CCNO", "[!C]"),
+            ("CC(C)C", "[D3]"),
+            ("C1CCCCC1", "[R]"),
+        ],
+    )
     def test_matches_rdkit(self, smiles: str, smarts: str):
         """Validate GPU matches against RDKit for various patterns."""
         target = Chem.MolFromSmiles(smiles)
@@ -842,12 +853,12 @@ class TestRDKitValidation:
         results = getSubstructMatches([target], [query])
         rdkit_matches = get_rdkit_matches(target, query)
 
-        assert len(results[0][0]) == len(rdkit_matches), \
+        assert len(results[0][0]) == len(rdkit_matches), (
             f"Count mismatch for {smiles} with {smarts}: GPU={len(results[0][0])}, RDKit={len(rdkit_matches)}"
+        )
 
         if len(results[0][0]) > 0:
-            assert matches_equal(results[0][0], rdkit_matches), \
-                f"Mapping mismatch for {smiles} with {smarts}"
+            assert matches_equal(results[0][0], rdkit_matches), f"Mapping mismatch for {smiles} with {smarts}"
 
 
 class TestLargerMolecules:
@@ -887,13 +898,13 @@ class TestLargerMolecules:
             assert len(results[t_idx]) == len(queries)
             for q_idx, query in enumerate(queries):
                 rdkit_matches = get_rdkit_matches(target, query)
-                assert len(results[t_idx][q_idx]) == len(rdkit_matches), \
-                    f"Mismatch at target {t_idx}, query {q_idx}"
+                assert len(results[t_idx][q_idx]) == len(rdkit_matches), f"Mismatch at target {t_idx}, query {q_idx}"
 
 
 # =============================================================================
 # Integration Tests - Large Scale Dataset Validation
 # =============================================================================
+
 
 def load_smiles_file(filepath: Path, max_count: int = NUM_SMILES, max_atoms: int = MAX_ATOMS) -> list[Chem.Mol]:
     """Load molecules from a SMILES file, filtering by atom count."""
@@ -914,7 +925,7 @@ def load_smiles_file(filepath: Path, max_count: int = NUM_SMILES, max_atoms: int
 
 def load_smarts_file(filepath: Path) -> tuple[list[Chem.Mol], list[str]]:
     """Load query molecules from a SMARTS file.
-    
+
     Returns:
         Tuple of (query_mols, smarts_strings)
     """
@@ -935,6 +946,7 @@ def load_smarts_file(filepath: Path) -> tuple[list[Chem.Mol], list[str]]:
 @dataclass
 class MismatchInfo:
     """Details about a single mismatch between GPU and RDKit results."""
+
     target_idx: int
     query_idx: int
     target_smiles: str
@@ -944,9 +956,10 @@ class MismatchInfo:
     is_count_mismatch: bool  # True = count mismatch, False = mapping mismatch
 
 
-@dataclass  
+@dataclass
 class ValidationResult:
     """Result of validating GPU results against RDKit."""
+
     total_pairs: int
     count_mismatches: list[MismatchInfo]
     mapping_mismatches: list[MismatchInfo]
@@ -959,50 +972,54 @@ def validate_against_rdkit(
     query_smarts: list[str] | None = None,
 ) -> ValidationResult:
     """Validate GPU results against RDKit.
-    
+
     Args:
         targets: List of target molecules
         queries: List of query molecules
         results: GPU match results
         query_smarts: Optional list of SMARTS strings for better error reporting
-        
+
     Returns:
         ValidationResult with detailed mismatch information
     """
     total_pairs = 0
     count_mismatches = []
     mapping_mismatches = []
-    
+
     for t_idx, target in enumerate(targets):
         target_smiles = Chem.MolToSmiles(target)
         for q_idx, query in enumerate(queries):
             total_pairs += 1
             rdkit_matches = get_rdkit_matches(target, query)
             gpu_matches = results[t_idx][q_idx]
-            
+
             smarts_str = query_smarts[q_idx] if query_smarts else Chem.MolToSmarts(query)
-            
+
             if len(gpu_matches) != len(rdkit_matches):
-                count_mismatches.append(MismatchInfo(
-                    target_idx=t_idx,
-                    query_idx=q_idx,
-                    target_smiles=target_smiles,
-                    query_smarts=smarts_str,
-                    gpu_count=len(gpu_matches),
-                    rdkit_count=len(rdkit_matches),
-                    is_count_mismatch=True,
-                ))
+                count_mismatches.append(
+                    MismatchInfo(
+                        target_idx=t_idx,
+                        query_idx=q_idx,
+                        target_smiles=target_smiles,
+                        query_smarts=smarts_str,
+                        gpu_count=len(gpu_matches),
+                        rdkit_count=len(rdkit_matches),
+                        is_count_mismatch=True,
+                    )
+                )
             elif len(gpu_matches) > 0 and not matches_equal(gpu_matches, rdkit_matches):
-                mapping_mismatches.append(MismatchInfo(
-                    target_idx=t_idx,
-                    query_idx=q_idx,
-                    target_smiles=target_smiles,
-                    query_smarts=smarts_str,
-                    gpu_count=len(gpu_matches),
-                    rdkit_count=len(rdkit_matches),
-                    is_count_mismatch=False,
-                ))
-    
+                mapping_mismatches.append(
+                    MismatchInfo(
+                        target_idx=t_idx,
+                        query_idx=q_idx,
+                        target_smiles=target_smiles,
+                        query_smarts=smarts_str,
+                        gpu_count=len(gpu_matches),
+                        rdkit_count=len(rdkit_matches),
+                        is_count_mismatch=False,
+                    )
+                )
+
     return ValidationResult(total_pairs, count_mismatches, mapping_mismatches)
 
 
@@ -1018,11 +1035,14 @@ class TestIntegrationChemblSmarts:
             pytest.skip(f"Test data not found: {smiles_path}")
         return load_smiles_file(smiles_path)
 
-    @pytest.mark.parametrize("smarts_file", [
-        "rdkit_fragment_descriptors_supported.txt",
-        "pwalters_alert_collection_supported.txt",
-        "openbabel_functional_groups_supported.txt",
-    ])
+    @pytest.mark.parametrize(
+        "smarts_file",
+        [
+            "rdkit_fragment_descriptors_supported.txt",
+            "pwalters_alert_collection_supported.txt",
+            "openbabel_functional_groups_supported.txt",
+        ],
+    )
     def test_chembl_vs_smarts_dataset(self, chembl_mols: list[Chem.Mol], smarts_file: str):
         """Test ChEMBL molecules against SMARTS dataset files."""
         smarts_path = TEST_DATA_DIR / "SMARTS" / smarts_file
@@ -1050,33 +1070,37 @@ class TestIntegrationChemblSmarts:
                 f"GPU={m.gpu_count}, RDKit={m.rdkit_count}"
                 for m in validation.count_mismatches[:20]  # Show first 20
             )
-            more = f"\n  ... and {len(validation.count_mismatches) - 20} more" \
-                if len(validation.count_mismatches) > 20 else ""
-            pytest.fail(
-                f"Count mismatches: {len(validation.count_mismatches)}/{validation.total_pairs}\n"
-                f"{details}{more}"
+            more = (
+                f"\n  ... and {len(validation.count_mismatches) - 20} more"
+                if len(validation.count_mismatches) > 20
+                else ""
             )
-        
+            pytest.fail(
+                f"Count mismatches: {len(validation.count_mismatches)}/{validation.total_pairs}\n{details}{more}"
+            )
+
         if validation.mapping_mismatches:
             details = "\n".join(
                 f"  [{m.target_idx},{m.query_idx}] {m.target_smiles} vs {m.query_smarts}"
                 for m in validation.mapping_mismatches[:20]
             )
-            more = f"\n  ... and {len(validation.mapping_mismatches) - 20} more" \
-                if len(validation.mapping_mismatches) > 20 else ""
+            more = (
+                f"\n  ... and {len(validation.mapping_mismatches) - 20} more"
+                if len(validation.mapping_mismatches) > 20
+                else ""
+            )
             pytest.fail(
-                f"Mapping mismatches: {len(validation.mapping_mismatches)}/{validation.total_pairs}\n"
-                f"{details}{more}"
+                f"Mapping mismatches: {len(validation.mapping_mismatches)}/{validation.total_pairs}\n{details}{more}"
             )
 
     def test_chembl_basic_queries(self, chembl_mols: list[Chem.Mol]):
         """Test ChEMBL molecules against basic SMARTS queries."""
         smarts_strings = [
-            "[CX3]=[OX1]",      # Carbonyl
-            "[NX3;H2]",         # Primary amine
-            "[OX2H]",           # Hydroxyl
-            "c1ccccc1",         # Benzene ring
-            "[#7]",             # Any nitrogen
+            "[CX3]=[OX1]",  # Carbonyl
+            "[NX3;H2]",  # Primary amine
+            "[OX2H]",  # Hydroxyl
+            "c1ccccc1",  # Benzene ring
+            "[#7]",  # Any nitrogen
         ]
         queries = [Chem.MolFromSmarts(s) for s in smarts_strings]
 
@@ -1093,10 +1117,7 @@ class TestIntegrationChemblSmarts:
                 f"GPU={m.gpu_count}, RDKit={m.rdkit_count}"
                 for m in validation.count_mismatches[:20]
             )
-            pytest.fail(
-                f"Count mismatches: {len(validation.count_mismatches)}/{validation.total_pairs}\n"
-                f"{details}"
-            )
+            pytest.fail(f"Count mismatches: {len(validation.count_mismatches)}/{validation.total_pairs}\n{details}")
 
     def test_chembl_has_substruct_match(self, chembl_mols: list[Chem.Mol]):
         """Test hasSubstructMatch on ChEMBL molecules."""
@@ -1115,8 +1136,7 @@ class TestIntegrationChemblSmarts:
         for t_idx, target in enumerate(chembl_mols):
             for q_idx, query in enumerate(queries):
                 rdkit_has_match = target.HasSubstructMatch(query)
-                assert bool(results[t_idx, q_idx]) == rdkit_has_match, \
-                    f"Mismatch at target {t_idx}, query {q_idx}"
+                assert bool(results[t_idx, q_idx]) == rdkit_has_match, f"Mismatch at target {t_idx}, query {q_idx}"
 
     def test_chembl_count_substruct_matches(self, chembl_mols: list[Chem.Mol]):
         """Test countSubstructMatches on ChEMBL molecules."""
@@ -1135,9 +1155,9 @@ class TestIntegrationChemblSmarts:
         for t_idx, target in enumerate(chembl_mols):
             for q_idx, query in enumerate(queries):
                 rdkit_count = len(target.GetSubstructMatches(query, uniquify=False))
-                assert results[t_idx, q_idx] == rdkit_count, \
-                    f"Mismatch at target {t_idx}, query {q_idx}: " \
-                    f"GPU={results[t_idx, q_idx]}, RDKit={rdkit_count}"
+                assert results[t_idx, q_idx] == rdkit_count, (
+                    f"Mismatch at target {t_idx}, query {q_idx}: GPU={results[t_idx, q_idx]}, RDKit={rdkit_count}"
+                )
 
 
 @pytest.mark.long
@@ -1150,7 +1170,7 @@ class TestIntegrationConfig:
         smiles_path = TEST_DATA_DIR / "chembl_1k.smi"
         if not smiles_path.exists():
             pytest.skip(f"Test data not found: {smiles_path}")
-        
+
         targets = load_smiles_file(smiles_path, max_count=50)
         queries = [
             Chem.MolFromSmarts("C"),
@@ -1203,4 +1223,3 @@ class TestIntegrationConfig:
 
         validation = validate_against_rdkit(targets, queries, results)
         assert len(validation.count_mismatches) == 0
-

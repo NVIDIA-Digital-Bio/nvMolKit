@@ -18,6 +18,7 @@ import torch
 import numpy as np
 from nvmolkit.clustering import butina
 
+
 def check_butina_correctness(hit_mat, clusts):
     hit_mat = hit_mat.clone()
     seen = set()
@@ -38,7 +39,9 @@ def check_butina_correctness(hit_mat, clusts):
             seen.update(remaining_set)
             break
         counts = hit_mat.sum(-1)
-        assert clust_size == counts.max(), f"Cluster size {clust_size} doesn't match max available count {counts.max()}"
+        assert clust_size == counts.max(), (
+            f"Cluster size {clust_size} doesn't match max available count {counts.max()}"
+        )
         for item in clust:
             assert item not in seen, f"Point {item} assigned to multiple clusters"
             seen.add(item)
@@ -46,19 +49,22 @@ def check_butina_correctness(hit_mat, clusts):
             hit_mat[:, item] = False
     assert len(seen) == hit_mat.shape[0]
 
-@pytest.mark.parametrize("size,neighborlist_max_size", 
-                         [(s, n) for s in (1, 10, 100, 1000) for n in (8, 16, 24, 32, 64, 128)])
+
+@pytest.mark.parametrize(
+    "size,neighborlist_max_size", [(s, n) for s in (1, 10, 100, 1000) for n in (8, 16, 24, 32, 64, 128)]
+)
 def test_butina_clustering(size, neighborlist_max_size):
     n = size
     cutoff = 0.1
     np.random.seed(42)
     dists = np.random.rand(n, n)
     dists = np.abs(dists - dists.T)
-    torch_dists = torch.tensor(dists).to('cuda')
+    torch_dists = torch.tensor(dists).to("cuda")
     nvmol_res = butina(torch_dists, cutoff, neighborlist_max_size=neighborlist_max_size).torch()
     nvmol_clusts = [tuple(torch.argwhere(nvmol_res == i).flatten().tolist()) for i in range(nvmol_res.max() + 1)]
 
     check_butina_correctness(torch_dists <= cutoff, nvmol_clusts)
+
 
 @pytest.mark.parametrize("neighborlist_max_size", [8, 16, 24, 32, 64, 128])
 def test_butina_edge_one_cluster(neighborlist_max_size):
@@ -66,9 +72,10 @@ def test_butina_edge_one_cluster(neighborlist_max_size):
     cutoff = 100.0
     dists = np.random.rand(n, n)
     dists = np.abs(dists - dists.T)
-    torch_dists = torch.tensor(dists).to('cuda')
+    torch_dists = torch.tensor(dists).to("cuda")
     nvmol_res = butina(torch_dists, cutoff, neighborlist_max_size=neighborlist_max_size).torch()
     assert torch.all(nvmol_res == 0)
+
 
 @pytest.mark.parametrize("neighborlist_max_size", [8, 16, 24, 32, 64, 128])
 def test_butina_edge_n_clusters(neighborlist_max_size):
@@ -76,11 +83,12 @@ def test_butina_edge_n_clusters(neighborlist_max_size):
     cutoff = 1e-8
     dists = np.random.rand(n, n)
     dists = np.abs(dists - dists.T)
-    torch_dists = torch.tensor(dists).to('cuda')
+    torch_dists = torch.tensor(dists).to("cuda")
     torch_dists = torch.clip(torch_dists, min=0.01)
     torch_dists.fill_diagonal_(0)
     nvmol_res = butina(torch_dists, cutoff, neighborlist_max_size=neighborlist_max_size).torch()
-    assert torch.all(nvmol_res.sort()[0] == torch.arange(10).to('cuda'))
+    assert torch.all(nvmol_res.sort()[0] == torch.arange(10).to("cuda"))
+
 
 def test_butina_returns_centroids():
     n = 25
@@ -88,7 +96,7 @@ def test_butina_returns_centroids():
     np.random.seed(123)
     dists = np.random.rand(n, n)
     dists = np.abs(dists - dists.T)
-    torch_dists = torch.tensor(dists).to('cuda')
+    torch_dists = torch.tensor(dists).to("cuda")
     clusters, centroids = butina(torch_dists, cutoff, return_centroids=True)
     clusters_tensor = clusters.torch()
     centroids_tensor = centroids.torch()
@@ -111,7 +119,7 @@ def test_butina_on_explicit_stream():
     np.random.seed(42)
     dists = np.random.rand(n, n)
     dists = np.abs(dists - dists.T)
-    torch_dists = torch.tensor(dists).to('cuda')
+    torch_dists = torch.tensor(dists).to("cuda")
 
     s = torch.cuda.Stream()
     result = butina(torch_dists, cutoff, stream=s).torch()
@@ -123,7 +131,7 @@ def test_butina_on_explicit_stream():
 
 def test_butina_invalid_stream_type():
     n = 10
-    dists = torch.zeros(n, n, device='cuda', dtype=torch.float64)
+    dists = torch.zeros(n, n, device="cuda", dtype=torch.float64)
     with pytest.raises(TypeError):
         butina(dists, 0.1, stream=42)
 
@@ -135,4 +143,3 @@ def test_butina_invalid_neighborlist_max_size(invalid_size):
     dists = torch.zeros(n, n, dtype=torch.float64)
     with pytest.raises(ValueError, match="neighborlist_max_size must be one of"):
         butina(dists, 0.1, neighborlist_max_size=invalid_size)
-

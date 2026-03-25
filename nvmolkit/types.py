@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Types facilitating GPU-accelerated operations."""
+
 import torch
 from typing import Iterable, List
 from nvmolkit import _embedMolecules  # type: ignore
@@ -91,17 +92,19 @@ class HardwareOptions:
         """Internal: return the underlying BatchHardwareOptions object."""
         return self._native
 
+
 class AsyncGpuResult:
     """Handle to a GPU result.
 
     Populates the ``__cuda_array_interface__`` attribute which can be consumed by other libraries. Note that
     this result is async, and the data cannot be accessed without a sync, such as ``torch.cuda.synchronize()``.
     """
+
     def __init__(self, obj):
         """Internal construction of the AsyncGpuResult object."""
-        if not hasattr(obj, '__cuda_array_interface__'):
+        if not hasattr(obj, "__cuda_array_interface__"):
             raise TypeError(f"Object {obj} does not have a __cuda_array_interface__ attribute")
-        self.arr = torch.as_tensor(obj, device='cuda')
+        self.arr = torch.as_tensor(obj, device="cuda")
 
     @property
     def __cuda_array_interface__(self):

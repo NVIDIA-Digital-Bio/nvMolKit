@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-""" Contains GPU-accelerated Butina clustering implementation. """
+"""Contains GPU-accelerated Butina clustering implementation."""
 
 import torch
 
@@ -33,14 +33,14 @@ def butina(
 ) -> AsyncGpuResult | tuple[AsyncGpuResult, AsyncGpuResult]:
     """
     Perform Butina clustering on a distance matrix.
-    
+
     The Butina algorithm is a deterministic clustering method that groups items based
     on distance thresholds. It iteratively:
     1. Finds the item with the most neighbors within the cutoff distance
     2. Forms a cluster with that item and all its neighbors
     3. Removes clustered items from consideration
     4. Repeats until all items are clustered
-    
+
     Args:
         distance_matrix: Square distance matrix of shape (N, N) where N is the number
                         of items. Can be an AsyncGpuResult or torch.Tensor on GPU.
@@ -52,21 +52,20 @@ def butina(
                               shared memory.
         return_centroids: Whether to return centroid indices for each cluster.
         stream: CUDA stream to use. If None, uses the current stream.
-    
+
     Returns:
         AsyncGpuResult of shape ``(N,)`` with cluster IDs (cluster 0 is the
         largest) when ``return_centroids`` is False.  When ``return_centroids``
         is True, returns a tuple ``(clusters, centroids)`` where *centroids* is
         an AsyncGpuResult of shape ``(num_clusters,)`` containing the centroid
         index for each cluster ID.
-    
+
     Note:
         The distance matrix should be symmetric and have zeros on the diagonal.
     """
     if neighborlist_max_size not in _VALID_NEIGHBORLIST_SIZES:
         raise ValueError(
-            f"neighborlist_max_size must be one of {sorted(_VALID_NEIGHBORLIST_SIZES)}, "
-            f"got {neighborlist_max_size}"
+            f"neighborlist_max_size must be one of {sorted(_VALID_NEIGHBORLIST_SIZES)}, got {neighborlist_max_size}"
         )
     if stream is not None and not isinstance(stream, torch.cuda.Stream):
         raise TypeError(f"stream must be a torch.cuda.Stream or None, got {type(stream).__name__}")

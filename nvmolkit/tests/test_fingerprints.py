@@ -20,41 +20,46 @@ from rdkit.Chem import rdFingerprintGenerator
 
 from nvmolkit.fingerprints import MorganFingerprintGenerator, pack_fingerprint, unpack_fingerprint
 
+
 def test_roundtrip_pack_unpack():
     # Create a test boolean tensor
     n_fps = 10
     fp_size = 128
-    test_fp = torch.randint(0, 2, (n_fps, fp_size), dtype=torch.bool, device='cuda')
+    test_fp = torch.randint(0, 2, (n_fps, fp_size), dtype=torch.bool, device="cuda")
 
     # Pack it
     packed = pack_fingerprint(test_fp)
     assert packed.shape == (n_fps, fp_size // 32)
-    assert packed.device.type == 'cuda'
+    assert packed.device.type == "cuda"
 
     # Unpack it
     unpacked = unpack_fingerprint(packed)
     # Verify roundtrip
     torch.testing.assert_close(test_fp, unpacked)
 
+
 def test_pack_unpack_uneven_size():
     fp_size = 127
     n_fps = 10
-    test_fp = torch.randint(0, 2, (n_fps, fp_size), dtype=torch.bool, device='cpu')
+    test_fp = torch.randint(0, 2, (n_fps, fp_size), dtype=torch.bool, device="cpu")
     packed = pack_fingerprint(test_fp)
     assert packed.shape == (n_fps, 4)
     unpacked = unpack_fingerprint(packed)
     assert unpacked.shape == (n_fps, 128)
     torch.testing.assert_close(test_fp, unpacked[:, :fp_size])
 
+
 def test_unpack_invalid_dtype():
     with pytest.raises(ValueError):
-        unpack_fingerprint(torch.randint(0, 2, (10, 32), device='cuda', dtype=torch.int64))
+        unpack_fingerprint(torch.randint(0, 2, (10, 32), device="cuda", dtype=torch.int64))
 
-@pytest.mark.parametrize('fpSize', (17, 8192))
+
+@pytest.mark.parametrize("fpSize", (17, 8192))
 def test_nvmolkit_fingerprint_throws_on_invalid_fpsize(fpSize, size_limited_mols):
     fpgen = MorganFingerprintGenerator(radius=3, fpSize=fpSize)
     with pytest.raises(Exception):
         fpgen.GetFingerprints(size_limited_mols)
+
 
 def test_empty_input():
     fpgen = MorganFingerprintGenerator(radius=3, fpSize=2048)
@@ -62,22 +67,23 @@ def test_empty_input():
     torch.cuda.synchronize()
     assert fps.shape == (0, 2048 // 32)
 
+
 def test_invalid_input():
     fpgen = MorganFingerprintGenerator(radius=3, fpSize=2048)
     with pytest.raises(Exception):
         fpgen.GetFingerprints([None])
 
 
-@pytest.mark.parametrize('fpSize', (128, 1024, 2048))
-@pytest.mark.parametrize('radius', (0, 1, 3, 5))
+@pytest.mark.parametrize("fpSize", (128, 1024, 2048))
+@pytest.mark.parametrize("radius", (0, 1, 3, 5))
 def test_nvmolkit_morgan_fingerprint(size_limited_mols, fpSize, radius):
     fpgen = rdFingerprintGenerator.GetMorganGenerator(radius=radius, fpSize=fpSize)
     fps = [fpgen.GetFingerprint(mol) for mol in size_limited_mols]
 
     nvmolkit_fpgen = MorganFingerprintGenerator(radius=radius, fpSize=fpSize)
-    nvmolkit_fps_torch =  nvmolkit_fpgen.GetFingerprints(size_limited_mols).torch()
+    nvmolkit_fps_torch = nvmolkit_fpgen.GetFingerprints(size_limited_mols).torch()
     torch.cuda.synchronize()
-    assert nvmolkit_fps_torch.device.type == 'cuda'
+    assert nvmolkit_fps_torch.device.type == "cuda"
     want_n_rows = len(size_limited_mols)
     want_n_cols = fpSize / 32
     assert nvmolkit_fps_torch.shape == (want_n_rows, want_n_cols)
@@ -90,12 +96,15 @@ def test_nvmolkit_morgan_fingerprint(size_limited_mols, fpSize, radius):
             column = j // 32
             mask = 1 << (j % 32)
 
-            got_bit = got_fp_row[column].item() & mask  != 0
+            got_bit = got_fp_row[column].item() & mask != 0
             assert got_bit == want_bit
         # Now test that the unpacked fingerprint matches the original
         unpacked = unpack_fingerprint(got_fp_row.unsqueeze(0))
-        assert unpacked.shape == (1, fpSize,)
-        assert unpacked.device.type == 'cuda'
+        assert unpacked.shape == (
+            1,
+            fpSize,
+        )
+        assert unpacked.device.type == "cuda"
         assert unpacked.dtype == torch.bool
         torch.testing.assert_close(ref_fp.ToList(), unpacked.to(int).tolist()[0])
 
@@ -127,9 +136,7 @@ def test_fingerprints_invalid_stream_type(size_limited_mols):
 
 def test_gh_issue_84():
     """Regression test for https://github.com/NVIDIA/nvMolKit/issues/84."""
-    mol = Chem.MolFromSmiles(
-        "CC1(C)C2=C(C=CC(=C2)P(C3=CC=CC=C3)C4=CC=CC=C4)OC5=C1C=CC(=C5)P(C6=CC=CC=C6)C7=CC=CC=C7"
-    )
+    mol = Chem.MolFromSmiles("CC1(C)C2=C(C=CC(=C2)P(C3=CC=CC=C3)C4=CC=CC=C4)OC5=C1C=CC(=C5)P(C6=CC=CC=C6)C7=CC=CC=C7")
     assert mol is not None
 
     configs = [(2, 512), (2, 1024), (3, 512), (3, 1024)]
