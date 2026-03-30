@@ -26,7 +26,7 @@ target_link_libraries(batched_forcefield PUBLIC device_vector)
 target_include_directories(batched_forcefield PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
                                                      ${CMAKE_SOURCE_DIR}/src)
 
-add_library(mmff mmff.cu mmff_kernels.cu mmff_constraints.cpp)
+add_library(mmff mmff.cu mmff_kernels.cu forcefield_constraints.cpp)
 target_link_libraries(
   mmff
   PUBLIC batched_forcefield

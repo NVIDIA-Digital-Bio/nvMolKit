@@ -13,7 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <ForceField/AngleConstraints.h>
+#include <ForceField/DistanceConstraints.h>
 #include <ForceField/ForceField.h>
+#include <ForceField/MMFF/PositionConstraint.h>
+#include <ForceField/MMFF/TorsionConstraint.h>
 #include <gmock/gmock.h>
 // clang-format off
 // Bug in RDKit, includes need to be ordered.
@@ -31,6 +35,7 @@
 #include "device.h"
 #include "mmff.h"
 #include "mmff_batched_forcefield.h"
+#include "forcefield_constraints.h"
 #include "test_utils.h"
 
 using ::nvMolKit::MMFF::BatchedMolecularDeviceBuffers;
@@ -120,9 +125,72 @@ void perturbConformer(RDKit::Conformer& conf, const float delta = 0.1, const int
   }
 }
 
+struct ConstraintSpecs {
+  nvMolKit::ForceFieldConstraints::DistanceConstraintSpec distance{0, 2, true, 0.3, 0.6, 15.0};
+  nvMolKit::ForceFieldConstraints::PositionConstraintSpec position{0, 0.1, 50.0};
+  nvMolKit::ForceFieldConstraints::AngleConstraintSpec    angle{0, 1, 2, true, 5.0, 10.0, 20.0};
+  nvMolKit::ForceFieldConstraints::TorsionConstraintSpec  torsion{0, 1, 2, 3, true, 15.0, 30.0, 12.0};
+};
+
+void addConstraintSpecsToContribs(EnergyForceContribsHost&      contribs,
+                                  const std::vector<double>&    positions,
+                                  const ConstraintSpecs&         specs = {}) {
+  nvMolKit::ForceFieldConstraints::appendDistanceConstraint(contribs, positions, specs.distance);
+  nvMolKit::ForceFieldConstraints::appendPositionConstraint(contribs, positions, specs.position);
+  nvMolKit::ForceFieldConstraints::appendAngleConstraint(contribs, positions, specs.angle);
+  nvMolKit::ForceFieldConstraints::appendTorsionConstraint(contribs, positions, specs.torsion);
+}
+
+void addConstraintSpecsToForcefield(ForceFields::ForceField&    forcefield,
+                                    const ConstraintSpecs&      specs = {}) {
+  auto* distanceContribs = new ForceFields::DistanceConstraintContribs(&forcefield);
+  distanceContribs->addContrib(specs.distance.idx1,
+                               specs.distance.idx2,
+                               specs.distance.relative,
+                               specs.distance.minLen,
+                               specs.distance.maxLen,
+                               specs.distance.forceConstant);
+  forcefield.contribs().push_back(ForceFields::ContribPtr(distanceContribs));
+
+  auto* positionContrib = new ForceFields::MMFF::PositionConstraintContrib(&forcefield,
+                                                                           specs.position.idx,
+                                                                           specs.position.maxDispl,
+                                                                           specs.position.forceConstant);
+  forcefield.contribs().push_back(ForceFields::ContribPtr(positionContrib));
+
+  auto* angleContribs = new ForceFields::AngleConstraintContribs(&forcefield);
+  angleContribs->addContrib(specs.angle.idx1,
+                            specs.angle.idx2,
+                            specs.angle.idx3,
+                            specs.angle.relative,
+                            specs.angle.minAngleDeg,
+                            specs.angle.maxAngleDeg,
+                            specs.angle.forceConstant);
+  forcefield.contribs().push_back(ForceFields::ContribPtr(angleContribs));
+
+  auto* torsionContrib = new ForceFields::MMFF::TorsionConstraintContrib(&forcefield,
+                                                                         specs.torsion.idx1,
+                                                                         specs.torsion.idx2,
+                                                                         specs.torsion.idx3,
+                                                                         specs.torsion.idx4,
+                                                                         specs.torsion.relative,
+                                                                         specs.torsion.minDihedralDeg,
+                                                                         specs.torsion.maxDihedralDeg,
+                                                                         specs.torsion.forceConstant);
+  forcefield.contribs().push_back(ForceFields::ContribPtr(torsionContrib));
+}
+
+std::unique_ptr<ForceFields::ForceField> constructConstrainedRDKitForcefield(RDKit::ROMol&            mol,
+                                                                             const ConstraintSpecs& specs = {}) {
+  auto molProps = std::make_unique<RDKit::MMFF::MMFFMolProperties>(mol);
+  auto forcefield = std::unique_ptr<ForceFields::ForceField>(RDKit::MMFF::constructForceField(mol, molProps.get()));
+  addConstraintSpecsToForcefield(*forcefield, specs);
+  return forcefield;
+}
+
 class BFGSMinimizerTestFixture : public ::testing::Test {
  protected:
-  void setUpMMFFSystems(int numMols, bool duplicateFirstMol = false) {
+  void setUpMMFFSystems(int numMols, bool duplicateFirstMol = false, bool addConstraints = false) {
     getMols(getTestDataFolderPath() + "/MMFF94_dative.sdf", mols, duplicateFirstMol ? 1 : numMols);
     if (duplicateFirstMol) {
       mols.resize(1);
@@ -131,10 +199,14 @@ class BFGSMinimizerTestFixture : public ::testing::Test {
       }
     }
 
-    setUpCommon();
+    setUpCommon(addConstraints);
   }
 
-  void setUpCommon() {
+  void setUpConstrainedMMFFSystems(int numMols, bool duplicateFirstMol = false) {
+    setUpMMFFSystems(numMols, duplicateFirstMol, true);
+  }
+
+  void setUpCommon(bool addConstraints = false) {
     int runningIdx = 0;
     for (const auto& mol : mols) {
       perturbConformer(mol->getConformer(), 0.3, runningIdx++);
@@ -146,6 +218,9 @@ class BFGSMinimizerTestFixture : public ::testing::Test {
         positions[3 * i + 2] = pos.z;
       }
       auto ffParams = nvMolKit::MMFF::constructForcefieldContribs(*mol);
+      if (addConstraints) {
+        addConstraintSpecsToContribs(ffParams, positions);
+      }
       nvMolKit::MMFF::addMoleculeToBatch(ffParams, positions, systemHost);
     }
     nvMolKit::MMFF::sendContribsAndIndicesToDevice(systemHost, systemDevice);
@@ -551,6 +626,41 @@ TEST_P(BFGSMinimizerBackendTest, E2EMinimizationSingleSystemConvergedMatches) {
   EXPECT_THAT(gotEnergies, ::testing::Pointwise(::testing::DoubleNear(1e-4), refEnergies));
 
   // Status checking only works with BATCHED backend (PER_MOLECULE doesn't track detailed convergence yet)
+  std::vector<int16_t> gotStatuses(systemDevice.energyOuts.size());
+  ASSERT_EQ(0,
+            cudaMemcpy(gotStatuses.data(),
+                       bfgsMinimizer.statuses_.data(),
+                       gotStatuses.size() * sizeof(int16_t),
+                       cudaMemcpyDeviceToHost));
+  EXPECT_THAT(gotStatuses, ::testing::Pointwise(::testing::Eq(), std::vector<int16_t>(numMols, 0)));
+}
+
+TEST_P(BFGSMinimizerBackendTest, E2EMinimizationSingleSystemConstrainedMatches) {
+  const nvMolKit::BfgsBackend backend  = GetParam();
+  const int                   numMols  = 1;
+  const int                   maxIters = 200;
+  setUpConstrainedMMFFSystems(numMols);
+
+  nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dataDim=*/3, nvMolKit::DebugLevel::STEPWISE, true, nullptr, backend);
+
+  minimizeMMFF(bfgsMinimizer, maxIters, 1e-4, systemHost, systemDevice);
+
+  std::vector<double> refEnergies;
+  for (auto& mol : mols) {
+    auto molFF = constructConstrainedRDKitForcefield(*mol);
+    EXPECT_EQ(molFF->minimize(maxIters), 0);
+    refEnergies.push_back(molFF->calcEnergy());
+  }
+
+  std::vector<double> gotEnergies(systemDevice.energyOuts.size());
+  ASSERT_EQ(0,
+            cudaMemcpy(gotEnergies.data(),
+                       systemDevice.energyOuts.data(),
+                       gotEnergies.size() * sizeof(double),
+                       cudaMemcpyDeviceToHost));
+
+  EXPECT_THAT(gotEnergies, ::testing::Pointwise(::testing::DoubleNear(1e-4), refEnergies));
+
   std::vector<int16_t> gotStatuses(systemDevice.energyOuts.size());
   ASSERT_EQ(0,
             cudaMemcpy(gotStatuses.data(),

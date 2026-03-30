@@ -1,12 +1,12 @@
-#ifndef NVMOLKIT_MMFF_CONSTRAINTS_H
-#define NVMOLKIT_MMFF_CONSTRAINTS_H
+#ifndef NVMOLKIT_FORCEFIELD_CONSTRAINTS_H
+#define NVMOLKIT_FORCEFIELD_CONSTRAINTS_H
 
 #include <string>
 #include <vector>
 
 #include "mmff.h"
 
-namespace nvMolKit::MMFF {
+namespace nvMolKit::ForceFieldConstraints {
 
 struct DistanceConstraintSpec {
   int    idx1          = -1;
@@ -50,19 +50,19 @@ double computeAngleDeg(const std::vector<double>& positions, int idx1, int idx2,
 double computeDihedralDeg(const std::vector<double>& positions, int idx1, int idx2, int idx3, int idx4);
 double normalizeAngleDeg(double angleDeg);
 
-void appendDistanceConstraint(EnergyForceContribsHost&      contribs,
-                              const std::vector<double>&    positions,
-                              const DistanceConstraintSpec& spec);
-void appendPositionConstraint(EnergyForceContribsHost&      contribs,
-                              const std::vector<double>&    positions,
-                              const PositionConstraintSpec& spec);
-void appendAngleConstraint(EnergyForceContribsHost&   contribs,
-                           const std::vector<double>& positions,
-                           const AngleConstraintSpec& spec);
-void appendTorsionConstraint(EnergyForceContribsHost&     contribs,
-                             const std::vector<double>&   positions,
-                             const TorsionConstraintSpec& spec);
+void appendDistanceConstraint(nvMolKit::MMFF::EnergyForceContribsHost& contribs,
+                              const std::vector<double>&               positions,
+                              const DistanceConstraintSpec&            spec);
+void appendPositionConstraint(nvMolKit::MMFF::EnergyForceContribsHost& contribs,
+                              const std::vector<double>&               positions,
+                              const PositionConstraintSpec&            spec);
+void appendAngleConstraint(nvMolKit::MMFF::EnergyForceContribsHost& contribs,
+                           const std::vector<double>&               positions,
+                           const AngleConstraintSpec&               spec);
+void appendTorsionConstraint(nvMolKit::MMFF::EnergyForceContribsHost& contribs,
+                             const std::vector<double>&               positions,
+                             const TorsionConstraintSpec&             spec);
 
-}  // namespace nvMolKit::MMFF
+}  // namespace nvMolKit::ForceFieldConstraints
 
-#endif  // NVMOLKIT_MMFF_CONSTRAINTS_H
+#endif  // NVMOLKIT_FORCEFIELD_CONSTRAINTS_H

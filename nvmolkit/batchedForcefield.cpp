@@ -24,7 +24,7 @@
 #include "device_vector.h"
 #include "ff_utils.h"
 #include "mmff_batched_forcefield.h"
-#include "mmff_constraints.h"
+#include "forcefield_constraints.h"
 #include "mmff_flattened_builder.h"
 #include "mmff_properties.h"
 
@@ -150,7 +150,7 @@ static std::vector<std::vector<Spec>> extractConstraintLists(const bp::list&    
   return allSpecs;
 }
 
-static nvMolKit::MMFF::DistanceConstraintSpec parseDistanceConstraintTuple(const bp::tuple& value) {
+static nvMolKit::ForceFieldConstraints::DistanceConstraintSpec parseDistanceConstraintTuple(const bp::tuple& value) {
   if (bp::len(value) != 6) {
     throw std::invalid_argument("Distance constraint tuples must have 6 elements");
   }
@@ -162,14 +162,14 @@ static nvMolKit::MMFF::DistanceConstraintSpec parseDistanceConstraintTuple(const
           bp::extract<double>(value[5])};
 }
 
-static nvMolKit::MMFF::PositionConstraintSpec parsePositionConstraintTuple(const bp::tuple& value) {
+static nvMolKit::ForceFieldConstraints::PositionConstraintSpec parsePositionConstraintTuple(const bp::tuple& value) {
   if (bp::len(value) != 3) {
     throw std::invalid_argument("Position constraint tuples must have 3 elements");
   }
   return {bp::extract<int>(value[0]), bp::extract<double>(value[1]), bp::extract<double>(value[2])};
 }
 
-static nvMolKit::MMFF::AngleConstraintSpec parseAngleConstraintTuple(const bp::tuple& value) {
+static nvMolKit::ForceFieldConstraints::AngleConstraintSpec parseAngleConstraintTuple(const bp::tuple& value) {
   if (bp::len(value) != 7) {
     throw std::invalid_argument("Angle constraint tuples must have 7 elements");
   }
@@ -182,7 +182,7 @@ static nvMolKit::MMFF::AngleConstraintSpec parseAngleConstraintTuple(const bp::t
           bp::extract<double>(value[6])};
 }
 
-static nvMolKit::MMFF::TorsionConstraintSpec parseTorsionConstraintTuple(const bp::tuple& value) {
+static nvMolKit::ForceFieldConstraints::TorsionConstraintSpec parseTorsionConstraintTuple(const bp::tuple& value) {
   if (bp::len(value) != 8) {
     throw std::invalid_argument("Torsion constraint tuples must have 8 elements");
   }
@@ -210,25 +210,25 @@ class NativeMMFFBatchedForcefield {
     const auto props    = extractMMFFPropertiesList(properties, numMols);
     const auto confList = extractIntList(confIds, numMols, "conf_id");
     const auto distanceConstraintLists =
-      extractConstraintLists<nvMolKit::MMFF::DistanceConstraintSpec>(distanceConstraints,
-                                                                     numMols,
-                                                                     parseDistanceConstraintTuple,
-                                                                     "distance constraints");
+      extractConstraintLists<nvMolKit::ForceFieldConstraints::DistanceConstraintSpec>(distanceConstraints,
+                                                                                      numMols,
+                                                                                      parseDistanceConstraintTuple,
+                                                                                      "distance constraints");
     const auto positionConstraintLists =
-      extractConstraintLists<nvMolKit::MMFF::PositionConstraintSpec>(positionConstraints,
-                                                                     numMols,
-                                                                     parsePositionConstraintTuple,
-                                                                     "position constraints");
+      extractConstraintLists<nvMolKit::ForceFieldConstraints::PositionConstraintSpec>(positionConstraints,
+                                                                                      numMols,
+                                                                                      parsePositionConstraintTuple,
+                                                                                      "position constraints");
     const auto angleConstraintLists =
-      extractConstraintLists<nvMolKit::MMFF::AngleConstraintSpec>(angleConstraints,
-                                                                  numMols,
-                                                                  parseAngleConstraintTuple,
-                                                                  "angle constraints");
+      extractConstraintLists<nvMolKit::ForceFieldConstraints::AngleConstraintSpec>(angleConstraints,
+                                                                                   numMols,
+                                                                                   parseAngleConstraintTuple,
+                                                                                   "angle constraints");
     const auto torsionConstraintLists =
-      extractConstraintLists<nvMolKit::MMFF::TorsionConstraintSpec>(torsionConstraints,
-                                                                    numMols,
-                                                                    parseTorsionConstraintTuple,
-                                                                    "torsion constraints");
+      extractConstraintLists<nvMolKit::ForceFieldConstraints::TorsionConstraintSpec>(torsionConstraints,
+                                                                                     numMols,
+                                                                                     parseTorsionConstraintTuple,
+                                                                                     "torsion constraints");
 
     nvMolKit::MMFF::BatchedMolecularSystemHost systemHost;
     nvMolKit::BatchedForcefieldMetadata        metadata;
@@ -238,16 +238,16 @@ class NativeMMFFBatchedForcefield {
 
       auto ffParams = nvMolKit::MMFF::constructForcefieldContribs(*mols[molIdx], props[molIdx], confList[molIdx]);
       for (const auto& spec : distanceConstraintLists[molIdx]) {
-        nvMolKit::MMFF::appendDistanceConstraint(ffParams, positions, spec);
+        nvMolKit::ForceFieldConstraints::appendDistanceConstraint(ffParams, positions, spec);
       }
       for (const auto& spec : positionConstraintLists[molIdx]) {
-        nvMolKit::MMFF::appendPositionConstraint(ffParams, positions, spec);
+        nvMolKit::ForceFieldConstraints::appendPositionConstraint(ffParams, positions, spec);
       }
       for (const auto& spec : angleConstraintLists[molIdx]) {
-        nvMolKit::MMFF::appendAngleConstraint(ffParams, positions, spec);
+        nvMolKit::ForceFieldConstraints::appendAngleConstraint(ffParams, positions, spec);
       }
       for (const auto& spec : torsionConstraintLists[molIdx]) {
-        nvMolKit::MMFF::appendTorsionConstraint(ffParams, positions, spec);
+        nvMolKit::ForceFieldConstraints::appendTorsionConstraint(ffParams, positions, spec);
       }
       nvMolKit::MMFF::addMoleculeToBatch(ffParams, positions, systemHost, &metadata, molIdx, 0);
     }
