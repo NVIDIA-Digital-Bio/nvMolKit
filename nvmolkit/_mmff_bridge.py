@@ -11,6 +11,7 @@ into the native extension.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+import weakref
 
 from rdkit.Chem import rdForceFieldHelpers
 from rdkit.ForceField import rdForceField as _rdForceField  # noqa: F401
@@ -34,7 +35,7 @@ _DEFAULT_MMFF_SETTINGS = {
     "vdw_term": True,
     "ele_term": True,
 }
-_CAPTURED_MMFF_SETTINGS_BY_ID: dict[int, dict] = {}
+_CAPTURED_MMFF_SETTINGS_BY_OBJECT: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
 
 def _normalize_mmff_settings(settings: dict | None) -> dict:
@@ -53,7 +54,7 @@ def capture_mmff_settings(properties: "RDKitMMFFMolProperties", settings: dict |
     every setting in a given build.
     """
 
-    _CAPTURED_MMFF_SETTINGS_BY_ID[id(properties)] = _normalize_mmff_settings(settings)
+    _CAPTURED_MMFF_SETTINGS_BY_OBJECT[properties] = _normalize_mmff_settings(settings)
     return properties
 
 
@@ -74,7 +75,7 @@ def extract_mmff_settings(properties: "RDKitMMFFMolProperties") -> dict:
     them.
     """
 
-    captured = _CAPTURED_MMFF_SETTINGS_BY_ID.get(id(properties))
+    captured = _CAPTURED_MMFF_SETTINGS_BY_OBJECT.get(properties)
     if captured is not None:
         return dict(captured)
 
