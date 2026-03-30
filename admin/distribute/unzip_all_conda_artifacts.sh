@@ -12,7 +12,9 @@
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
-# limitations under the License.#
+# limitations under the License.
+
+#
 # Unzip all .zip files in a given folder (e.g. Azure conda artifact zips).
 # Handles nested zips: unzips top-level .zip files, then recursively unzips any
 # .zip found inside the resulting directories (so build_artifacts/ ends up visible).

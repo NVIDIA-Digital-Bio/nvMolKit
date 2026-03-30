@@ -125,19 +125,17 @@ write_header() {
     local comment_prefix="$2"
     local year="$3"
     local preserve_shebang="$4"
-    local header
     local temp_file
     local first_line
 
-    header=$(make_header "${comment_prefix}" "${year}")
     temp_file=$(mktemp)
 
     if [ "${preserve_shebang}" = true ] && IFS= read -r first_line < "${file}" && [[ "${first_line}" == '#!'* ]]; then
         printf '%s\n' "${first_line}" > "${temp_file}"
-        printf '%s' "${header}" >> "${temp_file}"
+        make_header "${comment_prefix}" "${year}" >> "${temp_file}"
         tail -n +2 "${file}" >> "${temp_file}"
     else
-        printf '%s' "${header}" > "${temp_file}"
+        make_header "${comment_prefix}" "${year}" > "${temp_file}"
         cat "${file}" >> "${temp_file}"
     fi
 

@@ -12,7 +12,9 @@
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
-# limitations under the License.#
+# limitations under the License.
+
+#
 # Merge multiple conda build_artifacts directories into one channel directory
 # so that verify_conda_version_combinations.sh can use a single local endpoint.
 #
