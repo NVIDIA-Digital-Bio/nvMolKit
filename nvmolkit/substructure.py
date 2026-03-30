@@ -284,4 +284,3 @@ def getSubstructMatches(
         config = SubstructSearchConfig()
     atom_indices, match_indptr, pair_indptr, shape = _getSubstructMatches(targets, queries, config._as_native())
     return SubstructMatchResults(atom_indices, match_indptr, pair_indptr, shape)
-

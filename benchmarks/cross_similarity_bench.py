@@ -36,13 +36,15 @@ mols = [MolFromSmiles(smi) for smi in smis]
 
 
 runner = pyperf.Runner(min_time=0.01, values=3, processes=1, loops=3)
-runner.metadata['description'] = f"Cross Similarity benchmark"
+runner.metadata["description"] = f"Cross Similarity benchmark"
+
 
 def rdkit_sim(fps, sim_type):
     if sim_type.lower() == "tanimoto":
         sim = [BulkTanimotoSimilarity(fps[i], fps) for i in range(len(fps))]
     elif sim_type.lower() == "cosine":
         sim = [BulkCosineSimilarity(fps[i], fps) for i in range(len(fps))]
+
 
 def _internal_mp(fps, idx, sim_type):
     if sim_type.lower() == "tanimoto":
@@ -70,10 +72,14 @@ def nvmolkit_sim_cpu_collect(fps, sim_type):
     elif sim_type.lower() == "cosine":
         out = crossCosineSimilarityMemoryConstrained(fps)
 
-for sim_type in ("tanimoto", "cosine"):
-    for molNum in (100, 1000, 2000,):
-        for fpsize in (1024,):
 
+for sim_type in ("tanimoto", "cosine"):
+    for molNum in (
+        100,
+        1000,
+        2000,
+    ):
+        for fpsize in (1024,):
             generator = rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=fpsize)
             fps = [generator.GetFingerprint(mol) for mol in mols[:molNum]]
             while len(fps) < molNum:
@@ -84,16 +90,18 @@ for sim_type in ("tanimoto", "cosine"):
             runner.bench_func(name, rdkit_sim, fps, sim_type, metadata={"name": name})
 
             name2 = f"rdkit_multiprocess_{sim_type}sim_fpsize_{fpsize}_{molNum}mols"
-            runner.bench_func(name2, rdkit_sim_mp,  fps, sim_type, metadata={"name": str(name2)})
+            runner.bench_func(name2, rdkit_sim_mp, fps, sim_type, metadata={"name": str(name2)})
 
             while len(mols) < molNum:
                 mols += mols
             mols = mols[:molNum]
             nvmolkit_fpgen = MorganFingerprintGenerator(radius=3, fpSize=fpsize)
 
-            nvmolkit_fps_cu = torch.as_tensor(nvmolkit_fpgen.GetFingerprints(mols[:molNum]), device='cuda')
+            nvmolkit_fps_cu = torch.as_tensor(nvmolkit_fpgen.GetFingerprints(mols[:molNum]), device="cuda")
             name3 = f"nvmolkit_gpu-only_{sim_type}sim_fpsize_{fpsize}_{molNum}mols_gpu_only"
             runner.bench_func(name3, nvmolkit_sim_gpu_only, nvmolkit_fps_cu, sim_type, metadata={"name": str(name3)})
 
             name4 = f"nvmolkit_cpu-collect_{sim_type}sim_fpsize_{fpsize}_{molNum}mols_cpu_result"
-            runner.bench_func(name4, nvmolkit_sim_cpu_collect, nvmolkit_fps_cu, sim_type, metadata={"name": str(name4)})
+            runner.bench_func(
+                name4, nvmolkit_sim_cpu_collect, nvmolkit_fps_cu, sim_type, metadata={"name": str(name4)}
+            )
