@@ -20,6 +20,7 @@
 
 set -ex
 
+EXPECTED_RUFF_VERSION="0.15.8"
 RUFF_ARGS=()
 while getopts ":d" opt; do
   case ${opt} in
@@ -34,6 +35,16 @@ while getopts ":d" opt; do
 done
 
 ROOT_DIR=$(git rev-parse --show-toplevel)
+
+if command -v ruff >/dev/null 2>&1; then
+  ACTUAL_RUFF_VERSION=$(ruff --version | awk '{print $2}')
+  if [ "$ACTUAL_RUFF_VERSION" != "$EXPECTED_RUFF_VERSION" ]; then
+    echo "Warning: expected ruff version $EXPECTED_RUFF_VERSION, found $ACTUAL_RUFF_VERSION. Formatting may not match CI checker." >&2
+  fi
+else
+  echo "Error: ruff is not installed; expected version $EXPECTED_RUFF_VERSION." >&2
+  exit 1
+fi
 
 echo "Running ruff format:"
 ruff format "${RUFF_ARGS[@]}" "$ROOT_DIR"
