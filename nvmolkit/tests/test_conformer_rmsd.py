@@ -32,8 +32,8 @@ def _numpy_kabsch_rmsd(p, q):
     U, S, Vt = np.linalg.svd(H)
     d = np.sign(np.linalg.det(H))
     S[-1] *= d if d != 0.0 else 1.0
-    Sp = np.sum(p_c ** 2)
-    Sq = np.sum(q_c ** 2)
+    Sp = np.sum(p_c**2)
+    Sq = np.sum(q_c**2)
     return np.sqrt(max((Sp + Sq - 2.0 * np.sum(S)) / len(p), 0.0))
 
 
@@ -51,7 +51,6 @@ def _rdkit_rmsd_matrix(mol, prealigned=False):
     return list(AllChem.GetConformerRMSMatrix(mol, prealigned=prealigned))
 
 
-
 def _numpy_rmsd_matrix(mol, prealigned=False):
     """Compute full RMSD matrix using numpy Kabsch (independent reference)."""
     confs = mol.GetConformers()
@@ -62,7 +61,7 @@ def _numpy_rmsd_matrix(mol, prealigned=False):
         for j in range(i):
             if prealigned:
                 diff = coords[i] - coords[j]
-                rmsd = np.sqrt(np.sum(diff ** 2) / len(coords[i]))
+                rmsd = np.sqrt(np.sum(diff**2) / len(coords[i]))
             else:
                 rmsd = _numpy_kabsch_rmsd(coords[i], coords[j])
             result.append(rmsd)
@@ -80,14 +79,10 @@ def test_rmsd_matches_numpy_kabsch(smiles):
     torch.cuda.synchronize()
     gpu_rms = gpu_result.numpy().tolist()
 
-    assert len(gpu_rms) == len(ref_rms), (
-        f"Length mismatch: GPU={len(gpu_rms)}, ref={len(ref_rms)}"
-    )
+    assert len(gpu_rms) == len(ref_rms), f"Length mismatch: GPU={len(gpu_rms)}, ref={len(ref_rms)}"
 
     for i, (g, r) in enumerate(zip(gpu_rms, ref_rms)):
-        assert abs(g - r) < 0.01, (
-            f"RMSD mismatch at index {i}: GPU={g:.6f}, numpy={r:.6f}, diff={abs(g - r):.6f}"
-        )
+        assert abs(g - r) < 0.01, f"RMSD mismatch at index {i}: GPU={g:.6f}, numpy={r:.6f}, diff={abs(g - r):.6f}"
 
 
 @pytest.mark.parametrize("smiles", ["CCCCCC", "c1ccccc1"])
@@ -103,9 +98,7 @@ def test_rmsd_prealigned_matches_rdkit(smiles):
 
     assert len(gpu_rms) == len(rdkit_rms)
     for i, (g, r) in enumerate(zip(gpu_rms, rdkit_rms)):
-        assert abs(g - r) < 0.01, (
-            f"RMSD mismatch at index {i}: GPU={g:.6f}, RDKit={r:.6f}"
-        )
+        assert abs(g - r) < 0.01, f"RMSD mismatch at index {i}: GPU={g:.6f}, RDKit={r:.6f}"
 
 
 def test_rmsd_large_conformer_set():
@@ -192,6 +185,7 @@ def test_rmsd_invalid_stream_type():
 # Batch API tests
 # ---------------------------------------------------------------------------
 
+
 def test_batch_matches_single():
     """Batch results match the single-molecule API for each molecule."""
     smiles_list = ["CCCCCC", "c1ccccc1", "CC(=O)Oc1ccccc1C(=O)O"]
@@ -204,23 +198,22 @@ def test_batch_matches_single():
         single_result = GetConformerRMSMatrix(mol, prealigned=False)
         torch.cuda.synchronize()
 
-        batch_rms  = batch_result.numpy()
+        batch_rms = batch_result.numpy()
         single_rms = single_result.numpy()
-        np.testing.assert_allclose(batch_rms, single_rms, atol=1e-10,
-                                   err_msg="Batch and single-mol results differ")
+        np.testing.assert_allclose(batch_rms, single_rms, atol=1e-10, err_msg="Batch and single-mol results differ")
 
 
 def test_batch_mixed_conformer_counts():
     """Batch handles molecules with different conformer counts."""
-    mol_many  = Chem.RemoveHs(_embed_mol("CCCCCC", num_confs=20))
-    mol_few   = Chem.RemoveHs(_embed_mol("CC", num_confs=3))
-    mol_one   = Chem.RemoveHs(_embed_mol("CCO", num_confs=1))  # below threshold
+    mol_many = Chem.RemoveHs(_embed_mol("CCCCCC", num_confs=20))
+    mol_few = Chem.RemoveHs(_embed_mol("CC", num_confs=3))
+    mol_one = Chem.RemoveHs(_embed_mol("CCO", num_confs=1))  # below threshold
 
     results = GetConformerRMSMatrixBatch([mol_many, mol_few, mol_one])
     torch.cuda.synchronize()
 
     n_many = mol_many.GetNumConformers()
-    n_few  = mol_few.GetNumConformers()
+    n_few = mol_few.GetNumConformers()
 
     assert results[0].numpy().shape[0] == n_many * (n_many - 1) // 2
     assert results[1].numpy().shape[0] == n_few * (n_few - 1) // 2
@@ -235,8 +228,7 @@ def test_batch_empty_list():
 
 def test_batch_prealigned_matches_single():
     """Batch prealigned=True path matches the single-molecule API."""
-    mols = [Chem.RemoveHs(_embed_mol(s, num_confs=8))
-            for s in ["CCCCCC", "c1ccccc1"]]
+    mols = [Chem.RemoveHs(_embed_mol(s, num_confs=8)) for s in ["CCCCCC", "c1ccccc1"]]
 
     batch_results = GetConformerRMSMatrixBatch(mols, prealigned=True)
     torch.cuda.synchronize()
@@ -244,9 +236,12 @@ def test_batch_prealigned_matches_single():
     for mol, batch_result in zip(mols, batch_results):
         single_result = GetConformerRMSMatrix(mol, prealigned=True)
         torch.cuda.synchronize()
-        np.testing.assert_allclose(batch_result.numpy(), single_result.numpy(),
-                                   atol=1e-10,
-                                   err_msg="Batch prealigned and single-mol results differ")
+        np.testing.assert_allclose(
+            batch_result.numpy(),
+            single_result.numpy(),
+            atol=1e-10,
+            err_msg="Batch prealigned and single-mol results differ",
+        )
 
 
 def test_batch_invalid_none():
@@ -258,8 +253,7 @@ def test_batch_invalid_none():
 
 def test_batch_explicit_stream():
     """Batch results are correct on an explicit CUDA stream."""
-    mols = [Chem.RemoveHs(_embed_mol(s, num_confs=5))
-            for s in ["CCCC", "CCCCC"]]
+    mols = [Chem.RemoveHs(_embed_mol(s, num_confs=5)) for s in ["CCCC", "CCCCC"]]
 
     s = torch.cuda.Stream()
     results = GetConformerRMSMatrixBatch(mols, stream=s)

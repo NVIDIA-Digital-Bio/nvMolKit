@@ -23,6 +23,7 @@ from rdkit.Chem import MolFromSmiles
 from nvmolkit.fingerprints import MorganFingerprintGenerator
 from nvmolkit.types import HardwareOptions
 
+
 def _get_fps(num_mols):
     generator = MorganFingerprintGenerator(radius=0, fpSize=2048)
     template = MolFromSmiles("CC")
@@ -31,6 +32,7 @@ def _get_fps(num_mols):
     result = generator.GetFingerprints(mols)
     torch.cuda.synchronize()
     return result
+
 
 def test_async_gpu_result_release_frees_memory():
     torch.cuda.synchronize()
@@ -42,7 +44,6 @@ def test_async_gpu_result_release_frees_memory():
     expected_bytes = num_mols * 2048 // 8
     fps = _get_fps(num_mols)
     torch.cuda.synchronize()
-
 
     free_after_alloc, _ = torch.cuda.mem_get_info()
     assert free_after_alloc < base_free
@@ -66,4 +67,3 @@ def test_hardware_options_invalid_batches_per_gpu(invalid_value):
     hw = HardwareOptions()
     with pytest.raises(ValueError, match="batchesPerGpu must be greater than 0 or -1"):
         hw.batchesPerGpu = invalid_value
-
