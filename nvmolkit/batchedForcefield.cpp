@@ -23,6 +23,7 @@
 
 #include "device_vector.h"
 #include "ff_utils.h"
+#include "forcefield_constraints.h"
 #include "mmff_batched_forcefield.h"
 #include "mmff_flattened_builder.h"
 #include "mmff_properties.h"
@@ -128,20 +129,126 @@ static std::vector<int> extractIntList(const bp::list& pyList, int expectedSize,
   return result;
 }
 
+template <typename Spec, typename Parser>
+static std::vector<std::vector<Spec>> extractConstraintLists(const bp::list&    outerList,
+                                                             const int          expectedSize,
+                                                             const Parser&      parser,
+                                                             const std::string& name) {
+  if (bp::len(outerList) != expectedSize) {
+    throw std::invalid_argument("Expected " + std::to_string(expectedSize) + " entries for " + name + ", got " +
+                                std::to_string(bp::len(outerList)));
+  }
+  std::vector<std::vector<Spec>> allSpecs(expectedSize);
+  for (int molIdx = 0; molIdx < expectedSize; ++molIdx) {
+    const bp::list innerList = bp::extract<bp::list>(bp::object(outerList[molIdx]));
+    auto&          specs     = allSpecs[molIdx];
+    specs.reserve(bp::len(innerList));
+    for (int j = 0; j < bp::len(innerList); ++j) {
+      specs.push_back(parser(bp::extract<bp::tuple>(bp::object(innerList[j]))));
+    }
+  }
+  return allSpecs;
+}
+
+static nvMolKit::ForceFieldConstraints::DistanceConstraintSpec parseDistanceConstraintTuple(const bp::tuple& value) {
+  if (bp::len(value) != 6) {
+    throw std::invalid_argument("Distance constraint tuples must have 6 elements");
+  }
+  return {bp::extract<int>(value[0]),
+          bp::extract<int>(value[1]),
+          bp::extract<bool>(value[2]),
+          bp::extract<double>(value[3]),
+          bp::extract<double>(value[4]),
+          bp::extract<double>(value[5])};
+}
+
+static nvMolKit::ForceFieldConstraints::PositionConstraintSpec parsePositionConstraintTuple(const bp::tuple& value) {
+  if (bp::len(value) != 3) {
+    throw std::invalid_argument("Position constraint tuples must have 3 elements");
+  }
+  return {bp::extract<int>(value[0]), bp::extract<double>(value[1]), bp::extract<double>(value[2])};
+}
+
+static nvMolKit::ForceFieldConstraints::AngleConstraintSpec parseAngleConstraintTuple(const bp::tuple& value) {
+  if (bp::len(value) != 7) {
+    throw std::invalid_argument("Angle constraint tuples must have 7 elements");
+  }
+  return {bp::extract<int>(value[0]),
+          bp::extract<int>(value[1]),
+          bp::extract<int>(value[2]),
+          bp::extract<bool>(value[3]),
+          bp::extract<double>(value[4]),
+          bp::extract<double>(value[5]),
+          bp::extract<double>(value[6])};
+}
+
+static nvMolKit::ForceFieldConstraints::TorsionConstraintSpec parseTorsionConstraintTuple(const bp::tuple& value) {
+  if (bp::len(value) != 8) {
+    throw std::invalid_argument("Torsion constraint tuples must have 8 elements");
+  }
+  return {bp::extract<int>(value[0]),
+          bp::extract<int>(value[1]),
+          bp::extract<int>(value[2]),
+          bp::extract<int>(value[3]),
+          bp::extract<bool>(value[4]),
+          bp::extract<double>(value[5]),
+          bp::extract<double>(value[6]),
+          bp::extract<double>(value[7])};
+}
+
 class NativeMMFFBatchedForcefield {
  public:
-  NativeMMFFBatchedForcefield(const bp::list& molecules, const bp::list& properties, const bp::list& confIds) {
+  NativeMMFFBatchedForcefield(const bp::list& molecules,
+                              const bp::list& properties,
+                              const bp::list& confIds,
+                              const bp::list& distanceConstraints,
+                              const bp::list& positionConstraints,
+                              const bp::list& angleConstraints,
+                              const bp::list& torsionConstraints) {
     const auto mols     = extractMolecules(molecules);
     const int  numMols  = static_cast<int>(mols.size());
     const auto props    = extractMMFFPropertiesList(properties, numMols);
     const auto confList = extractIntList(confIds, numMols, "conf_id");
+    const auto distanceConstraintLists =
+      extractConstraintLists<nvMolKit::ForceFieldConstraints::DistanceConstraintSpec>(distanceConstraints,
+                                                                                      numMols,
+                                                                                      parseDistanceConstraintTuple,
+                                                                                      "distance constraints");
+    const auto positionConstraintLists =
+      extractConstraintLists<nvMolKit::ForceFieldConstraints::PositionConstraintSpec>(positionConstraints,
+                                                                                      numMols,
+                                                                                      parsePositionConstraintTuple,
+                                                                                      "position constraints");
+    const auto angleConstraintLists =
+      extractConstraintLists<nvMolKit::ForceFieldConstraints::AngleConstraintSpec>(angleConstraints,
+                                                                                   numMols,
+                                                                                   parseAngleConstraintTuple,
+                                                                                   "angle constraints");
+    const auto torsionConstraintLists =
+      extractConstraintLists<nvMolKit::ForceFieldConstraints::TorsionConstraintSpec>(torsionConstraints,
+                                                                                     numMols,
+                                                                                     parseTorsionConstraintTuple,
+                                                                                     "torsion constraints");
 
     nvMolKit::MMFF::BatchedMolecularSystemHost systemHost;
     nvMolKit::BatchedForcefieldMetadata        metadata;
     for (int molIdx = 0; molIdx < numMols; ++molIdx) {
       std::vector<double> positions;
       nvMolKit::confPosToVect(*mols[molIdx], positions, confList[molIdx]);
+
       auto ffParams = nvMolKit::MMFF::constructForcefieldContribs(*mols[molIdx], props[molIdx], confList[molIdx]);
+      for (const auto& spec : distanceConstraintLists[molIdx]) {
+        nvMolKit::ForceFieldConstraints::appendDistanceConstraint(ffParams, positions, spec);
+      }
+      for (const auto& spec : positionConstraintLists[molIdx]) {
+        nvMolKit::ForceFieldConstraints::appendPositionConstraint(ffParams, positions, spec);
+      }
+      for (const auto& spec : angleConstraintLists[molIdx]) {
+        nvMolKit::ForceFieldConstraints::appendAngleConstraint(ffParams, positions, spec);
+      }
+      for (const auto& spec : torsionConstraintLists[molIdx]) {
+        nvMolKit::ForceFieldConstraints::appendTorsionConstraint(ffParams, positions, spec);
+      }
       nvMolKit::MMFF::addMoleculeToBatch(ffParams, positions, systemHost, &metadata, molIdx, 0);
     }
     forcefield_ = std::make_unique<nvMolKit::MMFFBatchedForcefield>(systemHost, metadata);
@@ -184,9 +291,14 @@ BOOST_PYTHON_MODULE(_batchedForcefield) {
     .def_readwrite("vdwTerm", &nvMolKit::MMFFProperties::vdwTerm)
     .def_readwrite("eleTerm", &nvMolKit::MMFFProperties::eleTerm);
 
-  bp::class_<NativeMMFFBatchedForcefield, boost::noncopyable>(
-    "NativeMMFFBatchedForcefield",
-    bp::init<const bp::list&, const bp::list&, const bp::list&>())
+  bp::class_<NativeMMFFBatchedForcefield, boost::noncopyable>("NativeMMFFBatchedForcefield",
+                                                              bp::init<const bp::list&,
+                                                                       const bp::list&,
+                                                                       const bp::list&,
+                                                                       const bp::list&,
+                                                                       const bp::list&,
+                                                                       const bp::list&,
+                                                                       const bp::list&>())
     .def("computeEnergy", &NativeMMFFBatchedForcefield::computeEnergy)
     .def("computeGradients", &NativeMMFFBatchedForcefield::computeGradients);
 }

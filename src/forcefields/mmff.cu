@@ -71,19 +71,51 @@ EnergyForceContribsDevicePtr toPointerStruct(const EnergyForceContribsDevice& sr
   dst.eleTerms.dielModel  = src.eleTerms.dielModel.data();
   dst.eleTerms.is1_4      = src.eleTerms.is1_4.data();
 
+  dst.distanceConstraintTerms.idx1          = src.distanceConstraintTerms.idx1.data();
+  dst.distanceConstraintTerms.idx2          = src.distanceConstraintTerms.idx2.data();
+  dst.distanceConstraintTerms.minLen        = src.distanceConstraintTerms.minLen.data();
+  dst.distanceConstraintTerms.maxLen        = src.distanceConstraintTerms.maxLen.data();
+  dst.distanceConstraintTerms.forceConstant = src.distanceConstraintTerms.forceConstant.data();
+
+  dst.positionConstraintTerms.idx           = src.positionConstraintTerms.idx.data();
+  dst.positionConstraintTerms.refX          = src.positionConstraintTerms.refX.data();
+  dst.positionConstraintTerms.refY          = src.positionConstraintTerms.refY.data();
+  dst.positionConstraintTerms.refZ          = src.positionConstraintTerms.refZ.data();
+  dst.positionConstraintTerms.maxDispl      = src.positionConstraintTerms.maxDispl.data();
+  dst.positionConstraintTerms.forceConstant = src.positionConstraintTerms.forceConstant.data();
+
+  dst.angleConstraintTerms.idx1          = src.angleConstraintTerms.idx1.data();
+  dst.angleConstraintTerms.idx2          = src.angleConstraintTerms.idx2.data();
+  dst.angleConstraintTerms.idx3          = src.angleConstraintTerms.idx3.data();
+  dst.angleConstraintTerms.minAngleDeg   = src.angleConstraintTerms.minAngleDeg.data();
+  dst.angleConstraintTerms.maxAngleDeg   = src.angleConstraintTerms.maxAngleDeg.data();
+  dst.angleConstraintTerms.forceConstant = src.angleConstraintTerms.forceConstant.data();
+
+  dst.torsionConstraintTerms.idx1           = src.torsionConstraintTerms.idx1.data();
+  dst.torsionConstraintTerms.idx2           = src.torsionConstraintTerms.idx2.data();
+  dst.torsionConstraintTerms.idx3           = src.torsionConstraintTerms.idx3.data();
+  dst.torsionConstraintTerms.idx4           = src.torsionConstraintTerms.idx4.data();
+  dst.torsionConstraintTerms.minDihedralDeg = src.torsionConstraintTerms.minDihedralDeg.data();
+  dst.torsionConstraintTerms.maxDihedralDeg = src.torsionConstraintTerms.maxDihedralDeg.data();
+  dst.torsionConstraintTerms.forceConstant  = src.torsionConstraintTerms.forceConstant.data();
+
   return dst;
 }
 
 BatchedIndicesDevicePtr toPointerStruct(const BatchedIndicesDevice& src) {
   BatchedIndicesDevicePtr dst;
-  dst.atomStarts        = src.atomStarts.data();
-  dst.bondTermStarts    = src.bondTermStarts.data();
-  dst.angleTermStarts   = src.angleTermStarts.data();
-  dst.bendTermStarts    = src.bendTermStarts.data();
-  dst.oopTermStarts     = src.oopTermStarts.data();
-  dst.torsionTermStarts = src.torsionTermStarts.data();
-  dst.vdwTermStarts     = src.vdwTermStarts.data();
-  dst.eleTermStarts     = src.eleTermStarts.data();
+  dst.atomStarts                   = src.atomStarts.data();
+  dst.bondTermStarts               = src.bondTermStarts.data();
+  dst.angleTermStarts              = src.angleTermStarts.data();
+  dst.bendTermStarts               = src.bendTermStarts.data();
+  dst.oopTermStarts                = src.oopTermStarts.data();
+  dst.torsionTermStarts            = src.torsionTermStarts.data();
+  dst.vdwTermStarts                = src.vdwTermStarts.data();
+  dst.eleTermStarts                = src.eleTermStarts.data();
+  dst.distanceConstraintTermStarts = src.distanceConstraintTermStarts.data();
+  dst.positionConstraintTermStarts = src.positionConstraintTermStarts.data();
+  dst.angleConstraintTermStarts    = src.angleConstraintTermStarts.data();
+  dst.torsionConstraintTermStarts  = src.torsionConstraintTermStarts.data();
 
   return dst;
 }
@@ -165,6 +197,34 @@ void setStreams(BatchedMolecularDeviceBuffers& molSystemDevice, cudaStream_t str
   deviceContribs.eleTerms.dielModel.setStream(stream);
   deviceContribs.eleTerms.is1_4.setStream(stream);
 
+  deviceContribs.distanceConstraintTerms.idx1.setStream(stream);
+  deviceContribs.distanceConstraintTerms.idx2.setStream(stream);
+  deviceContribs.distanceConstraintTerms.minLen.setStream(stream);
+  deviceContribs.distanceConstraintTerms.maxLen.setStream(stream);
+  deviceContribs.distanceConstraintTerms.forceConstant.setStream(stream);
+
+  deviceContribs.positionConstraintTerms.idx.setStream(stream);
+  deviceContribs.positionConstraintTerms.refX.setStream(stream);
+  deviceContribs.positionConstraintTerms.refY.setStream(stream);
+  deviceContribs.positionConstraintTerms.refZ.setStream(stream);
+  deviceContribs.positionConstraintTerms.maxDispl.setStream(stream);
+  deviceContribs.positionConstraintTerms.forceConstant.setStream(stream);
+
+  deviceContribs.angleConstraintTerms.idx1.setStream(stream);
+  deviceContribs.angleConstraintTerms.idx2.setStream(stream);
+  deviceContribs.angleConstraintTerms.idx3.setStream(stream);
+  deviceContribs.angleConstraintTerms.minAngleDeg.setStream(stream);
+  deviceContribs.angleConstraintTerms.maxAngleDeg.setStream(stream);
+  deviceContribs.angleConstraintTerms.forceConstant.setStream(stream);
+
+  deviceContribs.torsionConstraintTerms.idx1.setStream(stream);
+  deviceContribs.torsionConstraintTerms.idx2.setStream(stream);
+  deviceContribs.torsionConstraintTerms.idx3.setStream(stream);
+  deviceContribs.torsionConstraintTerms.idx4.setStream(stream);
+  deviceContribs.torsionConstraintTerms.minDihedralDeg.setStream(stream);
+  deviceContribs.torsionConstraintTerms.maxDihedralDeg.setStream(stream);
+  deviceContribs.torsionConstraintTerms.forceConstant.setStream(stream);
+
   // Indices
   molSystemDevice.indices.atomStarts.setStream(stream);
   molSystemDevice.indices.energyBufferStarts.setStream(stream);
@@ -178,6 +238,10 @@ void setStreams(BatchedMolecularDeviceBuffers& molSystemDevice, cudaStream_t str
   molSystemDevice.indices.torsionTermStarts.setStream(stream);
   molSystemDevice.indices.vdwTermStarts.setStream(stream);
   molSystemDevice.indices.eleTermStarts.setStream(stream);
+  molSystemDevice.indices.distanceConstraintTermStarts.setStream(stream);
+  molSystemDevice.indices.positionConstraintTermStarts.setStream(stream);
+  molSystemDevice.indices.angleConstraintTermStarts.setStream(stream);
+  molSystemDevice.indices.torsionConstraintTermStarts.setStream(stream);
 }
 
 void sendContribsAndIndicesToDevice(const BatchedMolecularSystemHost& molSystemHost,
@@ -236,6 +300,38 @@ void sendContribsAndIndicesToDevice(const BatchedMolecularSystemHost& molSystemH
   deviceContribs.eleTerms.dielModel.setFromVector(hostContribs.eleTerms.dielModel);
   deviceContribs.eleTerms.is1_4.setFromVector(hostContribs.eleTerms.is1_4);
 
+  deviceContribs.distanceConstraintTerms.idx1.setFromVector(hostContribs.distanceConstraintTerms.idx1);
+  deviceContribs.distanceConstraintTerms.idx2.setFromVector(hostContribs.distanceConstraintTerms.idx2);
+  deviceContribs.distanceConstraintTerms.minLen.setFromVector(hostContribs.distanceConstraintTerms.minLen);
+  deviceContribs.distanceConstraintTerms.maxLen.setFromVector(hostContribs.distanceConstraintTerms.maxLen);
+  deviceContribs.distanceConstraintTerms.forceConstant.setFromVector(
+    hostContribs.distanceConstraintTerms.forceConstant);
+
+  deviceContribs.positionConstraintTerms.idx.setFromVector(hostContribs.positionConstraintTerms.idx);
+  deviceContribs.positionConstraintTerms.refX.setFromVector(hostContribs.positionConstraintTerms.refX);
+  deviceContribs.positionConstraintTerms.refY.setFromVector(hostContribs.positionConstraintTerms.refY);
+  deviceContribs.positionConstraintTerms.refZ.setFromVector(hostContribs.positionConstraintTerms.refZ);
+  deviceContribs.positionConstraintTerms.maxDispl.setFromVector(hostContribs.positionConstraintTerms.maxDispl);
+  deviceContribs.positionConstraintTerms.forceConstant.setFromVector(
+    hostContribs.positionConstraintTerms.forceConstant);
+
+  deviceContribs.angleConstraintTerms.idx1.setFromVector(hostContribs.angleConstraintTerms.idx1);
+  deviceContribs.angleConstraintTerms.idx2.setFromVector(hostContribs.angleConstraintTerms.idx2);
+  deviceContribs.angleConstraintTerms.idx3.setFromVector(hostContribs.angleConstraintTerms.idx3);
+  deviceContribs.angleConstraintTerms.minAngleDeg.setFromVector(hostContribs.angleConstraintTerms.minAngleDeg);
+  deviceContribs.angleConstraintTerms.maxAngleDeg.setFromVector(hostContribs.angleConstraintTerms.maxAngleDeg);
+  deviceContribs.angleConstraintTerms.forceConstant.setFromVector(hostContribs.angleConstraintTerms.forceConstant);
+
+  deviceContribs.torsionConstraintTerms.idx1.setFromVector(hostContribs.torsionConstraintTerms.idx1);
+  deviceContribs.torsionConstraintTerms.idx2.setFromVector(hostContribs.torsionConstraintTerms.idx2);
+  deviceContribs.torsionConstraintTerms.idx3.setFromVector(hostContribs.torsionConstraintTerms.idx3);
+  deviceContribs.torsionConstraintTerms.idx4.setFromVector(hostContribs.torsionConstraintTerms.idx4);
+  deviceContribs.torsionConstraintTerms.minDihedralDeg.setFromVector(
+    hostContribs.torsionConstraintTerms.minDihedralDeg);
+  deviceContribs.torsionConstraintTerms.maxDihedralDeg.setFromVector(
+    hostContribs.torsionConstraintTerms.maxDihedralDeg);
+  deviceContribs.torsionConstraintTerms.forceConstant.setFromVector(hostContribs.torsionConstraintTerms.forceConstant);
+
   // Indices
   molSystemDevice.indices.atomStarts.setFromVector(molSystemHost.indices.atomStarts);
   molSystemDevice.indices.energyBufferStarts.setFromVector(molSystemHost.indices.energyBufferStarts);
@@ -250,6 +346,12 @@ void sendContribsAndIndicesToDevice(const BatchedMolecularSystemHost& molSystemH
   molSystemDevice.indices.torsionTermStarts.setFromVector(molSystemHost.indices.torsionTermStarts);
   molSystemDevice.indices.vdwTermStarts.setFromVector(molSystemHost.indices.vdwTermStarts);
   molSystemDevice.indices.eleTermStarts.setFromVector(molSystemHost.indices.eleTermStarts);
+  molSystemDevice.indices.distanceConstraintTermStarts.setFromVector(
+    molSystemHost.indices.distanceConstraintTermStarts);
+  molSystemDevice.indices.positionConstraintTermStarts.setFromVector(
+    molSystemHost.indices.positionConstraintTermStarts);
+  molSystemDevice.indices.angleConstraintTermStarts.setFromVector(molSystemHost.indices.angleConstraintTermStarts);
+  molSystemDevice.indices.torsionConstraintTermStarts.setFromVector(molSystemHost.indices.torsionConstraintTermStarts);
 }
 
 void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
@@ -293,6 +395,14 @@ void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
   indexHolder.torsionTermStarts.push_back(indexHolder.torsionTermStarts.back() + contribs.torsionTerms.idx1.size());
   indexHolder.vdwTermStarts.push_back(indexHolder.vdwTermStarts.back() + contribs.vdwTerms.idx1.size());
   indexHolder.eleTermStarts.push_back(indexHolder.eleTermStarts.back() + contribs.eleTerms.idx1.size());
+  indexHolder.distanceConstraintTermStarts.push_back(indexHolder.distanceConstraintTermStarts.back() +
+                                                     contribs.distanceConstraintTerms.idx1.size());
+  indexHolder.positionConstraintTermStarts.push_back(indexHolder.positionConstraintTermStarts.back() +
+                                                     contribs.positionConstraintTerms.idx.size());
+  indexHolder.angleConstraintTermStarts.push_back(indexHolder.angleConstraintTermStarts.back() +
+                                                  contribs.angleConstraintTerms.idx1.size());
+  indexHolder.torsionConstraintTermStarts.push_back(indexHolder.torsionConstraintTermStarts.back() +
+                                                    contribs.torsionConstraintTerms.idx1.size());
 
   int maxNumContribs = 0;
   maxNumContribs     = std::max<int>(maxNumContribs, contribs.bondTerms.idx1.size());
@@ -302,6 +412,10 @@ void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
   maxNumContribs     = std::max<int>(maxNumContribs, contribs.torsionTerms.idx1.size());
   maxNumContribs     = std::max<int>(maxNumContribs, contribs.vdwTerms.idx1.size());
   maxNumContribs     = std::max<int>(maxNumContribs, contribs.eleTerms.idx1.size());
+  maxNumContribs     = std::max<int>(maxNumContribs, contribs.distanceConstraintTerms.idx1.size());
+  maxNumContribs     = std::max<int>(maxNumContribs, contribs.positionConstraintTerms.idx.size());
+  maxNumContribs     = std::max<int>(maxNumContribs, contribs.angleConstraintTerms.idx1.size());
+  maxNumContribs     = std::max<int>(maxNumContribs, contribs.torsionConstraintTerms.idx1.size());
 
   const int numBlocksNeeded  = (maxNumContribs + 127) / nvMolKit::FFKernelUtils::blockSizeEnergyReduction;
   const int numThreadsNeeded = numBlocksNeeded * nvMolKit::FFKernelUtils::blockSizeEnergyReduction;
@@ -371,6 +485,45 @@ void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
     contribHolder.eleTerms.chargeTerm.push_back(contribs.eleTerms.chargeTerm[i]);
     contribHolder.eleTerms.dielModel.push_back(contribs.eleTerms.dielModel[i]);
     contribHolder.eleTerms.is1_4.push_back(contribs.eleTerms.is1_4[i]);
+  }
+  for (size_t i = 0; i < contribs.distanceConstraintTerms.idx1.size(); i++) {
+    contribHolder.distanceConstraintTerms.idx1.push_back(contribs.distanceConstraintTerms.idx1[i] +
+                                                         previousLastAtomIndex);
+    contribHolder.distanceConstraintTerms.idx2.push_back(contribs.distanceConstraintTerms.idx2[i] +
+                                                         previousLastAtomIndex);
+    contribHolder.distanceConstraintTerms.minLen.push_back(contribs.distanceConstraintTerms.minLen[i]);
+    contribHolder.distanceConstraintTerms.maxLen.push_back(contribs.distanceConstraintTerms.maxLen[i]);
+    contribHolder.distanceConstraintTerms.forceConstant.push_back(contribs.distanceConstraintTerms.forceConstant[i]);
+  }
+  for (size_t i = 0; i < contribs.positionConstraintTerms.idx.size(); i++) {
+    contribHolder.positionConstraintTerms.idx.push_back(contribs.positionConstraintTerms.idx[i] +
+                                                        previousLastAtomIndex);
+    contribHolder.positionConstraintTerms.refX.push_back(contribs.positionConstraintTerms.refX[i]);
+    contribHolder.positionConstraintTerms.refY.push_back(contribs.positionConstraintTerms.refY[i]);
+    contribHolder.positionConstraintTerms.refZ.push_back(contribs.positionConstraintTerms.refZ[i]);
+    contribHolder.positionConstraintTerms.maxDispl.push_back(contribs.positionConstraintTerms.maxDispl[i]);
+    contribHolder.positionConstraintTerms.forceConstant.push_back(contribs.positionConstraintTerms.forceConstant[i]);
+  }
+  for (size_t i = 0; i < contribs.angleConstraintTerms.idx1.size(); i++) {
+    contribHolder.angleConstraintTerms.idx1.push_back(contribs.angleConstraintTerms.idx1[i] + previousLastAtomIndex);
+    contribHolder.angleConstraintTerms.idx2.push_back(contribs.angleConstraintTerms.idx2[i] + previousLastAtomIndex);
+    contribHolder.angleConstraintTerms.idx3.push_back(contribs.angleConstraintTerms.idx3[i] + previousLastAtomIndex);
+    contribHolder.angleConstraintTerms.minAngleDeg.push_back(contribs.angleConstraintTerms.minAngleDeg[i]);
+    contribHolder.angleConstraintTerms.maxAngleDeg.push_back(contribs.angleConstraintTerms.maxAngleDeg[i]);
+    contribHolder.angleConstraintTerms.forceConstant.push_back(contribs.angleConstraintTerms.forceConstant[i]);
+  }
+  for (size_t i = 0; i < contribs.torsionConstraintTerms.idx1.size(); i++) {
+    contribHolder.torsionConstraintTerms.idx1.push_back(contribs.torsionConstraintTerms.idx1[i] +
+                                                        previousLastAtomIndex);
+    contribHolder.torsionConstraintTerms.idx2.push_back(contribs.torsionConstraintTerms.idx2[i] +
+                                                        previousLastAtomIndex);
+    contribHolder.torsionConstraintTerms.idx3.push_back(contribs.torsionConstraintTerms.idx3[i] +
+                                                        previousLastAtomIndex);
+    contribHolder.torsionConstraintTerms.idx4.push_back(contribs.torsionConstraintTerms.idx4[i] +
+                                                        previousLastAtomIndex);
+    contribHolder.torsionConstraintTerms.minDihedralDeg.push_back(contribs.torsionConstraintTerms.minDihedralDeg[i]);
+    contribHolder.torsionConstraintTerms.maxDihedralDeg.push_back(contribs.torsionConstraintTerms.maxDihedralDeg[i]);
+    contribHolder.torsionConstraintTerms.forceConstant.push_back(contribs.torsionConstraintTerms.forceConstant[i]);
   }
 }
 
@@ -495,6 +648,66 @@ cudaError_t computeEnergy(BatchedMolecularDeviceBuffers& molSystemDevice,
                                 molSystemDevice.indices.eleTermStarts.data(),
                                 stream);
   }
+  if (err == cudaSuccess && contribs.distanceConstraintTerms.idx1.size() > 0) {
+    err = launchDistanceConstraintEnergyKernel(contribs.distanceConstraintTerms.idx1.size(),
+                                               contribs.distanceConstraintTerms.idx1.data(),
+                                               contribs.distanceConstraintTerms.idx2.data(),
+                                               contribs.distanceConstraintTerms.minLen.data(),
+                                               contribs.distanceConstraintTerms.maxLen.data(),
+                                               contribs.distanceConstraintTerms.forceConstant.data(),
+                                               positions,
+                                               molSystemDevice.energyBuffer.data(),
+                                               molSystemDevice.indices.energyBufferStarts.data(),
+                                               molSystemDevice.indices.atomIdxToBatchIdx.data(),
+                                               molSystemDevice.indices.distanceConstraintTermStarts.data(),
+                                               stream);
+  }
+  if (err == cudaSuccess && contribs.positionConstraintTerms.idx.size() > 0) {
+    err = launchPositionConstraintEnergyKernel(contribs.positionConstraintTerms.idx.size(),
+                                               contribs.positionConstraintTerms.idx.data(),
+                                               contribs.positionConstraintTerms.refX.data(),
+                                               contribs.positionConstraintTerms.refY.data(),
+                                               contribs.positionConstraintTerms.refZ.data(),
+                                               contribs.positionConstraintTerms.maxDispl.data(),
+                                               contribs.positionConstraintTerms.forceConstant.data(),
+                                               positions,
+                                               molSystemDevice.energyBuffer.data(),
+                                               molSystemDevice.indices.energyBufferStarts.data(),
+                                               molSystemDevice.indices.atomIdxToBatchIdx.data(),
+                                               molSystemDevice.indices.positionConstraintTermStarts.data(),
+                                               stream);
+  }
+  if (err == cudaSuccess && contribs.angleConstraintTerms.idx1.size() > 0) {
+    err = launchAngleConstraintEnergyKernel(contribs.angleConstraintTerms.idx1.size(),
+                                            contribs.angleConstraintTerms.idx1.data(),
+                                            contribs.angleConstraintTerms.idx2.data(),
+                                            contribs.angleConstraintTerms.idx3.data(),
+                                            contribs.angleConstraintTerms.minAngleDeg.data(),
+                                            contribs.angleConstraintTerms.maxAngleDeg.data(),
+                                            contribs.angleConstraintTerms.forceConstant.data(),
+                                            positions,
+                                            molSystemDevice.energyBuffer.data(),
+                                            molSystemDevice.indices.energyBufferStarts.data(),
+                                            molSystemDevice.indices.atomIdxToBatchIdx.data(),
+                                            molSystemDevice.indices.angleConstraintTermStarts.data(),
+                                            stream);
+  }
+  if (err == cudaSuccess && contribs.torsionConstraintTerms.idx1.size() > 0) {
+    err = launchTorsionConstraintEnergyKernel(contribs.torsionConstraintTerms.idx1.size(),
+                                              contribs.torsionConstraintTerms.idx1.data(),
+                                              contribs.torsionConstraintTerms.idx2.data(),
+                                              contribs.torsionConstraintTerms.idx3.data(),
+                                              contribs.torsionConstraintTerms.idx4.data(),
+                                              contribs.torsionConstraintTerms.minDihedralDeg.data(),
+                                              contribs.torsionConstraintTerms.maxDihedralDeg.data(),
+                                              contribs.torsionConstraintTerms.forceConstant.data(),
+                                              positions,
+                                              molSystemDevice.energyBuffer.data(),
+                                              molSystemDevice.indices.energyBufferStarts.data(),
+                                              molSystemDevice.indices.atomIdxToBatchIdx.data(),
+                                              molSystemDevice.indices.torsionConstraintTermStarts.data(),
+                                              stream);
+  }
 
   if (err == cudaSuccess) {
     return launchReduceEnergiesKernel(molSystemDevice.indices.energyBufferBlockIdxToBatchIdx.size(),
@@ -601,6 +814,54 @@ cudaError_t computeGradients(BatchedMolecularDeviceBuffers& molSystemDevice,
                                   positions,
                                   grad,
                                   stream);
+  }
+  if (err == cudaSuccess && contribs.distanceConstraintTerms.idx1.size() > 0) {
+    err = launchDistanceConstraintGradientKernel(contribs.distanceConstraintTerms.idx1.size(),
+                                                 contribs.distanceConstraintTerms.idx1.data(),
+                                                 contribs.distanceConstraintTerms.idx2.data(),
+                                                 contribs.distanceConstraintTerms.minLen.data(),
+                                                 contribs.distanceConstraintTerms.maxLen.data(),
+                                                 contribs.distanceConstraintTerms.forceConstant.data(),
+                                                 positions,
+                                                 grad,
+                                                 stream);
+  }
+  if (err == cudaSuccess && contribs.positionConstraintTerms.idx.size() > 0) {
+    err = launchPositionConstraintGradientKernel(contribs.positionConstraintTerms.idx.size(),
+                                                 contribs.positionConstraintTerms.idx.data(),
+                                                 contribs.positionConstraintTerms.refX.data(),
+                                                 contribs.positionConstraintTerms.refY.data(),
+                                                 contribs.positionConstraintTerms.refZ.data(),
+                                                 contribs.positionConstraintTerms.maxDispl.data(),
+                                                 contribs.positionConstraintTerms.forceConstant.data(),
+                                                 positions,
+                                                 grad,
+                                                 stream);
+  }
+  if (err == cudaSuccess && contribs.angleConstraintTerms.idx1.size() > 0) {
+    err = launchAngleConstraintGradientKernel(contribs.angleConstraintTerms.idx1.size(),
+                                              contribs.angleConstraintTerms.idx1.data(),
+                                              contribs.angleConstraintTerms.idx2.data(),
+                                              contribs.angleConstraintTerms.idx3.data(),
+                                              contribs.angleConstraintTerms.minAngleDeg.data(),
+                                              contribs.angleConstraintTerms.maxAngleDeg.data(),
+                                              contribs.angleConstraintTerms.forceConstant.data(),
+                                              positions,
+                                              grad,
+                                              stream);
+  }
+  if (err == cudaSuccess && contribs.torsionConstraintTerms.idx1.size() > 0) {
+    err = launchTorsionConstraintGradientKernel(contribs.torsionConstraintTerms.idx1.size(),
+                                                contribs.torsionConstraintTerms.idx1.data(),
+                                                contribs.torsionConstraintTerms.idx2.data(),
+                                                contribs.torsionConstraintTerms.idx3.data(),
+                                                contribs.torsionConstraintTerms.idx4.data(),
+                                                contribs.torsionConstraintTerms.minDihedralDeg.data(),
+                                                contribs.torsionConstraintTerms.maxDihedralDeg.data(),
+                                                contribs.torsionConstraintTerms.forceConstant.data(),
+                                                positions,
+                                                grad,
+                                                stream);
   }
   if (err == cudaSuccess && activeSystemMask != nullptr && molSystemDevice.indices.atomIdxToBatchIdx.size() > 0) {
     constexpr int blockSize = 256;

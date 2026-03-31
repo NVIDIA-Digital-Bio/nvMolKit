@@ -94,6 +94,42 @@ struct EleTerms {
   std::vector<uint8_t> is1_4;
 };
 
+struct DistanceConstraintTerms {
+  std::vector<int>    idx1;
+  std::vector<int>    idx2;
+  std::vector<double> minLen;
+  std::vector<double> maxLen;
+  std::vector<double> forceConstant;
+};
+
+struct PositionConstraintTerms {
+  std::vector<int>    idx;
+  std::vector<double> refX;
+  std::vector<double> refY;
+  std::vector<double> refZ;
+  std::vector<double> maxDispl;
+  std::vector<double> forceConstant;
+};
+
+struct AngleConstraintTerms {
+  std::vector<int>    idx1;
+  std::vector<int>    idx2;
+  std::vector<int>    idx3;
+  std::vector<double> minAngleDeg;
+  std::vector<double> maxAngleDeg;
+  std::vector<double> forceConstant;
+};
+
+struct TorsionConstraintTerms {
+  std::vector<int>    idx1;
+  std::vector<int>    idx2;
+  std::vector<int>    idx3;
+  std::vector<int>    idx4;
+  std::vector<double> minDihedralDeg;
+  std::vector<double> maxDihedralDeg;
+  std::vector<double> forceConstant;
+};
+
 struct EnergyForceContribsHost {
   BondStretchContribTerms bondTerms;
   AngleBendTerms          angleTerms;
@@ -102,6 +138,10 @@ struct EnergyForceContribsHost {
   TorsionContribTerms     torsionTerms;
   VdwTerms                vdwTerms;
   EleTerms                eleTerms;
+  DistanceConstraintTerms distanceConstraintTerms;
+  PositionConstraintTerms positionConstraintTerms;
+  AngleConstraintTerms    angleConstraintTerms;
+  TorsionConstraintTerms  torsionConstraintTerms;
 };
 
 //! Modifies a single MMFF system's contribs before they are flattened into the batched buffers.
@@ -121,19 +161,27 @@ struct BatchedIndicesHost {
   //! Size total energy buffer blocks, maps energy buffer block index to batch index.
   std::vector<int> energyBufferBlockIdxToBatchIdx;
   //! Size n_molecules, defines the start and end of each molecule's bond term count
-  std::vector<int> bondTermStarts    = {0};
+  std::vector<int> bondTermStarts               = {0};
   //! Size n_molecules, defines the start and end of each molecule's angle term count
-  std::vector<int> angleTermStarts   = {0};
+  std::vector<int> angleTermStarts              = {0};
   //! Size n_molecules, defines the start and end of each molecule's bend term count
-  std::vector<int> bendTermStarts    = {0};
+  std::vector<int> bendTermStarts               = {0};
   //! Size n_molecules, defines the start and end of each molecule's oop term count
-  std::vector<int> oopTermStarts     = {0};
+  std::vector<int> oopTermStarts                = {0};
   //! Size n_molecules, defines the start and end of each molecule's torsion term count
-  std::vector<int> torsionTermStarts = {0};
+  std::vector<int> torsionTermStarts            = {0};
   //! Size n_molecules, defines the start and end of each molecule's vdw term count
-  std::vector<int> vdwTermStarts     = {0};
+  std::vector<int> vdwTermStarts                = {0};
   //! Size n_molecules, defines the start and end of each molecule's ele term count
-  std::vector<int> eleTermStarts     = {0};
+  std::vector<int> eleTermStarts                = {0};
+  //! Size n_molecules, defines the start and end of each molecule's distance constraint term count
+  std::vector<int> distanceConstraintTermStarts = {0};
+  //! Size n_molecules, defines the start and end of each molecule's position constraint term count
+  std::vector<int> positionConstraintTermStarts = {0};
+  //! Size n_molecules, defines the start and end of each molecule's angle constraint term count
+  std::vector<int> angleConstraintTermStarts    = {0};
+  //! Size n_molecules, defines the start and end of each molecule's torsion constraint term count
+  std::vector<int> torsionConstraintTermStarts  = {0};
 };
 
 struct BatchedMolecularSystemHost {
@@ -206,6 +254,42 @@ struct EleTermsDevice {
   nvMolKit::AsyncDeviceVector<uint8_t> is1_4;
 };
 
+struct DistanceConstraintTermsDevice {
+  nvMolKit::AsyncDeviceVector<int>    idx1;
+  nvMolKit::AsyncDeviceVector<int>    idx2;
+  nvMolKit::AsyncDeviceVector<double> minLen;
+  nvMolKit::AsyncDeviceVector<double> maxLen;
+  nvMolKit::AsyncDeviceVector<double> forceConstant;
+};
+
+struct PositionConstraintTermsDevice {
+  nvMolKit::AsyncDeviceVector<int>    idx;
+  nvMolKit::AsyncDeviceVector<double> refX;
+  nvMolKit::AsyncDeviceVector<double> refY;
+  nvMolKit::AsyncDeviceVector<double> refZ;
+  nvMolKit::AsyncDeviceVector<double> maxDispl;
+  nvMolKit::AsyncDeviceVector<double> forceConstant;
+};
+
+struct AngleConstraintTermsDevice {
+  nvMolKit::AsyncDeviceVector<int>    idx1;
+  nvMolKit::AsyncDeviceVector<int>    idx2;
+  nvMolKit::AsyncDeviceVector<int>    idx3;
+  nvMolKit::AsyncDeviceVector<double> minAngleDeg;
+  nvMolKit::AsyncDeviceVector<double> maxAngleDeg;
+  nvMolKit::AsyncDeviceVector<double> forceConstant;
+};
+
+struct TorsionConstraintTermsDevice {
+  nvMolKit::AsyncDeviceVector<int>    idx1;
+  nvMolKit::AsyncDeviceVector<int>    idx2;
+  nvMolKit::AsyncDeviceVector<int>    idx3;
+  nvMolKit::AsyncDeviceVector<int>    idx4;
+  nvMolKit::AsyncDeviceVector<double> minDihedralDeg;
+  nvMolKit::AsyncDeviceVector<double> maxDihedralDeg;
+  nvMolKit::AsyncDeviceVector<double> forceConstant;
+};
+
 struct EnergyForceContribsDevice {
   BondStretchContribTermsDevice bondTerms;
   AngleBendTermsDevice          angleTerms;
@@ -214,6 +298,10 @@ struct EnergyForceContribsDevice {
   TorsionContribTermsDevice     torsionTerms;
   VdwTermsDevice                vdwTerms;
   EleTermsDevice                eleTerms;
+  DistanceConstraintTermsDevice distanceConstraintTerms;
+  PositionConstraintTermsDevice positionConstraintTerms;
+  AngleConstraintTermsDevice    angleConstraintTerms;
+  TorsionConstraintTermsDevice  torsionConstraintTerms;
 };
 
 //! See BatchedIndices for more information on each field.
@@ -230,6 +318,10 @@ struct BatchedIndicesDevice {
   nvMolKit::AsyncDeviceVector<int> torsionTermStarts;
   nvMolKit::AsyncDeviceVector<int> vdwTermStarts;
   nvMolKit::AsyncDeviceVector<int> eleTermStarts;
+  nvMolKit::AsyncDeviceVector<int> distanceConstraintTermStarts;
+  nvMolKit::AsyncDeviceVector<int> positionConstraintTermStarts;
+  nvMolKit::AsyncDeviceVector<int> angleConstraintTermStarts;
+  nvMolKit::AsyncDeviceVector<int> torsionConstraintTermStarts;
 };
 
 //! Device buffers for the batched molecular system.
