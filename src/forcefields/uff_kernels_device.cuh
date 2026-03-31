@@ -26,9 +26,13 @@ namespace {
 constexpr double kUffAngleCorrectionThreshold = 0.8660;
 constexpr double kUffZeroTol                  = 1.0e-16;
 
-__device__ __forceinline__ double squareValue(const double x) { return x * x; }
+__device__ __forceinline__ double squareValue(const double x) {
+  return x * x;
+}
 
-__device__ __forceinline__ double cubeValue(const double x) { return x * x * x; }
+__device__ __forceinline__ double cubeValue(const double x) {
+  return x * x * x;
+}
 
 __device__ __forceinline__ double uffBondStretchEnergy(const double* pos,
                                                        const int     idx1,
@@ -69,8 +73,8 @@ __device__ __forceinline__ void uffBondStretchGrad(const double* pos,
   atomicAdd(&grad[3 * idx2 + 2], -gz);
 }
 
-__device__ __forceinline__ double uffAngleEnergyTerm(const double cosTheta,
-                                                     const double sinThetaSq,
+__device__ __forceinline__ double uffAngleEnergyTerm(const double  cosTheta,
+                                                     const double  sinThetaSq,
                                                      const uint8_t order,
                                                      const double  C0,
                                                      const double  C1,
@@ -101,8 +105,8 @@ __device__ __forceinline__ double uffAngleEnergyTerm(const double cosTheta,
   return (1.0 - result) / static_cast<double>(order * order);
 }
 
-__device__ __forceinline__ double uffAngleThetaDeriv(const double cosTheta,
-                                                     const double sinTheta,
+__device__ __forceinline__ double uffAngleThetaDeriv(const double  cosTheta,
+                                                     const double  sinTheta,
                                                      const uint8_t order,
                                                      const double  forceConstant,
                                                      const double  C1,
@@ -290,9 +294,9 @@ __device__ __forceinline__ double uffTorsionEnergy(const double* pos,
                                                    const double  forceConstant,
                                                    const uint8_t order,
                                                    const double  cosTerm) {
-  const double cosPhi    = uffCalculateCosTorsion(pos, idx1, idx2, idx3, idx4);
-  const double sinPhiSq  = 1.0 - cosPhi * cosPhi;
-  double       cosNPhi   = 0.0;
+  const double cosPhi   = uffCalculateCosTorsion(pos, idx1, idx2, idx3, idx4);
+  const double sinPhiSq = 1.0 - cosPhi * cosPhi;
+  double       cosNPhi  = 0.0;
   switch (order) {
     case 2:
       cosNPhi = 1.0 - 2.0 * sinPhiSq;
@@ -365,19 +369,19 @@ __device__ __forceinline__ void uffTorsionGrad(const double* pos,
   atomicAdd(&grad[3 * idx1 + 1], sinTerm * (dCos_dT0 * r1z - dCos_dT2 * r1x));
   atomicAdd(&grad[3 * idx1 + 2], sinTerm * (dCos_dT1 * r1x - dCos_dT0 * r1y));
 
-  atomicAdd(&grad[3 * idx2 + 0], sinTerm * (dCos_dT1 * (r1z - r0z) + dCos_dT2 * (r0y - r1y) + dCos_dT4 * (-r3z) +
-                                            dCos_dT5 * (r3y)));
-  atomicAdd(&grad[3 * idx2 + 1], sinTerm * (dCos_dT0 * (r0z - r1z) + dCos_dT2 * (r1x - r0x) + dCos_dT3 * (r3z) +
-                                            dCos_dT5 * (-r3x)));
-  atomicAdd(&grad[3 * idx2 + 2], sinTerm * (dCos_dT0 * (r1y - r0y) + dCos_dT1 * (r0x - r1x) + dCos_dT3 * (-r3y) +
-                                            dCos_dT4 * (r3x)));
+  atomicAdd(&grad[3 * idx2 + 0],
+            sinTerm * (dCos_dT1 * (r1z - r0z) + dCos_dT2 * (r0y - r1y) + dCos_dT4 * (-r3z) + dCos_dT5 * (r3y)));
+  atomicAdd(&grad[3 * idx2 + 1],
+            sinTerm * (dCos_dT0 * (r0z - r1z) + dCos_dT2 * (r1x - r0x) + dCos_dT3 * (r3z) + dCos_dT5 * (-r3x)));
+  atomicAdd(&grad[3 * idx2 + 2],
+            sinTerm * (dCos_dT0 * (r1y - r0y) + dCos_dT1 * (r0x - r1x) + dCos_dT3 * (-r3y) + dCos_dT4 * (r3x)));
 
-  atomicAdd(&grad[3 * idx3 + 0], sinTerm * (dCos_dT1 * r0z + dCos_dT2 * (-r0y) + dCos_dT4 * (r3z - r2z) +
-                                            dCos_dT5 * (r2y - r3y)));
-  atomicAdd(&grad[3 * idx3 + 1], sinTerm * (dCos_dT0 * (-r0z) + dCos_dT2 * r0x + dCos_dT3 * (r2z - r3z) +
-                                            dCos_dT5 * (r3x - r2x)));
-  atomicAdd(&grad[3 * idx3 + 2], sinTerm * (dCos_dT0 * r0y + dCos_dT1 * (-r0x) + dCos_dT3 * (r3y - r2y) +
-                                            dCos_dT4 * (r2x - r3x)));
+  atomicAdd(&grad[3 * idx3 + 0],
+            sinTerm * (dCos_dT1 * r0z + dCos_dT2 * (-r0y) + dCos_dT4 * (r3z - r2z) + dCos_dT5 * (r2y - r3y)));
+  atomicAdd(&grad[3 * idx3 + 1],
+            sinTerm * (dCos_dT0 * (-r0z) + dCos_dT2 * r0x + dCos_dT3 * (r2z - r3z) + dCos_dT5 * (r3x - r2x)));
+  atomicAdd(&grad[3 * idx3 + 2],
+            sinTerm * (dCos_dT0 * r0y + dCos_dT1 * (-r0x) + dCos_dT3 * (r3y - r2y) + dCos_dT4 * (r2x - r3x)));
 
   atomicAdd(&grad[3 * idx4 + 0], sinTerm * (dCos_dT4 * r2z - dCos_dT5 * r2y));
   atomicAdd(&grad[3 * idx4 + 1], sinTerm * (dCos_dT5 * r2x - dCos_dT3 * r2z));
@@ -482,8 +486,8 @@ __device__ __forceinline__ void uffInversionGrad(const double* pos,
 
   double cosY = nx * rJLx + ny * rJLy + nz * rJLz;
   clipToOne(cosY);
-  const double sinYSq = 1.0 - cosY * cosY;
-  const double sinY   = fmax(sqrt(sinYSq), 1.0e-8);
+  const double sinYSq   = 1.0 - cosY * cosY;
+  const double sinY     = fmax(sqrt(sinYSq), 1.0e-8);
   double       cosTheta = rJIx * rJKx + rJIy * rJKy + rJIz * rJKz;
   clipToOne(cosTheta);
   const double sinThetaSq = 1.0 - cosTheta * cosTheta;
@@ -596,9 +600,11 @@ __device__ __inline__ double molEnergy(const EnergyForceContribsDevicePtr& terms
   const int bondEnd   = systemIndices.bondTermStarts[molIdx + 1];
 #pragma unroll 1
   for (int i = bondStart + tid; i < bondEnd; i += stride) {
-    energy += uffBondStretchEnergy(
-      molCoords, terms.bondTerms.idx1[i] - atomStart, terms.bondTerms.idx2[i] - atomStart, terms.bondTerms.restLen[i],
-      terms.bondTerms.forceConstant[i]);
+    energy += uffBondStretchEnergy(molCoords,
+                                   terms.bondTerms.idx1[i] - atomStart,
+                                   terms.bondTerms.idx2[i] - atomStart,
+                                   terms.bondTerms.restLen[i],
+                                   terms.bondTerms.forceConstant[i]);
   }
 
   const int angleStart = systemIndices.angleTermStarts[molIdx];
@@ -726,9 +732,12 @@ __device__ __inline__ void molGrad(const EnergyForceContribsDevicePtr& terms,
   const int bondEnd   = systemIndices.bondTermStarts[molIdx + 1];
 #pragma unroll 1
   for (int i = bondStart + tid; i < bondEnd; i += stride) {
-    uffBondStretchGrad(
-      molCoords, terms.bondTerms.idx1[i] - atomStart, terms.bondTerms.idx2[i] - atomStart, terms.bondTerms.restLen[i],
-      terms.bondTerms.forceConstant[i], grad);
+    uffBondStretchGrad(molCoords,
+                       terms.bondTerms.idx1[i] - atomStart,
+                       terms.bondTerms.idx2[i] - atomStart,
+                       terms.bondTerms.restLen[i],
+                       terms.bondTerms.forceConstant[i],
+                       grad);
   }
 
   const int angleStart = systemIndices.angleTermStarts[molIdx];

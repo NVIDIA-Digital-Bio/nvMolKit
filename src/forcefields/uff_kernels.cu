@@ -35,8 +35,8 @@ __global__ void bondStretchEnergyKernel(const int     numBonds,
                                         const int*    termBatchStarts) {
   const int idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < numBonds) {
-    const double energy = uffBondStretchEnergy(pos, idx1[idx], idx2[idx], restLen[idx], forceConstant[idx]);
-    const int    batchIdx = atomBatchMap[idx1[idx]];
+    const double energy    = uffBondStretchEnergy(pos, idx1[idx], idx2[idx], restLen[idx], forceConstant[idx]);
+    const int    batchIdx  = atomBatchMap[idx1[idx]];
     const int    outputIdx = getEnergyAccumulatorIndex(idx, batchIdx, energyBufferStarts, termBatchStarts);
     energyBuffer[outputIdx] += energy;
   }
@@ -72,10 +72,18 @@ __global__ void angleBendEnergyKernel(const int      numAngles,
                                       const int*     termBatchStarts) {
   const int idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < numAngles) {
-    const double energy = uffAngleBendEnergy(
-      pos, idx1[idx], idx2[idx], idx3[idx], theta0[idx], forceConstant[idx], order[idx], C0[idx], C1[idx], C2[idx]);
-    const int batchIdx  = atomBatchMap[idx1[idx]];
-    const int outputIdx = getEnergyAccumulatorIndex(idx, batchIdx, energyBufferStarts, termBatchStarts);
+    const double energy    = uffAngleBendEnergy(pos,
+                                             idx1[idx],
+                                             idx2[idx],
+                                             idx3[idx],
+                                             theta0[idx],
+                                             forceConstant[idx],
+                                             order[idx],
+                                             C0[idx],
+                                             C1[idx],
+                                             C2[idx]);
+    const int    batchIdx  = atomBatchMap[idx1[idx]];
+    const int    outputIdx = getEnergyAccumulatorIndex(idx, batchIdx, energyBufferStarts, termBatchStarts);
     energyBuffer[outputIdx] += energy;
   }
 }
@@ -94,8 +102,17 @@ __global__ void angleBendGradKernel(const int      numAngles,
                                     double*        grad) {
   const int idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < numAngles) {
-    uffAngleBendGrad(
-      pos, idx1[idx], idx2[idx], idx3[idx], theta0[idx], forceConstant[idx], order[idx], C0[idx], C1[idx], C2[idx], grad);
+    uffAngleBendGrad(pos,
+                     idx1[idx],
+                     idx2[idx],
+                     idx3[idx],
+                     theta0[idx],
+                     forceConstant[idx],
+                     order[idx],
+                     C0[idx],
+                     C1[idx],
+                     C2[idx],
+                     grad);
   }
 }
 
@@ -154,10 +171,17 @@ __global__ void inversionEnergyKernel(const int     numInversions,
                                       const int*    termBatchStarts) {
   const int idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < numInversions) {
-    const double energy =
-      uffInversionEnergy(pos, idx1[idx], idx2[idx], idx3[idx], idx4[idx], forceConstant[idx], C0[idx], C1[idx], C2[idx]);
-    const int batchIdx  = atomBatchMap[idx1[idx]];
-    const int outputIdx = getEnergyAccumulatorIndex(idx, batchIdx, energyBufferStarts, termBatchStarts);
+    const double energy    = uffInversionEnergy(pos,
+                                             idx1[idx],
+                                             idx2[idx],
+                                             idx3[idx],
+                                             idx4[idx],
+                                             forceConstant[idx],
+                                             C0[idx],
+                                             C1[idx],
+                                             C2[idx]);
+    const int    batchIdx  = atomBatchMap[idx1[idx]];
+    const int    outputIdx = getEnergyAccumulatorIndex(idx, batchIdx, energyBufferStarts, termBatchStarts);
     energyBuffer[outputIdx] += energy;
   }
 }
@@ -191,7 +215,7 @@ __global__ void vdwEnergyKernel(const int     numVdws,
                                 const int*    termBatchStarts) {
   const int idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < numVdws) {
-    const double energy = uffVdwEnergy(pos, idx1[idx], idx2[idx], x_ij[idx], wellDepth[idx], threshold[idx]);
+    const double energy    = uffVdwEnergy(pos, idx1[idx], idx2[idx], x_ij[idx], wellDepth[idx], threshold[idx]);
     const int    batchIdx  = atomBatchMap[idx1[idx]];
     const int    outputIdx = getEnergyAccumulatorIndex(idx, batchIdx, energyBufferStarts, termBatchStarts);
     energyBuffer[outputIdx] += energy;
@@ -216,18 +240,18 @@ constexpr int blockSizePerMol = 128;
 
 __global__ void combinedEnergiesKernel(const nvMolKit::UFF::EnergyForceContribsDevicePtr* terms,
                                        const nvMolKit::UFF::BatchedIndicesDevicePtr*      systemIndices,
-                                       const double*                                       coords,
-                                       double*                                             energies) {
+                                       const double*                                      coords,
+                                       double*                                            energies) {
   const int molIdx = blockIdx.x;
   const int tid    = threadIdx.x;
 
-  const int atomStart = systemIndices->atomStarts[molIdx];
-  const double* molCoords = coords + atomStart * 3;
+  const int     atomStart   = systemIndices->atomStarts[molIdx];
+  const double* molCoords   = coords + atomStart * 3;
   const double threadEnergy = nvMolKit::UFF::molEnergy<blockSizePerMol>(*terms, *systemIndices, molCoords, molIdx, tid);
 
   using BlockReduce = cub::BlockReduce<double, blockSizePerMol>;
   __shared__ typename BlockReduce::TempStorage tempStorage;
-  const double blockEnergy = BlockReduce(tempStorage).Sum(threadEnergy);
+  const double                                 blockEnergy = BlockReduce(tempStorage).Sum(threadEnergy);
 
   if (tid == 0) {
     energies[molIdx] = blockEnergy;
@@ -236,8 +260,8 @@ __global__ void combinedEnergiesKernel(const nvMolKit::UFF::EnergyForceContribsD
 
 __global__ void combinedGradKernel(const nvMolKit::UFF::EnergyForceContribsDevicePtr* terms,
                                    const nvMolKit::UFF::BatchedIndicesDevicePtr*      systemIndices,
-                                   const double*                                       coords,
-                                   double*                                             grad) {
+                                   const double*                                      coords,
+                                   double*                                            grad) {
   const int molIdx = blockIdx.x;
   const int tid    = threadIdx.x;
 
@@ -245,7 +269,7 @@ __global__ void combinedGradKernel(const nvMolKit::UFF::EnergyForceContribsDevic
   const int atomEnd   = systemIndices->atomStarts[molIdx + 1];
   const int numAtoms  = atomEnd - atomStart;
 
-  constexpr int maxAtomSize = 256;
+  constexpr int     maxAtomSize = 256;
   __shared__ double accumGrad[maxAtomSize * 3];
 
   const bool useSharedMem = numAtoms <= maxAtomSize;
@@ -286,8 +310,16 @@ cudaError_t launchBondStretchEnergyKernel(int           numBonds,
                                           cudaStream_t  stream) {
   constexpr int blockSize = 256;
   const int     numBlocks = (numBonds + blockSize - 1) / blockSize;
-  bondStretchEnergyKernel<<<numBlocks, blockSize, 0, stream>>>(
-    numBonds, idx1, idx2, restLen, forceConstant, pos, energyBuffer, energyBufferStarts, atomBatchMap, termBatchStarts);
+  bondStretchEnergyKernel<<<numBlocks, blockSize, 0, stream>>>(numBonds,
+                                                               idx1,
+                                                               idx2,
+                                                               restLen,
+                                                               forceConstant,
+                                                               pos,
+                                                               energyBuffer,
+                                                               energyBufferStarts,
+                                                               atomBatchMap,
+                                                               termBatchStarts);
   return cudaGetLastError();
 }
 
@@ -356,8 +388,18 @@ cudaError_t launchAngleBendGradientKernel(int            numAngles,
                                           cudaStream_t   stream) {
   constexpr int blockSize = 256;
   const int     numBlocks = (numAngles + blockSize - 1) / blockSize;
-  angleBendGradKernel<<<numBlocks, blockSize, 0, stream>>>(
-    numAngles, idx1, idx2, idx3, theta0, forceConstant, order, C0, C1, C2, pos, grad);
+  angleBendGradKernel<<<numBlocks, blockSize, 0, stream>>>(numAngles,
+                                                           idx1,
+                                                           idx2,
+                                                           idx3,
+                                                           theta0,
+                                                           forceConstant,
+                                                           order,
+                                                           C0,
+                                                           C1,
+                                                           C2,
+                                                           pos,
+                                                           grad);
   return cudaGetLastError();
 }
 
@@ -406,8 +448,16 @@ cudaError_t launchTorsionGradientKernel(int            numTorsions,
                                         cudaStream_t   stream) {
   constexpr int blockSize = 256;
   const int     numBlocks = (numTorsions + blockSize - 1) / blockSize;
-  torsionGradKernel<<<numBlocks, blockSize, 0, stream>>>(
-    numTorsions, idx1, idx2, idx3, idx4, forceConstant, order, cosTerm, pos, grad);
+  torsionGradKernel<<<numBlocks, blockSize, 0, stream>>>(numTorsions,
+                                                         idx1,
+                                                         idx2,
+                                                         idx3,
+                                                         idx4,
+                                                         forceConstant,
+                                                         order,
+                                                         cosTerm,
+                                                         pos,
+                                                         grad);
   return cudaGetLastError();
 }
 
@@ -428,8 +478,20 @@ cudaError_t launchInversionEnergyKernel(int           numInversions,
                                         cudaStream_t  stream) {
   constexpr int blockSize = 256;
   const int     numBlocks = (numInversions + blockSize - 1) / blockSize;
-  inversionEnergyKernel<<<numBlocks, blockSize, 0, stream>>>(
-    numInversions, idx1, idx2, idx3, idx4, forceConstant, C0, C1, C2, pos, energyBuffer, energyBufferStarts, atomBatchMap, termBatchStarts);
+  inversionEnergyKernel<<<numBlocks, blockSize, 0, stream>>>(numInversions,
+                                                             idx1,
+                                                             idx2,
+                                                             idx3,
+                                                             idx4,
+                                                             forceConstant,
+                                                             C0,
+                                                             C1,
+                                                             C2,
+                                                             pos,
+                                                             energyBuffer,
+                                                             energyBufferStarts,
+                                                             atomBatchMap,
+                                                             termBatchStarts);
   return cudaGetLastError();
 }
 
@@ -448,7 +510,16 @@ cudaError_t launchInversionGradientKernel(int           numInversions,
   (void)C0;
   constexpr int blockSize = 256;
   const int     numBlocks = (numInversions + blockSize - 1) / blockSize;
-  inversionGradKernel<<<numBlocks, blockSize, 0, stream>>>(numInversions, idx1, idx2, idx3, idx4, forceConstant, C1, C2, pos, grad);
+  inversionGradKernel<<<numBlocks, blockSize, 0, stream>>>(numInversions,
+                                                           idx1,
+                                                           idx2,
+                                                           idx3,
+                                                           idx4,
+                                                           forceConstant,
+                                                           C1,
+                                                           C2,
+                                                           pos,
+                                                           grad);
   return cudaGetLastError();
 }
 
@@ -466,8 +537,17 @@ cudaError_t launchVdwEnergyKernel(int           numVdws,
                                   cudaStream_t  stream) {
   constexpr int blockSize = 256;
   const int     numBlocks = (numVdws + blockSize - 1) / blockSize;
-  vdwEnergyKernel<<<numBlocks, blockSize, 0, stream>>>(
-    numVdws, idx1, idx2, x_ij, wellDepth, threshold, pos, energyBuffer, energyBufferStarts, atomBatchMap, termBatchStarts);
+  vdwEnergyKernel<<<numBlocks, blockSize, 0, stream>>>(numVdws,
+                                                       idx1,
+                                                       idx2,
+                                                       x_ij,
+                                                       wellDepth,
+                                                       threshold,
+                                                       pos,
+                                                       energyBuffer,
+                                                       energyBufferStarts,
+                                                       atomBatchMap,
+                                                       termBatchStarts);
   return cudaGetLastError();
 }
 

@@ -10,8 +10,8 @@ void allocateEnergyScratch(const UFF::BatchedMolecularSystemHost& molSystemHost,
 }  // namespace
 
 UFFBatchedForcefield::UFFBatchedForcefield(const UFF::BatchedMolecularSystemHost& molSystemHost,
-                                           BatchedForcefieldMetadata               metadata,
-                                           const cudaStream_t                      stream)
+                                           BatchedForcefieldMetadata              metadata,
+                                           const cudaStream_t                     stream)
     : BatchedForcefield(ForceFieldType::UFF, 3, molSystemHost.indices.atomStarts, nullptr, std::move(metadata)) {
   UFF::setStreams(systemDevice_, stream);
   UFF::sendContribsAndIndicesToDevice(molSystemHost, systemDevice_);

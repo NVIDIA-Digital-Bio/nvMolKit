@@ -203,11 +203,11 @@ struct VdwTermsDevicePtr {
 };
 
 struct EnergyForceContribsDevicePtr {
-  BondStretchTermsDevicePtr             bondTerms;
-  AngleBendTermsDevicePtr               angleTerms;
-  TorsionTermsDevicePtr                 torsionTerms;
-  InversionTermsDevicePtr               inversionTerms;
-  VdwTermsDevicePtr                     vdwTerms;
+  BondStretchTermsDevicePtr              bondTerms;
+  AngleBendTermsDevicePtr                angleTerms;
+  TorsionTermsDevicePtr                  torsionTerms;
+  InversionTermsDevicePtr                inversionTerms;
+  VdwTermsDevicePtr                      vdwTerms;
   MMFF::DistanceConstraintTermsDevicePtr distanceConstraintTerms;
   MMFF::PositionConstraintTermsDevicePtr positionConstraintTerms;
   MMFF::AngleConstraintTermsDevicePtr    angleConstraintTerms;

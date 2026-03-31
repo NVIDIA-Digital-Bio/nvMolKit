@@ -22,6 +22,8 @@
 
 #include "batched_forcefield.h"
 #include "device_vector.h"
+// TODO: Constraint types and kernels (DistanceConstraintTerms, launchReduceEnergiesKernel, etc.)
+// should be extracted from MMFF into shared forcefield-generic headers so UFF doesn't depend on MMFF.
 #include "mmff.h"
 #include "uff_kernels.h"
 
@@ -82,20 +84,19 @@ using AngleConstraintTerms    = MMFF::AngleConstraintTerms;
 using TorsionConstraintTerms  = MMFF::TorsionConstraintTerms;
 
 struct EnergyForceContribsHost {
-  BondStretchTerms       bondTerms;
-  AngleBendTerms         angleTerms;
-  TorsionTerms           torsionTerms;
-  InversionTerms         inversionTerms;
-  VdwTerms               vdwTerms;
+  BondStretchTerms        bondTerms;
+  AngleBendTerms          angleTerms;
+  TorsionTerms            torsionTerms;
+  InversionTerms          inversionTerms;
+  VdwTerms                vdwTerms;
   DistanceConstraintTerms distanceConstraintTerms;
   PositionConstraintTerms positionConstraintTerms;
   AngleConstraintTerms    angleConstraintTerms;
   TorsionConstraintTerms  torsionConstraintTerms;
 };
 
-using HostCustomization = std::function<void(const BatchedSystemInfo&,
-                                             const std::vector<double>&,
-                                             EnergyForceContribsHost&)>;
+using HostCustomization =
+  std::function<void(const BatchedSystemInfo&, const std::vector<double>&, EnergyForceContribsHost&)>;
 
 struct BatchedIndicesHost {
   std::vector<int> atomStarts         = {0};
@@ -175,11 +176,11 @@ using AngleConstraintTermsDevice    = MMFF::AngleConstraintTermsDevice;
 using TorsionConstraintTermsDevice  = MMFF::TorsionConstraintTermsDevice;
 
 struct EnergyForceContribsDevice {
-  BondStretchTermsDevice       bondTerms;
-  AngleBendTermsDevice         angleTerms;
-  TorsionTermsDevice           torsionTerms;
-  InversionTermsDevice         inversionTerms;
-  VdwTermsDevice               vdwTerms;
+  BondStretchTermsDevice        bondTerms;
+  AngleBendTermsDevice          angleTerms;
+  TorsionTermsDevice            torsionTerms;
+  InversionTermsDevice          inversionTerms;
+  VdwTermsDevice                vdwTerms;
   DistanceConstraintTermsDevice distanceConstraintTerms;
   PositionConstraintTermsDevice positionConstraintTerms;
   AngleConstraintTermsDevice    angleConstraintTerms;
@@ -204,12 +205,12 @@ struct BatchedIndicesDevice {
 };
 
 struct BatchedMolecularDeviceBuffers {
-  EnergyForceContribsDevice   contribs;
-  BatchedIndicesDevice        indices;
-  AsyncDeviceVector<double>   positions;
-  AsyncDeviceVector<double>   grad;
-  AsyncDeviceVector<double>   energyBuffer;
-  AsyncDeviceVector<double>   energyOuts;
+  EnergyForceContribsDevice contribs;
+  BatchedIndicesDevice      indices;
+  AsyncDeviceVector<double> positions;
+  AsyncDeviceVector<double> grad;
+  AsyncDeviceVector<double> energyBuffer;
+  AsyncDeviceVector<double> energyOuts;
 };
 
 void addMoleculeToBatch(const EnergyForceContribsHost& contribs,

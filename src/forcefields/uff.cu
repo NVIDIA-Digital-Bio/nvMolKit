@@ -124,16 +124,14 @@ __global__ void zeroInactiveGradientEntries(const int*     atomIdxToBatchIdx,
   }
 }
 
-template <typename T>
-void appendOffsetIndices(std::vector<T>& dst, const std::vector<T>& src, const int offset) {
+template <typename T> void appendOffsetIndices(std::vector<T>& dst, const std::vector<T>& src, const int offset) {
   dst.reserve(dst.size() + src.size());
   for (const auto value : src) {
     dst.push_back(value + offset);
   }
 }
 
-template <typename T>
-void appendValues(std::vector<T>& dst, const std::vector<T>& src) {
+template <typename T> void appendValues(std::vector<T>& dst, const std::vector<T>& src) {
   dst.insert(dst.end(), src.begin(), src.end());
 }
 
@@ -301,14 +299,17 @@ void sendContribsAndIndicesToDevice(const BatchedMolecularSystemHost& molSystemH
   molSystemDevice.indices.atomStarts.setFromVector(molSystemHost.indices.atomStarts);
   molSystemDevice.indices.atomIdxToBatchIdx.setFromVector(molSystemHost.indices.atomIdxToBatchIdx);
   molSystemDevice.indices.energyBufferStarts.setFromVector(molSystemHost.indices.energyBufferStarts);
-  molSystemDevice.indices.energyBufferBlockIdxToBatchIdx.setFromVector(molSystemHost.indices.energyBufferBlockIdxToBatchIdx);
+  molSystemDevice.indices.energyBufferBlockIdxToBatchIdx.setFromVector(
+    molSystemHost.indices.energyBufferBlockIdxToBatchIdx);
   molSystemDevice.indices.bondTermStarts.setFromVector(molSystemHost.indices.bondTermStarts);
   molSystemDevice.indices.angleTermStarts.setFromVector(molSystemHost.indices.angleTermStarts);
   molSystemDevice.indices.torsionTermStarts.setFromVector(molSystemHost.indices.torsionTermStarts);
   molSystemDevice.indices.inversionTermStarts.setFromVector(molSystemHost.indices.inversionTermStarts);
   molSystemDevice.indices.vdwTermStarts.setFromVector(molSystemHost.indices.vdwTermStarts);
-  molSystemDevice.indices.distanceConstraintTermStarts.setFromVector(molSystemHost.indices.distanceConstraintTermStarts);
-  molSystemDevice.indices.positionConstraintTermStarts.setFromVector(molSystemHost.indices.positionConstraintTermStarts);
+  molSystemDevice.indices.distanceConstraintTermStarts.setFromVector(
+    molSystemHost.indices.distanceConstraintTermStarts);
+  molSystemDevice.indices.positionConstraintTermStarts.setFromVector(
+    molSystemHost.indices.positionConstraintTermStarts);
   molSystemDevice.indices.angleConstraintTermStarts.setFromVector(molSystemHost.indices.angleConstraintTermStarts);
   molSystemDevice.indices.torsionConstraintTermStarts.setFromVector(molSystemHost.indices.torsionConstraintTermStarts);
 }
@@ -316,11 +317,11 @@ void sendContribsAndIndicesToDevice(const BatchedMolecularSystemHost& molSystemH
 void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
                         const std::vector<double>&     positions,
                         BatchedMolecularSystemHost&    molSystem) {
-  const int atomOffset   = molSystem.indices.atomStarts.back();
-  const int batchIdx     = static_cast<int>(molSystem.indices.atomStarts.size()) - 1;
-  const int newNumAtoms  = static_cast<int>(positions.size()) / 3;
-  auto&     indices      = molSystem.indices;
-  auto&     dstContribs  = molSystem.contribs;
+  const int atomOffset  = molSystem.indices.atomStarts.back();
+  const int batchIdx    = static_cast<int>(molSystem.indices.atomStarts.size()) - 1;
+  const int newNumAtoms = static_cast<int>(positions.size()) / 3;
+  auto&     indices     = molSystem.indices;
+  auto&     dstContribs = molSystem.contribs;
 
   indices.atomStarts.push_back(atomOffset + newNumAtoms);
   molSystem.maxNumAtoms = std::max(molSystem.maxNumAtoms, newNumAtoms);
@@ -342,17 +343,17 @@ void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
                                                 contribs.torsionConstraintTerms.idx1.size());
 
   int maxNumContribs = 0;
-  maxNumContribs = std::max<int>(maxNumContribs, contribs.bondTerms.idx1.size());
-  maxNumContribs = std::max<int>(maxNumContribs, contribs.angleTerms.idx1.size());
-  maxNumContribs = std::max<int>(maxNumContribs, contribs.torsionTerms.idx1.size());
-  maxNumContribs = std::max<int>(maxNumContribs, contribs.inversionTerms.idx1.size());
-  maxNumContribs = std::max<int>(maxNumContribs, contribs.vdwTerms.idx1.size());
-  maxNumContribs = std::max<int>(maxNumContribs, contribs.distanceConstraintTerms.idx1.size());
-  maxNumContribs = std::max<int>(maxNumContribs, contribs.positionConstraintTerms.idx.size());
-  maxNumContribs = std::max<int>(maxNumContribs, contribs.angleConstraintTerms.idx1.size());
-  maxNumContribs = std::max<int>(maxNumContribs, contribs.torsionConstraintTerms.idx1.size());
+  maxNumContribs     = std::max<int>(maxNumContribs, contribs.bondTerms.idx1.size());
+  maxNumContribs     = std::max<int>(maxNumContribs, contribs.angleTerms.idx1.size());
+  maxNumContribs     = std::max<int>(maxNumContribs, contribs.torsionTerms.idx1.size());
+  maxNumContribs     = std::max<int>(maxNumContribs, contribs.inversionTerms.idx1.size());
+  maxNumContribs     = std::max<int>(maxNumContribs, contribs.vdwTerms.idx1.size());
+  maxNumContribs     = std::max<int>(maxNumContribs, contribs.distanceConstraintTerms.idx1.size());
+  maxNumContribs     = std::max<int>(maxNumContribs, contribs.positionConstraintTerms.idx.size());
+  maxNumContribs     = std::max<int>(maxNumContribs, contribs.angleConstraintTerms.idx1.size());
+  maxNumContribs     = std::max<int>(maxNumContribs, contribs.torsionConstraintTerms.idx1.size());
 
-  const int numBlocksNeeded  =
+  const int numBlocksNeeded =
     (maxNumContribs + FFKernelUtils::blockSizeEnergyReduction - 1) / FFKernelUtils::blockSizeEnergyReduction;
   const int numThreadsNeeded = numBlocksNeeded * FFKernelUtils::blockSizeEnergyReduction;
   indices.energyBufferStarts.push_back(indices.energyBufferStarts.back() + numThreadsNeeded);
@@ -444,7 +445,9 @@ void addMoleculeToBatch(const EnergyForceContribsHost& contribs,
 
 void allocateIntermediateBuffers(const BatchedMolecularSystemHost& molSystemHost,
                                  BatchedMolecularDeviceBuffers&    molSystemDevice) {
-  FFKernelUtils::allocateIntermediateBuffers(molSystemHost, molSystemDevice, molSystemHost.indices.atomStarts.size() - 1);
+  FFKernelUtils::allocateIntermediateBuffers(molSystemHost,
+                                             molSystemDevice,
+                                             molSystemHost.indices.atomStarts.size() - 1);
 }
 
 cudaError_t computeEnergy(BatchedMolecularDeviceBuffers& molSystemDevice,
@@ -608,7 +611,11 @@ cudaError_t computeEnergy(BatchedMolecularDeviceBuffers& molSystemDevice,
 }
 
 cudaError_t computeEnergy(BatchedMolecularDeviceBuffers& molSystemDevice, const double* coords, cudaStream_t stream) {
-  return computeEnergy(molSystemDevice, molSystemDevice.energyOuts.data(), coords != nullptr ? coords : molSystemDevice.positions.data(), nullptr, stream);
+  return computeEnergy(molSystemDevice,
+                       molSystemDevice.energyOuts.data(),
+                       coords != nullptr ? coords : molSystemDevice.positions.data(),
+                       nullptr,
+                       stream);
 }
 
 cudaError_t computeGradients(BatchedMolecularDeviceBuffers& molSystemDevice,
@@ -744,8 +751,11 @@ cudaError_t computeGradients(BatchedMolecularDeviceBuffers& molSystemDevice,
 }
 
 cudaError_t computeGradients(BatchedMolecularDeviceBuffers& molSystemDevice, cudaStream_t stream) {
-  return computeGradients(
-    molSystemDevice, molSystemDevice.positions.data(), molSystemDevice.grad.data(), nullptr, stream);
+  return computeGradients(molSystemDevice,
+                          molSystemDevice.positions.data(),
+                          molSystemDevice.grad.data(),
+                          nullptr,
+                          stream);
 }
 
 cudaError_t computeEnergyBlockPerMol(BatchedMolecularDeviceBuffers& molSystemDevice,

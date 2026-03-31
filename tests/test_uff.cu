@@ -63,7 +63,8 @@ double computeEnergyViaForcefield(BatchedMolecularSystemHost& systemHost, AsyncD
   return energy;
 }
 
-std::vector<double> computeGradientViaForcefield(BatchedMolecularSystemHost& systemHost, AsyncDeviceVector<double>& positionsDevice) {
+std::vector<double> computeGradientViaForcefield(BatchedMolecularSystemHost& systemHost,
+                                                 AsyncDeviceVector<double>&  positionsDevice) {
   nvMolKit::UFFBatchedForcefield forcefield(systemHost);
   AsyncDeviceVector<double>      gradDevice;
   gradDevice.resize(positionsDevice.size());
@@ -113,12 +114,12 @@ class UFFGpuTestFixture : public ::testing::Test {
   }
 
  protected:
-  std::string                         testDataFolderPath_;
-  std::unique_ptr<RDKit::RWMol>       mol_;
-  std::vector<double>                 positions_;
-  EnergyForceContribsHost             contribs_;
-  BatchedMolecularSystemHost          systemHost_;
-  BatchedMolecularDeviceBuffers       systemDevice_;
+  std::string                   testDataFolderPath_;
+  std::unique_ptr<RDKit::RWMol> mol_;
+  std::vector<double>           positions_;
+  EnergyForceContribsHost       contribs_;
+  BatchedMolecularSystemHost    systemHost_;
+  BatchedMolecularDeviceBuffers systemDevice_;
 };
 
 TEST_F(UFFGpuTestFixture, FlattenedBuilderPopulatesAllTerms) {
@@ -136,14 +137,14 @@ TEST_F(UFFGpuTestFixture, FlattenedBuilderPopulatesAllTerms) {
 }
 
 TEST_F(UFFGpuTestFixture, CombinedEnergyMatchesRDKit) {
-  auto referenceFF = buildReferenceForceField(*mol_);
-  const double wantEnergy = referenceFF->calcEnergy(positions_.data());
-  const double gotEnergy  = computeEnergyViaForcefield(systemHost_, systemDevice_.positions);
+  auto         referenceFF = buildReferenceForceField(*mol_);
+  const double wantEnergy  = referenceFF->calcEnergy(positions_.data());
+  const double gotEnergy   = computeEnergyViaForcefield(systemHost_, systemDevice_.positions);
   EXPECT_NEAR(gotEnergy, wantEnergy, kEnergyTol);
 }
 
 TEST_F(UFFGpuTestFixture, CombinedGradientMatchesRDKit) {
-  auto referenceFF = buildReferenceForceField(*mol_);
+  auto                referenceFF = buildReferenceForceField(*mol_);
   std::vector<double> wantGrad(referenceFF->dimension() * referenceFF->positions().size(), 0.0);
   referenceFF->calcGrad(positions_.data(), wantGrad.data());
   const std::vector<double> gotGrad = computeGradientViaForcefield(systemHost_, systemDevice_.positions);
@@ -175,8 +176,8 @@ TEST_P(UFFGpuEdgeCases, CombinedEnergyAndGradient) {
   auto mol = buildEmbeddedEdgeCaseMol(GetParam());
   ASSERT_NE(mol, nullptr);
 
-  auto positions = positionsFromMol(*mol);
-  const auto contribs  = constructForcefieldContribs(*mol);
+  auto                       positions = positionsFromMol(*mol);
+  const auto                 contribs  = constructForcefieldContribs(*mol);
   BatchedMolecularSystemHost host;
   addMoleculeToBatch(contribs, positions, host);
 
@@ -185,7 +186,7 @@ TEST_P(UFFGpuEdgeCases, CombinedEnergyAndGradient) {
   const double gotEnergy = computeEnergyViaForcefield(host, positionsDevice);
   const auto   gotGrad   = computeGradientViaForcefield(host, positionsDevice);
 
-  auto referenceFF = buildReferenceForceField(*mol);
+  auto                referenceFF = buildReferenceForceField(*mol);
   std::vector<double> wantGrad(referenceFF->dimension() * referenceFF->positions().size(), 0.0);
   referenceFF->calcGrad(positions.data(), wantGrad.data());
 
@@ -193,21 +194,19 @@ TEST_P(UFFGpuEdgeCases, CombinedEnergyAndGradient) {
   EXPECT_THAT(gotGrad, ::testing::Pointwise(::testing::DoubleNear(2.0e-4), wantGrad));
 }
 
-INSTANTIATE_TEST_SUITE_P(UFFOneTwoAtoms,
-                         UFFGpuEdgeCases,
-                         ::testing::Values("C", "O", "CC", "CO", "CCC"));
+INSTANTIATE_TEST_SUITE_P(UFFOneTwoAtoms, UFFGpuEdgeCases, ::testing::Values("C", "O", "CC", "CO", "CCC"));
 
 TEST(UFFValidationSuite, BatchMatchesRDKitValidationSet) {
-  const std::string sdfPath = getTestDataFolderPath() + "/MMFF94_dative.sdf";
+  const std::string                          sdfPath = getTestDataFolderPath() + "/MMFF94_dative.sdf";
   std::vector<std::unique_ptr<RDKit::ROMol>> mols;
   getMols(sdfPath, mols, 25);
   ASSERT_FALSE(mols.empty());
 
-  BatchedMolecularSystemHost host;
-  std::vector<double>        wantEnergies;
+  BatchedMolecularSystemHost       host;
+  std::vector<double>              wantEnergies;
   std::vector<std::vector<double>> wantGrads;
   for (size_t i = 0; i < mols.size(); ++i) {
-    auto& mol = *mols[i];
+    auto& mol       = *mols[i];
     auto  positions = positionsFromMol(mol);
     auto  contribs  = constructForcefieldContribs(mol);
     addMoleculeToBatch(contribs, positions, host);
@@ -240,15 +239,15 @@ TEST(UFFValidationSuite, BatchMatchesRDKitValidationSet) {
 
   for (size_t i = 0; i < wantEnergies.size(); ++i) {
     EXPECT_NEAR(gotEnergies[i], wantEnergies[i], 1.0e-5) << "molecule " << i;
-    const int atomStart = host.indices.atomStarts[i];
-    const int atomEnd   = host.indices.atomStarts[i + 1];
+    const int           atomStart = host.indices.atomStarts[i];
+    const int           atomEnd   = host.indices.atomStarts[i + 1];
     std::vector<double> gotGradMol(gotGrad.begin() + atomStart * 3, gotGrad.begin() + atomEnd * 3);
     EXPECT_THAT(gotGradMol, ::testing::Pointwise(::testing::DoubleNear(2.0e-4), wantGrads[i])) << "molecule " << i;
   }
 }
 
 TEST(UFFMinimizer, BatchMinimizerMatchesRDKitFinalEnergies) {
-  const std::string sdfPath = getTestDataFolderPath() + "/MMFF94_dative.sdf";
+  const std::string                          sdfPath = getTestDataFolderPath() + "/MMFF94_dative.sdf";
   std::vector<std::unique_ptr<RDKit::ROMol>> mols;
   getMols(sdfPath, mols, 8);
   ASSERT_FALSE(mols.empty());
@@ -256,9 +255,9 @@ TEST(UFFMinimizer, BatchMinimizerMatchesRDKitFinalEnergies) {
   BatchedMolecularSystemHost host;
   std::vector<double>        referenceFinalEnergies;
   for (auto& molPtr : mols) {
-    auto& mol = *molPtr;
-    auto positions = positionsFromMol(mol);
-    auto contribs  = constructForcefieldContribs(mol);
+    auto& mol       = *molPtr;
+    auto  positions = positionsFromMol(mol);
+    auto  contribs  = constructForcefieldContribs(mol);
     addMoleculeToBatch(contribs, positions, host);
 
     const auto optimizeResult = RDKit::UFF::UFFOptimizeMolecule(mol, 1000, 100.0, -1, true);
