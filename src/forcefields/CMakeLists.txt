@@ -33,6 +33,10 @@ target_link_libraries(
   PRIVATE device_vector ff_kernel_utils)
 target_include_directories(mmff PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_library(uff uff.cu uff_kernels.cu)
+target_link_libraries(uff PRIVATE device_vector ff_kernel_utils)
+target_include_directories(uff PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
 add_library(dist_geom dist_geom.cu dist_geom_kernels.cu coord_gen.cu)
 target_link_libraries(
   dist_geom
@@ -49,6 +53,15 @@ target_link_libraries(
 target_include_directories(
   mmff_batched_forcefield PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
                                  ${CMAKE_SOURCE_DIR}/src)
+
+add_library(uff_batched_forcefield uff_batched_forcefield.cu)
+target_link_libraries(
+  uff_batched_forcefield
+  PUBLIC batched_forcefield uff
+  PRIVATE device_vector)
+target_include_directories(
+  uff_batched_forcefield PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
+                                ${CMAKE_SOURCE_DIR}/src)
 
 add_library(dg_batched_forcefield dg_batched_forcefield.cu)
 target_link_libraries(

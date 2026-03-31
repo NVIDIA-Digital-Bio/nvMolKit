@@ -22,7 +22,8 @@ namespace nvMolKit {
 enum class ForceFieldType {
   MMFF = 0,
   ETK  = 1,
-  DG   = 2
+  DG   = 2,
+  UFF  = 3
 };
 
 /// Debug level for BFGS minimization
