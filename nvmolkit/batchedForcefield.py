@@ -196,9 +196,7 @@ class MMFFBatchElement:
         entry.
         """
         self._parent._validate_atom_indices(self._idx, idx)
-        self._parent._position_constraints[self._idx].append(
-            _PositionConstraint(idx, max_displ, force_constant)
-        )
+        self._parent._position_constraints[self._idx].append(_PositionConstraint(idx, max_displ, force_constant))
         self._parent._dirty = True
 
     def add_angle_constraint(
@@ -261,9 +259,7 @@ class MMFFBatchElement:
         """
         self._parent._validate_atom_indices(self._idx, idx1, idx2, idx3, idx4)
         self._parent._torsion_constraints[self._idx].append(
-            _TorsionConstraint(
-                idx1, idx2, idx3, idx4, relative, min_dihedral_deg, max_dihedral_deg, force_constant
-            )
+            _TorsionConstraint(idx1, idx2, idx3, idx4, relative, min_dihedral_deg, max_dihedral_deg, force_constant)
         )
         self._parent._dirty = True
 
@@ -347,9 +343,7 @@ class MMFFBatchedForcefield:
         self._molecules = molecules
         self._properties = self._normalize_properties(properties)
         self._conf_ids = self._normalize_conf_ids(conf_id)
-        self._non_bonded_thresholds = self._normalize_scalar_or_list(
-            nonBondedThreshold, "nonBondedThreshold"
-        )
+        self._non_bonded_thresholds = self._normalize_scalar_or_list(nonBondedThreshold, "nonBondedThreshold")
         self._ignore_interfrag_interactions = self._normalize_scalar_or_list(
             ignoreInterfragInteractions, "ignoreInterfragInteractions"
         )
@@ -388,9 +382,7 @@ class MMFFBatchedForcefield:
             return [None for _ in self._molecules]
         if isinstance(properties, Sequence) and not hasattr(properties, "SetMMFFVariant"):
             if len(properties) != len(self._molecules):
-                raise ValueError(
-                    f"Expected {len(self._molecules)} MMFFMolProperties objects, got {len(properties)}"
-                )
+                raise ValueError(f"Expected {len(self._molecules)} MMFFMolProperties objects, got {len(properties)}")
             return list(properties)
         return [properties for _ in self._molecules]
 
@@ -404,7 +396,9 @@ class MMFFBatchedForcefield:
     def _default_mmff_properties(self, mol: "Mol"):
         return default_rdkit_mmff_properties(mol)
 
-    def _copy_mmff_properties(self, mol: "Mol", properties, non_bonded_threshold: float, ignore_interfrag_interactions: bool):
+    def _copy_mmff_properties(
+        self, mol: "Mol", properties, non_bonded_threshold: float, ignore_interfrag_interactions: bool
+    ):
         """Convert RDKit MMFF properties into the native representation."""
         source = self._default_mmff_properties(mol) if properties is None else properties
         return make_internal_mmff_properties(
@@ -424,9 +418,7 @@ class MMFFBatchedForcefield:
         num_atoms = self._molecules[batch_idx].GetNumAtoms()
         for idx in indices:
             if idx < 0 or idx >= num_atoms:
-                raise IndexError(
-                    f"Atom index {idx} out of range for molecule {batch_idx} with {num_atoms} atoms"
-                )
+                raise IndexError(f"Atom index {idx} out of range for molecule {batch_idx} with {num_atoms} atoms")
 
     def _build(self) -> None:
         """Build the native forcefield for the current batch settings."""
@@ -458,8 +450,7 @@ class MMFFBatchedForcefield:
             for constraints in self._distance_constraints
         ]
         position_constraints = [
-            [(c.idx, c.max_displ, c.force_constant) for c in constraints]
-            for constraints in self._position_constraints
+            [(c.idx, c.max_displ, c.force_constant) for c in constraints] for constraints in self._position_constraints
         ]
         angle_constraints = [
             [
