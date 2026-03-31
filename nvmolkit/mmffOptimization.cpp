@@ -89,7 +89,7 @@ BOOST_PYTHON_MODULE(_mmffOptimization) {
         molsVec.push_back(mol);
       }
 
-      std::vector<std::vector<double>> result;
+      std::vector<std::vector<double>>            result;
       boost::python::extract<boost::python::list> propertiesListExtract(propertiesObj);
       if (propertiesListExtract.check()) {
         const auto properties = extractMMFFPropertiesList(propertiesListExtract(), static_cast<int>(molsVec.size()));
