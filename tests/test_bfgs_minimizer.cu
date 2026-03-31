@@ -33,9 +33,9 @@
 #include "batched_forcefield.h"
 #include "bfgs_minimize.h"
 #include "device.h"
+#include "forcefield_constraints.h"
 #include "mmff.h"
 #include "mmff_batched_forcefield.h"
-#include "forcefield_constraints.h"
 #include "test_utils.h"
 
 using ::nvMolKit::MMFF::BatchedMolecularDeviceBuffers;
@@ -132,17 +132,16 @@ struct ConstraintSpecs {
   nvMolKit::ForceFieldConstraints::TorsionConstraintSpec  torsion{0, 1, 2, 3, true, 15.0, 30.0, 12.0};
 };
 
-void addConstraintSpecsToContribs(EnergyForceContribsHost&      contribs,
-                                  const std::vector<double>&    positions,
-                                  const ConstraintSpecs&         specs = {}) {
+void addConstraintSpecsToContribs(EnergyForceContribsHost&   contribs,
+                                  const std::vector<double>& positions,
+                                  const ConstraintSpecs&     specs = {}) {
   nvMolKit::ForceFieldConstraints::appendDistanceConstraint(contribs, positions, specs.distance);
   nvMolKit::ForceFieldConstraints::appendPositionConstraint(contribs, positions, specs.position);
   nvMolKit::ForceFieldConstraints::appendAngleConstraint(contribs, positions, specs.angle);
   nvMolKit::ForceFieldConstraints::appendTorsionConstraint(contribs, positions, specs.torsion);
 }
 
-void addConstraintSpecsToForcefield(ForceFields::ForceField&    forcefield,
-                                    const ConstraintSpecs&      specs = {}) {
+void addConstraintSpecsToForcefield(ForceFields::ForceField& forcefield, const ConstraintSpecs& specs = {}) {
   auto* distanceContribs = new ForceFields::DistanceConstraintContribs(&forcefield);
   distanceContribs->addContrib(specs.distance.idx1,
                                specs.distance.idx2,
@@ -180,9 +179,9 @@ void addConstraintSpecsToForcefield(ForceFields::ForceField&    forcefield,
   forcefield.contribs().push_back(ForceFields::ContribPtr(torsionContrib));
 }
 
-std::unique_ptr<ForceFields::ForceField> constructConstrainedRDKitForcefield(RDKit::ROMol&            mol,
+std::unique_ptr<ForceFields::ForceField> constructConstrainedRDKitForcefield(RDKit::ROMol&          mol,
                                                                              const ConstraintSpecs& specs = {}) {
-  auto molProps = std::make_unique<RDKit::MMFF::MMFFMolProperties>(mol);
+  auto molProps   = std::make_unique<RDKit::MMFF::MMFFMolProperties>(mol);
   auto forcefield = std::unique_ptr<ForceFields::ForceField>(RDKit::MMFF::constructForceField(mol, molProps.get()));
   addConstraintSpecsToForcefield(*forcefield, specs);
   return forcefield;

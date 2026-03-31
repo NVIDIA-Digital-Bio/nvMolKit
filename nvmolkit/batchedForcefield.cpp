@@ -23,8 +23,8 @@
 
 #include "device_vector.h"
 #include "ff_utils.h"
-#include "mmff_batched_forcefield.h"
 #include "forcefield_constraints.h"
+#include "mmff_batched_forcefield.h"
 #include "mmff_flattened_builder.h"
 #include "mmff_properties.h"
 

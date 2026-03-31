@@ -38,10 +38,10 @@
 #include "bfgs_mmff.h"
 #include "device.h"
 #include "ff_utils.h"
+#include "forcefield_constraints.h"
 #include "kernel_utils.cuh"
 #include "mmff.h"
 #include "mmff_batched_forcefield.h"
-#include "forcefield_constraints.h"
 #include "mmff_flattened_builder.h"
 #include "mmff_kernels.h"
 #include "mmff_optimize.h"
@@ -524,10 +524,11 @@ void addConstraintTermToReferenceForcefield(ForceFields::ForceField&       refer
     }
     case FFTerm::PositionConstraint: {
       for (size_t i = 0; i < contribs.positionConstraintTerms.idx.size(); ++i) {
-        auto* positionContrib = new ForceFields::MMFF::PositionConstraintContrib(&referenceForceField,
-                                                                                 contribs.positionConstraintTerms.idx[i],
-                                                                                 contribs.positionConstraintTerms.maxDispl[i],
-                                                                                 contribs.positionConstraintTerms.forceConstant[i]);
+        auto* positionContrib =
+          new ForceFields::MMFF::PositionConstraintContrib(&referenceForceField,
+                                                           contribs.positionConstraintTerms.idx[i],
+                                                           contribs.positionConstraintTerms.maxDispl[i],
+                                                           contribs.positionConstraintTerms.forceConstant[i]);
         referenceForceField.contribs().push_back(ForceFields::ContribPtr(positionContrib));
       }
       break;
@@ -547,14 +548,15 @@ void addConstraintTermToReferenceForcefield(ForceFields::ForceField&       refer
     }
     case FFTerm::TorsionConstraint: {
       for (size_t i = 0; i < contribs.torsionConstraintTerms.idx1.size(); ++i) {
-        auto* torsionContrib = new ForceFields::MMFF::TorsionConstraintContrib(&referenceForceField,
-                                                                               contribs.torsionConstraintTerms.idx1[i],
-                                                                               contribs.torsionConstraintTerms.idx2[i],
-                                                                               contribs.torsionConstraintTerms.idx3[i],
-                                                                               contribs.torsionConstraintTerms.idx4[i],
-                                                                               contribs.torsionConstraintTerms.minDihedralDeg[i],
-                                                                               contribs.torsionConstraintTerms.maxDihedralDeg[i],
-                                                                               contribs.torsionConstraintTerms.forceConstant[i]);
+        auto* torsionContrib =
+          new ForceFields::MMFF::TorsionConstraintContrib(&referenceForceField,
+                                                          contribs.torsionConstraintTerms.idx1[i],
+                                                          contribs.torsionConstraintTerms.idx2[i],
+                                                          contribs.torsionConstraintTerms.idx3[i],
+                                                          contribs.torsionConstraintTerms.idx4[i],
+                                                          contribs.torsionConstraintTerms.minDihedralDeg[i],
+                                                          contribs.torsionConstraintTerms.maxDihedralDeg[i],
+                                                          contribs.torsionConstraintTerms.forceConstant[i]);
         referenceForceField.contribs().push_back(ForceFields::ContribPtr(torsionContrib));
       }
       break;
@@ -882,7 +884,7 @@ TEST_F(MMffGpuTestFixture, EleGradientSingleMolecule) {
 }
 
 TEST_F(MMffGpuTestFixture, DistanceConstraintEnergySingleMolecule) {
-  EnergyForceContribsHost                      contribs;
+  EnergyForceContribsHost                                       contribs;
   const nvMolKit::ForceFieldConstraints::DistanceConstraintSpec spec{0, 2, true, 0.3, 0.6, 15.0};
   nvMolKit::ForceFieldConstraints::appendDistanceConstraint(contribs, systemHost.positions, spec);
 
@@ -892,29 +894,30 @@ TEST_F(MMffGpuTestFixture, DistanceConstraintEnergySingleMolecule) {
 }
 
 TEST_F(MMffGpuTestFixture, DistanceConstraintGradientSingleMolecule) {
-  EnergyForceContribsHost                      contribs;
+  EnergyForceContribsHost                                       contribs;
   const nvMolKit::ForceFieldConstraints::DistanceConstraintSpec spec{0, 2, true, 0.3, 0.6, 15.0};
   nvMolKit::ForceFieldConstraints::appendDistanceConstraint(contribs, systemHost.positions, spec);
 
   const auto wantGradients =
     getReferenceConstraintGradientTerm(mol_.get(), contribs, FFTerm::DistanceConstraint, systemHost.positions);
-  const auto gotGradients  = getGradientViaForcefield(contribs, systemHost.positions);
+  const auto gotGradients = getGradientViaForcefield(contribs, systemHost.positions);
   EXPECT_THAT(gotGradients, ::testing::Pointwise(::testing::FloatNear(1.0e-4), wantGradients));
 }
 
 TEST_F(MMffGpuTestFixture, PositionConstraintEnergySingleMolecule) {
-  EnergyForceContribsHost                      contribs;
+  EnergyForceContribsHost                                       contribs;
   const nvMolKit::ForceFieldConstraints::PositionConstraintSpec spec{0, 0.1, 50.0};
   nvMolKit::ForceFieldConstraints::appendPositionConstraint(contribs, systemHost.positions, spec);
 
   std::vector<double> evalPositions = systemHost.positions;
   evalPositions[0] += 0.25;
-  const double wantEnergy = getReferenceConstraintEnergyTerm(mol_.get(), contribs, FFTerm::PositionConstraint, evalPositions);
+  const double wantEnergy =
+    getReferenceConstraintEnergyTerm(mol_.get(), contribs, FFTerm::PositionConstraint, evalPositions);
   EXPECT_NEAR(getEnergyViaForcefield(contribs, evalPositions), wantEnergy, FUNCTION_E_TOL);
 }
 
 TEST_F(MMffGpuTestFixture, PositionConstraintGradientSingleMolecule) {
-  EnergyForceContribsHost                      contribs;
+  EnergyForceContribsHost                                       contribs;
   const nvMolKit::ForceFieldConstraints::PositionConstraintSpec spec{0, 0.1, 50.0};
   nvMolKit::ForceFieldConstraints::appendPositionConstraint(contribs, systemHost.positions, spec);
 
@@ -922,32 +925,33 @@ TEST_F(MMffGpuTestFixture, PositionConstraintGradientSingleMolecule) {
   evalPositions[0] += 0.25;
   const auto wantGradients =
     getReferenceConstraintGradientTerm(mol_.get(), contribs, FFTerm::PositionConstraint, evalPositions);
-  const auto gotGradients  = getGradientViaForcefield(contribs, evalPositions);
+  const auto gotGradients = getGradientViaForcefield(contribs, evalPositions);
   EXPECT_THAT(gotGradients, ::testing::Pointwise(::testing::FloatNear(1.0e-4), wantGradients));
 }
 
 TEST_F(MMffGpuTestFixture, AngleConstraintEnergySingleMolecule) {
-  EnergyForceContribsHost                   contribs;
+  EnergyForceContribsHost                                    contribs;
   const nvMolKit::ForceFieldConstraints::AngleConstraintSpec spec{0, 1, 2, true, 5.0, 10.0, 20.0};
   nvMolKit::ForceFieldConstraints::appendAngleConstraint(contribs, systemHost.positions, spec);
 
-  const double wantEnergy = getReferenceConstraintEnergyTerm(mol_.get(), contribs, FFTerm::AngleConstraint, systemHost.positions);
+  const double wantEnergy =
+    getReferenceConstraintEnergyTerm(mol_.get(), contribs, FFTerm::AngleConstraint, systemHost.positions);
   EXPECT_NEAR(getEnergyViaForcefield(contribs, systemHost.positions), wantEnergy, FUNCTION_E_TOL);
 }
 
 TEST_F(MMffGpuTestFixture, AngleConstraintGradientSingleMolecule) {
-  EnergyForceContribsHost                   contribs;
+  EnergyForceContribsHost                                    contribs;
   const nvMolKit::ForceFieldConstraints::AngleConstraintSpec spec{0, 1, 2, true, 5.0, 10.0, 20.0};
   nvMolKit::ForceFieldConstraints::appendAngleConstraint(contribs, systemHost.positions, spec);
 
   const auto wantGradients =
     getReferenceConstraintGradientTerm(mol_.get(), contribs, FFTerm::AngleConstraint, systemHost.positions);
-  const auto gotGradients  = getGradientViaForcefield(contribs, systemHost.positions);
+  const auto gotGradients = getGradientViaForcefield(contribs, systemHost.positions);
   EXPECT_THAT(gotGradients, ::testing::Pointwise(::testing::FloatNear(1.0e-3), wantGradients));
 }
 
 TEST_F(MMffGpuTestFixture, TorsionConstraintEnergySingleMolecule) {
-  EnergyForceContribsHost                     contribs;
+  EnergyForceContribsHost                                      contribs;
   const nvMolKit::ForceFieldConstraints::TorsionConstraintSpec spec{0, 1, 2, 3, true, 15.0, 30.0, 12.0};
   nvMolKit::ForceFieldConstraints::appendTorsionConstraint(contribs, systemHost.positions, spec);
 
@@ -957,13 +961,13 @@ TEST_F(MMffGpuTestFixture, TorsionConstraintEnergySingleMolecule) {
 }
 
 TEST_F(MMffGpuTestFixture, TorsionConstraintGradientSingleMolecule) {
-  EnergyForceContribsHost                     contribs;
+  EnergyForceContribsHost                                      contribs;
   const nvMolKit::ForceFieldConstraints::TorsionConstraintSpec spec{0, 1, 2, 3, true, 15.0, 30.0, 12.0};
   nvMolKit::ForceFieldConstraints::appendTorsionConstraint(contribs, systemHost.positions, spec);
 
   const auto wantGradients =
     getReferenceConstraintGradientTerm(mol_.get(), contribs, FFTerm::TorsionConstraint, systemHost.positions);
-  const auto gotGradients  = getGradientViaForcefield(contribs, systemHost.positions);
+  const auto gotGradients = getGradientViaForcefield(contribs, systemHost.positions);
   EXPECT_THAT(gotGradients, ::testing::Pointwise(::testing::FloatNear(1.0e-3), wantGradients));
 }
 
@@ -1679,7 +1683,8 @@ TEST_F(MMffGpuWrapperTestFixture, MMffConstructorEnergyWithConstraints) {
     angleContribs->addContrib(0, 1, 2, true, 5.0, 10.0, 20.0);
     forcefield.contribs().push_back(ForceFields::ContribPtr(angleContribs));
 
-    auto* torsionContrib = new ForceFields::MMFF::TorsionConstraintContrib(&forcefield, 0, 1, 2, 3, true, 15.0, 30.0, 12.0);
+    auto* torsionContrib =
+      new ForceFields::MMFF::TorsionConstraintContrib(&forcefield, 0, 1, 2, 3, true, 15.0, 30.0, 12.0);
     forcefield.contribs().push_back(ForceFields::ContribPtr(torsionContrib));
   };
   addConstraints(*ffReference);
