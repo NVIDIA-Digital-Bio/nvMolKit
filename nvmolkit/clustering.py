@@ -17,9 +17,10 @@
 
 import torch
 
-from nvmolkit import _clustering
-from nvmolkit._arrayHelpers import *  # noqa: F403
-from nvmolkit.types import AsyncGpuResult
+# from nvmolkit import _clustering
+# from nvmolkit._arrayHelpers import *  # noqa: F403
+# from nvmolkit.types import AsyncGpuResult
+AsyncGpuResult = None
 from nvmolkit._similarity_neighbor import similarity_neighbor, subtract_similarity_neighbor, remove_largest_cluster
 # TODO: rename and add cosine similarity
 
@@ -185,11 +186,12 @@ if __name__ == "__main__":
     def get_rdkit_clusters(bit_tensor, threshold=0.5):
         """Convert int32 tensor to RDKit ExplicitBitVects and run Butina"""
         n = bit_tensor.shape[0]
+        num_words = bit_tensor.shape[1]
         fps = []
         for i in range(n):
-            bv = ExplicitBitVect(1024)
+            bv = ExplicitBitVect(num_words * 32)
             bits = bit_tensor[i].cpu().numpy()
-            for word_idx in range(32):
+            for word_idx in range(num_words):
                 word = int(bits[word_idx])
                 for bit_idx in range(32):
                     if (word >> bit_idx) & 1:
@@ -205,25 +207,25 @@ if __name__ == "__main__":
         clusters = Butina.ClusterData(dists, n, cutoff, isDistData=True, reordering=True)
         return clusters
 
-    def generate_data(n, num_clusters, noise_range=2, seed=42):
+    def generate_data(n, num_clusters, noise_range=2, seed=42, num_words=64):
         """Generate random bit vectors with underlying cluster structure."""
         torch.manual_seed(seed)
-        base_vectors = torch.randint(-(2**31 - 1), 2**31 - 1, size=(num_clusters, 32), dtype=torch.int32).cuda()
-        x_tr = torch.zeros((n, 32), dtype=torch.int32).cuda()
+        base_vectors = torch.randint(-(2**31 - 1), 2**31 - 1, size=(num_clusters, num_words), dtype=torch.int32).cuda()
+        x_tr = torch.zeros((n, num_words), dtype=torch.int32).cuda()
         for i in range(n):
             base_idx = i % num_clusters
             x_tr[i] = base_vectors[base_idx]
-            noise = torch.randint(0, noise_range, size=(32,), dtype=torch.int32).cuda()
+            noise = torch.randint(0, noise_range, size=(num_words,), dtype=torch.int32).cuda()
             x_tr[i] = x_tr[i] ^ noise
         return x_tr
 
-    def run_test(n, threshold, num_clusters, noise_range=2, seed=42):
+    def run_test(n, threshold, num_clusters, noise_range=2, seed=42, num_words=64):
         """Run a single comparison test between Triton and RDKit Butina clustering."""
         print(f"\n{'='*60}")
-        print(f"Test: n={n}, threshold={threshold}, num_clusters={num_clusters}, noise_range={noise_range}")
+        print(f"Test: n={n}, threshold={threshold}, num_clusters={num_clusters}, noise_range={noise_range}, num_words={num_words}")
         print(f"{'='*60}")
 
-        x_tr = generate_data(n, num_clusters, noise_range=noise_range, seed=seed)
+        x_tr = generate_data(n, num_clusters, noise_range=noise_range, seed=seed, num_words=num_words)
 
         print("Running Triton clustering...")
         # fused_butina expects a distance cutoff, so we pass 1.0 - threshold
@@ -269,47 +271,47 @@ if __name__ == "__main__":
 
     def main():
         test_configs = [
-            # (n, threshold, num_clusters, noise_range)
-            (100,   0.3,  20,  2),
-            (100,   0.5,  20,  2),
-            (100,   0.7,  20,  2),
-            (100,   0.9,  20,  2),
-            (500,   0.4,  50,  2),
-            (500,   0.6,  50,  2),
-            (500,   0.8,  50,  2),
-            (1000,  0.3, 100,  2),
-            (1000,  0.5, 100,  2),
-            (1000,  0.7, 100,  2),
-            (5000,  0.5, 200,  2),
-            (5000,  0.7, 200,  2),
-            (10000, 0.5, 500,  2),
-            (10000, 0.5, 2000,  2),
+            # (n, threshold, num_clusters, noise_range, num_words)
+            (100,   0.3,  20,  2, 32),
+            (100,   0.5,  20,  2, 32),
+            (100,   0.7,  20,  2, 64),
+            (100,   0.9,  20,  2, 64),
+            (500,   0.4,  50,  2, 32),
+            (500,   0.6,  50,  2, 32),
+            (500,   0.8,  50,  2, 64),
+            (1000,  0.3, 100,  2, 32),
+            (1000,  0.5, 100,  2, 64),
+            (1000,  0.7, 100,  2, 64),
+            (5000,  0.5, 200,  2, 32),
+            (5000,  0.7, 200,  2, 64),
+            (10000, 0.5, 500,  2, 32),
+            (10000, 0.5, 2000,  2, 64),
             
             # Denser clusters (lower noise) with tight threshold
-            (1000,  0.9, 100,  1),
+            (1000,  0.9, 100,  1, 32),
             # Sparser clusters (higher noise) with loose threshold
-            (1000,  0.3, 100,  4),
+            (1000,  0.3, 100,  4, 64),
             # Many small clusters
-            (2000,  0.5, 1000, 2),
+            (2000,  0.5, 1000, 2, 32),
             # Few large clusters
-            (2000,  0.5, 10,   2),
-            (100000, 0.7, 100,  128),
+            (2000,  0.5, 10,   2, 64),
+            (100000, 0.7, 100,  128, 32),
         ]
 
         results = []
-        for n, threshold, num_clusters, noise_range in test_configs:
-            passed = run_test(n, threshold, num_clusters, noise_range=noise_range)
-            results.append((n, threshold, num_clusters, noise_range, passed))
+        for n, threshold, num_clusters, noise_range, num_words in test_configs:
+            passed = run_test(n, threshold, num_clusters, noise_range=noise_range, num_words=num_words)
+            results.append((n, threshold, num_clusters, noise_range, num_words, passed))
 
         print(f"\n{'='*60}")
         print("SUMMARY")
         print(f"{'='*60}")
         all_passed = True
-        for n, threshold, num_clusters, noise_range, passed in results:
+        for n, threshold, num_clusters, noise_range, num_words, passed in results:
             status = "PASS" if passed else "FAIL"
             if not passed:
                 all_passed = False
-            print(f"  [{status}] n={n:>5}, threshold={threshold}, clusters={num_clusters:>4}, noise={noise_range}")
+            print(f"  [{status}] n={n:>5}, threshold={threshold}, clusters={num_clusters:>4}, noise={noise_range}, words={num_words}")
 
         total = len(results)
         n_passed = sum(1 for *_, p in results if p)
