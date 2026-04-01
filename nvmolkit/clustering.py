@@ -18,9 +18,9 @@
 import torch
 
 from nvmolkit import _clustering
-from nvmolkit._arrayHelpers import * # noqa: F403
-from nvmolkit.types import AsyncGpuResult
+from nvmolkit._arrayHelpers import *  # noqa: F403
 from nvmolkit._fused_Butina import extract_cluster_and_singletons, update_neighbor_counts
+from nvmolkit.types import AsyncGpuResult
 
 _VALID_NEIGHBORLIST_SIZES = frozenset({8, 16, 24, 32, 64, 128})
 
@@ -91,7 +91,7 @@ def fused_butina(
     metric: str = "tanimoto",
 ):
     """Perform fused Butina clustering on a set of fingerprints.
-    
+
     This function uses a fused implementation of Butina clustering that computes
     similarities and neighbors on-the-fly, avoiding the need to compute and store
     the full distance matrix. This makes it suitable for large datasets.
@@ -106,8 +106,8 @@ def fused_butina(
                 and "cosine" are supported.
 
     Returns:
-        A tuple ``(clusters, cluster_sizes)`` where *clusters* is a list of tuples 
-        representing each cluster (with the first element being the centroid), and 
+        A tuple ``(clusters, cluster_sizes)`` where *clusters* is a list of tuples
+        representing each cluster (with the first element being the centroid), and
         *cluster_sizes* is a list of cumulative cluster sizes.
         If ``return_centroids`` is True, returns a tuple ``(clusters, cluster_sizes, centroids)``
         where *centroids* is a list of centroid indices.
@@ -140,7 +140,9 @@ def fused_butina(
             id_max = neigh.shape[0] - 1 - neigh.flip(0).contiguous().argmax().item()
             centroids.append(indices[id_max].item())
 
-            extract_cluster_and_singletons(x, id_max, is_free, neigh, cluster_count, cluster_indices, threshold, indices, metric=metric)
+            extract_cluster_and_singletons(
+                x, id_max, is_free, neigh, cluster_count, cluster_indices, threshold, indices, metric=metric
+            )
             cluster_sizes.append(cluster_count[0].item())
             x, y = x[is_free.bool(), :].contiguous(), x[~is_free.bool(), :].contiguous()
             indices = indices[is_free.bool()].contiguous()
@@ -155,7 +157,7 @@ def fused_butina(
         indices_cpu = cluster_indices.cpu().numpy()
         for i in range(len(cluster_sizes) - 1):
             start_idx = cluster_sizes[i]
-            end_idx = cluster_sizes[i+1]
+            end_idx = cluster_sizes[i + 1]
             cluster_members = indices_cpu[start_idx:end_idx].tolist()
 
             centroid = centroids[i]
@@ -164,152 +166,3 @@ def fused_butina(
         if return_centroids:
             return clusters, cluster_sizes, centroids
         return clusters, cluster_sizes
-
-if __name__ == "__main__":
-    import time
-    try:
-        from rdkit import DataStructs
-        from rdkit.DataStructs import ExplicitBitVect
-        from rdkit.ML.Cluster import Butina
-        HAS_RDKIT = True
-    except ImportError:
-        HAS_RDKIT = False
-        print("RDKit not found. RDKit comparison tests will be skipped.")
-
-    def get_rdkit_clusters(bit_tensor, threshold=0.5):
-        """Convert int32 tensor to RDKit ExplicitBitVects and run Butina"""
-        n = bit_tensor.shape[0]
-        num_words = bit_tensor.shape[1]
-        fps = []
-        for i in range(n):
-            bv = ExplicitBitVect(num_words * 32)
-            bits = bit_tensor[i].cpu().numpy()
-            for word_idx in range(num_words):
-                word = int(bits[word_idx])
-                for bit_idx in range(32):
-                    if (word >> bit_idx) & 1:
-                        bv.SetBit(word_idx * 32 + bit_idx)
-            fps.append(bv)
-
-        # Calculate pairwise distances (1 - Tanimoto similarity)
-        dists = []
-        for i in range(n):
-            dists.extend(DataStructs.BulkCosineSimilarity(fps[i], fps[:i], returnDistance=True))
-        # Run Butina clustering (cutoff is maximum distance, so 1.0 - threshold)
-        cutoff = 1.0 - threshold
-        clusters = Butina.ClusterData(dists, n, cutoff, isDistData=True, reordering=True)
-        return clusters
-
-    def generate_data(n, num_clusters, noise_range=2, seed=42, num_words=64):
-        """Generate random bit vectors with underlying cluster structure."""
-        torch.manual_seed(seed)
-        base_vectors = torch.randint(-(2**31 - 1), 2**31 - 1, size=(num_clusters, num_words), dtype=torch.int32).cuda()
-        x_tr = torch.zeros((n, num_words), dtype=torch.int32).cuda()
-        for i in range(n):
-            base_idx = i % num_clusters
-            x_tr[i] = base_vectors[base_idx]
-            noise = torch.randint(0, noise_range, size=(num_words,), dtype=torch.int32).cuda()
-            x_tr[i] = x_tr[i] ^ noise
-        return x_tr
-
-    def run_test(n, threshold, num_clusters, noise_range=2, seed=42, num_words=64):
-        """Run a single comparison test between Triton and RDKit Butina clustering."""
-        print(f"\n{'='*60}")
-        print(f"Test: n={n}, threshold={threshold}, num_clusters={num_clusters}, noise_range={noise_range}, num_words={num_words}")
-        print(f"{'='*60}")
-
-        x_tr = generate_data(n, num_clusters, noise_range=noise_range, seed=seed, num_words=num_words)
-
-        print("Running Triton clustering...")
-        # fused_butina expects a distance cutoff, so we pass 1.0 - threshold
-        fused_butina(x_tr, cutoff=1.0 - threshold, metric="cosine")
-        torch.cuda.synchronize()
-        print("Done Triton clustering, starting second run...")
-        start = time.time()
-        warp_clusters, _ = fused_butina(x_tr, cutoff=1.0 - threshold, metric="cosine")
-        torch.cuda.synchronize()
-        warp_time = time.time() - start
-        print(f"Triton took {warp_time:.4f}s, found {len(warp_clusters)} clusters")
-
-        if not HAS_RDKIT:
-            return True
-
-        print("Running RDKit Butina...")
-        start = time.time()
-        rdkit_failed = False
-        try:
-            rdkit_clusters = get_rdkit_clusters(x_tr, threshold=threshold)
-        except Exception as e:
-            print(f"Error running RDKit: {e}")
-            rdkit_failed = True
-        rdkit_time = time.time() - start
-        print(f"RDKit took {rdkit_time:.4f}s, found {len(rdkit_clusters)} clusters")
-
-        if rdkit_failed:
-            return True
-        rdkit_set = set(tuple(sorted(c)) for c in rdkit_clusters)
-        warp_set = set(tuple(sorted(c)) for c in warp_clusters)
-
-        passed = rdkit_set == warp_set
-        if passed:
-            print("SUCCESS: Clusters match exactly!")
-        else:
-            print("DIFFERENCE DETECTED!")
-            print(f"  Clusters only in RDKit: {len(rdkit_set - warp_set)}")
-            print(f"  Clusters only in Warp: {len(warp_set - rdkit_set)}")
-            print(f"  RDKit diff: {rdkit_set - warp_set}")
-            print(f"  Warp diff:  {warp_set - rdkit_set}")
-
-        return passed
-
-    def main():
-        test_configs = [
-            # (n, threshold, num_clusters, noise_range, num_words)
-            (100,   0.3,  20,  2, 32),
-            (100,   0.5,  20,  2, 32),
-            (100,   0.7,  20,  2, 64),
-            (100,   0.9,  20,  2, 64),
-            (500,   0.4,  50,  2, 32),
-            (500,   0.6,  50,  2, 32),
-            (500,   0.8,  50,  2, 64),
-            (1000,  0.3, 100,  2, 32),
-            (1000,  0.5, 100,  2, 64),
-            (1000,  0.7, 100,  2, 64),
-            (5000,  0.5, 200,  2, 32),
-            (5000,  0.7, 200,  2, 64),
-            (10000, 0.5, 500,  2, 32),
-            (10000, 0.5, 2000,  2, 64),
-
-            # Denser clusters (lower noise) with tight threshold
-            (1000,  0.9, 100,  1, 32),
-            # Sparser clusters (higher noise) with loose threshold
-            (1000,  0.3, 100,  4, 64),
-            # Many small clusters
-            (2000,  0.5, 1000, 2, 32),
-            # Few large clusters
-            (2000,  0.5, 10,   2, 64),
-            (100000, 0.7, 1000,  128, 32),
-        ]
-
-        results = []
-        for n, threshold, num_clusters, noise_range, num_words in test_configs:
-            passed = run_test(n, threshold, num_clusters, noise_range=noise_range, num_words=num_words)
-            results.append((n, threshold, num_clusters, noise_range, num_words, passed))
-
-        print(f"\n{'='*60}")
-        print("SUMMARY")
-        print(f"{'='*60}")
-        all_passed = True
-        for n, threshold, num_clusters, noise_range, num_words, passed in results:
-            status = "PASS" if passed else "FAIL"
-            if not passed:
-                all_passed = False
-            print(f"  [{status}] n={n:>5}, threshold={threshold}, clusters={num_clusters:>4}, noise={noise_range}, words={num_words}")
-
-        total = len(results)
-        n_passed = sum(1 for *_, p in results if p)
-        print(f"\n{n_passed}/{total} tests passed.")
-        if not all_passed:
-            exit(1)
-
-    main()
