@@ -21,8 +21,7 @@ import torch
 # from nvmolkit._arrayHelpers import *  # noqa: F403
 # from nvmolkit.types import AsyncGpuResult
 AsyncGpuResult = None
-from nvmolkit._similarity_neighbor import similarity_neighbor, subtract_similarity_neighbor, remove_largest_cluster
-# TODO: rename and add cosine similarity
+from nvmolkit._similarity_neighbor import update_neighbor_counts, extract_cluster_and_singletons
 
 _VALID_NEIGHBORLIST_SIZES = frozenset({8, 16, 24, 32, 64, 128})
 
@@ -107,7 +106,7 @@ def fused_butina(
         return_centroids: Whether to return centroid indices for each cluster.
         stream: CUDA stream to use. If None, uses the current stream.
         metric: Metric to use for similarity computation. Currently only "tanimoto"
-                is supported.
+                and "cosine" are supported.
 
     Returns:
         A tuple ``(clusters, cluster_sizes)`` where *clusters* is a list of tuples 
@@ -116,61 +115,57 @@ def fused_butina(
         If ``return_centroids`` is True, returns a tuple ``(clusters, cluster_sizes, centroids)``
         where *centroids* is a list of centroid indices.
     """
-    if metric not in ["tanimoto"]:
-        raise ValueError(f"metric must be one of ['tanimoto'], got {metric}")
+    if metric not in ["tanimoto", "cosine"]:
+        raise ValueError(f"metric must be one of ['tanimoto', 'cosine'], got {metric}")
     if stream is not None and not isinstance(stream, torch.cuda.Stream):
         raise TypeError(f"stream must be a torch.cuda.Stream or None, got {type(stream).__name__}")
-    
-    if metric == "tanimoto":
-        n_start = x.shape[0]
-        indices = torch.arange(n_start, dtype=torch.int32).cuda()
-        cluster_count = torch.zeros(2).int().cuda()
-        cluster_count[1] = n_start - 1
-        cluster_indices = torch.zeros(n_start, dtype=torch.int32).cuda()
-        cluster_indices.fill_(-1)
-        cluster_sizes = [0]
-        centroids = []
-        is_free = torch.ones(n_start, dtype=torch.int32).cuda()
-        neigh = torch.zeros(n_start).int().cuda()
-        threshold = float(1 -cutoff)
 
-        first_run = True
-        while cluster_count[0].item() < cluster_count[1].item():
-            if first_run:
-                similarity_neighbor(x, x, neigh, threshold)
-                first_run = False
-            else:
-                subtract_similarity_neighbor(x, y, neigh, threshold)
-            max_val = neigh.max().item()
-            if max_val == 0:
-                break
-            id_max = neigh.shape[0] - 1 - neigh.flip(0).contiguous().argmax().item()
-            centroids.append(indices[id_max].item())
+    n_start = x.shape[0]
+    indices = torch.arange(n_start, dtype=torch.int32).cuda()
+    cluster_count = torch.zeros(2).int().cuda()
+    cluster_count[1] = n_start - 1
+    cluster_indices = torch.zeros(n_start, dtype=torch.int32).cuda()
+    cluster_sizes = [0]
+    centroids = []
+    is_free = torch.ones(n_start, dtype=torch.int32).cuda()
+    neigh = torch.zeros(n_start).int().cuda()
+    threshold = float(1 - cutoff)
+    y = x
+    first_run = True
+    while cluster_count[0].item() < cluster_count[1].item():
+        update_neighbor_counts(x, y, neigh, threshold, add_mode=0 if first_run else 1, metric=metric)
+        first_run = False
 
-            remove_largest_cluster(x, id_max, is_free, neigh, cluster_count, cluster_indices, threshold, indices)
-            cluster_sizes.append(cluster_count[0].item())
-            x, y = x[is_free.bool(), :].contiguous(), x[~is_free.bool(), :].contiguous()
-            indices = indices[is_free.bool()].contiguous()
-            neigh = neigh[is_free.bool()].contiguous()
-            is_free = torch.ones(x.shape[0], dtype=torch.int32, device=x.device)
-            
-        for i in range(n_start - cluster_sizes[-1]):
-            item = cluster_sizes[-1]
-            cluster_sizes.append(cluster_sizes[-1] + 1) 
-            centroids.append(cluster_indices[item].item())
-        clusters = []
-        indices_cpu = cluster_indices.cpu().numpy()
-        for i in range(len(cluster_sizes) - 1):
-            start_idx = cluster_sizes[i]
-            end_idx = cluster_sizes[i+1]
-            cluster_members = indices_cpu[start_idx:end_idx].tolist()
-            
-            centroid = centroids[i]
-            members = [centroid] + [m for m in cluster_members if m != centroid]
-            clusters.append(tuple(members))
-        if return_centroids:
-            return clusters, cluster_sizes, centroids
-        return clusters, cluster_sizes
+        max_val = neigh.max().item()
+        if max_val == 0:
+            break
+        id_max = neigh.shape[0] - 1 - neigh.flip(0).contiguous().argmax().item()
+        centroids.append(indices[id_max].item())
+
+        extract_cluster_and_singletons(x, id_max, is_free, neigh, cluster_count, cluster_indices, threshold, indices, metric=metric)
+        cluster_sizes.append(cluster_count[0].item())
+        x, y = x[is_free.bool(), :].contiguous(), x[~is_free.bool(), :].contiguous()
+        indices = indices[is_free.bool()].contiguous()
+        neigh = neigh[is_free.bool()].contiguous()
+        is_free = torch.ones(x.shape[0], dtype=torch.int32, device=x.device)
+        
+    for i in range(n_start - cluster_sizes[-1]):
+        item = cluster_sizes[-1]
+        cluster_sizes.append(cluster_sizes[-1] + 1) 
+        centroids.append(cluster_indices[item].item())
+    clusters = []
+    indices_cpu = cluster_indices.cpu().numpy()
+    for i in range(len(cluster_sizes) - 1):
+        start_idx = cluster_sizes[i]
+        end_idx = cluster_sizes[i+1]
+        cluster_members = indices_cpu[start_idx:end_idx].tolist()
+        
+        centroid = centroids[i]
+        members = [centroid] + [m for m in cluster_members if m != centroid]
+        clusters.append(tuple(members))
+    if return_centroids:
+        return clusters, cluster_sizes, centroids
+    return clusters, cluster_sizes
 
 if __name__ == "__main__":
     import time
@@ -201,7 +196,7 @@ if __name__ == "__main__":
         # Calculate pairwise distances (1 - Tanimoto similarity)
         dists = []
         for i in range(n):
-            dists.extend(DataStructs.BulkTanimotoSimilarity(fps[i], fps[:i], returnDistance=True))
+            dists.extend(DataStructs.BulkCosineSimilarity(fps[i], fps[:i], returnDistance=True))
         # Run Butina clustering (cutoff is maximum distance, so 1.0 - threshold)
         cutoff = 1.0 - threshold
         clusters = Butina.ClusterData(dists, n, cutoff, isDistData=True, reordering=True)
@@ -229,11 +224,11 @@ if __name__ == "__main__":
 
         print("Running Triton clustering...")
         # fused_butina expects a distance cutoff, so we pass 1.0 - threshold
-        fused_butina(x_tr, cutoff=1.0 - threshold)
+        fused_butina(x_tr, cutoff=1.0 - threshold, metric="cosine")
         torch.cuda.synchronize()
         print("Done Triton clustering, starting second run...")
         start = time.time()
-        warp_clusters, _ = fused_butina(x_tr, cutoff=1.0 - threshold)
+        warp_clusters, _ = fused_butina(x_tr, cutoff=1.0 - threshold, metric="cosine")
         torch.cuda.synchronize()
         warp_time = time.time() - start
         print(f"Triton took {warp_time:.4f}s, found {len(warp_clusters)} clusters")
@@ -295,7 +290,7 @@ if __name__ == "__main__":
             (2000,  0.5, 1000, 2, 32),
             # Few large clusters
             (2000,  0.5, 10,   2, 64),
-            (100000, 0.7, 100,  128, 32),
+            (100000, 0.7, 1000,  128, 32),
         ]
 
         results = []
