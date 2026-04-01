@@ -118,14 +118,15 @@ def fused_butina(
         raise TypeError(f"stream must be a torch.cuda.Stream or None, got {type(stream).__name__}")
     with torch.cuda.stream(stream):
         n_start = x.shape[0]
-        indices = torch.arange(n_start, dtype=torch.int32).cuda()
-        cluster_count = torch.zeros(2).int().cuda()
+        device = x.device
+        indices = torch.arange(n_start, dtype=torch.int32, device=device)
+        cluster_count = torch.zeros(2, dtype=torch.int32, device=device)
         cluster_count[1] = n_start - 1
-        cluster_indices = torch.zeros(n_start, dtype=torch.int32).cuda()
+        cluster_indices = torch.zeros(n_start, dtype=torch.int32, device=device)
         cluster_sizes = [0]
         centroids = []
-        is_free = torch.ones(n_start, dtype=torch.int32).cuda()
-        neigh = torch.zeros(n_start).int().cuda()
+        is_free = torch.ones(n_start, dtype=torch.int32, device=device)
+        neigh = torch.zeros(n_start, dtype=torch.int32, device=device)
         threshold = float(1 - cutoff)
         y = x
         first_run = True
