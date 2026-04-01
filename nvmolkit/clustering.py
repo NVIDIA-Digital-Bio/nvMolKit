@@ -18,10 +18,10 @@
 import torch
 
 # from nvmolkit import _clustering
-# from nvmolkit._arrayHelpers import *  # noqa: F403
+# from nvmolkit._arrayHelpers import *
 # from nvmolkit.types import AsyncGpuResult
 AsyncGpuResult = None
-from nvmolkit._similarity_neighbor import update_neighbor_counts, extract_cluster_and_singletons
+from nvmolkit._fused_Butina import extract_cluster_and_singletons, update_neighbor_counts
 
 _VALID_NEIGHBORLIST_SIZES = frozenset({8, 16, 24, 32, 64, 128})
 
@@ -33,8 +33,7 @@ def butina(
     return_centroids: bool = False,
     stream: torch.cuda.Stream | None = None,
 ) -> AsyncGpuResult | tuple[AsyncGpuResult, AsyncGpuResult]:
-    """
-    Perform Butina clustering on a distance matrix.
+    """Perform Butina clustering on a distance matrix.
 
     The Butina algorithm is a deterministic clustering method that groups items based
     on distance thresholds. It iteratively:
@@ -92,8 +91,7 @@ def fused_butina(
     stream: torch.cuda.Stream | None = None,
     metric: str = "tanimoto",
 ):
-    """
-    Perform fused Butina clustering on a set of fingerprints.
+    """Perform fused Butina clustering on a set of fingerprints.
     
     This function uses a fused implementation of Butina clustering that computes
     similarities and neighbors on-the-fly, avoiding the need to compute and store
@@ -133,7 +131,7 @@ def fused_butina(
     y = x
     first_run = True
     while cluster_count[0].item() < cluster_count[1].item():
-        update_neighbor_counts(x, y, neigh, threshold, add_mode=0 if first_run else 1, metric=metric)
+        update_neighbor_counts(x, y, neigh, threshold, subtract=not first_run, metric=metric)
         first_run = False
 
         max_val = neigh.max().item()
@@ -148,10 +146,10 @@ def fused_butina(
         indices = indices[is_free.bool()].contiguous()
         neigh = neigh[is_free.bool()].contiguous()
         is_free = torch.ones(x.shape[0], dtype=torch.int32, device=x.device)
-        
+
     for i in range(n_start - cluster_sizes[-1]):
         item = cluster_sizes[-1]
-        cluster_sizes.append(cluster_sizes[-1] + 1) 
+        cluster_sizes.append(cluster_sizes[-1] + 1)
         centroids.append(cluster_indices[item].item())
     clusters = []
     indices_cpu = cluster_indices.cpu().numpy()
@@ -159,7 +157,7 @@ def fused_butina(
         start_idx = cluster_sizes[i]
         end_idx = cluster_sizes[i+1]
         cluster_members = indices_cpu[start_idx:end_idx].tolist()
-        
+
         centroid = centroids[i]
         members = [centroid] + [m for m in cluster_members if m != centroid]
         clusters.append(tuple(members))
@@ -192,7 +190,7 @@ if __name__ == "__main__":
                     if (word >> bit_idx) & 1:
                         bv.SetBit(word_idx * 32 + bit_idx)
             fps.append(bv)
-            
+
         # Calculate pairwise distances (1 - Tanimoto similarity)
         dists = []
         for i in range(n):
@@ -281,7 +279,7 @@ if __name__ == "__main__":
             (5000,  0.7, 200,  2, 64),
             (10000, 0.5, 500,  2, 32),
             (10000, 0.5, 2000,  2, 64),
-            
+
             # Denser clusters (lower noise) with tight threshold
             (1000,  0.9, 100,  1, 32),
             # Sparser clusters (higher noise) with loose threshold

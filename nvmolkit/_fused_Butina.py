@@ -84,13 +84,13 @@ def _update_neighbor_count_kernel(
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
-    ADD_MODE: tl.constexpr,
+    SUBTRACT: tl.constexpr,
     METRIC: tl.constexpr,
 ):
     """Compute pairwise similarity between blocks of x and y using bit-packed fingerprints.
 
-    Atomically adds (ADD_MODE=0) or subtracts (ADD_MODE=1) the per-row neighbor
-    counts into ``neighbors_ptr``.
+    Atomically adds (SUBTRACT=False) or subtracts (SUBTRACT=True) the per-row
+    neighbor counts into ``neighbors_ptr``.
     """
     pid_m = tl.program_id(axis=0)
     pid_n = tl.program_id(axis=1)
@@ -137,10 +137,10 @@ def _update_neighbor_count_kernel(
     is_neighbor = valid & (similarity >= threshold)
 
     row_counts = tl.sum(is_neighbor.to(tl.int32), axis=1)
-    if ADD_MODE == 0:
-        tl.atomic_add(neighbors_ptr + offs_m, row_counts, mask=mask_m)
-    else:
+    if SUBTRACT:
         tl.atomic_add(neighbors_ptr + offs_m, -row_counts, mask=mask_m)
+    else:
+        tl.atomic_add(neighbors_ptr + offs_m, row_counts, mask=mask_m)
 
 
 @triton.jit
@@ -217,14 +217,14 @@ def update_neighbor_counts(
     y: torch.Tensor,
     neighbors: torch.Tensor,
     threshold: float,
-    add_mode: int = 0,
+    subtract: bool = False,
     metric: str = "tanimoto",
 ) -> None:
     """Update per-row neighbor counts for fingerprints in ``x`` against ``y``.
 
     For each row *i* in ``x``, counts how many rows in ``y`` have similarity
-    >= ``threshold`` and atomically adds (``add_mode=0``) or subtracts
-    (``add_mode=1``) that count into ``neighbors[i]``.
+    >= ``threshold`` and atomically adds (or subtracts when ``subtract=True``)
+    that count into ``neighbors[i]``.
     """
     _check_fingerprint_matrix("x", x)
     _check_fingerprint_matrix("y", y)
@@ -254,7 +254,7 @@ def update_neighbor_counts(
         BLOCK_N=TILE_Y,
         BLOCK_K=32,
         num_warps=8,
-        ADD_MODE=add_mode,
+        SUBTRACT=subtract,
         METRIC=metric,
     )
 
