@@ -17,10 +17,9 @@
 
 import torch
 
-# from nvmolkit import _clustering
-# from nvmolkit._arrayHelpers import *
-# from nvmolkit.types import AsyncGpuResult
-AsyncGpuResult = None
+from nvmolkit import _clustering
+from nvmolkit._arrayHelpers import *
+from nvmolkit.types import AsyncGpuResult
 from nvmolkit._fused_Butina import extract_cluster_and_singletons, update_neighbor_counts
 
 _VALID_NEIGHBORLIST_SIZES = frozenset({8, 16, 24, 32, 64, 128})
@@ -117,53 +116,53 @@ def fused_butina(
         raise ValueError(f"metric must be one of ['tanimoto', 'cosine'], got {metric}")
     if stream is not None and not isinstance(stream, torch.cuda.Stream):
         raise TypeError(f"stream must be a torch.cuda.Stream or None, got {type(stream).__name__}")
+    with torch.cuda.stream(stream):
+        n_start = x.shape[0]
+        indices = torch.arange(n_start, dtype=torch.int32).cuda()
+        cluster_count = torch.zeros(2).int().cuda()
+        cluster_count[1] = n_start - 1
+        cluster_indices = torch.zeros(n_start, dtype=torch.int32).cuda()
+        cluster_sizes = [0]
+        centroids = []
+        is_free = torch.ones(n_start, dtype=torch.int32).cuda()
+        neigh = torch.zeros(n_start).int().cuda()
+        threshold = float(1 - cutoff)
+        y = x
+        first_run = True
+        while cluster_count[0].item() < cluster_count[1].item():
+            update_neighbor_counts(x, y, neigh, threshold, subtract=not first_run, metric=metric)
+            first_run = False
 
-    n_start = x.shape[0]
-    indices = torch.arange(n_start, dtype=torch.int32).cuda()
-    cluster_count = torch.zeros(2).int().cuda()
-    cluster_count[1] = n_start - 1
-    cluster_indices = torch.zeros(n_start, dtype=torch.int32).cuda()
-    cluster_sizes = [0]
-    centroids = []
-    is_free = torch.ones(n_start, dtype=torch.int32).cuda()
-    neigh = torch.zeros(n_start).int().cuda()
-    threshold = float(1 - cutoff)
-    y = x
-    first_run = True
-    while cluster_count[0].item() < cluster_count[1].item():
-        update_neighbor_counts(x, y, neigh, threshold, subtract=not first_run, metric=metric)
-        first_run = False
+            max_val = neigh.max().item()
+            if max_val == 0:
+                break
+            id_max = neigh.shape[0] - 1 - neigh.flip(0).contiguous().argmax().item()
+            centroids.append(indices[id_max].item())
 
-        max_val = neigh.max().item()
-        if max_val == 0:
-            break
-        id_max = neigh.shape[0] - 1 - neigh.flip(0).contiguous().argmax().item()
-        centroids.append(indices[id_max].item())
+            extract_cluster_and_singletons(x, id_max, is_free, neigh, cluster_count, cluster_indices, threshold, indices, metric=metric)
+            cluster_sizes.append(cluster_count[0].item())
+            x, y = x[is_free.bool(), :].contiguous(), x[~is_free.bool(), :].contiguous()
+            indices = indices[is_free.bool()].contiguous()
+            neigh = neigh[is_free.bool()].contiguous()
+            is_free = torch.ones(x.shape[0], dtype=torch.int32, device=x.device)
 
-        extract_cluster_and_singletons(x, id_max, is_free, neigh, cluster_count, cluster_indices, threshold, indices, metric=metric)
-        cluster_sizes.append(cluster_count[0].item())
-        x, y = x[is_free.bool(), :].contiguous(), x[~is_free.bool(), :].contiguous()
-        indices = indices[is_free.bool()].contiguous()
-        neigh = neigh[is_free.bool()].contiguous()
-        is_free = torch.ones(x.shape[0], dtype=torch.int32, device=x.device)
+        for i in range(n_start - cluster_sizes[-1]):
+            item = cluster_sizes[-1]
+            cluster_sizes.append(cluster_sizes[-1] + 1)
+            centroids.append(cluster_indices[item].item())
+        clusters = []
+        indices_cpu = cluster_indices.cpu().numpy()
+        for i in range(len(cluster_sizes) - 1):
+            start_idx = cluster_sizes[i]
+            end_idx = cluster_sizes[i+1]
+            cluster_members = indices_cpu[start_idx:end_idx].tolist()
 
-    for i in range(n_start - cluster_sizes[-1]):
-        item = cluster_sizes[-1]
-        cluster_sizes.append(cluster_sizes[-1] + 1)
-        centroids.append(cluster_indices[item].item())
-    clusters = []
-    indices_cpu = cluster_indices.cpu().numpy()
-    for i in range(len(cluster_sizes) - 1):
-        start_idx = cluster_sizes[i]
-        end_idx = cluster_sizes[i+1]
-        cluster_members = indices_cpu[start_idx:end_idx].tolist()
-
-        centroid = centroids[i]
-        members = [centroid] + [m for m in cluster_members if m != centroid]
-        clusters.append(tuple(members))
-    if return_centroids:
-        return clusters, cluster_sizes, centroids
-    return clusters, cluster_sizes
+            centroid = centroids[i]
+            members = [centroid] + [m for m in cluster_members if m != centroid]
+            clusters.append(tuple(members))
+        if return_centroids:
+            return clusters, cluster_sizes, centroids
+        return clusters, cluster_sizes
 
 if __name__ == "__main__":
     import time
