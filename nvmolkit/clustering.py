@@ -18,7 +18,7 @@
 import torch
 
 from nvmolkit import _clustering
-from nvmolkit._arrayHelpers import *
+from nvmolkit._arrayHelpers import * # noqa: F403
 from nvmolkit.types import AsyncGpuResult
 from nvmolkit._fused_Butina import extract_cluster_and_singletons, update_neighbor_counts
 
@@ -82,7 +82,7 @@ def butina(
         return AsyncGpuResult(clusters), AsyncGpuResult(centroids)
     return AsyncGpuResult(result)
 
-#TODO: add cosine similarity support for longer fingerprint sizes
+
 def fused_butina(
     x: torch.Tensor,
     cutoff: float,
