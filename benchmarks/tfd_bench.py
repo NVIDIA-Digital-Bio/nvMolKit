@@ -171,9 +171,14 @@ def bench_nvmol_cpu_single(mol: Chem.Mol) -> None:
     nvmol_tfd.GetTFDMatrix(mol, useWeights=True, maxDev="equal", backend="cpu")
 
 
-def bench_nvmol_cpu_batch(mols: List[Chem.Mol]) -> None:
-    """Benchmark nvMolKit CPU TFD for multiple molecules."""
-    nvmol_tfd.GetTFDMatrices(mols, useWeights=True, maxDev="equal", backend="cpu")
+def bench_nvmol_cpu_list(mols: List[Chem.Mol]) -> None:
+    """Benchmark nvMolKit CPU TFD returning Python lists."""
+    nvmol_tfd.GetTFDMatrices(mols, useWeights=True, maxDev="equal", backend="cpu", return_type="list")
+
+
+def bench_nvmol_cpu_numpy(mols: List[Chem.Mol]) -> None:
+    """Benchmark nvMolKit CPU TFD returning numpy arrays."""
+    nvmol_tfd.GetTFDMatrices(mols, useWeights=True, maxDev="equal", backend="cpu", return_type="numpy")
 
 
 def bench_nvmol_gpu_single(mol: Chem.Mol) -> None:
@@ -327,16 +332,27 @@ def run_benchmarks(
                 result["rdkit_time_ms"] = None
                 result["rdkit_std_ms"] = None
 
-            # nvMolKit CPU benchmark (OpenMP multi-threaded)
+            # nvMolKit CPU list benchmark (return_type="list")
             try:
-                nvmol_cpu_time, nvmol_cpu_std = time_it(lambda: bench_nvmol_cpu_batch(mols))
-                result["nvmol_cpu_time_ms"] = nvmol_cpu_time
-                result["nvmol_cpu_std_ms"] = nvmol_cpu_std
-                print(f"  nvMolKit (CPU):     {nvmol_cpu_time:8.2f} ms (+/- {nvmol_cpu_std:.2f})")
+                t, s = time_it(lambda: bench_nvmol_cpu_list(mols))
+                result["nvmol_cpu_list_time_ms"] = t
+                result["nvmol_cpu_list_std_ms"] = s
+                print(f"  nvMolKit (CPU list): {t:8.2f} ms (+/- {s:.2f})")
             except Exception as e:
-                print(f"  nvMolKit CPU failed: {e}")
-                result["nvmol_cpu_time_ms"] = None
-                result["nvmol_cpu_std_ms"] = None
+                print(f"  nvMolKit CPU list failed: {e}")
+                result["nvmol_cpu_list_time_ms"] = None
+                result["nvmol_cpu_list_std_ms"] = None
+
+            # nvMolKit CPU numpy benchmark (return_type="numpy")
+            try:
+                t, s = time_it(lambda: bench_nvmol_cpu_numpy(mols))
+                result["nvmol_cpu_numpy_time_ms"] = t
+                result["nvmol_cpu_numpy_std_ms"] = s
+                print(f"  nvMolKit (CPU numpy):{t:8.2f} ms (+/- {s:.2f})")
+            except Exception as e:
+                print(f"  nvMolKit CPU numpy failed: {e}")
+                result["nvmol_cpu_numpy_time_ms"] = None
+                result["nvmol_cpu_numpy_std_ms"] = None
 
             # nvMolKit GPU list benchmark (return_type="list")
             try:
@@ -371,7 +387,8 @@ def run_benchmarks(
             # Calculate speedups vs RDKit
             speedups = {}
             for key, label in [
-                ("nvmol_cpu_time_ms", "CPU"),
+                ("nvmol_cpu_list_time_ms", "CPU list"),
+                ("nvmol_cpu_numpy_time_ms", "CPU numpy"),
                 ("nvmol_gpu_list_time_ms", "GPU list"),
                 ("nvmol_gpu_numpy_time_ms", "GPU numpy"),
                 ("nvmol_gpu_tensor_time_ms", "GPU tensor"),
