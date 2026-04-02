@@ -40,10 +40,22 @@ Example usage:
     >>> tfd_matrices = tfd.GetTFDMatrices(mols, return_type="tensor")
 """
 
+from contextlib import nullcontext
 from typing import List, Union
 
 import numpy as np
 import torch
+
+try:
+    import nvtx as _nvtx
+
+    def _nvtx_range(name, color="blue"):
+        return _nvtx.annotate(name, color=color)
+except ImportError:
+
+    def _nvtx_range(name, color="blue"):
+        return nullcontext()
+
 
 from nvmolkit import _TFD
 from nvmolkit._arrayHelpers import *  # noqa: F403
@@ -61,22 +73,23 @@ class _TFDGpuResult:
     def to_tensors(self) -> List[torch.Tensor]:
         """Extract as list of GPU tensors (no D2H copy)."""
         all_values = self.tfd_values.torch()
-        return [all_values[self.output_starts[i]:self.output_starts[i + 1]]
-                for i in range(len(self.conformer_counts))]
+        return [
+            all_values[self.output_starts[i] : self.output_starts[i + 1]] for i in range(len(self.conformer_counts))
+        ]
 
     def to_numpy(self) -> List[np.ndarray]:
         """Extract as list of numpy arrays (one bulk D2H copy)."""
         torch.cuda.synchronize()
         all_values = self.tfd_values.numpy()
-        return [all_values[self.output_starts[i]:self.output_starts[i + 1]]
-                for i in range(len(self.conformer_counts))]
+        return [
+            all_values[self.output_starts[i] : self.output_starts[i + 1]] for i in range(len(self.conformer_counts))
+        ]
 
     def to_lists(self) -> List[List[float]]:
         """Extract as Python lists (bulk D2H + tolist)."""
         torch.cuda.synchronize()
         all_list = self.tfd_values.numpy().tolist()
-        return [all_list[self.output_starts[i]:self.output_starts[i + 1]]
-                for i in range(len(self.conformer_counts))]
+        return [all_list[self.output_starts[i] : self.output_starts[i + 1]] for i in range(len(self.conformer_counts))]
 
 
 def _get_gpu_result(mols, useWeights, maxDev, symmRadius, ignoreColinearBonds):
@@ -133,16 +146,21 @@ def GetTFDMatrices(
     """
     if backend in ("gpu", "GPU"):
         gpu_result = _get_gpu_result(mols, useWeights, maxDev, symmRadius, ignoreColinearBonds)
-        return _extract_gpu_result(gpu_result, return_type)
+        with _nvtx_range("GPU: split per-molecule results", color="yellow"):
+            return _extract_gpu_result(gpu_result, return_type)
 
     if backend not in ("cpu", "CPU"):
         raise ValueError(f"backend must be 'gpu' or 'cpu', got: '{backend}'")
 
     results = _TFD.GetTFDMatricesCpu(
-        mols, useWeights=useWeights, maxDev=maxDev,
-        symmRadius=symmRadius, ignoreColinearBonds=ignoreColinearBonds,
+        mols,
+        useWeights=useWeights,
+        maxDev=maxDev,
+        symmRadius=symmRadius,
+        ignoreColinearBonds=ignoreColinearBonds,
     )
-    return list(results)
+    with _nvtx_range("CPU: boost list to Python list", color="gray"):
+        return list(results)
 
 
 def GetTFDMatrix(
@@ -174,8 +192,13 @@ def GetTFDMatrix(
         Lower triangular TFD matrix as a flat list, numpy array, or GPU tensor.
     """
     results = GetTFDMatrices(
-        [mol], useWeights=useWeights, maxDev=maxDev, symmRadius=symmRadius,
-        ignoreColinearBonds=ignoreColinearBonds, backend=backend, return_type=return_type,
+        [mol],
+        useWeights=useWeights,
+        maxDev=maxDev,
+        symmRadius=symmRadius,
+        ignoreColinearBonds=ignoreColinearBonds,
+        backend=backend,
+        return_type=return_type,
     )
     if not results:
         if return_type == "numpy":

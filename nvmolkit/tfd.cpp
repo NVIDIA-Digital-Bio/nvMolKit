@@ -13,15 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "tfd_cpu.h"
-#include "tfd_gpu.h"
-
 #include <GraphMol/ROMol.h>
 
 #include <boost/python.hpp>
 #include <boost/python/manage_new_object.hpp>
 
 #include "array_helpers.h"
+#include "nvtx.h"
+#include "tfd_cpu.h"
+#include "tfd_gpu.h"
 
 namespace {
 
@@ -106,10 +106,13 @@ BOOST_PYTHON_MODULE(_TFD) {
         const std::string&         maxDev,
         int                        symmRadius,
         bool                       ignoreColinearBonds) {
-      auto molsVec = listToMolVector(mols);
-      auto options = buildOptions(useWeights, maxDev, symmRadius, ignoreColinearBonds);
-      options.backend = nvMolKit::TFDComputeBackend::CPU;
-      return nestedVectorToList(getCpuGenerator().GetTFDMatrices(molsVec, options));
+      auto molsVec                      = listToMolVector(mols);
+      auto options                      = buildOptions(useWeights, maxDev, symmRadius, ignoreColinearBonds);
+      options.backend                   = nvMolKit::TFDComputeBackend::CPU;
+      auto                      results = getCpuGenerator().GetTFDMatrices(molsVec, options);
+      nvMolKit::ScopedNvtxRange range("CPU: C++ to Python list (" + std::to_string(results.size()) + " mols)",
+                                      nvMolKit::NvtxColor::kGreen);
+      return nestedVectorToList(results);
     },
     (arg("mols"),
      arg("useWeights")          = true,
@@ -125,14 +128,15 @@ BOOST_PYTHON_MODULE(_TFD) {
         const std::string&         maxDev,
         int                        symmRadius,
         bool                       ignoreColinearBonds) -> boost::python::object {
-      auto molsVec = listToMolVector(mols);
-      auto options = buildOptions(useWeights, maxDev, symmRadius, ignoreColinearBonds);
+      auto molsVec    = listToMolVector(mols);
+      auto options    = buildOptions(useWeights, maxDev, symmRadius, ignoreColinearBonds);
       options.backend = nvMolKit::TFDComputeBackend::GPU;
 
       auto gpuResult = getGpuGenerator().GetTFDMatricesGpuBuffer(molsVec, options);
 
-      boost::python::list outputStarts    = intVectorToList(gpuResult.tfdOutputStarts);
-      boost::python::list conformerCounts = intVectorToList(gpuResult.conformerCounts);
+      nvMolKit::ScopedNvtxRange range("GPU: C++ to Python tuple", nvMolKit::NvtxColor::kYellow);
+      boost::python::list       outputStarts    = intVectorToList(gpuResult.tfdOutputStarts);
+      boost::python::list       conformerCounts = intVectorToList(gpuResult.conformerCounts);
 
       size_t totalSize = gpuResult.tfdValues.size();
       auto*  pyArray   = nvMolKit::makePyArray(gpuResult.tfdValues, boost::python::make_tuple(totalSize));
