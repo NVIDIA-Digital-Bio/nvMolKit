@@ -89,7 +89,8 @@ BOOST_PYTHON_MODULE(_mmffOptimization) {
       }
 
       const auto properties = extractMMFFPropertiesList(propertiesList, static_cast<int>(molsVec.size()));
-      const auto result = nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molsVec, maxIters, properties, hardwareOptions);
+      const auto result =
+        nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molsVec, maxIters, properties, hardwareOptions);
 
       // Convert result back to Python list of lists
       return vectorOfVectorsToList(result);
