@@ -100,26 +100,19 @@ def run_config(mols, backend, num_runs, label):
     """Run profiled iterations for a single configuration."""
     actual_confs = [mol.GetNumConformers() for mol in mols]
     total_pairs = sum(c * (c - 1) // 2 for c in actual_confs)
-    print(f"\n[{label}] {len(mols)} mols, avg {sum(actual_confs)/len(actual_confs):.1f} confs, "
-          f"{total_pairs} TFD pairs")
+    print(
+        f"\n[{label}] {len(mols)} mols, avg {sum(actual_confs) / len(actual_confs):.1f} confs, {total_pairs} TFD pairs"
+    )
 
     for run in range(num_runs):
         if backend in ("cpu", "both"):
             with nvtx.annotate(f"{label} CPU run {run}", color="cyan"):
-                results = nvmol_tfd.GetTFDMatrices(
-                    mols, useWeights=True, maxDev="equal", backend="cpu"
-                )
-                total_values = sum(len(r) for r in results)
-                print(f"  CPU run {run}: {total_values} TFD values")
+                nvmol_tfd.GetTFDMatrices(mols, useWeights=True, maxDev="equal", backend="cpu")
 
         if backend in ("gpu", "both"):
             with nvtx.annotate(f"{label} GPU run {run}", color="orange"):
-                results = nvmol_tfd.GetTFDMatrices(
-                    mols, useWeights=True, maxDev="equal", backend="gpu", return_type="tensor"
-                )
+                nvmol_tfd.GetTFDMatrices(mols, useWeights=True, maxDev="equal", backend="gpu", return_type="tensor")
                 torch.cuda.synchronize()
-                total_values = sum(len(r) for r in results)
-                print(f"  GPU run {run}: {total_values} TFD values")
 
 
 def main():
@@ -205,14 +198,15 @@ Examples:
     if args.warmup > 0:
         with nvtx.annotate("Warmup", color="red"):
             first_mols = list(configs.values())[0]
-            warmup_mols = first_mols[:min(5, len(first_mols))]
+            warmup_mols = first_mols[: min(5, len(first_mols))]
             print(f"\nWarmup ({args.warmup} iteration(s)) with {len(warmup_mols)} molecules...")
             for _ in range(args.warmup):
                 if args.backend in ("cpu", "both"):
                     nvmol_tfd.GetTFDMatrices(warmup_mols, useWeights=True, maxDev="equal", backend="cpu")
                 if args.backend in ("gpu", "both"):
-                    nvmol_tfd.GetTFDMatrices(warmup_mols, useWeights=True, maxDev="equal",
-                                             backend="gpu", return_type="tensor")
+                    nvmol_tfd.GetTFDMatrices(
+                        warmup_mols, useWeights=True, maxDev="equal", backend="gpu", return_type="tensor"
+                    )
                     torch.cuda.synchronize()
 
     # === Profiled runs ===
