@@ -76,6 +76,16 @@ Substructure Search
    substructure.SubstructSearchConfig
    substructure.SubstructMatchResults
 
+Conformer RMSD
+--------------
+
+.. autosummary::
+   :toctree: generated/
+   :template: function_template.rst
+
+   conformerRmsd.GetConformerRMSMatrix
+   conformerRmsd.GetConformerRMSMatrixBatch
+
 Types
 -----
 
