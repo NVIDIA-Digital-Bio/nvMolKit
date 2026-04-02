@@ -22,7 +22,7 @@ optimization for multiple molecules and conformers using CUDA and OpenMP.
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from rdkit.Chem import AllChem, rdForceFieldHelpers
+from rdkit.Chem import AllChem
 
 if TYPE_CHECKING:
     from rdkit.Chem import Mol
@@ -160,6 +160,4 @@ def MMFFOptimizeMoleculesConfs(
         )
         for props, threshold, ignore_interfrag in zip(properties_list, thresholds, interfrag_flags)
     ]
-    if len(native_properties) == 1:
-        native_properties = native_properties[0]
     return _mmffOptimization.MMFFOptimizeMoleculesConfs(molecules, maxIters, native_properties, native_options)

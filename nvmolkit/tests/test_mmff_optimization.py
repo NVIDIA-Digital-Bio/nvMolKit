@@ -89,6 +89,7 @@ def make_fragmented_mol():
     mol = Chem.AddHs(Chem.MolFromSmiles("CC.CC"))
     params = ETKDGv3()
     params.useRandomCoords = True
+    params.randomSeed = 42
     rdDistGeom.EmbedMultipleConfs(mol, numConfs=1, params=params)
     conf = mol.GetConformer()
     fragments = Chem.GetMolFrags(mol)

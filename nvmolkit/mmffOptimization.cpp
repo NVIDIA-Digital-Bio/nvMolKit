@@ -75,9 +75,8 @@ BOOST_PYTHON_MODULE(_mmffOptimization) {
     "MMFFOptimizeMoleculesConfs",
     +[](const boost::python::list&            molecules,
         int                                   maxIters,
-        const boost::python::object&          propertiesObj,
+        const boost::python::list&            propertiesList,
         const nvMolKit::BatchHardwareOptions& hardwareOptions) -> boost::python::list {
-      // Convert Python list to std::vector<RDKit::ROMol*>
       std::vector<RDKit::ROMol*> molsVec;
       molsVec.reserve(len(molecules));
 
@@ -89,22 +88,15 @@ BOOST_PYTHON_MODULE(_mmffOptimization) {
         molsVec.push_back(mol);
       }
 
-      std::vector<std::vector<double>>            result;
-      boost::python::extract<boost::python::list> propertiesListExtract(propertiesObj);
-      if (propertiesListExtract.check()) {
-        const auto properties = extractMMFFPropertiesList(propertiesListExtract(), static_cast<int>(molsVec.size()));
-        result = nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molsVec, maxIters, properties, hardwareOptions);
-      } else {
-        const auto properties = extractMMFFProperties(propertiesObj);
-        result = nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molsVec, maxIters, properties, hardwareOptions);
-      }
+      const auto properties = extractMMFFPropertiesList(propertiesList, static_cast<int>(molsVec.size()));
+      const auto result = nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molsVec, maxIters, properties, hardwareOptions);
 
       // Convert result back to Python list of lists
       return vectorOfVectorsToList(result);
     },
     (boost::python::arg("molecules"),
      boost::python::arg("maxIters")        = 200,
-     boost::python::arg("properties")      = boost::python::object(),
+     boost::python::arg("properties")      = boost::python::list(),
      boost::python::arg("hardwareOptions") = nvMolKit::BatchHardwareOptions()),
     "Optimize conformers for multiple molecules using MMFF force field.\n"
     "\n"
