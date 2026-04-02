@@ -110,7 +110,9 @@ std::vector<std::vector<double>> runNvMolKit(std::vector<RDKit::ROMol*>& molsPtr
                           ", batch_size=" + std::to_string(batchSize) +
                           ", num_concurrent_batches=" + std::to_string(batchesPerGpu) + ", backend=" + backendStr;
   ankerl::nanobench::Bench().epochIterations(1).epochs(1).run(benchName, [&]() {
-    energies = nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molsPtrs, maxIters, 100.0, perfOptions, backend);
+    nvMolKit::MMFFProperties properties;
+    properties.nonBondedThreshold = 100.0;
+    energies = nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molsPtrs, maxIters, properties, perfOptions, backend);
   });
   return energies;
 }

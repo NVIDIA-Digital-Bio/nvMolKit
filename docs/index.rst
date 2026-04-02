@@ -123,6 +123,8 @@ nvMolKit currently supports the following features:
     * Supports SMILES and recursive SMARTS-based query molecules via RDKit
     * Does not yet support chirality-aware matching, enhanced stereochemistry, or other advanced RDKit ``SubstructMatchParameters`` options
 
+* **Conformer RMSD**: GPU-accelerated pairwise RMSD matrix computation for conformer ensembles
+
 .. _async-results:
 
 Asynchronous GPU Results

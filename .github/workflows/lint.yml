@@ -39,6 +39,23 @@ jobs:
           set -xeuo pipefail
           bash admin/run_clang_format.sh -d
 
+  copyright-check:
+    name: copyright-check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source tree
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run copyright header check
+        shell: bash
+        run: |
+          set -xeuo pipefail
+          bash admin/apply_copyright.sh -d
+
   cmake-format-lint:
     name: cmake-format-lint
     runs-on: ubuntu-24.04
