@@ -17,6 +17,7 @@
 
 #include <boost/python.hpp>
 #include <boost/python/manage_new_object.hpp>
+#include <boost/python/numpy.hpp>
 
 #include "array_helpers.h"
 #include "nvtx.h"
@@ -26,6 +27,9 @@
 namespace {
 
 using namespace boost::python;
+namespace numpy = boost::python::numpy;
+
+using CpuTFDResults = std::vector<std::vector<double>>;
 
 std::vector<const RDKit::ROMol*> listToMolVector(const boost::python::list& mols) {
   std::vector<const RDKit::ROMol*> molsVec;
@@ -44,18 +48,6 @@ boost::python::list intVectorToList(const std::vector<int>& vec) {
   boost::python::list result;
   for (const auto& value : vec) {
     result.append(value);
-  }
-  return result;
-}
-
-boost::python::list nestedVectorToList(const std::vector<std::vector<double>>& vec) {
-  boost::python::list result;
-  for (const auto& inner : vec) {
-    boost::python::list innerList;
-    for (const auto& value : inner) {
-      innerList.append(value);
-    }
-    result.append(innerList);
   }
   return result;
 }
@@ -98,21 +90,48 @@ nvMolKit::TFDGpuGenerator& getGpuGenerator() {
 }  // namespace
 
 BOOST_PYTHON_MODULE(_TFD) {
-  // CPU path: returns nested Python lists
+  numpy::initialize();
+
+  // CPU path: returns flat numpy array + offsets (avoids per-element Python object creation)
   def(
-    "GetTFDMatricesCpu",
+    "GetTFDMatricesCpuBuffer",
     +[](const boost::python::list& mols,
         bool                       useWeights,
         const std::string&         maxDev,
         int                        symmRadius,
-        bool                       ignoreColinearBonds) {
-      auto molsVec                      = listToMolVector(mols);
-      auto options                      = buildOptions(useWeights, maxDev, symmRadius, ignoreColinearBonds);
-      options.backend                   = nvMolKit::TFDComputeBackend::CPU;
-      auto                      results = getCpuGenerator().GetTFDMatrices(molsVec, options);
-      nvMolKit::ScopedNvtxRange range("CPU: C++ to Python list (" + std::to_string(results.size()) + " mols)",
-                                      nvMolKit::NvtxColor::kGreen);
-      return nestedVectorToList(results);
+        bool                       ignoreColinearBonds) -> boost::python::object {
+      auto molsVec    = listToMolVector(mols);
+      auto options    = buildOptions(useWeights, maxDev, symmRadius, ignoreColinearBonds);
+      options.backend = nvMolKit::TFDComputeBackend::CPU;
+      auto results    = getCpuGenerator().GetTFDMatrices(molsVec, options);
+
+      nvMolKit::ScopedNvtxRange range("CPU: wrap as numpy arrays", nvMolKit::NvtxColor::kGreen);
+
+      // Move results to heap so PyCapsule can own the memory
+      auto* owned = new CpuTFDResults(std::move(results));
+
+      auto deleter = [](PyObject* cap) {
+        delete reinterpret_cast<CpuTFDResults*>(PyCapsule_GetPointer(cap, "nvmolkit.cpu_tfd"));
+      };
+      PyObject* cap = PyCapsule_New(static_cast<void*>(owned), "nvmolkit.cpu_tfd", deleter);
+      if (cap == nullptr) {
+        delete owned;
+        throw std::runtime_error("Failed to create PyCapsule for CPU TFD results");
+      }
+      object owner{handle<>(cap)};
+
+      // Create per-molecule numpy array views (zero-copy, each backed by the capsule)
+      const Py_intptr_t   stride = static_cast<Py_intptr_t>(sizeof(double));
+      boost::python::list arrays;
+      for (auto& vec : *owned) {
+        const Py_intptr_t shape = static_cast<Py_intptr_t>(vec.size());
+        arrays.append(numpy::from_data(vec.data(),
+                                       numpy::dtype::get_builtin<double>(),
+                                       make_tuple(shape),
+                                       make_tuple(stride),
+                                       owner));
+      }
+      return arrays;
     },
     (arg("mols"),
      arg("useWeights")          = true,
@@ -135,13 +154,12 @@ BOOST_PYTHON_MODULE(_TFD) {
       auto gpuResult = getGpuGenerator().GetTFDMatricesGpuBuffer(molsVec, options);
 
       nvMolKit::ScopedNvtxRange range("GPU: C++ to Python tuple", nvMolKit::NvtxColor::kYellow);
-      boost::python::list       outputStarts    = intVectorToList(gpuResult.tfdOutputStarts);
-      boost::python::list       conformerCounts = intVectorToList(gpuResult.conformerCounts);
+      boost::python::list       outputStarts = intVectorToList(gpuResult.tfdOutputStarts);
 
       size_t totalSize = gpuResult.tfdValues.size();
       auto*  pyArray   = nvMolKit::makePyArray(gpuResult.tfdValues, boost::python::make_tuple(totalSize));
 
-      return boost::python::make_tuple(toOwnedPyArray(pyArray), outputStarts, conformerCounts);
+      return boost::python::make_tuple(toOwnedPyArray(pyArray), outputStarts);
     },
     (arg("mols"),
      arg("useWeights")          = true,

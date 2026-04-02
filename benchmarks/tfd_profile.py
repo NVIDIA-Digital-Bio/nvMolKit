@@ -107,7 +107,7 @@ def run_config(mols, backend, num_runs, label):
     for run in range(num_runs):
         if backend in ("cpu", "both"):
             with nvtx.annotate(f"{label} CPU run {run}", color="cyan"):
-                nvmol_tfd.GetTFDMatrices(mols, useWeights=True, maxDev="equal", backend="cpu")
+                nvmol_tfd.GetTFDMatrices(mols, useWeights=True, maxDev="equal", backend="cpu", return_type="numpy")
 
         if backend in ("gpu", "both"):
             with nvtx.annotate(f"{label} GPU run {run}", color="orange"):
