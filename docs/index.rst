@@ -125,6 +125,10 @@ nvMolKit currently supports the following features:
 
 * **Conformer RMSD**: GPU-accelerated pairwise RMSD matrix computation for conformer ensembles
 
+* **Torsion Fingerprint Deviation (TFD)**: GPU-accelerated TFD computation for comparing conformer geometry
+    * Batch processing of multiple molecules with all-pairs conformer comparison
+    * CPU and GPU backends with automatic backend selection
+
 .. _async-results:
 
 Asynchronous GPU Results
