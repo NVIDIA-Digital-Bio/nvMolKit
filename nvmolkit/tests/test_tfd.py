@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -209,7 +209,6 @@ class TestGpuResidentOutput:
             assert len(gpu_list) == len(tensor_list)
             for l, t in zip(gpu_list, tensor_list):
                 assert abs(l - t) < 1e-4
-
 
     def test_return_type_numpy(self, multiple_mols_with_conformers):
         """Test return_type='numpy' returns correct numpy arrays."""

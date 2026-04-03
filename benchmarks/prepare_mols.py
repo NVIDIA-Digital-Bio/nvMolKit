@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -160,7 +160,7 @@ def main():
             pickle.dump(mols, f, protocol=pickle.HIGHEST_PROTOCOL)
 
         file_size_mb = os.path.getsize(out_path) / (1024 * 1024)
-        print(f"  {len(mols)} molecules, avg {sum(actual_confs)/len(actual_confs):.1f} conformers")
+        print(f"  {len(mols)} molecules, avg {sum(actual_confs) / len(actual_confs):.1f} conformers")
         print(f"  Total TFD pairs: {total_pairs}")
         print(f"  Time: {elapsed:.1f}s")
         print(f"  Saved: {out_path} ({file_size_mb:.1f} MB)")
