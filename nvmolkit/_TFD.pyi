@@ -3,28 +3,20 @@
 
 from typing import Any, List, Tuple
 
+import numpy as np
 from rdkit.Chem import Mol
 
-def GetTFDMatrix(
-    mol: Mol,
-    useWeights: bool = True,
-    maxDev: str = "equal",
-    symmRadius: int = 2,
-    ignoreColinearBonds: bool = True,
-    backend: str = "gpu",
-) -> List[float]: ...
-def GetTFDMatrices(
+def GetTFDMatricesCpuBuffer(
     mols: List[Mol],
     useWeights: bool = True,
     maxDev: str = "equal",
     symmRadius: int = 2,
     ignoreColinearBonds: bool = True,
-    backend: str = "gpu",
-) -> List[List[float]]: ...
+) -> List[np.ndarray]: ...
 def GetTFDMatricesGpuBuffer(
     mols: List[Mol],
     useWeights: bool = True,
     maxDev: str = "equal",
     symmRadius: int = 2,
     ignoreColinearBonds: bool = True,
-) -> Tuple[Any, List[int], List[int]]: ...
+) -> Tuple[Any, List[int]]: ...

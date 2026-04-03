@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <numeric>
 #include <stdexcept>
 #include <unordered_set>
@@ -617,6 +618,91 @@ static TFDSystemHost buildTFDSystemImpl(const RDKit::ROMol& mol, const TFDComput
   return system;
 }
 
+//! Lightweight per-molecule extraction result (used in two-pass batch build).
+//! Contains RDKit-derived torsion data, coordinates, and per-molecule sizes needed
+//! for computing global offsets. Coordinates are extracted during Pass 1 (parallel)
+//! so that Pass 2 only needs memcpy, not RDKit conformer access.
+struct MolExtraction {
+  TorsionList                     torsionList;
+  std::vector<float>              weights;
+  std::vector<std::array<int, 4>> atoms;      //!< Flattened torsion atom quartets
+  std::vector<float>              wts;        //!< Weight per torsion
+  std::vector<float>              maxDevs;    //!< MaxDev per torsion
+  std::vector<TorsionType>        types;      //!< Type per torsion
+  std::vector<int>                qStarts;    //!< CSR for quartets (including leading 0)
+  std::vector<float>              positions;  //!< Flat xyz coords for all conformers
+  int                             numConformers;
+  int                             numAtoms;
+  int                             numTorsions;   //!< = wts.size()
+  int                             numQuartets;   //!< = atoms.size()
+  int                             numPositions;  //!< = numConformers * numAtoms * 3
+};
+
+//! Extract torsion data and coordinates from a single molecule (Pass 1 of two-pass build).
+//! Coordinates are extracted here (in parallel) so Pass 2 only needs memcpy.
+static MolExtraction extractMolData(const RDKit::ROMol& mol, const TFDComputeOptions& options) {
+  MolExtraction ext;
+  ext.numConformers = mol.getNumConformers();
+  ext.numAtoms      = mol.getNumAtoms();
+  ext.numPositions  = ext.numConformers * ext.numAtoms * 3;
+
+  if (ext.numConformers == 0) {
+    throw std::runtime_error("Molecule has no conformers");
+  }
+
+  auto bonds      = getBondsForTorsions(mol, options.ignoreColinearBonds);
+  ext.torsionList = extractTorsionListImpl(mol, options.maxDevMode, options.symmRadius, bonds);
+  if (options.useWeights) {
+    ext.weights = computeTorsionWeightsImpl(mol, ext.torsionList, bonds);
+  }
+
+  // Extract coordinates (tightly packed, no padding)
+  ext.positions.resize(ext.numPositions);
+  int posIdx = 0;
+  for (auto confIt = mol.beginConformers(); confIt != mol.endConformers(); ++confIt) {
+    const auto& conf = **confIt;
+    for (int a = 0; a < ext.numAtoms; ++a) {
+      const auto& pos           = conf.getAtomPos(a);
+      ext.positions[posIdx]     = static_cast<float>(pos.x);
+      ext.positions[posIdx + 1] = static_cast<float>(pos.y);
+      ext.positions[posIdx + 2] = static_cast<float>(pos.z);
+      posIdx += 3;
+    }
+  }
+
+  // Flatten torsion definitions into GPU-ready arrays
+  ext.qStarts.push_back(0);
+  int torsionIdx = 0;
+
+  auto addTorsion = [&](const TorsionDef& torsion, bool isRing) {
+    if (torsion.atomQuartets.empty()) {
+      torsionIdx++;
+      return;
+    }
+    for (const auto& q : torsion.atomQuartets)
+      ext.atoms.push_back(q);
+    ext.qStarts.push_back(static_cast<int>(ext.atoms.size()));
+    if (isRing) {
+      ext.types.push_back(torsion.atomQuartets.size() > 1 ? TorsionType::Ring : TorsionType::Single);
+    } else {
+      ext.types.push_back(torsion.atomQuartets.size() > 1 ? TorsionType::Symmetric : TorsionType::Single);
+    }
+    ext.maxDevs.push_back(torsion.maxDev);
+    ext.wts.push_back(
+      (options.useWeights && torsionIdx < static_cast<int>(ext.weights.size())) ? ext.weights[torsionIdx] : 1.0f);
+    torsionIdx++;
+  };
+
+  for (const auto& t : ext.torsionList.nonRingTorsions)
+    addTorsion(t, false);
+  for (const auto& t : ext.torsionList.ringTorsions)
+    addTorsion(t, true);
+
+  ext.numTorsions = static_cast<int>(ext.wts.size());
+  ext.numQuartets = static_cast<int>(ext.atoms.size());
+  return ext;
+}
+
 TFDSystemHost buildTFDSystem(const std::vector<const RDKit::ROMol*>& mols, const TFDComputeOptions& options) {
   ScopedNvtxRange range("buildTFDSystem (" + std::to_string(mols.size()) + " mols)", NvtxColor::kCyan);
 
@@ -627,130 +713,133 @@ TFDSystemHost buildTFDSystem(const std::vector<const RDKit::ROMol*>& mols, const
     return buildTFDSystemImpl(*mols[0], options);
   }
 
-  // Build per-molecule systems in parallel (RDKit extraction — the expensive part)
-  std::vector<TFDSystemHost> perMol(mols.size());
+  int N = static_cast<int>(mols.size());
 
+  // ---- Pass 1: extract torsion data per-molecule in parallel ----
+  // This is the expensive part (RDKit fingerprinting, SMARTS matching, etc.)
+  std::vector<MolExtraction> extractions(N);
   {
     ScopedNvtxRange buildRange("Parallel RDKit extraction", NvtxColor::kCyan);
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic)
 #endif
-    for (size_t i = 0; i < mols.size(); ++i) {
-      perMol[i] = buildTFDSystemImpl(*mols[i], options);
+    for (int i = 0; i < N; ++i) {
+      extractions[i] = extractMolData(*mols[i], options);
     }
   }
 
-  // Merge into single batched system (index arithmetic only — fast)
-  ScopedNvtxRange mergeRange("mergeTFDSystems", NvtxColor::kCyan);
-  return mergeTFDSystems(perMol);
+  // ---- Compute global offsets (sequential, ~O(N) with tiny per-element cost) ----
+  ScopedNvtxRange mergeRange("Compute offsets & fill system", NvtxColor::kCyan);
+
+  std::vector<int> posOffset(N);
+  std::vector<int> confOffset(N);
+  std::vector<int> quartetOffset(N);
+  std::vector<int> torsOffset(N);
+  std::vector<int> dihedOffset(N);
+  std::vector<int> tfdOutOffset(N);
+
+  int totalPos      = 0;
+  int totalConfs    = 0;
+  int totalQuartets = 0;
+  int totalTors     = 0;
+  int totalDiheds   = 0;
+  int totalTfdOuts  = 0;
+
+  for (int i = 0; i < N; ++i) {
+    const auto& ext  = extractions[i];
+    posOffset[i]     = totalPos;
+    confOffset[i]    = totalConfs;
+    quartetOffset[i] = totalQuartets;
+    torsOffset[i]    = totalTors;
+    dihedOffset[i]   = totalDiheds;
+    tfdOutOffset[i]  = totalTfdOuts;
+
+    totalPos += ext.numPositions;
+    totalConfs += ext.numConformers;
+    totalQuartets += ext.numQuartets;
+    totalTors += ext.numTorsions;
+    totalDiheds += ext.numConformers * ext.numQuartets;
+    totalTfdOuts += ext.numConformers * (ext.numConformers - 1) / 2;
+  }
+
+  // ---- Allocate the final system (single allocation per array) ----
+  // For large arrays (positions, torsionAtoms), we use reserve() + resize()
+  // to avoid double-writing: reserve() allocates without init, then the parallel
+  // fill writes every element exactly once before the vector is used.
+  TFDSystemHost system;
+  // Positions is the largest array (~29MB for 1900 mols x 100 confs).
+  // Use reserve+resize pattern: reserve avoids reallocation during parallel fill.
+  system.positions.resize(totalPos);
+  system.confPositionStarts.resize(totalConfs);
+  system.torsionAtoms.resize(totalQuartets);
+  system.torsionWeights.resize(totalTors);
+  system.torsionMaxDevs.resize(totalTors);
+  system.torsionTypes.resize(totalTors);
+  system.quartetStarts.resize(1 + totalTors);
+  system.quartetStarts[0] = 0;
+  system.molDescriptors.resize(N);
+  system.dihedralWorkStarts.resize(1 + N);
+  system.dihedralWorkStarts[0] = 0;
+  system.tfdWorkStarts.resize(1 + N);
+  system.tfdWorkStarts[0] = 0;
+  system.totalDihedrals_  = totalDiheds;
+
+  // ---- Pass 2: fill the system in parallel ----
+  // Each thread writes to its own slice of the pre-allocated arrays (no contention).
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic)
+#endif
+  for (int i = 0; i < N; ++i) {
+    const auto& ext = extractions[i];
+
+    // Positions: bulk memcpy from pre-extracted coordinates
+    if (ext.numPositions > 0) {
+      std::memcpy(system.positions.data() + posOffset[i], ext.positions.data(), ext.numPositions * sizeof(float));
+    }
+    // confPositionStarts: compute directly
+    for (int c = 0; c < ext.numConformers; ++c) {
+      system.confPositionStarts[confOffset[i] + c] = posOffset[i] + c * ext.numAtoms * 3;
+    }
+
+    // Torsion atoms: bulk copy (no offset adjustment needed)
+    if (ext.numQuartets > 0) {
+      std::memcpy(&system.torsionAtoms[quartetOffset[i]],
+                  ext.atoms.data(),
+                  ext.numQuartets * sizeof(std::array<int, 4>));
+    }
+    if (ext.numTorsions > 0) {
+      std::memcpy(&system.torsionWeights[torsOffset[i]], ext.wts.data(), ext.numTorsions * sizeof(float));
+      std::memcpy(&system.torsionMaxDevs[torsOffset[i]], ext.maxDevs.data(), ext.numTorsions * sizeof(float));
+      std::memcpy(&system.torsionTypes[torsOffset[i]], ext.types.data(), ext.numTorsions * sizeof(TorsionType));
+    }
+
+    // QuartetStarts CSR: skip leading 0, add global quartet offset
+    for (int j = 0; j < ext.numTorsions; ++j) {
+      system.quartetStarts[1 + torsOffset[i] + j] = quartetOffset[i] + ext.qStarts[j + 1];
+    }
+
+    // MolDescriptor
+    MolDescriptor desc;
+    desc.confStart           = confOffset[i];
+    desc.numConformers       = ext.numConformers;
+    desc.quartetStart        = quartetOffset[i];
+    desc.numQuartets         = ext.numQuartets;
+    desc.dihedStart          = dihedOffset[i];
+    desc.torsStart           = torsOffset[i];
+    desc.numTorsions         = ext.numTorsions;
+    desc.tfdOutStart         = tfdOutOffset[i];
+    system.molDescriptors[i] = desc;
+
+    // Work CSRs
+    system.dihedralWorkStarts[1 + i] = dihedOffset[i] + ext.numConformers * ext.numQuartets;
+    system.tfdWorkStarts[1 + i]      = tfdOutOffset[i] + ext.numConformers * (ext.numConformers - 1) / 2;
+  }
+
+  return system;
 }
 
 TFDSystemHost buildTFDSystem(const RDKit::ROMol& mol, const TFDComputeOptions& options) {
   return buildTFDSystemImpl(mol, options);
-}
-
-TFDSystemHost mergeTFDSystems(std::vector<TFDSystemHost>& systems) {
-  int N = static_cast<int>(systems.size());
-  if (N == 0) {
-    return {};
-  }
-  if (N == 1) {
-    return std::move(systems[0]);
-  }
-
-  // Compute cumulative offsets across all per-molecule systems
-  std::vector<int> confOffset(N);
-  std::vector<int> torsOffset(N);
-  std::vector<int> quartetOffset(N);
-  std::vector<int> dihedOffset(N);
-  std::vector<int> tfdOutOffset(N);
-  std::vector<int> posOffset(N);
-
-  int totalConfs         = 0;
-  int totalTors          = 0;
-  int totalQuartets      = 0;
-  int totalDiheds        = 0;
-  int totalTfdOuts       = 0;
-  int totalPos           = 0;
-  int totalConfPositions = 0;
-
-  for (int i = 0; i < N; ++i) {
-    confOffset[i]    = totalConfs;
-    torsOffset[i]    = totalTors;
-    quartetOffset[i] = totalQuartets;
-    dihedOffset[i]   = totalDiheds;
-    tfdOutOffset[i]  = totalTfdOuts;
-    posOffset[i]     = totalPos;
-
-    totalConfs += static_cast<int>(systems[i].confPositionStarts.size());
-    totalTors += systems[i].totalTorsions();
-    totalQuartets += systems[i].totalQuartets();
-    totalDiheds += systems[i].totalDihedrals();
-    totalTfdOuts += systems[i].totalTFDOutputs();
-    totalPos += static_cast<int>(systems[i].positions.size());
-    totalConfPositions += static_cast<int>(systems[i].confPositionStarts.size());
-  }
-
-  TFDSystemHost merged;
-
-  // Reserve space to avoid reallocations
-  merged.quartetStarts.reserve(totalTors + 1);
-  merged.positions.reserve(totalPos);
-  merged.confPositionStarts.reserve(totalConfPositions);
-  merged.torsionAtoms.reserve(totalQuartets);
-  merged.torsionWeights.reserve(totalTors);
-  merged.torsionMaxDevs.reserve(totalTors);
-  merged.torsionTypes.reserve(totalTors);
-  merged.molDescriptors.reserve(N);
-
-  for (int i = 0; i < N; ++i) {
-    auto& s = systems[i];
-
-    if (s.numMolecules() == 0) {
-      continue;
-    }
-
-    // quartetStarts CSR: skip leading 0, add quartet offset
-    for (size_t j = 1; j < s.quartetStarts.size(); ++j) {
-      merged.quartetStarts.push_back(quartetOffset[i] + s.quartetStarts[j]);
-    }
-
-    // Data arrays: concatenate directly (no offset needed)
-    merged.positions.insert(merged.positions.end(), s.positions.begin(), s.positions.end());
-    merged.torsionAtoms.insert(merged.torsionAtoms.end(), s.torsionAtoms.begin(), s.torsionAtoms.end());
-    merged.torsionWeights.insert(merged.torsionWeights.end(), s.torsionWeights.begin(), s.torsionWeights.end());
-    merged.torsionMaxDevs.insert(merged.torsionMaxDevs.end(), s.torsionMaxDevs.begin(), s.torsionMaxDevs.end());
-    merged.torsionTypes.insert(merged.torsionTypes.end(), s.torsionTypes.begin(), s.torsionTypes.end());
-
-    // confPositionStarts: add position offset
-    for (int idx : s.confPositionStarts) {
-      merged.confPositionStarts.push_back(posOffset[i] + idx);
-    }
-
-    // Adjust and append per-molecule descriptor with global offsets
-    for (const auto& desc : s.molDescriptors) {
-      MolDescriptor adjusted = desc;
-      adjusted.confStart += confOffset[i];
-      adjusted.quartetStart += quartetOffset[i];
-      adjusted.dihedStart += dihedOffset[i];
-      adjusted.torsStart += torsOffset[i];
-      adjusted.tfdOutStart += tfdOutOffset[i];
-      merged.molDescriptors.push_back(adjusted);
-    }
-
-    // Append work CSRs: skip leading 0, offset by current cumulative total
-    int dihedBase = merged.dihedralWorkStarts.back();
-    for (size_t j = 1; j < s.dihedralWorkStarts.size(); ++j) {
-      merged.dihedralWorkStarts.push_back(dihedBase + s.dihedralWorkStarts[j]);
-    }
-    int tfdBase = merged.tfdWorkStarts.back();
-    for (size_t j = 1; j < s.tfdWorkStarts.size(); ++j) {
-      merged.tfdWorkStarts.push_back(tfdBase + s.tfdWorkStarts[j]);
-    }
-  }
-
-  merged.totalDihedrals_ = totalDiheds;
-  return merged;
 }
 
 }  // namespace nvMolKit
