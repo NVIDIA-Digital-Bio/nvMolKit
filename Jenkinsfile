@@ -1,10 +1,8 @@
 @Library('blossom-github-lib@master')
 import ipp.blossom.*
 
-// GPU selection (Confluence "specify GPU" pattern): set resources nvidia.com/gpu and
-// nodeSelector nvidia.com/gpu_type (or board_name / driver_version / product_name per device plugin).
-// Note: restartPolicy and backoffLimit in some wiki snippets sit next to container fields; in the
-// Kubernetes API they are Pod/Job fields, not part of a Container spec—keep them out of containers[].
+// Request any linux node with a GPU; no gpu_type selector so scheduling isn't
+// blocked by tainted nodes. restartPolicy/backoffLimit are Pod/Job fields, not container fields.
 podTemplate(cloud: 'blsm-prod-cloud', yaml: """
 spec:
   containers:
@@ -20,9 +18,9 @@ spec:
     tty: true
   nodeSelector:
     kubernetes.io/os: linux
-    nvidia.com/gpu_type: A10
 """) {
     node(POD_LABEL) {
+        timeout(time: 90, unit: 'MINUTES') {
         def githubHelper
         stage('Get Token') {
             withCredentials([usernamePassword(credentialsId: 'github-token', passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')]) {
@@ -35,9 +33,7 @@ spec:
             stageName = 'Verify GPU'
             stage(stageName) {
                 container('cuda') {
-                    def gpuInfo = sh(script: 'nvidia-smi', returnStdout: true).trim()
-                    echo gpuInfo
-                    sh 'nvidia-smi | grep -Ei "NVIDIA A10([^G]|$)|Tesla A10([^G]|$)"'
+                    sh 'nvidia-smi'
                 }
             }
 
@@ -93,6 +89,7 @@ spec:
             println ex
             githubHelper.uploadLogs(this, env.JOB_NAME, env.BUILD_NUMBER, null, null)
             githubHelper.updateCommitStatus("$BUILD_URL", "$stageName Failed", GitHubCommitState.FAILURE)
+        }
         }
     }
 }
