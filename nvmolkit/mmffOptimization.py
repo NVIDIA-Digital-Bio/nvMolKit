@@ -19,21 +19,26 @@ This module provides GPU-accelerated implementations of MMFF (Molecular Mechanic
 optimization for multiple molecules and conformers using CUDA and OpenMP.
 """
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from rdkit.Chem import AllChem
 
 if TYPE_CHECKING:
     from rdkit.Chem import Mol
+    from rdkit.ForceField.rdForceField import MMFFMolProperties
 
 from nvmolkit import _mmffOptimization
+from nvmolkit._mmff_bridge import default_rdkit_mmff_properties, make_internal_mmff_properties
 from nvmolkit.types import HardwareOptions
 
 
 def MMFFOptimizeMoleculesConfs(
     molecules: list["Mol"],
     maxIters: int = 200,
-    nonBondedThreshold: float = 100.0,
+    properties: "MMFFMolProperties | Sequence[MMFFMolProperties | None] | None" = None,
+    nonBondedThreshold: float | Sequence[float] = 100.0,
+    ignoreInterfragInteractions: bool | Sequence[bool] = True,
     hardwareOptions: HardwareOptions | None = None,
 ) -> list[list[float]]:
     """Optimize conformers for multiple molecules using MMFF force field with BFGS minimization.
@@ -46,7 +51,12 @@ def MMFFOptimizeMoleculesConfs(
         molecules: List of RDKit molecules to optimize. Each molecule should have
                   conformers already generated.
         maxIters: Maximum number of BFGS optimization iterations (default: 200)
-        nonBondedThreshold: Radius threshold for non-bonded interactions in Ångströms (default: 100.0)
+        properties: RDKit ``MMFFMolProperties`` object, a per-molecule sequence
+            of those objects, or ``None`` to use default MMFF94 settings.
+        nonBondedThreshold: Radius threshold used to exclude long-range
+            non-bonded interactions, either as a scalar or per-molecule sequence.
+        ignoreInterfragInteractions: If ``True``, omit non-bonded terms between
+            fragments. May also be provided as a per-molecule sequence.
         hardwareOptions: Configures CPU and GPU batching, threading, and device selection. Will attempt to use reasonable defaults if not set.
 
     Returns:
@@ -117,8 +127,37 @@ def MMFFOptimizeMoleculesConfs(
             {"none": none_indices, "no_params": no_params_indices},
         )
 
+    def _normalize_scalar_or_list(value, name: str):
+        if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+            if len(value) != len(molecules):
+                raise ValueError(f"Expected {len(molecules)} values for {name}, got {len(value)}")
+            return list(value)
+        return [value for _ in molecules]
+
+    def _normalize_properties(value):
+        if value is None:
+            return [default_rdkit_mmff_properties(mol) for mol in molecules]
+        if isinstance(value, Sequence) and not hasattr(value, "SetMMFFVariant"):
+            if len(value) != len(molecules):
+                raise ValueError(f"Expected {len(molecules)} MMFFMolProperties objects, got {len(value)}")
+            return [
+                default_rdkit_mmff_properties(mol) if props is None else props for mol, props in zip(molecules, value)
+            ]
+        return [value for _ in molecules]
+
     # Call the C++ implementation
     if hardwareOptions is None:
         hardwareOptions = HardwareOptions()
     native_options = hardwareOptions._as_native()
-    return _mmffOptimization.MMFFOptimizeMoleculesConfs(molecules, maxIters, nonBondedThreshold, native_options)
+    properties_list = _normalize_properties(properties)
+    thresholds = _normalize_scalar_or_list(nonBondedThreshold, "nonBondedThreshold")
+    interfrag_flags = _normalize_scalar_or_list(ignoreInterfragInteractions, "ignoreInterfragInteractions")
+    native_properties = [
+        make_internal_mmff_properties(
+            props,
+            non_bonded_threshold=float(threshold),
+            ignore_interfrag_interactions=bool(ignore_interfrag),
+        )
+        for props, threshold, ignore_interfrag in zip(properties_list, thresholds, interfrag_flags)
+    ]
+    return _mmffOptimization.MMFFOptimizeMoleculesConfs(molecules, maxIters, native_properties, native_options)
