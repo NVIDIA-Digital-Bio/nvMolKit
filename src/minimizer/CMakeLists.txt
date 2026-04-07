@@ -22,14 +22,21 @@ target_link_libraries(
           cub_helpers cccl_interface)
 target_include_directories(bfgs PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_library(bfgs_common bfgs_common.cpp)
+target_link_libraries(
+  bfgs_common
+  PUBLIC host_vector device
+  PRIVATE ${RDKit_LIBS} OpenMP::OpenMP_CXX)
+target_include_directories(bfgs_common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
 add_library(bfgs_mmff bfgs_mmff.cpp)
 target_link_libraries(
   bfgs_mmff
   PUBLIC bfgs
   PRIVATE ${RDKit_LIBS}
+          bfgs_common
           mmff_batched_forcefield
           rdkit_mmff_flattened
-          device
           device_vector
           OpenMP::OpenMP_CXX
           openmp_helpers
@@ -42,9 +49,9 @@ target_link_libraries(
   bfgs_uff
   PUBLIC bfgs
   PRIVATE ${RDKit_LIBS}
+          bfgs_common
           uff_batched_forcefield
           rdkit_uff_flattened
-          device
           device_vector
           OpenMP::OpenMP_CXX
           openmp_helpers

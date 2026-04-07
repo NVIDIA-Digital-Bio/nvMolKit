@@ -65,6 +65,7 @@ def make_fragmented_mol():
     mol = Chem.AddHs(Chem.MolFromSmiles("CC.CC"))
     params = rdDistGeom.ETKDGv3()
     params.useRandomCoords = True
+    params.randomSeed = 42
     rdDistGeom.EmbedMultipleConfs(mol, numConfs=1, params=params)
     conf = mol.GetConformer()
     fragments = Chem.GetMolFrags(mol)
@@ -172,7 +173,7 @@ def test_uff_optimization_threshold_and_interfrag_vs_rdkit():
     rdkit_energies = [
         calculate_rdkit_uff_energies(
             [mol],
-            maxIters=200,
+            maxIters=1000,
             vdwThreshold=threshold,
             ignoreInterfragInteractions=ignore,
         )[0]
@@ -180,7 +181,7 @@ def test_uff_optimization_threshold_and_interfrag_vs_rdkit():
     ]
     nvmolkit_energies = nvmolkit_uff.UFFOptimizeMoleculesConfs(
         nvmolkit_mols,
-        maxIters=200,
+        maxIters=1000,
         vdwThreshold=thresholds,
         ignoreInterfragInteractions=ignore_interfrag,
     )

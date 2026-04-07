@@ -18,43 +18,17 @@
 #include <GraphMol/ROMol.h>
 #include <omp.h>
 
-#include <numeric>
 #include <vector>
 
+#include "bfgs_common.h"
 #include "bfgs_minimize.h"
-#include "device.h"
 #include "ff_utils.h"
-#include "host_vector.h"
 #include "nvtx.h"
 #include "openmp_helpers.h"
 #include "uff_batched_forcefield.h"
 #include "uff_flattened_builder.h"
 
 namespace nvMolKit::UFF {
-
-namespace {
-
-struct ThreadLocalBuffers {
-  PinnedHostVector<double> positions;
-  PinnedHostVector<double> energies;
-  PinnedHostVector<double> initialPositions;
-
-  void ensureCapacity(const size_t positionsSize, const size_t energiesSize) {
-    constexpr double extraCapacityFactor = 1.3;
-    const auto       newSize = static_cast<size_t>(static_cast<double>(positionsSize) * extraCapacityFactor);
-    if (positions.size() < positionsSize) {
-      positions.resize(newSize);
-    }
-    if (energies.size() < energiesSize) {
-      energies.resize(static_cast<size_t>(static_cast<double>(energiesSize) * extraCapacityFactor));
-    }
-    if (initialPositions.size() < positionsSize) {
-      initialPositions.resize(newSize);
-    }
-  }
-};
-
-}  // namespace
 
 std::vector<std::vector<double>> UFFOptimizeMoleculesConfsBfgs(std::vector<RDKit::ROMol*>& mols,
                                                                const int                   maxIters,
@@ -70,87 +44,43 @@ std::vector<std::vector<double>> UFFOptimizeMoleculesConfsBfgs(std::vector<RDKit
   if (ignoreInterfragInteractions.size() != mols.size()) {
     throw std::invalid_argument("Expected one interfragment interaction flag per molecule");
   }
-  for (size_t i = 0; i < mols.size(); ++i) {
-    if (mols[i] == nullptr) {
-      throw std::invalid_argument("Invalid molecule pointer at index " + std::to_string(i));
-    }
-  }
 
-  const size_t batchSize = perfOptions.batchSize == -1 ? 500 : perfOptions.batchSize;
-
-  std::vector<int> gpuIds = perfOptions.gpuIds;
-  if (gpuIds.empty()) {
-    const int numDevices = countCudaDevices();
-    if (numDevices == 0) {
-      throw std::runtime_error("No CUDA devices found for UFF relaxation");
-    }
-    gpuIds.resize(numDevices);
-    std::iota(gpuIds.begin(), gpuIds.end(), 0);
-  }
-  const int batchesPerGpu = perfOptions.batchesPerGpu == -1 ? 4 : perfOptions.batchesPerGpu;
-  const int numThreads =
-    perfOptions.batchesPerGpu > 0 ? batchesPerGpu * static_cast<int>(gpuIds.size()) : omp_get_max_threads();
-
-  std::vector<std::vector<double>> moleculeEnergies(mols.size());
-  struct ConformerInfo {
-    RDKit::ROMol*     mol;
-    size_t            molIdx;
-    RDKit::Conformer* conformer;
-    int               conformerId;
-    size_t            confIdx;
-  };
-
-  std::vector<ConformerInfo> allConformers;
-  for (size_t molIdx = 0; molIdx < mols.size(); ++molIdx) {
-    auto* mol = mols[molIdx];
-    moleculeEnergies[molIdx].resize(mol->getNumConformers());
-    size_t confIdx = 0;
-    for (auto confIter = mol->beginConformers(); confIter != mol->endConformers(); ++confIter, ++confIdx) {
-      allConformers.push_back({mol, molIdx, &(**confIter), static_cast<int>((*confIter)->getId()), confIdx});
-    }
-  }
+  auto                             ctx = setupBatchExecution(perfOptions);
+  std::vector<std::vector<double>> moleculeEnergies;
+  const auto                       allConformers = flattenConformers(mols, moleculeEnergies);
 
   const size_t totalConformers    = allConformers.size();
-  const size_t effectiveBatchSize = batchSize == 0 ? totalConformers : batchSize;
+  const size_t effectiveBatchSize = ctx.batchSize == 0 ? totalConformers : ctx.batchSize;
   if (totalConformers == 0) {
     return moleculeEnergies;
   }
 
-  std::vector<nvMolKit::ScopedStream> streamPool;
-  streamPool.reserve(numThreads);
-  std::vector<int> devicesPerThread(numThreads);
-  for (int i = 0; i < numThreads; ++i) {
-    const int        gpuId = gpuIds[i % gpuIds.size()];
-    const WithDevice dev(gpuId);
-    streamPool.emplace_back();
-    devicesPerThread[i] = gpuId;
-  }
-
-  std::vector<ThreadLocalBuffers> threadBuffers(numThreads);
+  std::vector<ThreadLocalBuffers> threadBuffers(ctx.numThreads);
   detail::OpenMPExceptionRegistry exceptionHandler;
   setupRange.pop();
-#pragma omp parallel for num_threads(numThreads) schedule(dynamic) default(none) shared(allConformers,                 \
-                                                                                          moleculeEnergies,            \
-                                                                                          totalConformers,             \
-                                                                                          effectiveBatchSize,          \
-                                                                                          maxIters,                    \
-                                                                                          vdwThresholds,               \
-                                                                                          ignoreInterfragInteractions, \
-                                                                                          streamPool,                  \
-                                                                                          devicesPerThread,            \
-                                                                                          threadBuffers,               \
-                                                                                          exceptionHandler)
+#pragma omp parallel for num_threads(ctx.numThreads) schedule(dynamic) default(none) \
+  shared(allConformers,                                                              \
+           moleculeEnergies,                                                         \
+           totalConformers,                                                          \
+           effectiveBatchSize,                                                       \
+           maxIters,                                                                 \
+           vdwThresholds,                                                            \
+           ignoreInterfragInteractions,                                              \
+           ctx,                                                                      \
+           threadBuffers,                                                            \
+           exceptionHandler)
   for (size_t batchStart = 0; batchStart < totalConformers; batchStart += effectiveBatchSize) {
     try {
       ScopedNvtxRange singleBatchRange("OpenMP loop thread");
       ScopedNvtxRange setupBatchRange("OpenMP loop preprocessing");
 
-      const int                  threadId = omp_get_thread_num();
-      const WithDevice           dev(devicesPerThread[threadId]);
-      const size_t               batchEnd = std::min(batchStart + effectiveBatchSize, totalConformers);
-      std::vector<ConformerInfo> batchConformers(allConformers.begin() + batchStart, allConformers.begin() + batchEnd);
+      const int                            threadId = omp_get_thread_num();
+      const WithDevice                     dev(ctx.devicesPerThread[threadId]);
+      const size_t                         batchEnd = std::min(batchStart + effectiveBatchSize, totalConformers);
+      std::vector<nvMolKit::ConformerInfo> batchConformers(allConformers.begin() + batchStart,
+                                                           allConformers.begin() + batchEnd);
 
-      cudaStream_t streamPtr = streamPool[threadId].stream();
+      cudaStream_t streamPtr = ctx.streamPool[threadId].stream();
 
       BatchedMolecularSystemHost systemHost;
       BatchedForcefieldMetadata  metadata;
@@ -204,18 +134,7 @@ std::vector<std::vector<double>> UFFOptimizeMoleculesConfsBfgs(std::vector<RDKit
       energyOutsDevice.copyToHost(buffers.energies.data(), energyOutsDevice.size());
       cudaStreamSynchronize(streamPtr);
 
-      for (size_t i = 0; i < batchConformers.size(); ++i) {
-        const auto&    confInfo     = batchConformers[i];
-        const uint32_t numAtoms     = confInfo.mol->getNumAtoms();
-        const uint32_t atomStartIdx = conformerAtomStarts[i];
-        for (uint32_t j = 0; j < numAtoms; ++j) {
-          confInfo.conformer->setAtomPos(j,
-                                         RDGeom::Point3D(buffers.positions[3 * (atomStartIdx + j) + 0],
-                                                         buffers.positions[3 * (atomStartIdx + j) + 1],
-                                                         buffers.positions[3 * (atomStartIdx + j) + 2]));
-        }
-        moleculeEnergies[confInfo.molIdx][confInfo.confIdx] = buffers.energies[i];
-      }
+      writeBackResults(batchConformers, conformerAtomStarts, buffers, moleculeEnergies);
     } catch (...) {
       exceptionHandler.store(std::current_exception());
     }
