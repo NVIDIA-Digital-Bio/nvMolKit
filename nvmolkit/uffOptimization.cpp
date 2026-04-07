@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,7 +16,6 @@
 #include <GraphMol/ROMol.h>
 
 #include <boost/python.hpp>
-
 #include <stdexcept>
 #include <vector>
 
@@ -24,8 +23,7 @@
 
 namespace bp = boost::python;
 
-template <typename T>
-bp::list vectorToList(const std::vector<T>& vec) {
+template <typename T> bp::list vectorToList(const std::vector<T>& vec) {
   bp::list list;
   for (const auto& value : vec) {
     list.append(value);
@@ -33,8 +31,7 @@ bp::list vectorToList(const std::vector<T>& vec) {
   return list;
 }
 
-template <typename T>
-bp::list vectorOfVectorsToList(const std::vector<std::vector<T>>& vecOfVecs) {
+template <typename T> bp::list vectorOfVectorsToList(const std::vector<std::vector<T>>& vecOfVecs) {
   bp::list outerList;
   for (const auto& innerVec : vecOfVecs) {
     outerList.append(vectorToList(innerVec));
@@ -85,22 +82,21 @@ static std::vector<bool> extractBoolList(const bp::list& values, const int expec
 BOOST_PYTHON_MODULE(_uffOptimization) {
   bp::def(
     "UFFOptimizeMoleculesConfs",
-    +[](const bp::list&                        molecules,
+    +[](const bp::list&                       molecules,
         int                                   maxIters,
         const bp::list&                       vdwThresholds,
         const bp::list&                       ignoreInterfragInteractions,
         const nvMolKit::BatchHardwareOptions& hardwareOptions) -> bp::list {
-      auto molsVec = extractMolecules(molecules);
-      const int numMols = static_cast<int>(molsVec.size());
+      auto       molsVec      = extractMolecules(molecules);
+      const int  numMols      = static_cast<int>(molsVec.size());
       const auto thresholdVec = extractDoubleList(vdwThresholds, numMols, "vdwThreshold");
-      const auto ignoreVec =
-        extractBoolList(ignoreInterfragInteractions, numMols, "ignoreInterfragInteractions");
+      const auto ignoreVec    = extractBoolList(ignoreInterfragInteractions, numMols, "ignoreInterfragInteractions");
       const auto result =
         nvMolKit::UFF::UFFOptimizeMoleculesConfsBfgs(molsVec, maxIters, thresholdVec, ignoreVec, hardwareOptions);
       return vectorOfVectorsToList(result);
     },
     (bp::arg("molecules"),
-     bp::arg("maxIters")                   = 1000,
+     bp::arg("maxIters") = 1000,
      bp::arg("vdwThresholds"),
      bp::arg("ignoreInterfragInteractions"),
      bp::arg("hardwareOptions") = nvMolKit::BatchHardwareOptions()),

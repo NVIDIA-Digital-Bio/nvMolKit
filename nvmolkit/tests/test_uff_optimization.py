@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -114,13 +114,9 @@ def test_uff_optimization_serial_vs_rdkit(uff_test_mols):
         nvmolkit_energies.extend(mol_energies)
 
     assert len(rdkit_energies) == len(nvmolkit_energies)
-    for mol_idx, (rdkit_mol_energies, nvmolkit_mol_energies) in enumerate(
-        zip(rdkit_energies, nvmolkit_energies)
-    ):
+    for mol_idx, (rdkit_mol_energies, nvmolkit_mol_energies) in enumerate(zip(rdkit_energies, nvmolkit_energies)):
         assert len(rdkit_mol_energies) == len(nvmolkit_mol_energies)
-        for conf_idx, (rdkit_energy, nvmolkit_energy) in enumerate(
-            zip(rdkit_mol_energies, nvmolkit_mol_energies)
-        ):
+        for conf_idx, (rdkit_energy, nvmolkit_energy) in enumerate(zip(rdkit_mol_energies, nvmolkit_mol_energies)):
             diff = abs(rdkit_energy - nvmolkit_energy)
             rel = diff / abs(rdkit_energy) if abs(rdkit_energy) > 1e-10 else diff
             assert rel < 1e-3, (
@@ -142,13 +138,9 @@ def test_uff_optimization_batch_vs_rdkit(uff_test_mols):
     )
 
     assert len(rdkit_energies) == len(nvmolkit_energies)
-    for mol_idx, (rdkit_mol_energies, nvmolkit_mol_energies) in enumerate(
-        zip(rdkit_energies, nvmolkit_energies)
-    ):
+    for mol_idx, (rdkit_mol_energies, nvmolkit_mol_energies) in enumerate(zip(rdkit_energies, nvmolkit_energies)):
         assert len(rdkit_mol_energies) == len(nvmolkit_mol_energies)
-        for conf_idx, (rdkit_energy, nvmolkit_energy) in enumerate(
-            zip(rdkit_mol_energies, nvmolkit_mol_energies)
-        ):
+        for conf_idx, (rdkit_energy, nvmolkit_energy) in enumerate(zip(rdkit_mol_energies, nvmolkit_mol_energies)):
             diff = abs(rdkit_energy - nvmolkit_energy)
             rel = diff / abs(rdkit_energy) if abs(rdkit_energy) > 1e-10 else diff
             assert rel < 1e-3, (
@@ -194,13 +186,9 @@ def test_uff_optimization_threshold_and_interfrag_vs_rdkit():
     )
 
     assert len(rdkit_energies) == len(nvmolkit_energies)
-    for mol_idx, (rdkit_mol_energies, nvmolkit_mol_energies) in enumerate(
-        zip(rdkit_energies, nvmolkit_energies)
-    ):
+    for mol_idx, (rdkit_mol_energies, nvmolkit_mol_energies) in enumerate(zip(rdkit_energies, nvmolkit_energies)):
         assert len(rdkit_mol_energies) == len(nvmolkit_mol_energies)
-        for conf_idx, (rdkit_energy, nvmolkit_energy) in enumerate(
-            zip(rdkit_mol_energies, nvmolkit_mol_energies)
-        ):
+        for conf_idx, (rdkit_energy, nvmolkit_energy) in enumerate(zip(rdkit_mol_energies, nvmolkit_mol_energies)):
             diff = abs(rdkit_energy - nvmolkit_energy)
             rel = diff / abs(rdkit_energy) if abs(rdkit_energy) > 1e-10 else diff
             assert rel < 1e-3, (

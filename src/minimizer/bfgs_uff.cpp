@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -126,28 +126,28 @@ std::vector<std::vector<double>> UFFOptimizeMoleculesConfsBfgs(std::vector<RDKit
     devicesPerThread[i] = gpuId;
   }
 
-  std::vector<ThreadLocalBuffers>       threadBuffers(numThreads);
+  std::vector<ThreadLocalBuffers> threadBuffers(numThreads);
   detail::OpenMPExceptionRegistry exceptionHandler;
   setupRange.pop();
-#pragma omp parallel for num_threads(numThreads) schedule(dynamic) default(none) shared(allConformers,        \
-                                                                                          moleculeEnergies,   \
-                                                                                          totalConformers,    \
-                                                                                          effectiveBatchSize, \
-                                                                                          maxIters,           \
-                                                                                          vdwThresholds,      \
+#pragma omp parallel for num_threads(numThreads) schedule(dynamic) default(none) shared(allConformers,                 \
+                                                                                          moleculeEnergies,            \
+                                                                                          totalConformers,             \
+                                                                                          effectiveBatchSize,          \
+                                                                                          maxIters,                    \
+                                                                                          vdwThresholds,               \
                                                                                           ignoreInterfragInteractions, \
-                                                                                          streamPool,         \
-                                                                                          devicesPerThread,   \
-                                                                                          threadBuffers,      \
+                                                                                          streamPool,                  \
+                                                                                          devicesPerThread,            \
+                                                                                          threadBuffers,               \
                                                                                           exceptionHandler)
   for (size_t batchStart = 0; batchStart < totalConformers; batchStart += effectiveBatchSize) {
     try {
       ScopedNvtxRange singleBatchRange("OpenMP loop thread");
       ScopedNvtxRange setupBatchRange("OpenMP loop preprocessing");
 
-      const int        threadId = omp_get_thread_num();
-      const WithDevice dev(devicesPerThread[threadId]);
-      const size_t     batchEnd = std::min(batchStart + effectiveBatchSize, totalConformers);
+      const int                  threadId = omp_get_thread_num();
+      const WithDevice           dev(devicesPerThread[threadId]);
+      const size_t               batchEnd = std::min(batchStart + effectiveBatchSize, totalConformers);
       std::vector<ConformerInfo> batchConformers(allConformers.begin() + batchStart, allConformers.begin() + batchEnd);
 
       cudaStream_t streamPtr = streamPool[threadId].stream();
@@ -175,7 +175,7 @@ std::vector<std::vector<double>> UFFOptimizeMoleculesConfsBfgs(std::vector<RDKit
       buffers.ensureCapacity(systemHost.positions.size(), batchConformers.size());
       std::copy(systemHost.positions.begin(), systemHost.positions.end(), buffers.initialPositions.begin());
 
-      UFFBatchedForcefield     forcefield(systemHost, metadata, streamPtr);
+      UFFBatchedForcefield      forcefield(systemHost, metadata, streamPtr);
       AsyncDeviceVector<double> positionsDevice;
       AsyncDeviceVector<double> gradDevice;
       AsyncDeviceVector<double> energyOutsDevice;
@@ -190,7 +190,11 @@ std::vector<std::vector<double>> UFFOptimizeMoleculesConfsBfgs(std::vector<RDKit
       energyOutsDevice.zero();
 
       nvMolKit::BfgsBatchMinimizer bfgsMinimizer(
-        /*dataDim=*/3, nvMolKit::DebugLevel::NONE, true, streamPtr, nvMolKit::BfgsBackend::BATCHED);
+        /*dataDim=*/3,
+        nvMolKit::DebugLevel::NONE,
+        true,
+        streamPtr,
+        nvMolKit::BfgsBackend::BATCHED);
       constexpr double gradTol = 1e-4;
       setupBatchRange.pop();
       bfgsMinimizer.minimize(maxIters, gradTol, forcefield, positionsDevice, gradDevice, energyOutsDevice);
