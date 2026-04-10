@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: cpp-build-test-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -17,6 +18,9 @@ jobs:
     runs-on: colossus
     container:
       image: ghcr.io/nvidia-digital-bio/nvmolkit-ci-ubuntu2024-clang17-tools:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 60
 
     steps:
