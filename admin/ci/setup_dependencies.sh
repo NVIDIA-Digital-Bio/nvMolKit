@@ -32,8 +32,8 @@ MINIFORGE_INSTALLER="Miniforge3-${MINIFORGE_VERSION}-Linux-${ARCH}.sh"
 MINIFORGE_BASE_URL="https://github.com/conda-forge/miniforge/releases/download/${MINIFORGE_VERSION}"
 
 wget -q -nc -P /var/tmp "${MINIFORGE_BASE_URL}/${MINIFORGE_INSTALLER}"
-wget -q -nc -P /var/tmp "${MINIFORGE_BASE_URL}/SHA256SUMS"
-grep "${MINIFORGE_INSTALLER}" /var/tmp/SHA256SUMS | (cd /var/tmp && sha256sum -c -)
+wget -q -nc -P /var/tmp "${MINIFORGE_BASE_URL}/${MINIFORGE_INSTALLER}.sha256"
+(cd /var/tmp && sha256sum -c "${MINIFORGE_INSTALLER}.sha256")
 bash "/var/tmp/${MINIFORGE_INSTALLER}" -b -p "${MINIFORGE_PREFIX}"
 "${MINIFORGE_PREFIX}/bin/conda" init
 ln -sf "${MINIFORGE_PREFIX}/etc/profile.d/conda.sh" /etc/profile.d/conda.sh
