@@ -20,6 +20,7 @@ jobs:
     runs-on: colossus
     container:
       image: nvcr.io/nvidia/cuda:12.6.3-devel-ubuntu22.04
+      options: --gpus all
     timeout-minutes: 90
 
     steps:
