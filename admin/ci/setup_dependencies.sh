@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set -euo pipefail
+set -eo pipefail
 
 PYTHON_VERSION="${1:-3.12}"
 RDKIT_VERSION="${2:-2024.09.6}"
@@ -25,8 +25,7 @@ MINIFORGE_PREFIX="/usr/local/anaconda"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y --no-install-recommends \
-    gcc-12 g++-12 build-essential git wget ca-certificates \
-    libomp-15-dev
+    build-essential git wget ca-certificates
 
 ARCH="$(uname -m)"
 MINIFORGE_URL="https://github.com/conda-forge/miniforge/releases/download/${MINIFORGE_VERSION}/Miniforge3-${MINIFORGE_VERSION}-Linux-${ARCH}.sh"
@@ -44,17 +43,19 @@ conda config --add channels conda-forge --add channels nvidia
 conda install -q -y \
     "python=${PYTHON_VERSION}" \
     "rdkit=${RDKIT_VERSION}" \
+    "gcc=13.*" \
+    "gxx=13.*" \
     libboost-devel \
     libboost-headers \
     libboost-python-devel \
     librdkit-dev \
     pytest \
-    cmake \
+    "cmake=3.30.*" \
     eigen
 
-export CC="$(command -v gcc-12)"
-export CXX="$(command -v g++-12)"
-
-echo "CC=${CC}" >> "${GITHUB_ENV:-/dev/null}"
-echo "CXX=${CXX}" >> "${GITHUB_ENV:-/dev/null}"
-echo "${MINIFORGE_PREFIX}/bin" >> "${GITHUB_PATH:-/dev/null}"
+export CC="$(which gcc)"
+export CXX="$(which g++)"
+echo "CC=${CC}"
+echo "CXX=${CXX}"
+"${CC}" --version
+"${CXX}" --version
