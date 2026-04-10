@@ -1,0 +1,47 @@
+name: C++ Build & Test
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cpp-build-test-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: colossus-gpu-runner
+    container:
+      image: ghcr.io/nvidia-digital-bio/nvmolkit-ci-ubuntu2024-clang17-tools:latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out source tree
+        uses: actions/checkout@v4
+
+      - name: Configure
+        shell: bash
+        run: |
+          set -xeuo pipefail
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DNVMOLKIT_BUILD_BENCHMARKS=ON \
+            -DNVMOLKIT_BUILD_PYTHON_BINDINGS=ON \
+            -DNVMOLKIT_BUILD_TESTS=ON \
+            -DNVMOLKIT_CUDA_TARGET_MODE=native
+
+      - name: Build
+        shell: bash
+        run: |
+          set -xeuo pipefail
+          cmake --build build --parallel $(nproc)
+
+      - name: Test
+        shell: bash
+        run: |
+          set -xeuo pipefail
+          ctest --test-dir build --output-on-failure
