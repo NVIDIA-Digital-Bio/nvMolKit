@@ -29,7 +29,6 @@ jobs:
         run: |
           set -xeuo pipefail
           nvidia-smi
-          ls -la /dev/nvidia* || echo "No /dev/nvidia* devices found"
 
       - name: Check out source tree
         uses: actions/checkout@v4
