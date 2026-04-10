@@ -1,12 +1,14 @@
 name: C++ Build & Test
 
 on:
+  push:
+    branches:
+      - main
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
-  packages: read
 
 concurrency:
   group: cpp-build-test-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -17,22 +19,26 @@ jobs:
     name: Build & Test
     runs-on: colossus
     container:
-      image: ghcr.io/nvidia-digital-bio/nvmolkit-ci-ubuntu2024-clang17-tools:latest
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    timeout-minutes: 60
+      image: nvcr.io/nvidia/cuda:12.6.3-devel-ubuntu22.04
+    timeout-minutes: 90
 
     steps:
       - name: Check out source tree
         uses: actions/checkout@v4
 
+      - name: Install dependencies
+        shell: bash
+        run: bash admin/ci/setup_dependencies.sh 3.12 2024.09.6
+
       - name: Configure
         shell: bash
         run: |
           set -xeuo pipefail
+          . /usr/local/anaconda/etc/profile.d/conda.sh && conda activate base
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="$(command -v gcc-12)" \
+            -DCMAKE_CXX_COMPILER="$(command -v g++-12)" \
             -DNVMOLKIT_BUILD_BENCHMARKS=ON \
             -DNVMOLKIT_BUILD_PYTHON_BINDINGS=ON \
             -DNVMOLKIT_BUILD_TESTS=ON \
@@ -42,10 +48,12 @@ jobs:
         shell: bash
         run: |
           set -xeuo pipefail
+          . /usr/local/anaconda/etc/profile.d/conda.sh && conda activate base
           cmake --build build --parallel $(nproc)
 
       - name: Test
         shell: bash
         run: |
           set -xeuo pipefail
+          . /usr/local/anaconda/etc/profile.d/conda.sh && conda activate base
           ctest --test-dir build --output-on-failure
