@@ -28,10 +28,13 @@ apt-get install -y --no-install-recommends \
     build-essential git wget ca-certificates
 
 ARCH="$(uname -m)"
-MINIFORGE_URL="https://github.com/conda-forge/miniforge/releases/download/${MINIFORGE_VERSION}/Miniforge3-${MINIFORGE_VERSION}-Linux-${ARCH}.sh"
+MINIFORGE_INSTALLER="Miniforge3-${MINIFORGE_VERSION}-Linux-${ARCH}.sh"
+MINIFORGE_BASE_URL="https://github.com/conda-forge/miniforge/releases/download/${MINIFORGE_VERSION}"
 
-wget -q -nc -P /var/tmp "${MINIFORGE_URL}"
-bash "/var/tmp/Miniforge3-${MINIFORGE_VERSION}-Linux-${ARCH}.sh" -b -p "${MINIFORGE_PREFIX}"
+wget -q -nc -P /var/tmp "${MINIFORGE_BASE_URL}/${MINIFORGE_INSTALLER}"
+wget -q -nc -P /var/tmp "${MINIFORGE_BASE_URL}/SHA256SUMS"
+grep "${MINIFORGE_INSTALLER}" /var/tmp/SHA256SUMS | (cd /var/tmp && sha256sum -c -)
+bash "/var/tmp/${MINIFORGE_INSTALLER}" -b -p "${MINIFORGE_PREFIX}"
 "${MINIFORGE_PREFIX}/bin/conda" init
 ln -sf "${MINIFORGE_PREFIX}/etc/profile.d/conda.sh" /etc/profile.d/conda.sh
 
@@ -52,10 +55,3 @@ conda install -q -y \
     pytest \
     "cmake=3.30.*" \
     eigen
-
-export CC="$(which gcc)"
-export CXX="$(which g++)"
-echo "CC=${CC}"
-echo "CXX=${CXX}"
-"${CC}" --version
-"${CXX}" --version
