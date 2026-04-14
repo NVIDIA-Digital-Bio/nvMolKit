@@ -13,62 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <GraphMol/ROMol.h>
-
 #include <boost/python.hpp>
 
 #include "bfgs_mmff.h"
-#include "mmff_properties.h"
-
-template <typename T> boost::python::list vectorToList(const std::vector<T>& vec) {
-  boost::python::list list;
-  for (const auto& value : vec) {
-    list.append(value);
-  }
-  return list;
-}
-
-template <typename T> boost::python::list vectorOfVectorsToList(const std::vector<std::vector<T>>& vecOfVecs) {
-  boost::python::list outerList;
-  for (const auto& innerVec : vecOfVecs) {
-    outerList.append(vectorToList(innerVec));
-  }
-  return outerList;
-}
-
-nvMolKit::MMFFProperties extractMMFFProperties(const boost::python::object& obj) {
-  nvMolKit::MMFFProperties props;
-  if (obj.is_none()) {
-    return props;
-  }
-  props.variant                     = boost::python::extract<std::string>(obj.attr("variant"));
-  props.dielectricConstant          = boost::python::extract<double>(obj.attr("dielectricConstant"));
-  props.dielectricModel             = boost::python::extract<int>(obj.attr("dielectricModel"));
-  props.nonBondedThreshold          = boost::python::extract<double>(obj.attr("nonBondedThreshold"));
-  props.ignoreInterfragInteractions = boost::python::extract<bool>(obj.attr("ignoreInterfragInteractions"));
-  props.bondTerm                    = boost::python::extract<bool>(obj.attr("bondTerm"));
-  props.angleTerm                   = boost::python::extract<bool>(obj.attr("angleTerm"));
-  props.stretchBendTerm             = boost::python::extract<bool>(obj.attr("stretchBendTerm"));
-  props.oopTerm                     = boost::python::extract<bool>(obj.attr("oopTerm"));
-  props.torsionTerm                 = boost::python::extract<bool>(obj.attr("torsionTerm"));
-  props.vdwTerm                     = boost::python::extract<bool>(obj.attr("vdwTerm"));
-  props.eleTerm                     = boost::python::extract<bool>(obj.attr("eleTerm"));
-  return props;
-}
-
-std::vector<nvMolKit::MMFFProperties> extractMMFFPropertiesList(const boost::python::list& properties,
-                                                                const int                  expectedSize) {
-  if (boost::python::len(properties) != expectedSize) {
-    throw std::invalid_argument("Expected " + std::to_string(expectedSize) + " MMFF properties objects, got " +
-                                std::to_string(boost::python::len(properties)));
-  }
-  std::vector<nvMolKit::MMFFProperties> out;
-  out.reserve(expectedSize);
-  for (int i = 0; i < expectedSize; ++i) {
-    out.push_back(extractMMFFProperties(boost::python::object(properties[i])));
-  }
-  return out;
-}
+#include "boost_python_utils.h"
+#include "mmff_python_utils.h"
 
 BOOST_PYTHON_MODULE(_mmffOptimization) {
   boost::python::def(
@@ -77,23 +26,13 @@ BOOST_PYTHON_MODULE(_mmffOptimization) {
         int                                   maxIters,
         const boost::python::list&            propertiesList,
         const nvMolKit::BatchHardwareOptions& hardwareOptions) -> boost::python::list {
-      std::vector<RDKit::ROMol*> molsVec;
-      molsVec.reserve(len(molecules));
+      auto molsVec = nvMolKit::extractMolecules(molecules);
 
-      for (int i = 0; i < len(molecules); i++) {
-        RDKit::ROMol* mol = boost::python::extract<RDKit::ROMol*>(boost::python::object(molecules[i]));
-        if (mol == nullptr) {
-          throw std::invalid_argument("Invalid molecule at index " + std::to_string(i));
-        }
-        molsVec.push_back(mol);
-      }
-
-      const auto properties = extractMMFFPropertiesList(propertiesList, static_cast<int>(molsVec.size()));
+      const auto properties = nvMolKit::extractMMFFPropertiesList(propertiesList, static_cast<int>(molsVec.size()));
       const auto result =
         nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molsVec, maxIters, properties, hardwareOptions);
 
-      // Convert result back to Python list of lists
-      return vectorOfVectorsToList(result);
+      return nvMolKit::vectorOfVectorsToList(result);
     },
     (boost::python::arg("molecules"),
      boost::python::arg("maxIters")        = 200,

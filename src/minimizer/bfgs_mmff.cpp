@@ -20,10 +20,9 @@
 
 #include <unordered_map>
 
+#include "bfgs_common.h"
 #include "bfgs_minimize.h"
-#include "device.h"
 #include "ff_utils.h"
-#include "host_vector.h"
 #include "mmff_batched_forcefield.h"
 #include "mmff_flattened_builder.h"
 #include "nvtx.h"
@@ -34,27 +33,6 @@ namespace nvMolKit::MMFF {
 //! Cached molecule-specific preprocessing
 struct CachedMoleculeData {
   EnergyForceContribsHost ffParams;
-};
-
-//! Thread-local pinned memory buffers for async transfers
-struct ThreadLocalBuffers {
-  PinnedHostVector<double> positions;
-  PinnedHostVector<double> energies;
-  PinnedHostVector<double> initialPositions;
-
-  void ensureCapacity(const size_t positionsSize, const size_t energiesSize) {
-    constexpr double extraCapacityFactor = 1.3;
-    const auto       newSize = static_cast<size_t>(static_cast<double>(positionsSize) * extraCapacityFactor);
-    if (positions.size() < positionsSize) {
-      positions.resize(newSize);
-    }
-    if (energies.size() < energiesSize) {
-      energies.resize(newSize);
-    }
-    if (initialPositions.size() < positionsSize) {
-      initialPositions.resize(newSize);
-    }
-  }
 };
 
 std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKit::ROMol*>& mols,
@@ -77,103 +55,47 @@ std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKi
   ScopedNvtxRange fullMinimizeRange("BFGS MMFF Optimize Molecules Confs");
   ScopedNvtxRange setupRange("BFGS MMFF Optimize Molecules Confs");
 
-  // Extract values from performance options
-  const size_t batchSize = perfOptions.batchSize == -1 ? 500 : perfOptions.batchSize;
-
   if (properties.size() != mols.size()) {
     throw std::invalid_argument("Expected one MMFFProperties entry per molecule");
   }
 
-  for (size_t i = 0; i < mols.size(); ++i) {
-    const auto* mol = mols[i];
-    if (mol == nullptr) {
-      throw std::invalid_argument("Invalid molecule pointer at index " + std::to_string(i));
-    }
-  }
+  auto                             ctx = setupBatchExecution(perfOptions);
+  std::vector<std::vector<double>> moleculeEnergies;
+  const auto                       allConformers = flattenConformers(mols, moleculeEnergies);
 
-  std::vector<int> gpuIds = perfOptions.gpuIds;
-  if (gpuIds.empty()) {
-    const int numDevices = countCudaDevices();
-    if (numDevices == 0) {
-      throw std::runtime_error("No CUDA devices found for MMFF relaxation");
-    }
-    gpuIds.resize(numDevices);
-    std::iota(gpuIds.begin(), gpuIds.end(), 0);  // Fill with device IDs 0, 1, ..., numDevices-1
-  }
-  const int batchesPerGpu = perfOptions.batchesPerGpu == -1 ? 4 : perfOptions.batchesPerGpu;
-  const int numThreads =
-    perfOptions.batchesPerGpu > 0 ? batchesPerGpu * static_cast<int>(gpuIds.size()) : omp_get_max_threads();
-
-  // Initialize result structure
-  std::vector<std::vector<double>> moleculeEnergies(mols.size());
-
-  // Flatten all conformers from all molecules for better load balancing
-  struct ConformerInfo {
-    RDKit::ROMol*     mol;
-    size_t            molIdx;
-    RDKit::Conformer* conformer;
-    size_t            confIdx;
-  };
-
-  std::vector<ConformerInfo> allConformers;
-  for (size_t molIdx = 0; molIdx < mols.size(); ++molIdx) {
-    auto* mol = mols[molIdx];
-    moleculeEnergies[molIdx].resize(mol->getNumConformers());
-
-    size_t confIdx = 0;
-    for (auto confIter = mol->beginConformers(); confIter != mol->endConformers(); ++confIter, ++confIdx) {
-      allConformers.push_back({mol, molIdx, &(**confIter), confIdx});
-    }
-  }
-
-  // Calculate batch parameters for conformers
   const size_t totalConformers    = allConformers.size();
-  const size_t effectiveBatchSize = (batchSize == 0) ? totalConformers : batchSize;
+  const size_t effectiveBatchSize = (ctx.batchSize == 0) ? totalConformers : ctx.batchSize;
 
   if (totalConformers == 0) {
-    return moleculeEnergies;  // Early return for empty input
+    return moleculeEnergies;
   }
 
-  // Create stream pool for better performance and profiling
-  std::vector<nvMolKit::ScopedStream> streamPool;
-  streamPool.reserve(numThreads);
-  std::vector<int> devicesPerThread(numThreads);
-  for (int i = 0; i < numThreads; ++i) {
-    const int        gpuId = gpuIds[i % gpuIds.size()];
-    const WithDevice dev(gpuId);
-    streamPool.emplace_back();
-    devicesPerThread[i] = gpuId;  // Round-robin assignment of devices
-  }
-
-  // Create thread-local pinned memory buffers for async transfers
-  std::vector<ThreadLocalBuffers> threadBuffers(numThreads);
+  std::vector<ThreadLocalBuffers> threadBuffers(ctx.numThreads);
   detail::OpenMPExceptionRegistry exceptionHandler;
   setupRange.pop();
-#pragma omp parallel for num_threads(numThreads) schedule(dynamic) default(none) shared(allConformers,        \
-                                                                                          moleculeEnergies,   \
-                                                                                          totalConformers,    \
-                                                                                          effectiveBatchSize, \
-                                                                                          maxIters,           \
-                                                                                          properties,         \
-                                                                                          streamPool,         \
-                                                                                          devicesPerThread,   \
-                                                                                          threadBuffers,      \
-                                                                                          backend,            \
-                                                                                          exceptionHandler)
+#pragma omp parallel for num_threads(ctx.numThreads) schedule(dynamic) default(none) shared(allConformers,        \
+                                                                                              moleculeEnergies,   \
+                                                                                              totalConformers,    \
+                                                                                              effectiveBatchSize, \
+                                                                                              maxIters,           \
+                                                                                              properties,         \
+                                                                                              ctx,                \
+                                                                                              threadBuffers,      \
+                                                                                              backend,            \
+                                                                                              exceptionHandler)
   for (size_t batchStart = 0; batchStart < totalConformers; batchStart += effectiveBatchSize) {
     try {
       std::unordered_map<RDKit::ROMol*, CachedMoleculeData> moleculeCache;
       ScopedNvtxRange                                       singleBatchRange("OpenMP loop thread");
       ScopedNvtxRange                                       setupBatchRange("OpenMP loop preprocessing");
       const int                                             threadId = omp_get_thread_num();
-      const WithDevice                                      dev(devicesPerThread[threadId]);
+      const WithDevice                                      dev(ctx.devicesPerThread[threadId]);
       const size_t batchEnd = std::min(batchStart + effectiveBatchSize, totalConformers);
 
-      // Create batch subset of conformers
-      std::vector<ConformerInfo> batchConformers(allConformers.begin() + batchStart, allConformers.begin() + batchEnd);
+      std::vector<nvMolKit::ConformerInfo> batchConformers(allConformers.begin() + batchStart,
+                                                           allConformers.begin() + batchEnd);
 
-      // Get thread-local stream from pool
-      cudaStream_t streamPtr = streamPool[threadId].stream();
+      cudaStream_t streamPtr = ctx.streamPool[threadId].stream();
 
       // Process this batch
       BatchedMolecularSystemHost    systemHost;
@@ -258,23 +180,7 @@ std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKi
         cudaStreamSynchronize(streamPtr);
       }
 
-      // Update conformer positions and store energies
-      for (size_t i = 0; i < batchConformers.size(); ++i) {
-        const auto&    confInfo     = batchConformers[i];
-        const uint32_t numAtoms     = confInfo.mol->getNumAtoms();
-        const uint32_t atomStartIdx = conformerAtomStarts[i];
-
-        // Update conformer positions
-        for (uint32_t j = 0; j < numAtoms; ++j) {
-          confInfo.conformer->setAtomPos(j,
-                                         RDGeom::Point3D(buffers.positions[3 * (atomStartIdx + j) + 0],
-                                                         buffers.positions[3 * (atomStartIdx + j) + 1],
-                                                         buffers.positions[3 * (atomStartIdx + j) + 2]));
-        }
-
-        // Store energy result - thread-safe since each thread writes to different indices
-        moleculeEnergies[confInfo.molIdx][confInfo.confIdx] = buffers.energies[i];
-      }
+      writeBackResults(batchConformers, conformerAtomStarts, buffers, moleculeEnergies);
     } catch (...) {
       exceptionHandler.store(std::current_exception());
     }
