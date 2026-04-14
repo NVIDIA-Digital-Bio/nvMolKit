@@ -13,14 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <GraphMol/ROMol.h>
-
 #include <boost/python.hpp>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
+#include "boost_python_utils.h"
 #include "device_vector.h"
 #include "ff_utils.h"
 #include "forcefield_constraints.h"
@@ -29,22 +27,6 @@
 #include "mmff_properties.h"
 
 namespace bp = boost::python;
-
-template <typename T> bp::list vectorToList(const std::vector<T>& vec) {
-  bp::list list;
-  for (const auto& value : vec) {
-    list.append(value);
-  }
-  return list;
-}
-
-template <typename T> bp::list vectorOfVectorsToList(const std::vector<std::vector<T>>& vecOfVecs) {
-  bp::list outerList;
-  for (const auto& innerVec : vecOfVecs) {
-    outerList.append(vectorToList(innerVec));
-  }
-  return outerList;
-}
 
 namespace {
 std::vector<std::vector<double>> splitGradients(const std::vector<double>& flatGrad,
@@ -60,20 +42,6 @@ std::vector<std::vector<double>> splitGradients(const std::vector<double>& flatG
   return result;
 }
 }  // namespace
-
-static std::vector<RDKit::ROMol*> extractMolecules(const bp::list& molecules) {
-  const int                  n = bp::len(molecules);
-  std::vector<RDKit::ROMol*> mols;
-  mols.reserve(n);
-  for (int i = 0; i < n; ++i) {
-    auto* mol = bp::extract<RDKit::ROMol*>(bp::object(molecules[i]))();
-    if (mol == nullptr) {
-      throw std::invalid_argument("Invalid molecule at index " + std::to_string(i));
-    }
-    mols.push_back(mol);
-  }
-  return mols;
-}
 
 static void throwIfCudaError(cudaError_t err, const std::string& context) {
   if (err != cudaSuccess) {
@@ -205,7 +173,7 @@ class NativeMMFFBatchedForcefield {
                               const bp::list& positionConstraints,
                               const bp::list& angleConstraints,
                               const bp::list& torsionConstraints) {
-    const auto mols     = extractMolecules(molecules);
+    const auto mols     = nvMolKit::extractMolecules(molecules);
     const int  numMols  = static_cast<int>(mols.size());
     const auto props    = extractMMFFPropertiesList(properties, numMols);
     const auto confList = extractIntList(confIds, numMols, "conf_id");
@@ -260,13 +228,14 @@ class NativeMMFFBatchedForcefield {
   bp::list computeEnergy() {
     energyOutsDevice_.zero();
     throwIfCudaError(forcefield_->computeEnergy(energyOutsDevice_.data(), positionsDevice_.data()), "computeEnergy");
-    return vectorToList(copyDeviceVector(energyOutsDevice_));
+    return nvMolKit::vectorToList(copyDeviceVector(energyOutsDevice_));
   }
 
   bp::list computeGradients() {
     gradDevice_.zero();
     throwIfCudaError(forcefield_->computeGradients(gradDevice_.data(), positionsDevice_.data()), "computeGradients");
-    return vectorOfVectorsToList(splitGradients(copyDeviceVector(gradDevice_), forcefield_->atomStartsHost(), 3));
+    return nvMolKit::vectorOfVectorsToList(
+      splitGradients(copyDeviceVector(gradDevice_), forcefield_->atomStartsHost(), 3));
   }
 
  private:

@@ -14,25 +14,15 @@
 // limitations under the License.
 
 #include <GraphMol/DistGeomHelpers/Embedder.h>
-#include <GraphMol/ROMol.h>
 
 #include <boost/python.hpp>
 #include <boost/python/stl_iterator.hpp>
 
+#include "boost_python_utils.h"
 #include "etkdg.h"
 
-// Utility: convert std::vector<T> to Python list
-template <typename T> boost::python::list vectorToList(const std::vector<T>& vec) {
-  boost::python::list list;
-  for (const auto& value : vec) {
-    list.append(value);
-  }
-  return list;
-}
-
-// Provide getter/setter so Python lists/iterables can be assigned to gpuIds
 static boost::python::list getGpuIdsPy(nvMolKit::BatchHardwareOptions& opts) {
-  return vectorToList(opts.gpuIds);
+  return nvMolKit::vectorToList(opts.gpuIds);
 }
 
 static void setGpuIds(nvMolKit::BatchHardwareOptions& opts, const boost::python::object& iterable) {
@@ -72,17 +62,7 @@ BOOST_PYTHON_MODULE(_embedMolecules) {
         int                                         confsPerMolecule,
         int                                         maxIterations,
         const nvMolKit::BatchHardwareOptions&       hardwareOptions) {
-      // Convert Python list to std::vector<RDKit::ROMol*>
-      std::vector<RDKit::ROMol*> molsVec;
-      molsVec.reserve(len(molecules));
-
-      for (int i = 0; i < len(molecules); i++) {
-        RDKit::ROMol* mol = boost::python::extract<RDKit::ROMol*>(boost::python::object(molecules[i]));
-        if (mol == nullptr) {
-          throw std::invalid_argument("Invalid molecule at index " + std::to_string(i));
-        }
-        molsVec.push_back(mol);
-      }
+      auto molsVec = nvMolKit::extractMolecules(molecules);
 
       // Call the C++ function with nullptr for failures
       nvMolKit::embedMolecules(molsVec,

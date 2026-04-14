@@ -49,6 +49,15 @@ MMFF Optimization
 
    mmffOptimization.MMFFOptimizeMoleculesConfs
 
+UFF Optimization
+----------------
+
+.. autosummary::
+   :toctree: generated/
+   :template: function_template.rst
+
+   uffOptimization.UFFOptimizeMoleculesConfs
+
 Butina Clustering
 -----------------
 

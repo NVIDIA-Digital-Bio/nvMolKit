@@ -26,14 +26,6 @@ namespace {
 
 using namespace boost::python;
 
-template <typename T> boost::python::list vectorToList(const std::vector<T>& vec) {
-  boost::python::list list;
-  for (const auto& value : vec) {
-    list.append(value);
-  }
-  return list;
-}
-
 template <int nBits>
 nvMolKit::PyArray* makePyArrayFromFlatBitVects(nvMolKit::AsyncDeviceVector<nvMolKit::FlatBitVect<nBits>>& deviceVect) {
   using dtype                = typename nvMolKit::FlatBitVect<nBits>::StorageType;

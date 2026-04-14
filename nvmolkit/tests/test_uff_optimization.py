@@ -66,7 +66,9 @@ def make_fragmented_mol():
     params = rdDistGeom.ETKDGv3()
     params.useRandomCoords = True
     params.randomSeed = 42
-    rdDistGeom.EmbedMultipleConfs(mol, numConfs=1, params=params)
+    conf_ids = rdDistGeom.EmbedMultipleConfs(mol, numConfs=1, params=params)
+    if not conf_ids:
+        raise RuntimeError("EmbedMultipleConfs failed to generate a conformer for fragmented mol")
     conf = mol.GetConformer()
     fragments = Chem.GetMolFrags(mol)
     if len(fragments) != 2:

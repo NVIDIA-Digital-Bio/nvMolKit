@@ -13,28 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <GraphMol/ROMol.h>
-
 #include <boost/python.hpp>
 
 #include "bfgs_mmff.h"
+#include "boost_python_utils.h"
 #include "mmff_properties.h"
-
-template <typename T> boost::python::list vectorToList(const std::vector<T>& vec) {
-  boost::python::list list;
-  for (const auto& value : vec) {
-    list.append(value);
-  }
-  return list;
-}
-
-template <typename T> boost::python::list vectorOfVectorsToList(const std::vector<std::vector<T>>& vecOfVecs) {
-  boost::python::list outerList;
-  for (const auto& innerVec : vecOfVecs) {
-    outerList.append(vectorToList(innerVec));
-  }
-  return outerList;
-}
 
 BOOST_PYTHON_MODULE(_mmffOptimization) {
   boost::python::def(
@@ -43,24 +26,13 @@ BOOST_PYTHON_MODULE(_mmffOptimization) {
         int                                   maxIters,
         double                                nonBondedThreshold,
         const nvMolKit::BatchHardwareOptions& hardwareOptions) -> boost::python::list {
-      // Convert Python list to std::vector<RDKit::ROMol*>
-      std::vector<RDKit::ROMol*> molsVec;
-      molsVec.reserve(len(molecules));
-
-      for (int i = 0; i < len(molecules); i++) {
-        RDKit::ROMol* mol = boost::python::extract<RDKit::ROMol*>(boost::python::object(molecules[i]));
-        if (mol == nullptr) {
-          throw std::invalid_argument("Invalid molecule at index " + std::to_string(i));
-        }
-        molsVec.push_back(mol);
-      }
+      auto molsVec = nvMolKit::extractMolecules(molecules);
 
       nvMolKit::MMFFProperties properties;
       properties.nonBondedThreshold = nonBondedThreshold;
       auto result = nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molsVec, maxIters, properties, hardwareOptions);
 
-      // Convert result back to Python list of lists
-      return vectorOfVectorsToList(result);
+      return nvMolKit::vectorOfVectorsToList(result);
     },
     (boost::python::arg("molecules"),
      boost::python::arg("maxIters")           = 200,

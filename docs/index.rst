@@ -117,6 +117,12 @@ nvMolKit currently supports the following features:
     * Batch optimization of multiple molecules and conformers
     * Supports multiple GPUs
 
+* **UFF Geometry Relaxation**: GPU-accelerated Universal Force Field optimization
+    * UFF force field implementation for conformer optimization
+    * Per-molecule van der Waals thresholds and interfragment interaction control
+    * Batch optimization of multiple molecules and conformers
+    * Supports multiple GPUs
+
 * **Butina clustering**: GPU-accelerated clustering from a distance matrix via the Taylor-Butina method
 
 * **Substructure Search**: GPU-accelerated substructure matching against batches of molecules
