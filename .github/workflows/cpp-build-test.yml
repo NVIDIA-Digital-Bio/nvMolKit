@@ -1,0 +1,69 @@
+name: C++ Build & Test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cpp-build-test-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: colossus
+    container:
+      image: nvcr.io/nvidia/cuda:12.6.3-devel-ubuntu22.04
+      options: --gpus all
+    timeout-minutes: 90
+
+    steps:
+      - name: Verify GPU access
+        shell: bash
+        run: |
+          set -xeuo pipefail
+          nvidia-smi
+
+      - name: Check out source tree
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        shell: bash
+        run: bash admin/ci/setup_dependencies.sh 3.12 2024.09.6
+
+      - name: Configure
+        shell: bash
+        env:
+          CUDA_HOME: /usr/local/cuda
+        run: |
+          set -xeo pipefail
+          . /usr/local/anaconda/etc/profile.d/conda.sh && conda activate base
+          export LD_LIBRARY_PATH="/usr/local/cuda/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
+            -DNVMOLKIT_EXTRA_DEV_FLAGS=OFF \
+            -DNVMOLKIT_BUILD_BENCHMARKS=ON \
+            -DNVMOLKIT_BUILD_PYTHON_BINDINGS=ON \
+            -DNVMOLKIT_BUILD_TESTS=ON \
+            -DNVMOLKIT_CUDA_TARGET_MODE=native
+
+      - name: Build
+        shell: bash
+        run: |
+          set -xeo pipefail
+          . /usr/local/anaconda/etc/profile.d/conda.sh && conda activate base
+          cmake --build build --parallel $(nproc)
+
+      - name: Test
+        shell: bash
+        run: |
+          set -xeo pipefail
+          . /usr/local/anaconda/etc/profile.d/conda.sh && conda activate base
+          ctest --test-dir build --output-on-failure
