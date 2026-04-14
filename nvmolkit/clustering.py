@@ -13,13 +13,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Contains GPU-accelerated Butina clustering implementation."""
+"""Contains GPU-accelerated Butina clustering implementation.
+
+The standard ``butina()`` path precomputes a full N x N distance matrix and then
+clusters from it.  This is the right choice when you already have a distance
+matrix or plan to reuse it (e.g. at multiple cutoffs), and when N is small
+enough that the O(N^2) matrix fits comfortably in GPU memory.
+
+``fused_butina()`` avoids materializing the distance matrix entirely.  Each
+clustering round recomputes only the similarities it needs on the fly using
+Triton kernels that fuse popcount-based fingerprint similarity with the
+neighbor-count and cluster-extraction steps.  This trades extra compute for
+drastically lower memory: usage is O(N) rather than O(N^2), making it the
+better choice for large N where the full matrix would be prohibitively large.
+"""
+
 
 import torch
 
 from nvmolkit import _clustering
 from nvmolkit._arrayHelpers import *  # noqa: F403
-from nvmolkit._fused_Butina import extract_cluster_and_singletons, update_neighbor_counts
+from nvmolkit._fusedButina import extract_cluster_and_singletons, update_neighbor_counts, _check_fingerprint_matrix
 from nvmolkit.types import AsyncGpuResult
 
 _VALID_NEIGHBORLIST_SIZES = frozenset({8, 16, 24, 32, 64, 128})
@@ -112,10 +126,16 @@ def fused_butina(
         If ``return_centroids`` is True, returns a tuple ``(clusters, cluster_sizes, centroids)``
         where *centroids* is a list of centroid indices.
     """
+    _check_fingerprint_matrix("x", x)
     if metric not in ["tanimoto", "cosine"]:
         raise ValueError(f"metric must be one of ['tanimoto', 'cosine'], got {metric}")
+        
     if stream is not None and not isinstance(stream, torch.cuda.Stream):
         raise TypeError(f"stream must be a torch.cuda.Stream or None, got {type(stream).__name__}")
+
+    if cutoff < 0 or cutoff > 1:
+        raise ValueError(f"cutoff must be in [0, 1], got {cutoff}")
+
     with torch.cuda.stream(stream):
         n_start = x.shape[0]
         device = x.device
@@ -125,12 +145,12 @@ def fused_butina(
         cluster_indices = torch.zeros(n_start, dtype=torch.int32, device=device)
         cluster_sizes = [0]
         centroids = []
-        is_free = torch.ones(n_start, dtype=torch.int32, device=device)
+        is_free = torch.ones(n_start, dtype=torch.bool, device=device)
         neigh = torch.zeros(n_start, dtype=torch.int32, device=device)
         threshold = float(1 - cutoff)
         y = x
         first_run = True
-        while cluster_count[0].item() < cluster_count[1].item():
+        while cluster_count[0].item() <= cluster_count[1].item() and x.shape[0] > 0:
             update_neighbor_counts(x, y, neigh, threshold, subtract=not first_run, metric=metric)
             first_run = False
 
@@ -144,15 +164,17 @@ def fused_butina(
                 x, id_max, is_free, neigh, cluster_count, cluster_indices, threshold, indices, metric=metric
             )
             cluster_sizes.append(cluster_count[0].item())
-            x, y = x[is_free.bool(), :].contiguous(), x[~is_free.bool(), :].contiguous()
-            indices = indices[is_free.bool()].contiguous()
-            neigh = neigh[is_free.bool()].contiguous()
-            is_free = torch.ones(x.shape[0], dtype=torch.int32, device=x.device)
+            x, y = x[is_free, :].contiguous(), x[~is_free, :].contiguous()
+            indices = indices[is_free].contiguous()
+            neigh = neigh[is_free].contiguous()
+            is_free = torch.ones(x.shape[0], dtype=torch.bool, device=x.device)
 
+        cluster_indices_cpu = cluster_indices.cpu()
         for i in range(n_start - cluster_sizes[-1]):
             item = cluster_sizes[-1]
             cluster_sizes.append(cluster_sizes[-1] + 1)
-            centroids.append(cluster_indices[item].item())
+            centroids.append(cluster_indices_cpu[item])
+            
         clusters = []
         indices_cpu = cluster_indices.cpu().numpy()
         for i in range(len(cluster_sizes) - 1):

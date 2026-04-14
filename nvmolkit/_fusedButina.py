@@ -17,8 +17,13 @@ import torch
 import triton
 import triton.language as tl
 
-TILE_X = 32
-TILE_Y = 64
+def get_cuda_autotune_config():
+    return [
+        triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'BLOCK_K': 32}, num_stages=4, num_warps=2),
+        triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'BLOCK_K': 32}, num_stages=5, num_warps=2),
+        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 32, 'BLOCK_K': 32}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 32, 'BLOCK_K': 32}, num_stages=5, num_warps=4),
+    ]
 
 @triton.jit
 def _popcount32(x):
@@ -44,6 +49,23 @@ def _check_fingerprint_matrix(name: str, x: torch.Tensor) -> None:
         raise ValueError(f"{name} must be 2D, got shape={tuple(x.shape)}")
 
 
+def _check_bool_vector(
+    name: str,
+    x: torch.Tensor,
+    expected_len: int,
+) -> None:
+    if not isinstance(x, torch.Tensor):
+        raise TypeError(f"{name} must be a torch.Tensor")
+    if not x.is_cuda:
+        raise ValueError(f"{name} must be a CUDA tensor")
+    if x.dtype != torch.bool:
+        raise ValueError(f"{name} must have dtype bool")
+    if x.ndim != 1:
+        raise ValueError(f"{name} must be 1D, got shape={tuple(x.shape)}")
+    if x.numel() != expected_len:
+        raise ValueError(f"{name} must have length {expected_len}, got {x.numel()}")
+
+
 def _check_int32_vector(
     name: str,
     x: torch.Tensor,
@@ -67,14 +89,17 @@ def _check_int32_vector(
             raise ValueError(f"{name} must have length {expected_len}, got {x.numel()}")
 
 # pyright: reportUnreachable=false
-# TODO: L2 Cache Optimizations
+@triton.autotune(
+    configs=get_cuda_autotune_config(),
+    key=['K'],
+)
 @triton.jit
 def _update_neighbor_count_kernel(
     x_ptr,
     y_ptr,
     neighbors_ptr,
-    n,
-    m,
+    M,
+    N,
     K,
     x_stride_n,
     x_stride_k,
@@ -86,20 +111,28 @@ def _update_neighbor_count_kernel(
     BLOCK_K: tl.constexpr,
     SUBTRACT: tl.constexpr,
     METRIC: tl.constexpr,
+    GROUP_SIZE_M: tl.constexpr = 8,
 ):
     """Compute pairwise similarity between blocks of x and y using bit-packed fingerprints.
 
     Atomically adds (SUBTRACT=False) or subtracts (SUBTRACT=True) the per-row
     neighbor counts into ``neighbors_ptr``.
     """
-    pid_m = tl.program_id(axis=0)
-    pid_n = tl.program_id(axis=1)
+    pid = tl.program_id(axis=0)
+    num_pid_m = tl.cdiv(M, BLOCK_M)
+    num_pid_n = tl.cdiv(N, BLOCK_N)
+    num_pid_in_group = GROUP_SIZE_M * num_pid_n
+    group_id = pid // num_pid_in_group
+    first_pid_m = group_id * GROUP_SIZE_M
+    group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
+    pid_m = first_pid_m + ((pid % num_pid_in_group) % group_size_m)
+    pid_n = (pid % num_pid_in_group) // group_size_m
 
     offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
 
-    mask_m = offs_m < n
-    mask_n = offs_n < m
+    mask_m = offs_m < M
+    mask_n = offs_n < N
 
     norm_x = tl.zeros((BLOCK_M,), dtype=tl.int32)
     norm_y = tl.zeros((BLOCK_N,), dtype=tl.int32)
@@ -153,7 +186,7 @@ def _extract_cluster_singleton_kernel(
     cluster_indices_ptr,
     threshold,
     indices_ptr,
-    n,
+    M,
     K,
     x_stride_n,
     x_stride_k,
@@ -167,7 +200,7 @@ def _extract_cluster_singleton_kernel(
     are collected as singletons from the back.
     """
     row = tl.program_id(axis=0)
-    row_mask = row < n
+    row_mask = row < M
 
     pa = tl.zeros((), dtype=tl.int32)
     pb = tl.zeros((), dtype=tl.int32)
@@ -195,21 +228,19 @@ def _extract_cluster_singleton_kernel(
     else:
         raise ValueError(f"Invalid metric: {METRIC}")
 
-    row_is_free = tl.load(is_free_ptr + row, mask=row_mask, other=0)
-    valid = row_mask & (row_is_free != 0) & (union > 0)
+    valid = row_mask & (union > 0)
     similarity = tl.where(valid, dot.to(tl.float32) / union.to(tl.float32), 0.0)
     is_neighbor = valid & (similarity >= threshold)
 
     orig_idx = tl.load(indices_ptr + row, mask=row_mask, other=0)
     neighbor_slot = tl.atomic_add(cluster_count_ptr + 0, 1, mask=is_neighbor)
     tl.store(cluster_indices_ptr + neighbor_slot, orig_idx, mask=is_neighbor)
-    tl.store(is_free_ptr + row, 0, mask=is_neighbor)
-
+    
     degree = tl.load(neighbors_ptr + row, mask=row_mask, other=0)
     is_singleton = row_mask & (~is_neighbor) & (degree == 1)
     singleton_slot = tl.atomic_add(cluster_count_ptr + 1, -1, mask=is_singleton)
     tl.store(cluster_indices_ptr + singleton_slot, orig_idx, mask=is_singleton)
-    tl.store(is_free_ptr + row, 0, mask=is_singleton)
+    tl.store(is_free_ptr + row, False, mask=is_singleton | is_neighbor)
 
 
 def update_neighbor_counts(
@@ -234,26 +265,22 @@ def update_neighbor_counts(
     if x.shape[1] != y.shape[1]:
         raise ValueError("x and y must have the same feature dimension")
 
-    n = x.shape[0]
-    m = y.shape[0]
+    M = x.shape[0]
+    N = y.shape[0]
     K = x.shape[1]
-    grid = (triton.cdiv(n, TILE_X), triton.cdiv(m, TILE_Y))
+    grid = lambda META: (triton.cdiv(M, META['BLOCK_M']) * triton.cdiv(N, META['BLOCK_N']),)
     _update_neighbor_count_kernel[grid](
         x,
         y,
         neighbors,
-        n,
-        m,
+        M,
+        N,
         K,
         x.stride(0),
         x.stride(1),
         y.stride(0),
         y.stride(1),
         float(threshold),
-        BLOCK_M=TILE_X,
-        BLOCK_N=TILE_Y,
-        BLOCK_K=32,
-        num_warps=8,
         SUBTRACT=subtract,
         METRIC=metric,
     )
@@ -278,15 +305,15 @@ def extract_cluster_and_singletons(
     Both groups are marked as non-free in ``is_free``.
     """
     _check_fingerprint_matrix("x", x)
-    n = x.shape[0]
+    M = x.shape[0]
     K = x.shape[1]
-    _check_int32_vector("is_free", is_free, n)
-    _check_int32_vector("neighbors", neighbors, n)
-    _check_int32_vector("cluster_indices", cluster_indices, n, allow_larger=True)
-    _check_int32_vector("indices", indices, n)
+    _check_bool_vector("is_free", is_free, M)
+    _check_int32_vector("neighbors", neighbors, M)
+    _check_int32_vector("cluster_indices", cluster_indices, M, allow_larger=True)
+    _check_int32_vector("indices", indices, M)
     _check_int32_vector("cluster_count", cluster_count, 2)
-    if not (0 <= id < n):
-        raise ValueError(f"id must be in [0, {n}), got {id}")
+    if not (0 <= id < M):
+        raise ValueError(f"id must be in [0, {M}), got {id}")
     if (
         x.device != is_free.device
         or x.device != neighbors.device
@@ -296,7 +323,7 @@ def extract_cluster_and_singletons(
     ):
         raise ValueError("all tensors must be on the same CUDA device")
 
-    grid = (n,)
+    grid = (M,)
     _extract_cluster_singleton_kernel[grid](
         x,
         id,
@@ -306,7 +333,7 @@ def extract_cluster_and_singletons(
         cluster_indices,
         float(threshold),
         indices,
-        n,
+        M,
         K,
         x.stride(0),
         x.stride(1),

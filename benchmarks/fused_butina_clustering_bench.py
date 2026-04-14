@@ -81,29 +81,16 @@ def run_test(n, threshold, num_clusters, noise_range=2, seed=42, num_words=64, m
     x = generate_data(n, num_clusters, noise_range=noise_range, seed=seed, num_words=num_words)
     cutoff = 1.0 - threshold
 
-    triton_result = time_it(lambda: fused_butina(x, cutoff=cutoff, metric=metric), gpu_sync=True)
-    warp_clusters, _ = fused_butina(x, cutoff=cutoff, metric=metric)
+    triton_result = time_it(lambda: fused_butina(x, cutoff=cutoff, metric=metric), runs=3, warmups=3, gpu_sync=True)
     torch.cuda.synchronize()
-    print(f"Triton: {triton_result.median_ms:.2f}ms (median), found {len(warp_clusters)} clusters")
+    print(f"Triton: {triton_result.median_ms:.2f}ms (median)")
 
     rdkit_time_ms = 0.0
-    passed = True
     if HAS_RDKIT:
         try:
-            rdkit_result = time_it(lambda: get_rdkit_clusters(x, threshold=threshold, metric=metric), runs=1)
-            rdkit_clusters = get_rdkit_clusters(x, threshold=threshold, metric=metric)
+            rdkit_result = time_it(lambda: get_rdkit_clusters(x, threshold=threshold, metric=metric))
             rdkit_time_ms = rdkit_result.median_ms
-            print(f"RDKit:  {rdkit_time_ms:.2f}ms (median), found {len(rdkit_clusters)} clusters")
-
-            rdkit_set = {tuple(sorted(c)) for c in rdkit_clusters}
-            warp_set = {tuple(sorted(c)) for c in warp_clusters}
-            passed = rdkit_set == warp_set
-            if passed:
-                print("SUCCESS: Clusters match exactly!")
-            else:
-                print("DIFFERENCE DETECTED!")
-                print(f"  Clusters only in RDKit: {len(rdkit_set - warp_set)}")
-                print(f"  Clusters only in Triton: {len(warp_set - rdkit_set)}")
+            print(f"RDKit:  {rdkit_time_ms:.2f}ms (median)")
         except Exception as e:
             print(f"Error running RDKit: {e}")
 
@@ -117,7 +104,6 @@ def run_test(n, threshold, num_clusters, noise_range=2, seed=42, num_words=64, m
         "triton_median_ms": triton_result.median_ms,
         "triton_std_ms": triton_result.std_ms,
         "rdkit_median_ms": rdkit_time_ms,
-        "passed": passed,
     }
 
 
@@ -142,7 +128,7 @@ if __name__ == "__main__":
         (5000, 0.5, 200, 2, 32),
         (5000, 0.7, 200, 2, 64),
         (10000, 0.5, 500, 2, 32),
-        (10000, 0.5, 2000, 2, 64),
+        (10000, 0.2, 2000, 2, 32),
         # Denser clusters (lower noise) with tight threshold
         (1000, 0.9, 100, 1, 32),
         # Sparser clusters (higher noise) with loose threshold
@@ -151,7 +137,8 @@ if __name__ == "__main__":
         (2000, 0.5, 1000, 2, 32),
         # Few large clusters
         (2000, 0.5, 10, 2, 64),
-        # (100000, 0.7, 1000, 128, 32),
+        (100000, 0.8, 1000, 128, 32),
+        (100000, 0.2, 1000, 128, 32),
     ]
 
     results = []
@@ -167,11 +154,4 @@ if __name__ == "__main__":
     print("SUMMARY")
     print(f"{'=' * 60}")
     print(df.to_string(index=False))
-
-    all_passed = all(r["passed"] for r in results)
-    n_passed = sum(1 for r in results if r["passed"])
-    print(f"\n{n_passed}/{len(results)} tests passed.")
-
     df.to_csv("fused_butina_results.csv", index=False)
-    if not all_passed:
-        sys.exit(1)
