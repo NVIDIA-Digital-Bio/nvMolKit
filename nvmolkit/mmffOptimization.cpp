@@ -17,33 +17,33 @@
 
 #include "bfgs_mmff.h"
 #include "boost_python_utils.h"
-#include "mmff_properties.h"
+#include "mmff_python_utils.h"
 
 BOOST_PYTHON_MODULE(_mmffOptimization) {
   boost::python::def(
     "MMFFOptimizeMoleculesConfs",
     +[](const boost::python::list&            molecules,
         int                                   maxIters,
-        double                                nonBondedThreshold,
+        const boost::python::list&            propertiesList,
         const nvMolKit::BatchHardwareOptions& hardwareOptions) -> boost::python::list {
       auto molsVec = nvMolKit::extractMolecules(molecules);
 
-      nvMolKit::MMFFProperties properties;
-      properties.nonBondedThreshold = nonBondedThreshold;
-      auto result = nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molsVec, maxIters, properties, hardwareOptions);
+      const auto properties = nvMolKit::extractMMFFPropertiesList(propertiesList, static_cast<int>(molsVec.size()));
+      const auto result =
+        nvMolKit::MMFF::MMFFOptimizeMoleculesConfsBfgs(molsVec, maxIters, properties, hardwareOptions);
 
       return nvMolKit::vectorOfVectorsToList(result);
     },
     (boost::python::arg("molecules"),
-     boost::python::arg("maxIters")           = 200,
-     boost::python::arg("nonBondedThreshold") = 100.0,
-     boost::python::arg("hardwareOptions")    = nvMolKit::BatchHardwareOptions()),
+     boost::python::arg("maxIters")        = 200,
+     boost::python::arg("properties")      = boost::python::list(),
+     boost::python::arg("hardwareOptions") = nvMolKit::BatchHardwareOptions()),
     "Optimize conformers for multiple molecules using MMFF force field.\n"
     "\n"
     "Args:\n"
     "    molecules: List of RDKit molecules to optimize\n"
     "    maxIters: Maximum number of optimization iterations (default: 200)\n"
-    "    nonBondedThreshold: Radius threshold for non-bonded interactions (default: 100.0)\n"
+    "    properties: MMFFProperties-compatible object with forcefield settings\n"
     "    hardwareOptions: BatchHardwareOptions object with hardware settings (default: default options)\n"
     "\n"
     "Returns:\n"

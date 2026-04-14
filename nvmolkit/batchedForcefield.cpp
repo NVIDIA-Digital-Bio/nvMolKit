@@ -25,6 +25,7 @@
 #include "mmff_batched_forcefield.h"
 #include "mmff_flattened_builder.h"
 #include "mmff_properties.h"
+#include "mmff_python_utils.h"
 
 namespace bp = boost::python;
 
@@ -54,33 +55,6 @@ template <typename T> std::vector<T> copyDeviceVector(nvMolKit::AsyncDeviceVecto
   deviceVec.copyToHost(hostVec);
   cudaStreamSynchronize(deviceVec.stream());
   return hostVec;
-}
-
-static nvMolKit::MMFFProperties extractInternalMMFFProperties(const bp::object& obj,
-                                                              double            nonBondedThreshold          = 100.0,
-                                                              bool              ignoreInterfragInteractions = true) {
-  nvMolKit::MMFFProperties props;
-  if (obj.is_none()) {
-    props.nonBondedThreshold          = nonBondedThreshold;
-    props.ignoreInterfragInteractions = ignoreInterfragInteractions;
-    return props;
-  }
-  props = bp::extract<nvMolKit::MMFFProperties>(obj);
-  return props;
-}
-
-static std::vector<nvMolKit::MMFFProperties> extractMMFFPropertiesList(const bp::list& properties, int numMols) {
-  const int                             n = bp::len(properties);
-  std::vector<nvMolKit::MMFFProperties> props;
-  props.reserve(numMols);
-  for (int i = 0; i < numMols; ++i) {
-    if (i < n) {
-      props.push_back(extractInternalMMFFProperties(bp::object(properties[i])));
-    } else {
-      props.emplace_back();
-    }
-  }
-  return props;
 }
 
 static std::vector<int> extractIntList(const bp::list& pyList, int expectedSize, const std::string& name) {
@@ -175,7 +149,7 @@ class NativeMMFFBatchedForcefield {
                               const bp::list& torsionConstraints) {
     const auto mols     = nvMolKit::extractMolecules(molecules);
     const int  numMols  = static_cast<int>(mols.size());
-    const auto props    = extractMMFFPropertiesList(properties, numMols);
+    const auto props    = nvMolKit::extractMMFFPropertiesList(properties, numMols);
     const auto confList = extractIntList(confIds, numMols, "conf_id");
     const auto distanceConstraintLists =
       extractConstraintLists<nvMolKit::ForceFieldConstraints::DistanceConstraintSpec>(distanceConstraints,
