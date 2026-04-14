@@ -112,14 +112,8 @@ nvMolKit currently supports the following features:
     * Supports multiple GPUs
     * Does not support all RDKit `EmbedParameters` options. Defaults in ETKDGv3() are supported with a few exceptions (see API documentation)
 
-* **MMFF Geometry Relaxation**: GPU-accelerated molecular mechanics force field optimization
-    * MMFF94 force field implementation for conformer optimization
-    * Batch optimization of multiple molecules and conformers
-    * Supports multiple GPUs
-
-* **UFF Geometry Relaxation**: GPU-accelerated Universal Force Field optimization
-    * UFF force field implementation for conformer optimization
-    * Per-molecule van der Waals thresholds and interfragment interaction control
+* **Geometry Relaxation**: GPU-accelerated force field optimization of conformers
+    * MMFF94 and UFF force fields
     * Batch optimization of multiple molecules and conformers
     * Supports multiple GPUs
 
