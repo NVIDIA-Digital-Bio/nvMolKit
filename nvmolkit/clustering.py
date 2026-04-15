@@ -173,7 +173,7 @@ def fused_butina(
         for i in range(n_start - cluster_sizes[-1]):
             item = cluster_sizes[-1]
             cluster_sizes.append(cluster_sizes[-1] + 1)
-            centroids.append(cluster_indices_cpu[item])
+            centroids.append(cluster_indices_cpu[item].item())
             
         clusters = []
         indices_cpu = cluster_indices.cpu().numpy()
