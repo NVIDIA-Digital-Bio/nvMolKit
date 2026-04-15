@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Contains GPU-accelerated Butina clustering implementation.
+"""Contains GPU-accelerated Butina clustering implementations.
 
 The standard ``butina()`` path precomputes a full N x N distance matrix and then
 clusters from it.  This is the right choice when you already have a distance

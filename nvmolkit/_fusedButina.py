@@ -17,13 +17,15 @@ import torch
 import triton
 import triton.language as tl
 
+
 def get_cuda_autotune_config():
     return [
-        triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'BLOCK_K': 32}, num_stages=4, num_warps=2),
-        triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'BLOCK_K': 32}, num_stages=5, num_warps=2),
-        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 32, 'BLOCK_K': 32}, num_stages=4, num_warps=4),
-        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 32, 'BLOCK_K': 32}, num_stages=5, num_warps=4),
+        triton.Config({"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=2),
+        triton.Config({"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=5, num_warps=2),
+        triton.Config({"BLOCK_M": 128, "BLOCK_N": 32, "BLOCK_K": 32}, num_stages=4, num_warps=4),
+        triton.Config({"BLOCK_M": 128, "BLOCK_N": 32, "BLOCK_K": 32}, num_stages=5, num_warps=4),
     ]
+
 
 @triton.jit
 def _popcount32(x):
@@ -88,10 +90,11 @@ def _check_int32_vector(
         if x.numel() != expected_len:
             raise ValueError(f"{name} must have length {expected_len}, got {x.numel()}")
 
+
 # pyright: reportUnreachable=false
 @triton.autotune(
     configs=get_cuda_autotune_config(),
-    key=['K'],
+    key=["K"],
 )
 @triton.jit
 def _update_neighbor_count_kernel(
@@ -235,7 +238,7 @@ def _extract_cluster_singleton_kernel(
     orig_idx = tl.load(indices_ptr + row, mask=row_mask, other=0)
     neighbor_slot = tl.atomic_add(cluster_count_ptr + 0, 1, mask=is_neighbor)
     tl.store(cluster_indices_ptr + neighbor_slot, orig_idx, mask=is_neighbor)
-    
+
     degree = tl.load(neighbors_ptr + row, mask=row_mask, other=0)
     is_singleton = row_mask & (~is_neighbor) & (degree == 1)
     singleton_slot = tl.atomic_add(cluster_count_ptr + 1, -1, mask=is_singleton)
@@ -268,7 +271,7 @@ def update_neighbor_counts(
     M = x.shape[0]
     N = y.shape[0]
     K = x.shape[1]
-    grid = lambda META: (triton.cdiv(M, META['BLOCK_M']) * triton.cdiv(N, META['BLOCK_N']),)
+    grid = lambda META: (triton.cdiv(M, META["BLOCK_M"]) * triton.cdiv(N, META["BLOCK_N"]),)
     _update_neighbor_count_kernel[grid](
         x,
         y,
