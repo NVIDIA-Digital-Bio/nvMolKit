@@ -41,7 +41,6 @@ Example usage:
 """
 
 from contextlib import nullcontext
-from typing import List, Union
 
 import numpy as np
 import torch
@@ -65,24 +64,24 @@ from nvmolkit.types import AsyncGpuResult
 class _TFDGpuResult:
     """Internal result container for GPU-resident TFD computation."""
 
-    def __init__(self, tfd_values: AsyncGpuResult, output_starts: List[int]):
+    def __init__(self, tfd_values: AsyncGpuResult, output_starts: list[int]):
         self.tfd_values = tfd_values
         self.output_starts = output_starts
 
-    def to_tensors(self) -> List[torch.Tensor]:
+    def to_tensors(self) -> list[torch.Tensor]:
         """Extract as list of GPU tensors (no D2H copy)."""
         n = len(self.output_starts) - 1
         all_values = self.tfd_values.torch()
         return [all_values[self.output_starts[i] : self.output_starts[i + 1]] for i in range(n)]
 
-    def to_numpy(self) -> List[np.ndarray]:
+    def to_numpy(self) -> list[np.ndarray]:
         """Extract as list of numpy arrays (one bulk D2H copy)."""
         n = len(self.output_starts) - 1
         torch.cuda.synchronize()
         all_values = self.tfd_values.numpy()
         return [all_values[self.output_starts[i] : self.output_starts[i + 1]] for i in range(n)]
 
-    def to_lists(self) -> List[List[float]]:
+    def to_lists(self) -> list[list[float]]:
         """Extract as Python lists (bulk D2H + tolist)."""
         n = len(self.output_starts) - 1
         torch.cuda.synchronize()
@@ -126,14 +125,14 @@ def _extract_cpu_result(arrays, return_type):
 
 
 def GetTFDMatrices(
-    mols: List,
+    mols: list,
     useWeights: bool = True,
     maxDev: str = "equal",
     symmRadius: int = 2,
     ignoreColinearBonds: bool = True,
     backend: str = "gpu",
     return_type: str = "list",
-) -> Union[List[List[float]], List[np.ndarray], List[torch.Tensor]]:
+) -> list[list[float]] | list[np.ndarray] | list[torch.Tensor]:
     """Calculate TFD matrices for multiple molecules.
 
     Args:
@@ -178,7 +177,7 @@ def GetTFDMatrix(
     ignoreColinearBonds: bool = True,
     backend: str = "gpu",
     return_type: str = "list",
-) -> Union[List[float], np.ndarray, torch.Tensor]:
+) -> list[float] | np.ndarray | torch.Tensor:
     """Calculate the TFD matrix for conformers of a molecule.
 
     Convenience wrapper over GetTFDMatrices for a single molecule.

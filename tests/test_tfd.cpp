@@ -37,43 +37,9 @@ void generateConformers(RDKit::ROMol& mol, int numConformers, int seed = 42) {
 
 }  // namespace
 
-// Global check for CUDA availability (same pattern as test_tfd_gpu.cpp)
-static bool gCudaAvailable = false;
-static bool gCudaChecked   = false;
-
-static bool checkCudaAvailable() {
-  if (!gCudaChecked) {
-    gCudaChecked = true;
-    try {
-      int         deviceCount = 0;
-      cudaError_t err         = cudaGetDeviceCount(&deviceCount);
-      if (err == cudaSuccess && deviceCount > 0) {
-        err = cudaSetDevice(0);
-        if (err == cudaSuccess) {
-          gCudaAvailable = true;
-        } else {
-          cudaGetLastError();
-        }
-      } else {
-        cudaGetLastError();
-      }
-    } catch (...) {
-      gCudaAvailable = false;
-    }
-  }
-  return gCudaAvailable;
-}
-
 // ========== Unified TFDGenerator API Tests ==========
 
-class TFDGeneratorTest : public ::testing::Test {
- protected:
-  void SetUp() override {
-    if (!checkCudaAvailable()) {
-      GTEST_SKIP() << "No CUDA devices available, skipping GPU tests";
-    }
-  }
-};
+class TFDGeneratorTest : public ::testing::Test {};
 
 TEST_F(TFDGeneratorTest, UnifiedAPIBackendSelection) {
   auto mol = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol("CCCCC"));

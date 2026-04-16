@@ -15,6 +15,8 @@
 
 """Tests for GPU-accelerated TFD calculation."""
 
+import os
+
 import pytest
 import torch
 from rdkit import Chem
@@ -334,8 +336,12 @@ class TestCompareWithRDKit:
     @pytest.mark.parametrize("backend", ["gpu", "cpu"])
     @pytest.mark.parametrize("symm_radius", [0, 1, 3])
     def test_symm_radius(self, backend, symm_radius):
-        """Test different symmRadius values against RDKit on both backends."""
-        mol = Chem.MolFromSmiles("CC(C)CC")
+        """Test different symmRadius values against RDKit on both backends.
+
+        Uses 4-propylheptane: the two propyl chains are symmetric at radius 1
+        but distinguishable at radius 3 due to the longer heptane backbone.
+        """
+        mol = Chem.MolFromSmiles("CCCC(CCC)CCC")
         generate_conformers(mol, 4)
 
         nvmolkit_result = tfd.GetTFDMatrix(
@@ -374,6 +380,56 @@ class TestCompareWithRDKit:
         for nv, rd in zip(nvmolkit_result, rdkit_result):
             assert abs(nv - rd) < TOLERANCE, f"ignoreColinearBonds=False, backend={backend}: nvMolKit={nv}, RDKit={rd}"
 
+    @pytest.mark.parametrize("backend", ["gpu", "cpu"])
+    def test_batch_against_rdkit(self, backend):
+        """Test GetTFDMatrices batch against per-molecule RDKit on nontrivial molecules.
+
+        Loads 10 diverse molecules from the MMFF94 validation SDF, generates
+        conformers, and checks that the batch result matches RDKit per-molecule.
+        """
+        sdf_path = os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "..",
+            "tests",
+            "test_data",
+            "MMFF94_dative.sdf",
+        )
+        if not os.path.exists(sdf_path):
+            pytest.skip(f"Test data file not found: {sdf_path}")
+
+        supplier = Chem.SDMolSupplier(sdf_path, removeHs=False, sanitize=True)
+
+        # Select 10 diverse molecules with enough atoms for torsions
+        mols = []
+        for mol in supplier:
+            if mol is None or mol.GetNumAtoms() < 8:
+                continue
+            generate_conformers(mol, 5)
+            if mol.GetNumConformers() >= 2:
+                mols.append(mol)
+            if len(mols) >= 10:
+                break
+
+        assert len(mols) == 10, f"Expected 10 molecules, got {len(mols)}"
+
+        # Batch call
+        nvmolkit_results = tfd.GetTFDMatrices(mols, backend=backend)
+
+        assert len(nvmolkit_results) == len(mols)
+
+        # Compare each molecule against RDKit
+        for mol_idx, (nv_result, mol) in enumerate(zip(nvmolkit_results, mols)):
+            rdkit_result = TorsionFingerprints.GetTFDMatrix(mol)
+
+            assert len(nv_result) == len(rdkit_result), (
+                f"Mol {mol_idx}: size mismatch nvMolKit={len(nv_result)}, RDKit={len(rdkit_result)}"
+            )
+            for i, (nv, rd) in enumerate(zip(nv_result, rdkit_result)):
+                assert abs(nv - rd) < TOLERANCE, (
+                    f"Mol {mol_idx}, pair {i}, backend={backend}: nvMolKit={nv}, RDKit={rd}"
+                )
+
 
 class TestEdgeCases:
     """Tests for edge cases."""
@@ -389,10 +445,24 @@ class TestEdgeCases:
         for val in result:
             assert val == 0.0
 
+    def test_triple_bond_chain_no_torsions(self):
+        """Test that triple bond chains produce no torsions.
+
+        1,3-butadiyne (HC#C-C#CH) has bonds that look rotatable but the
+        colinear triple bonds should exclude them from torsion assignment.
+        """
+        mol = Chem.MolFromSmiles("C#CC#C")
+        generate_conformers(mol, 3)
+
+        result = tfd.GetTFDMatrix(mol)
+
+        for val in result:
+            assert val == 0.0
+
     def test_large_molecule(self):
         """Test larger molecule."""
-        # Decane
-        mol = Chem.MolFromSmiles("CCCCCCCCCC")
+        # Irinotecan (topoisomerase inhibitor, 66 atoms, multiple rings + flexible chains)
+        mol = Chem.MolFromSmiles("CCC1(CC)C2=C(COC1=O)C(=O)N1CC3=CC4=C(N=C3C=C1C2=O)C=CC1=C4CN(C1)C(=O)OCC")
         generate_conformers(mol, 5)
 
         result = tfd.GetTFDMatrix(mol)

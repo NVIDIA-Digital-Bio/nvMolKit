@@ -22,10 +22,10 @@ benchmark/profile runs.
 Output files: <output-dir>/prepared_mols_<N>confs.pkl
 
 Usage:
-    python benchmarks/prepare_mols.py
+    python benchmarks/tfd_prepare_mols.py
 
     # Custom settings:
-    python benchmarks/prepare_mols.py \
+    python benchmarks/tfd_prepare_mols.py \
         --smiles-file benchmarks/data/benchmark_smiles.csv \
         --output-dir benchmarks/data \
         --conformers 5 10 20 50 \
@@ -139,7 +139,8 @@ def main():
         if args.workers > 1:
             with multiprocessing.Pool(args.workers) as pool:
                 results = []
-                for i, result in enumerate(pool.imap(worker_fn, work_items)):
+                chunksize = max(1, len(work_items) // (args.workers * 4))
+                for i, result in enumerate(pool.imap(worker_fn, work_items, chunksize=chunksize)):
                     results.append(result)
                     if (i + 1) % 50 == 0 or (i + 1) == len(work_items):
                         print(f"  Progress: {i + 1}/{len(work_items)} molecules", flush=True)
