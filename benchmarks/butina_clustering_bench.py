@@ -84,8 +84,11 @@ def resize_and_fill_fingerprints(fps: torch.Tensor, want_size: int) -> torch.Ten
     if current_size >= want_size:
         return fps[:want_size].contiguous()
     full_fps = torch.randint(
-        -(2**31), 2**31 - 1, (want_size, fps.shape[1]),
-        dtype=torch.int32, device=fps.device,
+        -(2**31),
+        2**31 - 1,
+        (want_size, fps.shape[1]),
+        dtype=torch.int32,
+        device=fps.device,
     )
     full_fps[:current_size] = fps
     return full_fps
@@ -116,8 +119,12 @@ def _tanimoto_dist(fp1, fp2):
 def bench_rdkit_lowmem(rdkit_fps, threshold, runs=3):
     result = time_it(
         lambda: ClusterData(
-            rdkit_fps, len(rdkit_fps), threshold,
-            isDistData=False, distFunc=_tanimoto_dist, reordering=True,
+            rdkit_fps,
+            len(rdkit_fps),
+            threshold,
+            isDistData=False,
+            distFunc=_tanimoto_dist,
+            reordering=True,
         ),
         runs=runs,
     )
@@ -156,7 +163,9 @@ if __name__ == "__main__":
     )
     parser.add_argument("--cutoff", type=float, default=None, help="Run only this cutoff value")
     parser.add_argument("--runs", type=int, default=3, help="Number of timed repetitions (default: 3)")
-    parser.add_argument("-o", "--output", type=str, default="results.csv", help="Output CSV file path (default: results.csv)")
+    parser.add_argument(
+        "-o", "--output", type=str, default="results.csv", help="Output CSV file path (default: results.csv)"
+    )
     args = parser.parse_args()
 
     include_tanimoto = args.include_tanimoto_matrix
@@ -214,11 +223,7 @@ if __name__ == "__main__":
     fps = get_fingerprints(mols)
 
     max_rdkit_fps_size = max(
-        (
-            e["size"]
-            for e in run_plan
-            if "rdkit_lowmem" in e["run"] or ("rdkit" in e["run"] and include_tanimoto)
-        ),
+        (e["size"] for e in run_plan if "rdkit_lowmem" in e["run"] or ("rdkit" in e["run"] and include_tanimoto)),
         default=0,
     )
     if max_rdkit_fps_size > 0:

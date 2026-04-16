@@ -28,7 +28,6 @@ drastically lower memory: usage is O(N) rather than O(N^2), making it the
 better choice for large N where the full matrix would be prohibitively large.
 """
 
-
 import torch
 
 from nvmolkit import _clustering
@@ -129,7 +128,7 @@ def fused_butina(
     _check_fingerprint_matrix("x", x)
     if metric not in ["tanimoto", "cosine"]:
         raise ValueError(f"metric must be one of ['tanimoto', 'cosine'], got {metric}")
-        
+
     if stream is not None and not isinstance(stream, torch.cuda.Stream):
         raise TypeError(f"stream must be a torch.cuda.Stream or None, got {type(stream).__name__}")
 
@@ -174,7 +173,7 @@ def fused_butina(
             item = cluster_sizes[-1]
             cluster_sizes.append(cluster_sizes[-1] + 1)
             centroids.append(cluster_indices_cpu[item].item())
-            
+
         clusters = []
         indices_cpu = cluster_indices.cpu().numpy()
         for i in range(len(cluster_sizes) - 1):
