@@ -15,6 +15,7 @@ description = "Python bindings for the nvMolKit project"
 dependencies = [
     "numpy",
     "torch",
+    "triton",
 ]
 
 [project.optional-dependencies]
