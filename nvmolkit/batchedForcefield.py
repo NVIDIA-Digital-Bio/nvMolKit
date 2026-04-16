@@ -15,9 +15,9 @@
 
 """Batched forcefield wrappers with energy, gradient, and minimization support.
 
-This module provides :class:`MMFFBatchedForcefield` for GPU-accelerated
-evaluation and BFGS minimization of multiple molecules with multiple
-conformers each.
+This module provides :class:`MMFFBatchedForcefield` and
+:class:`UFFBatchedForcefield` for GPU-accelerated evaluation and BFGS
+minimization of multiple molecules with multiple conformers each.
 
 All conformers of each molecule are evaluated as a batch.  Properties and
 constraints are specified per-molecule and apply to every conformer of that
@@ -308,6 +308,22 @@ class MMFFBatchElement(_BatchElementBase):
     """
 
 
+class UFFBatchElement(_BatchElementBase):
+    """Per-molecule view for configuring one molecule in a UFF batch.
+
+    Retrieve an element with ``ff[i]`` and use it to add constraints for
+    that molecule.  Constraints apply to all conformers of the molecule.
+
+    Example:
+
+    .. code-block:: python
+
+       ff = UFFBatchedForcefield([mol_a, mol_b])
+       ff[0].add_position_constraint(0, 0.1, 50.0)
+       energies = ff.minimize()
+    """
+
+
 def _normalize_scalar_or_list(value, n: int, name: str):
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
         if len(value) != n:
@@ -494,6 +510,149 @@ class MMFFBatchedForcefield:
         return self._native_ff.computeGradients()
 
     def minimize(self, maxIters: int = 200, forceTol: float = 1e-4) -> list[list[float]]:
+        """Run BFGS minimization on all conformers of all molecules.
+
+        Optimized coordinates are written back into the RDKit conformers
+        in-place.
+
+        Args:
+            maxIters: Maximum number of BFGS iterations.
+            forceTol: Gradient convergence tolerance.
+
+        Returns:
+            ``result[mol_idx][conf_idx]`` — optimized energy per conformer,
+            same shape as :meth:`compute_energy`.
+        """
+        if not self._molecules:
+            return []
+        self._ensure_built()
+        return self._native_ff.minimize(maxIters, forceTol)
+
+
+class UFFBatchedForcefield:
+    """Evaluate UFF energies and gradients, or run BFGS minimization, for a
+    batch of molecules with all their conformers.
+
+    Properties and constraints are per-molecule and are shared across all
+    conformers of that molecule.  Results are nested as
+    ``list[list[...]]`` — outer per-molecule, inner per-conformer.
+
+    Examples:
+
+    .. code-block:: python
+
+       ff = UFFBatchedForcefield([mol_a, mol_b])
+       energies = ff.compute_energy()  # [[...], [...]]
+
+    .. code-block:: python
+
+       ff = UFFBatchedForcefield([mol_a, mol_b])
+       ff[0].add_position_constraint(0, 0.1, 50.0)
+       opt_energies = ff.minimize()
+    """
+
+    def __init__(
+        self,
+        molecules: list["Mol"],
+        vdwThreshold: float | Sequence[float] = 10.0,
+        ignoreInterfragInteractions: bool | Sequence[bool] = True,
+    ):
+        """Create a batched UFF forcefield wrapper.
+
+        All conformers of each molecule are included in the batch
+        automatically.
+
+        Args:
+            molecules: RDKit molecules to evaluate.
+            vdwThreshold: Van der Waals threshold, scalar or per-molecule.
+            ignoreInterfragInteractions: Whether to omit interfragment
+                non-bonded interactions, as a scalar or per-molecule list.
+        """
+        self._molecules = molecules
+        self._vdw_thresholds = _normalize_scalar_or_list(vdwThreshold, len(molecules), "vdwThreshold")
+        self._ignore_interfrag_interactions = _normalize_scalar_or_list(
+            ignoreInterfragInteractions, len(molecules), "ignoreInterfragInteractions"
+        )
+        self._distance_constraints: list[list[_DistanceConstraint]] = [[] for _ in molecules]
+        self._position_constraints: list[list[_PositionConstraint]] = [[] for _ in molecules]
+        self._angle_constraints: list[list[_AngleConstraint]] = [[] for _ in molecules]
+        self._torsion_constraints: list[list[_TorsionConstraint]] = [[] for _ in molecules]
+        self._native_ff = None
+        self._dirty = True
+        self.num_molecules = len(molecules)
+        self.data_dim = 3
+
+    def __len__(self) -> int:
+        """Return the number of molecules in the batch."""
+        return len(self._molecules)
+
+    def __getitem__(self, idx: int) -> UFFBatchElement:
+        """Return a per-molecule view for adding constraints."""
+        if idx < 0 or idx >= len(self._molecules):
+            raise IndexError(f"Batch element index {idx} out of range")
+        return UFFBatchElement(self, idx)
+
+    def _validate_atom_indices(self, batch_idx: int, *indices: int) -> None:
+        num_atoms = self._molecules[batch_idx].GetNumAtoms()
+        for idx in indices:
+            if idx < 0 or idx >= num_atoms:
+                raise IndexError(f"Atom index {idx} out of range for molecule {batch_idx} with {num_atoms} atoms")
+
+    def _build(self) -> None:
+        """Build the native forcefield for the current batch settings."""
+        if not self._molecules:
+            self._native_ff = None
+            self._dirty = False
+            return
+        dist, pos, ang, tor = _serialize_all_constraints(
+            self._distance_constraints,
+            self._position_constraints,
+            self._angle_constraints,
+            self._torsion_constraints,
+        )
+        self._native_ff = _batchedForcefield.NativeUFFBatchedForcefield(
+            self._molecules,
+            [float(v) for v in self._vdw_thresholds],
+            [bool(v) for v in self._ignore_interfrag_interactions],
+            dist,
+            pos,
+            ang,
+            tor,
+        )
+        self._dirty = False
+
+    def _ensure_built(self) -> None:
+        if self._dirty or self._native_ff is None:
+            self._build()
+
+    def rebuild(self) -> None:
+        """Rebuild the forcefield after changing constraints or settings."""
+        self._build()
+
+    def compute_energy(self) -> list[list[float]]:
+        """Return UFF energies for all conformers of all molecules.
+
+        Returns:
+            ``result[mol_idx][conf_idx]`` — one energy per conformer.
+        """
+        if not self._molecules:
+            return []
+        self._ensure_built()
+        return self._native_ff.computeEnergy()
+
+    def compute_gradients(self) -> list[list[list[float]]]:
+        """Return UFF gradients for all conformers of all molecules.
+
+        Returns:
+            ``result[mol_idx][conf_idx]`` — one flattened ``[x0, y0, z0, ...]``
+            gradient vector per conformer.
+        """
+        if not self._molecules:
+            return []
+        self._ensure_built()
+        return self._native_ff.computeGradients()
+
+    def minimize(self, maxIters: int = 1000, forceTol: float = 1e-4) -> list[list[float]]:
         """Run BFGS minimization on all conformers of all molecules.
 
         Optimized coordinates are written back into the RDKit conformers
