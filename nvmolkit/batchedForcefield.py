@@ -13,13 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Evaluate forcefield energies and gradients for batches of RDKit molecules.
+"""Batched forcefield wrappers with energy, gradient, and minimization support.
 
-This module provides batched forcefield wrappers. The examples below use
-:class:`MMFFBatchedForcefield`, but the module-level description is intended to
-remain forcefield-agnostic.
+This module provides :class:`MMFFBatchedForcefield` for GPU-accelerated
+evaluation and BFGS minimization of multiple molecules with multiple
+conformers each.
 
-Typical batch usage:
+All conformers of each molecule are evaluated as a batch.  Properties and
+constraints are specified per-molecule and apply to every conformer of that
+molecule.  Results are returned nested as ``list[list[...]]`` where the outer
+list is per-molecule and the inner list is per-conformer.
+
+Typical usage:
 
 .. code-block:: python
 
@@ -30,36 +35,31 @@ Typical batch usage:
    mol_a = Chem.AddHs(Chem.MolFromSmiles("CCO"))
    mol_b = Chem.AddHs(Chem.MolFromSmiles("CCCC"))
 
-   rdDistGeom.EmbedMultipleConfs(mol_a, numConfs=1)
-   rdDistGeom.EmbedMultipleConfs(mol_b, numConfs=1)
+   rdDistGeom.EmbedMultipleConfs(mol_a, numConfs=5)
+   rdDistGeom.EmbedMultipleConfs(mol_b, numConfs=3)
 
    ff = MMFFBatchedForcefield([mol_a, mol_b])
-   energies = ff.compute_energy()
-   gradients = ff.compute_gradients()
+   energies = ff.compute_energy()      # [[5 floats], [3 floats]]
+   gradients = ff.compute_gradients()  # [[5 grad-lists], [3 grad-lists]]
 
-   energy_a = energies[0]
-   gradient_b = gradients[1]
-
-If a molecule has multiple conformers, use ``conf_id`` to choose which
-conformer is used for evaluation.
+   ff[0].add_position_constraint(0, 0.1, 50.0)
+   opt_energies = ff.minimize()        # [[5 floats], [3 floats]]
 
 The wrapper also supports per-entry settings such as custom property objects,
-conformer ids, non-bonded thresholds, and interfragment interaction handling.
-These options may be passed either as scalars, which are broadcast to the whole
-batch, or as per-molecule sequences:
+non-bonded thresholds, and interfragment interaction handling.  These options
+may be passed either as scalars, which are broadcast to the whole batch, or
+as per-molecule sequences:
 
 .. code-block:: python
 
    ff = MMFFBatchedForcefield(
        [mol_a, mol_b],
        properties=[props_a, props_b],
-       conf_id=[0, 3],
        nonBondedThreshold=[100.0, 25.0],
        ignoreInterfragInteractions=[True, False],
    )
 
-Constraint terms are added through :class:`MMFFBatchElement`, returned by
-indexing into the batch:
+Constraint terms are added through per-molecule element views:
 
 .. code-block:: python
 
@@ -68,9 +68,7 @@ indexing into the batch:
    ff[0].add_distance_constraint(0, 2, True, 0.2, 0.5, 20.0)
    ff[1].add_torsion_constraint(0, 1, 2, 3, True, 10.0, 20.0, 8.0)
 
-   energies = ff.compute_energy()
-   energy_a = energies[0]
-   energy_b = energies[1]
+   energies = ff.minimize()
 
 .. note::
    Calling :meth:`~MMFFBatchedForcefield.compute_energy` or
@@ -133,36 +131,55 @@ class _TorsionConstraint:
     force_constant: float
 
 
-class MMFFBatchElement:
-    """Per-entry view for configuring one item in an MMFF batch.
+def _serialize_distance_constraints(constraints: list[_DistanceConstraint]):
+    return [
+        (c.idx1, c.idx2, c.relative, c.min_len, c.max_len, c.force_constant)
+        for c in constraints
+    ]
 
-    Retrieve an element with ``ff[i]`` and use it to inspect the number of
-    atoms or to add constraints for that batch entry.
 
-    Example:
+def _serialize_position_constraints(constraints: list[_PositionConstraint]):
+    return [(c.idx, c.max_displ, c.force_constant) for c in constraints]
 
-    .. code-block:: python
 
-       ff = MMFFBatchedForcefield([mol_a, mol_b])
+def _serialize_angle_constraints(constraints: list[_AngleConstraint]):
+    return [
+        (c.idx1, c.idx2, c.idx3, c.relative, c.min_angle_deg, c.max_angle_deg, c.force_constant)
+        for c in constraints
+    ]
 
-       first = ff[0]
-       second = ff[1]
 
-       print(first.num_atoms)
-       print(second.num_atoms)
+def _serialize_torsion_constraints(constraints: list[_TorsionConstraint]):
+    return [
+        (c.idx1, c.idx2, c.idx3, c.idx4, c.relative, c.min_dihedral_deg, c.max_dihedral_deg, c.force_constant)
+        for c in constraints
+    ]
 
-       first.add_position_constraint(0, 0.1, 50.0)
-       second.add_distance_constraint(1, 4, False, 2.0, 2.2, 25.0)
-       energies = ff.compute_energy()
-    """
 
-    def __init__(self, parent: "MMFFBatchedForcefield", idx: int):
+def _serialize_all_constraints(
+    distance: list[list[_DistanceConstraint]],
+    position: list[list[_PositionConstraint]],
+    angle: list[list[_AngleConstraint]],
+    torsion: list[list[_TorsionConstraint]],
+):
+    return (
+        [_serialize_distance_constraints(c) for c in distance],
+        [_serialize_position_constraints(c) for c in position],
+        [_serialize_angle_constraints(c) for c in angle],
+        [_serialize_torsion_constraints(c) for c in torsion],
+    )
+
+
+class _BatchElementBase:
+    """Per-molecule view for adding constraints to a batched forcefield."""
+
+    def __init__(self, parent, idx: int):
         self._parent = parent
         self._idx = idx
 
     @property
     def num_atoms(self) -> int:
-        """Return the number of atoms in this batch element."""
+        """Return the number of atoms in this molecule."""
         return self._parent._molecules[self._idx].GetNumAtoms()
 
     def add_distance_constraint(
@@ -174,15 +191,14 @@ class MMFFBatchElement:
         max_len: float,
         force_constant: float,
     ) -> None:
-        """Add a distance constraint to this batch entry.
+        """Add a distance constraint to this molecule.
 
         Args:
             idx1: Index of the first constrained atom.
             idx2: Index of the second constrained atom.
             relative: If ``True``, interpret ``min_len`` and ``max_len`` as
-                offsets from the current distance in the selected conformer.
-                If ``False``, interpret them as absolute distances in
-                Angstroms.
+                offsets from the current distance.  If ``False``, interpret
+                them as absolute distances in Angstroms.
             min_len: Lower bound of the allowed distance range.
             max_len: Upper bound of the allowed distance range.
             force_constant: Constraint force constant.
@@ -199,16 +215,13 @@ class MMFFBatchElement:
         max_displ: float,
         force_constant: float,
     ) -> None:
-        """Add a position constraint to one atom in this batch entry.
+        """Add a position constraint to one atom in this molecule.
 
         Args:
             idx: Index of the constrained atom.
             max_displ: Maximum displacement allowed from the current atom
                 position before the restraint contributes energy.
             force_constant: Constraint force constant.
-
-        The reference position comes from the conformer selected for this batch
-        entry.
         """
         self._parent._validate_atom_indices(self._idx, idx)
         self._parent._position_constraints[self._idx].append(_PositionConstraint(idx, max_displ, force_constant))
@@ -224,16 +237,15 @@ class MMFFBatchElement:
         max_angle_deg: float,
         force_constant: float,
     ) -> None:
-        """Add an angle constraint to this batch entry.
+        """Add an angle constraint to this molecule.
 
         Args:
             idx1: Index of the first atom in the angle.
             idx2: Index of the central atom.
             idx3: Index of the third atom in the angle.
-            relative: If ``True``, interpret ``min_angle_deg`` and
-                ``max_angle_deg`` relative to the current angle in the selected
-                conformer. If ``False``, interpret them as absolute angles in
-                degrees.
+            relative: If ``True``, interpret angle bounds relative to the
+                current angle.  If ``False``, interpret them as absolute
+                angles in degrees.
             min_angle_deg: Lower bound of the allowed angle range in degrees.
             max_angle_deg: Upper bound of the allowed angle range in degrees.
             force_constant: Constraint force constant.
@@ -255,17 +267,16 @@ class MMFFBatchElement:
         max_dihedral_deg: float,
         force_constant: float,
     ) -> None:
-        """Add a torsion constraint to this batch entry.
+        """Add a torsion constraint to this molecule.
 
         Args:
             idx1: Index of the first atom in the torsion.
             idx2: Index of the second atom in the torsion.
             idx3: Index of the third atom in the torsion.
             idx4: Index of the fourth atom in the torsion.
-            relative: If ``True``, interpret ``min_dihedral_deg`` and
-                ``max_dihedral_deg`` relative to the current dihedral angle.
-                If ``False``, interpret them as absolute dihedral bounds in
-                degrees.
+            relative: If ``True``, interpret dihedral bounds relative to the
+                current dihedral angle.  If ``False``, interpret them as
+                absolute dihedral bounds in degrees.
             min_dihedral_deg: Lower bound of the allowed dihedral range in
                 degrees.
             max_dihedral_deg: Upper bound of the allowed dihedral range in
@@ -279,34 +290,46 @@ class MMFFBatchElement:
         self._parent._dirty = True
 
 
+class MMFFBatchElement(_BatchElementBase):
+    """Per-molecule view for configuring one molecule in an MMFF batch.
+
+    Retrieve an element with ``ff[i]`` and use it to inspect the number of
+    atoms or to add constraints for that molecule.  Constraints apply to all
+    conformers of the molecule.
+
+    Example:
+
+    .. code-block:: python
+
+       ff = MMFFBatchedForcefield([mol_a, mol_b])
+       ff[0].add_position_constraint(0, 0.1, 50.0)
+       ff[1].add_distance_constraint(1, 4, False, 2.0, 2.2, 25.0)
+       energies = ff.minimize()
+    """
+
+
+def _normalize_scalar_or_list(value, n: int, name: str):
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        if len(value) != n:
+            raise ValueError(f"Expected {n} values for {name}, got {len(value)}")
+        return list(value)
+    return [value for _ in range(n)]
+
+
 class MMFFBatchedForcefield:
-    """Evaluate MMFF energies and gradients for a batch of inputs.
+    """Evaluate MMFF energies and gradients, or run BFGS minimization, for a
+    batch of molecules with all their conformers.
 
-    Each batch entry consists of:
-
-    - one RDKit molecule
-    - one selected conformer from that molecule
-    - optional per-entry MMFF settings
-    - optional constraints added through :class:`MMFFBatchElement`
-
-    Use this class when you want batched MMFF evaluation from Python and need
-    one result per entry in the order you provided them.
+    Properties and constraints are per-molecule and are shared across all
+    conformers of that molecule.  Results are nested as
+    ``list[list[...]]`` — outer per-molecule, inner per-conformer.
 
     Examples:
 
     .. code-block:: python
 
        ff = MMFFBatchedForcefield([mol_a, mol_b])
-       energies = ff.compute_energy()
-       gradients = ff.compute_gradients()
-
-    .. code-block:: python
-
-       ff = MMFFBatchedForcefield(
-           [Chem.Mol(mol), Chem.Mol(mol)],
-           conf_id=[0, 1],
-       )
-       energies = ff.compute_energy()
+       energies = ff.compute_energy()  # [[...], [...]]
 
     .. code-block:: python
 
@@ -314,53 +337,40 @@ class MMFFBatchedForcefield:
            [mol_a, mol_b],
            properties=[props_a, None],
            nonBondedThreshold=[100.0, 20.0],
-           ignoreInterfragInteractions=[True, False],
        )
        ff[0].add_distance_constraint(0, 4, False, 1.8, 2.2, 50.0)
-       ff[1].add_position_constraint(1, 0.1, 100.0)
-       gradients = ff.compute_gradients()
-
-    The values returned by :meth:`compute_gradients` are flattened coordinate
-    gradients in ``[x0, y0, z0, x1, y1, z1, ...]`` order, one list per batch
-    element.
+       opt_energies = ff.minimize()
     """
 
     def __init__(
         self,
         molecules: list["Mol"],
         properties: "RDKitMMFFMolProperties | Sequence[RDKitMMFFMolProperties | None] | None" = None,
-        conf_id: int | Sequence[int] = -1,
         nonBondedThreshold: float | Sequence[float] = 100.0,
         ignoreInterfragInteractions: bool | Sequence[bool] = True,
     ):
         """Create a batched MMFF forcefield wrapper.
 
+        All conformers of each molecule are included in the batch
+        automatically.
+
         Args:
-            molecules: RDKit molecules to evaluate. The batch output order
-                matches this input order.
-            properties: RDKit ``MMFFMolProperties`` object, a per-molecule list
-                of those objects, or ``None`` to use default MMFF94 settings.
-                A single object is broadcast to all molecules.
-            conf_id: Conformer id or per-molecule conformer ids to use. A
-                scalar is broadcast to the whole batch. To evaluate multiple
-                conformers from one molecule, include that molecule multiple
-                times in ``molecules`` and provide one conformer id per batch
-                entry.
+            molecules: RDKit molecules to evaluate.
+            properties: RDKit ``MMFFMolProperties`` object, a per-molecule
+                list of those objects, or ``None`` to use default MMFF94
+                settings.  A single object is broadcast to all molecules.
             nonBondedThreshold: Non-bonded cutoff distance or per-molecule
                 values.
-            ignoreInterfragInteractions: Whether to omit interfragment non-bonded
-                interactions, as a scalar or per-molecule list.
+            ignoreInterfragInteractions: Whether to omit interfragment
+                non-bonded interactions, as a scalar or per-molecule list.
         """
-        # TODO: Expand this API to evaluate all conformers from each input
-        # molecule directly and return nested per-molecule/per-conformer
-        # energies and gradients instead of the current one-entry-per-input
-        # shape.
         self._molecules = molecules
         self._properties = self._normalize_properties(properties)
-        self._conf_ids = self._normalize_conf_ids(conf_id)
-        self._non_bonded_thresholds = self._normalize_scalar_or_list(nonBondedThreshold, "nonBondedThreshold")
-        self._ignore_interfrag_interactions = self._normalize_scalar_or_list(
-            ignoreInterfragInteractions, "ignoreInterfragInteractions"
+        self._non_bonded_thresholds = _normalize_scalar_or_list(
+            nonBondedThreshold, len(molecules), "nonBondedThreshold"
+        )
+        self._ignore_interfrag_interactions = _normalize_scalar_or_list(
+            ignoreInterfragInteractions, len(molecules), "ignoreInterfragInteractions"
         )
         self._distance_constraints: list[list[_DistanceConstraint]] = [[] for _ in molecules]
         self._position_constraints: list[list[_PositionConstraint]] = [[] for _ in molecules]
@@ -376,7 +386,7 @@ class MMFFBatchedForcefield:
         return len(self._molecules)
 
     def __getitem__(self, idx: int) -> MMFFBatchElement:
-        """Return a view for one batch entry.
+        """Return a per-molecule view for adding constraints.
 
         Example:
 
@@ -401,13 +411,6 @@ class MMFFBatchedForcefield:
             return list(properties)
         return [properties for _ in self._molecules]
 
-    def _normalize_scalar_or_list(self, value, name: str):
-        if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-            if len(value) != len(self._molecules):
-                raise ValueError(f"Expected {len(self._molecules)} values for {name}, got {len(value)}")
-            return list(value)
-        return [value for _ in self._molecules]
-
     def _default_mmff_properties(self, mol: "Mol"):
         return default_rdkit_mmff_properties(mol)
 
@@ -421,13 +424,6 @@ class MMFFBatchedForcefield:
             non_bonded_threshold=float(non_bonded_threshold),
             ignore_interfrag_interactions=bool(ignore_interfrag_interactions),
         )
-
-    def _normalize_conf_ids(self, conf_id: int | Sequence[int]) -> list[int]:
-        if isinstance(conf_id, int):
-            return [conf_id for _ in self._molecules]
-        if len(conf_id) != len(self._molecules):
-            raise ValueError(f"Expected {len(self._molecules)} conf_id values, got {len(conf_id)}")
-        return list(conf_id)
 
     def _validate_atom_indices(self, batch_idx: int, *indices: int) -> None:
         num_atoms = self._molecules[batch_idx].GetNumAtoms()
@@ -450,62 +446,19 @@ class MMFFBatchedForcefield:
                 self._ignore_interfrag_interactions,
             )
         ]
-        distance_constraints = [
-            [
-                (
-                    c.idx1,
-                    c.idx2,
-                    c.relative,
-                    c.min_len,
-                    c.max_len,
-                    c.force_constant,
-                )
-                for c in constraints
-            ]
-            for constraints in self._distance_constraints
-        ]
-        position_constraints = [
-            [(c.idx, c.max_displ, c.force_constant) for c in constraints] for constraints in self._position_constraints
-        ]
-        angle_constraints = [
-            [
-                (
-                    c.idx1,
-                    c.idx2,
-                    c.idx3,
-                    c.relative,
-                    c.min_angle_deg,
-                    c.max_angle_deg,
-                    c.force_constant,
-                )
-                for c in constraints
-            ]
-            for constraints in self._angle_constraints
-        ]
-        torsion_constraints = [
-            [
-                (
-                    c.idx1,
-                    c.idx2,
-                    c.idx3,
-                    c.idx4,
-                    c.relative,
-                    c.min_dihedral_deg,
-                    c.max_dihedral_deg,
-                    c.force_constant,
-                )
-                for c in constraints
-            ]
-            for constraints in self._torsion_constraints
-        ]
+        dist, pos, ang, tor = _serialize_all_constraints(
+            self._distance_constraints,
+            self._position_constraints,
+            self._angle_constraints,
+            self._torsion_constraints,
+        )
         self._native_ff = _batchedForcefield.NativeMMFFBatchedForcefield(
             self._molecules,
             native_properties,
-            self._conf_ids,
-            distance_constraints,
-            position_constraints,
-            angle_constraints,
-            torsion_constraints,
+            dist,
+            pos,
+            ang,
+            tor,
         )
         self._dirty = False
 
@@ -517,49 +470,44 @@ class MMFFBatchedForcefield:
         """Rebuild the forcefield after changing constraints or settings."""
         self._build()
 
-    def compute_energy(self) -> list[float]:
-        """Return one MMFF energy per batch entry.
+    def compute_energy(self) -> list[list[float]]:
+        """Return MMFF energies for all conformers of all molecules.
 
         Returns:
-            A list of MMFF energies in batch order.
-
-        Example:
-
-        .. code-block:: python
-
-           energies = ff.compute_energy()
-           first_energy = energies[0]
-           second_energy = energies[1]
-
-        Note:
-            Per-call Python overhead makes standalone calls slower than
-            expected. Prefer the minimizer for performance-sensitive workloads.
+            ``result[mol_idx][conf_idx]`` — one energy per conformer.
         """
         if not self._molecules:
             return []
         self._ensure_built()
         return self._native_ff.computeEnergy()
 
-    def compute_gradients(self) -> list[list[float]]:
-        """Return one flattened 3D gradient vector per batch entry.
+    def compute_gradients(self) -> list[list[list[float]]]:
+        """Return MMFF gradients for all conformers of all molecules.
 
         Returns:
-            A list with one flattened gradient vector per batch entry. Each
-            gradient is ordered as ``[x0, y0, z0, x1, y1, z1, ...]``.
-
-        Example:
-
-        .. code-block:: python
-
-           gradients = ff.compute_gradients()
-           grad_atom0_entry0 = gradients[0][0:3]
-           grad_atom0_entry1 = gradients[1][0:3]
-
-        Note:
-            Per-call Python overhead makes standalone calls slower than
-            expected. Prefer the minimizer for performance-sensitive workloads.
+            ``result[mol_idx][conf_idx]`` — one flattened ``[x0, y0, z0, ...]``
+            gradient vector per conformer.
         """
         if not self._molecules:
             return []
         self._ensure_built()
         return self._native_ff.computeGradients()
+
+    def minimize(self, maxIters: int = 200, forceTol: float = 1e-4) -> list[list[float]]:
+        """Run BFGS minimization on all conformers of all molecules.
+
+        Optimized coordinates are written back into the RDKit conformers
+        in-place.
+
+        Args:
+            maxIters: Maximum number of BFGS iterations.
+            forceTol: Gradient convergence tolerance.
+
+        Returns:
+            ``result[mol_idx][conf_idx]`` — optimized energy per conformer,
+            same shape as :meth:`compute_energy`.
+        """
+        if not self._molecules:
+            return []
+        self._ensure_built()
+        return self._native_ff.minimize(maxIters, forceTol)

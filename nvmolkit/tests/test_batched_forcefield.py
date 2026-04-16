@@ -135,7 +135,6 @@ def assert_energy_and_gradient_close(got_energy, want_energy, got_grad, want_gra
 def assert_single_batched_matches_rdkit(
     mol,
     properties=None,
-    conf_id: int = -1,
     nonBondedThreshold: float = 100.0,
     ignoreInterfragInteractions: bool = True,
     configure_batch=None,
@@ -145,18 +144,16 @@ def assert_single_batched_matches_rdkit(
     ff = MMFFBatchedForcefield(
         [nvmolkit_mol],
         properties=properties,
-        conf_id=conf_id,
         nonBondedThreshold=nonBondedThreshold,
         ignoreInterfragInteractions=ignoreInterfragInteractions,
     )
     if configure_batch is not None:
         configure_batch(ff[0])
-    got_energy = ff.compute_energy()[0]
-    got_grad = ff.compute_gradients()[0]
+    got_energy = ff.compute_energy()[0][0]
+    got_grad = ff.compute_gradients()[0][0]
     want_energy, want_grad = get_mmff_reference_energy_and_grad(
         Chem.Mol(mol),
         properties=properties,
-        conf_id=conf_id,
         nonBondedThreshold=nonBondedThreshold,
         ignoreInterfragInteractions=ignoreInterfragInteractions,
         configure_forcefield=configure_rdkit,
@@ -179,12 +176,12 @@ def test_mmff_batched_forcefield_batch_matches_single():
     single_grads = []
     for mol in clone_mols(mols):
         single_ff = MMFFBatchedForcefield([mol])
-        single_energies.append(single_ff.compute_energy()[0])
-        single_grads.append(single_ff.compute_gradients()[0])
+        single_energies.append(single_ff.compute_energy()[0][0])
+        single_grads.append(single_ff.compute_gradients()[0][0])
 
-    assert batch_energies == pytest.approx(single_energies, rel=1e-5, abs=1e-5)
-    for got_grad, want_grad in zip(batch_grads, single_grads):
-        assert got_grad == pytest.approx(want_grad, rel=1e-4, abs=1e-4)
+    for mol_idx in range(len(mols)):
+        assert batch_energies[mol_idx][0] == pytest.approx(single_energies[mol_idx], rel=1e-5, abs=1e-5)
+        assert batch_grads[mol_idx][0] == pytest.approx(single_grads[mol_idx], rel=1e-4, abs=1e-4)
 
 
 @pytest.mark.parametrize(
@@ -264,19 +261,28 @@ def test_mmff_batched_forcefield_per_molecule_properties_match_rdkit():
             nonBondedThreshold=non_bonded_thresholds[idx],
             ignoreInterfragInteractions=ignore_interfrag_interactions[idx],
         )
-        assert_energy_and_gradient_close(got_energies[idx], want_energy, got_grads[idx], want_grad)
+        assert_energy_and_gradient_close(got_energies[idx][0], want_energy, got_grads[idx][0], want_grad)
 
 
-def test_mmff_batched_forcefield_conf_ids_match_rdkit():
-    mol = make_embedded_mol("CCCO", num_confs=2)
-    ff = MMFFBatchedForcefield([Chem.Mol(mol), Chem.Mol(mol)], conf_id=[0, 1])
+def test_mmff_batched_forcefield_multi_conformer_matches_rdkit():
+    mol = make_embedded_mol("CCCO", num_confs=3)
+    ff = MMFFBatchedForcefield([Chem.Mol(mol)])
 
     got_energies = ff.compute_energy()
     got_grads = ff.compute_gradients()
 
-    for idx, conf_id in enumerate([0, 1]):
-        want_energy, want_grad = get_mmff_reference_energy_and_grad(Chem.Mol(mol), conf_id=conf_id)
-        assert_energy_and_gradient_close(got_energies[idx], want_energy, got_grads[idx], want_grad)
+    assert len(got_energies) == 1
+    assert len(got_energies[0]) == 3
+    assert len(got_grads) == 1
+    assert len(got_grads[0]) == 3
+
+    for conf_idx, conf in enumerate(mol.GetConformers()):
+        want_energy, want_grad = get_mmff_reference_energy_and_grad(
+            Chem.Mol(mol), conf_id=conf.GetId()
+        )
+        assert_energy_and_gradient_close(
+            got_energies[0][conf_idx], want_energy, got_grads[0][conf_idx], want_grad
+        )
 
 
 def test_mmff_batched_forcefield_lazy_build_and_rebuild():
@@ -286,12 +292,12 @@ def test_mmff_batched_forcefield_lazy_build_and_rebuild():
     assert ff._native_ff is None
     assert ff._dirty is True
 
-    first_energy = ff.compute_energy()[0]
+    first_energy = ff.compute_energy()[0][0]
     first_native = ff._native_ff
 
     assert first_native is not None
     assert ff._dirty is False
-    assert ff.compute_energy()[0] == pytest.approx(first_energy, rel=1e-5, abs=1e-5)
+    assert ff.compute_energy()[0][0] == pytest.approx(first_energy, rel=1e-5, abs=1e-5)
     assert ff._native_ff is first_native
 
     ff[0].add_distance_constraint(0, 2, True, 0.2, 0.4, 25.0)
@@ -380,4 +386,4 @@ def test_mmff_mixed_properties_and_constraints_batch_matches_rdkit():
             properties=prop,
             configure_forcefield=configure_forcefield,
         )
-        assert_energy_and_gradient_close(got_energies[idx], want_energy, got_grads[idx], want_grad)
+        assert_energy_and_gradient_close(got_energies[idx][0], want_energy, got_grads[idx][0], want_grad)
