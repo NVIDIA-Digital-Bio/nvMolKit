@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,6 +22,7 @@
 #include <memory>
 #include <vector>
 
+#include "boost_python_utils.h"
 #include "nvtx.h"
 #include "substruct_types.h"
 
@@ -65,14 +66,6 @@ struct SubstructMatchesCSR {
   int                  numQueries = 0;
 };
 
-template <typename T> list vectorToList(const std::vector<T>& vec) {
-  list result;
-  for (const auto& value : vec) {
-    result.append(value);
-  }
-  return result;
-}
-
 template <typename T> std::vector<T> listFromIterable(const object& iterable) {
   std::vector<T> converted;
   if (PySequence_Check(iterable.ptr())) {
@@ -92,7 +85,7 @@ template <typename T> std::vector<T> listFromIterable(const object& iterable) {
 }
 
 list getGpuIdsPy(nvMolKit::SubstructSearchConfig& config) {
-  return vectorToList(config.gpuIds);
+  return nvMolKit::vectorToList(config.gpuIds);
 }
 
 void setGpuIdsPy(nvMolKit::SubstructSearchConfig& config, const object& iterable) {

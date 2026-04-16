@@ -21,6 +21,14 @@ target_link_libraries(
 target_include_directories(rdkit_mmff_flattened
                            PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_library(rdkit_uff_flattened uff_flattened_builder.cpp)
+target_link_libraries(
+  rdkit_uff_flattened
+  PRIVATE ${RDKit_LIBS} device_vector
+  PUBLIC uff)
+target_include_directories(rdkit_uff_flattened
+                           PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
 add_library(mmff_contribs mmff_contribs.cpp)
 target_link_libraries(
   mmff_contribs

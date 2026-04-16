@@ -658,6 +658,378 @@ static __device__ __forceinline__ void eleGrad(const double* pos,
   atomicAdd(&grad[3 * idx2 + 2], -dE_dz);
 }
 
+static __device__ __forceinline__ double normalizeAngleDeg(double angleDeg) {
+  angleDeg = fmod(angleDeg, 360.0);
+  if (angleDeg < -180.0) {
+    angleDeg += 360.0;
+  } else if (angleDeg > 180.0) {
+    angleDeg -= 360.0;
+  }
+  return angleDeg;
+}
+
+static __device__ __forceinline__ double distanceConstraintEnergy(const double* pos,
+                                                                  const int     idx1,
+                                                                  const int     idx2,
+                                                                  const double  minLen,
+                                                                  const double  maxLen,
+                                                                  const double  forceConstant) {
+  const double distance2Val = distanceSquared(pos, idx1, idx2);
+  double       difference   = 0.0;
+  if (distance2Val < minLen * minLen) {
+    difference = minLen - sqrt(distance2Val);
+  } else if (distance2Val > maxLen * maxLen) {
+    difference = sqrt(distance2Val) - maxLen;
+  } else {
+    return 0.0;
+  }
+  return 0.5 * forceConstant * difference * difference;
+}
+
+static __device__ __forceinline__ void distanceConstraintGrad(const double* pos,
+                                                              const int     idx1,
+                                                              const int     idx2,
+                                                              const double  minLen,
+                                                              const double  maxLen,
+                                                              const double  forceConstant,
+                                                              double*       grad) {
+  const double distance2Val = distanceSquared(pos, idx1, idx2);
+  double       preFactor    = 0.0;
+  double       distance     = 0.0;
+  if (distance2Val < minLen * minLen) {
+    distance  = sqrt(distance2Val);
+    preFactor = distance - minLen;
+  } else if (distance2Val > maxLen * maxLen) {
+    distance  = sqrt(distance2Val);
+    preFactor = distance - maxLen;
+  } else {
+    return;
+  }
+  preFactor *= forceConstant;
+  preFactor /= fmax(1.0e-8, distance);
+  for (int i = 0; i < 3; ++i) {
+    const double dGrad = preFactor * (pos[3 * idx1 + i] - pos[3 * idx2 + i]);
+    atomicAdd(&grad[3 * idx1 + i], dGrad);
+    atomicAdd(&grad[3 * idx2 + i], -dGrad);
+  }
+}
+
+static __device__ __forceinline__ double positionConstraintEnergy(const double* pos,
+                                                                  const int     idx,
+                                                                  const double  refX,
+                                                                  const double  refY,
+                                                                  const double  refZ,
+                                                                  const double  maxDispl,
+                                                                  const double  forceConstant) {
+  const double dx       = pos[3 * idx + 0] - refX;
+  const double dy       = pos[3 * idx + 1] - refY;
+  const double dz       = pos[3 * idx + 2] - refZ;
+  const double dist     = sqrt(dx * dx + dy * dy + dz * dz);
+  const double distTerm = fmax(dist - maxDispl, 0.0);
+  return 0.5 * forceConstant * distTerm * distTerm;
+}
+
+static __device__ __forceinline__ void positionConstraintGrad(const double* pos,
+                                                              const int     idx,
+                                                              const double  refX,
+                                                              const double  refY,
+                                                              const double  refZ,
+                                                              const double  maxDispl,
+                                                              const double  forceConstant,
+                                                              double*       grad) {
+  const double dx   = pos[3 * idx + 0] - refX;
+  const double dy   = pos[3 * idx + 1] - refY;
+  const double dz   = pos[3 * idx + 2] - refZ;
+  const double dist = sqrt(dx * dx + dy * dy + dz * dz);
+  if (dist <= maxDispl) {
+    return;
+  }
+  const double preFactor = (dist - maxDispl) * forceConstant / fmax(dist, 1.0e-8);
+  atomicAdd(&grad[3 * idx + 0], preFactor * dx);
+  atomicAdd(&grad[3 * idx + 1], preFactor * dy);
+  atomicAdd(&grad[3 * idx + 2], preFactor * dz);
+}
+
+static __device__ __forceinline__ double computeAngleConstraintTerm(const double angle,
+                                                                    const double minAngleDeg,
+                                                                    const double maxAngleDeg) {
+  double angleTerm = 0.0;
+  if (angle < minAngleDeg) {
+    angleTerm = angle - minAngleDeg;
+  } else if (angle > maxAngleDeg) {
+    angleTerm = angle - maxAngleDeg;
+  }
+  return angleTerm;
+}
+
+static __device__ __forceinline__ double angleConstraintEnergy(const double* pos,
+                                                               const int     idx1,
+                                                               const int     idx2,
+                                                               const int     idx3,
+                                                               const double  minAngleDeg,
+                                                               const double  maxAngleDeg,
+                                                               const double  forceConstant) {
+  const double p1x = pos[3 * idx1 + 0];
+  const double p1y = pos[3 * idx1 + 1];
+  const double p1z = pos[3 * idx1 + 2];
+  const double p2x = pos[3 * idx2 + 0];
+  const double p2y = pos[3 * idx2 + 1];
+  const double p2z = pos[3 * idx2 + 2];
+  const double p3x = pos[3 * idx3 + 0];
+  const double p3y = pos[3 * idx3 + 1];
+  const double p3z = pos[3 * idx3 + 2];
+
+  const double r1x        = p1x - p2x;
+  const double r1y        = p1y - p2y;
+  const double r1z        = p1z - p2z;
+  const double r2x        = p3x - p2x;
+  const double r2y        = p3y - p2y;
+  const double r2z        = p3z - p2z;
+  const double rLengthSq1 = fmax(1.0e-5, r1x * r1x + r1y * r1y + r1z * r1z);
+  const double rLengthSq2 = fmax(1.0e-5, r2x * r2x + r2y * r2y + r2z * r2z);
+  double       cosTheta   = (r1x * r2x + r1y * r2y + r1z * r2z) / sqrt(rLengthSq1 * rLengthSq2);
+  cosTheta                = clamp(cosTheta, -1.0, 1.0);
+  const double angle      = radianToDegree * acos(cosTheta);
+  const double angleTerm  = computeAngleConstraintTerm(angle, minAngleDeg, maxAngleDeg);
+  return forceConstant * angleTerm * angleTerm;
+}
+
+static __device__ __forceinline__ void angleConstraintGrad(const double* pos,
+                                                           const int     idx1,
+                                                           const int     idx2,
+                                                           const int     idx3,
+                                                           const double  minAngleDeg,
+                                                           const double  maxAngleDeg,
+                                                           const double  forceConstant,
+                                                           double*       grad) {
+  const double p1x = pos[3 * idx1 + 0];
+  const double p1y = pos[3 * idx1 + 1];
+  const double p1z = pos[3 * idx1 + 2];
+  const double p2x = pos[3 * idx2 + 0];
+  const double p2y = pos[3 * idx2 + 1];
+  const double p2z = pos[3 * idx2 + 2];
+  const double p3x = pos[3 * idx3 + 0];
+  const double p3y = pos[3 * idx3 + 1];
+  const double p3z = pos[3 * idx3 + 2];
+
+  const double r1x        = p1x - p2x;
+  const double r1y        = p1y - p2y;
+  const double r1z        = p1z - p2z;
+  const double r2x        = p3x - p2x;
+  const double r2y        = p3y - p2y;
+  const double r2z        = p3z - p2z;
+  const double rLengthSq1 = fmax(1.0e-5, r1x * r1x + r1y * r1y + r1z * r1z);
+  const double rLengthSq2 = fmax(1.0e-5, r2x * r2x + r2y * r2y + r2z * r2z);
+  const double invDist1   = rsqrt(rLengthSq1);
+  const double invDist2   = rsqrt(rLengthSq2);
+  double       cosTheta   = (r1x * r2x + r1y * r2y + r1z * r2z) * invDist1 * invDist2;
+  cosTheta                = clamp(cosTheta, -1.0, 1.0);
+  const double angle      = radianToDegree * acos(cosTheta);
+  const double angleTerm  = computeAngleConstraintTerm(angle, minAngleDeg, maxAngleDeg);
+  if (isDoubleZero(angleTerm)) {
+    return;
+  }
+
+  const double rpX       = r2y * r1z - r2z * r1y;
+  const double rpY       = r2z * r1x - r2x * r1z;
+  const double rpZ       = r2x * r1y - r2y * r1x;
+  const double rpLength  = fmax(1.0e-5, sqrt(rpX * rpX + rpY * rpY + rpZ * rpZ));
+  const double dE_dTheta = 2.0 * radianToDegree * forceConstant * angleTerm;
+  const double prefactor = dE_dTheta / rpLength;
+  const double t0        = -prefactor / rLengthSq1;
+  const double t1        = prefactor / rLengthSq2;
+
+  const double c0x = r1y * rpZ - r1z * rpY;
+  const double c0y = r1z * rpX - r1x * rpZ;
+  const double c0z = r1x * rpY - r1y * rpX;
+  const double c1x = r2y * rpZ - r2z * rpY;
+  const double c1y = r2z * rpX - r2x * rpZ;
+  const double c1z = r2x * rpY - r2y * rpX;
+
+  const double dedp0x = c0x * t0;
+  const double dedp0y = c0y * t0;
+  const double dedp0z = c0z * t0;
+  const double dedp2x = c1x * t1;
+  const double dedp2y = c1y * t1;
+  const double dedp2z = c1z * t1;
+  const double dedp1x = -dedp0x - dedp2x;
+  const double dedp1y = -dedp0y - dedp2y;
+  const double dedp1z = -dedp0z - dedp2z;
+
+  atomicAdd(&grad[3 * idx1 + 0], dedp0x);
+  atomicAdd(&grad[3 * idx1 + 1], dedp0y);
+  atomicAdd(&grad[3 * idx1 + 2], dedp0z);
+  atomicAdd(&grad[3 * idx2 + 0], dedp1x);
+  atomicAdd(&grad[3 * idx2 + 1], dedp1y);
+  atomicAdd(&grad[3 * idx2 + 2], dedp1z);
+  atomicAdd(&grad[3 * idx3 + 0], dedp2x);
+  atomicAdd(&grad[3 * idx3 + 1], dedp2y);
+  atomicAdd(&grad[3 * idx3 + 2], dedp2z);
+}
+
+static __device__ __forceinline__ double computeDihedralConstraintTerm(double       dihedral,
+                                                                       const double minDihedralDeg,
+                                                                       const double maxDihedralDeg) {
+  double dihedralTarget = dihedral;
+  if (!(dihedral > minDihedralDeg && dihedral < maxDihedralDeg) &&
+      !(dihedral > minDihedralDeg && minDihedralDeg > maxDihedralDeg) &&
+      !(dihedral < maxDihedralDeg && minDihedralDeg > maxDihedralDeg)) {
+    double dihedralMinTarget = normalizeAngleDeg(dihedral - minDihedralDeg);
+    double dihedralMaxTarget = normalizeAngleDeg(dihedral - maxDihedralDeg);
+    if (fabs(dihedralMinTarget) < fabs(dihedralMaxTarget)) {
+      dihedralTarget = minDihedralDeg;
+    } else {
+      dihedralTarget = maxDihedralDeg;
+    }
+  }
+  return normalizeAngleDeg(dihedral - dihedralTarget);
+}
+
+static __device__ __forceinline__ double computeSignedDihedral(const double* pos,
+                                                               const int     idx1,
+                                                               const int     idx2,
+                                                               const int     idx3,
+                                                               const int     idx4,
+                                                               double*       cosPhiOut = nullptr,
+                                                               double        r[4][3]   = nullptr,
+                                                               double        t[2][3]   = nullptr,
+                                                               double        d[2]      = nullptr) {
+  double localR[4][3];
+  double localT[2][3];
+  double localD[2];
+  if (r == nullptr) {
+    r = localR;
+  }
+  if (t == nullptr) {
+    t = localT;
+  }
+  if (d == nullptr) {
+    d = localD;
+  }
+  r[0][0] = pos[3 * idx1 + 0] - pos[3 * idx2 + 0];
+  r[0][1] = pos[3 * idx1 + 1] - pos[3 * idx2 + 1];
+  r[0][2] = pos[3 * idx1 + 2] - pos[3 * idx2 + 2];
+  r[1][0] = pos[3 * idx3 + 0] - pos[3 * idx2 + 0];
+  r[1][1] = pos[3 * idx3 + 1] - pos[3 * idx2 + 1];
+  r[1][2] = pos[3 * idx3 + 2] - pos[3 * idx2 + 2];
+  r[2][0] = -r[1][0];
+  r[2][1] = -r[1][1];
+  r[2][2] = -r[1][2];
+  r[3][0] = pos[3 * idx4 + 0] - pos[3 * idx3 + 0];
+  r[3][1] = pos[3 * idx4 + 1] - pos[3 * idx3 + 1];
+  r[3][2] = pos[3 * idx4 + 2] - pos[3 * idx3 + 2];
+
+  crossProduct(r[0][0], r[0][1], r[0][2], r[1][0], r[1][1], r[1][2], t[0][0], t[0][1], t[0][2]);
+  d[0] = fmax(sqrt(t[0][0] * t[0][0] + t[0][1] * t[0][1] + t[0][2] * t[0][2]), 1.0e-5);
+  t[0][0] /= d[0];
+  t[0][1] /= d[0];
+  t[0][2] /= d[0];
+  crossProduct(r[2][0], r[2][1], r[2][2], r[3][0], r[3][1], r[3][2], t[1][0], t[1][1], t[1][2]);
+  d[1] = fmax(sqrt(t[1][0] * t[1][0] + t[1][1] * t[1][1] + t[1][2] * t[1][2]), 1.0e-5);
+  t[1][0] /= d[1];
+  t[1][1] /= d[1];
+  t[1][2] /= d[1];
+  const double cosPhi = clamp(t[0][0] * t[1][0] + t[0][1] * t[1][1] + t[0][2] * t[1][2], -1.0, 1.0);
+  if (cosPhiOut != nullptr) {
+    *cosPhiOut = cosPhi;
+  }
+  double mX, mY, mZ;
+  crossProduct(t[0][0], t[0][1], t[0][2], r[1][0], r[1][1], r[1][2], mX, mY, mZ);
+  const double mLength = fmax(sqrt(mX * mX + mY * mY + mZ * mZ), 1.0e-5);
+  return -atan2((mX * t[1][0] + mY * t[1][1] + mZ * t[1][2]) / mLength, cosPhi);
+}
+
+static __device__ __forceinline__ double torsionConstraintEnergy(const double* pos,
+                                                                 const int     idx1,
+                                                                 const int     idx2,
+                                                                 const int     idx3,
+                                                                 const int     idx4,
+                                                                 const double  minDihedralDeg,
+                                                                 const double  maxDihedralDeg,
+                                                                 const double  forceConstant) {
+  const double dihedral     = radianToDegree * computeSignedDihedral(pos, idx1, idx2, idx3, idx4);
+  const double dihedralTerm = computeDihedralConstraintTerm(dihedral, minDihedralDeg, maxDihedralDeg);
+  return forceConstant * dihedralTerm * dihedralTerm;
+}
+
+static __device__ __forceinline__ void torsionConstraintGrad(const double* pos,
+                                                             const int     idx1,
+                                                             const int     idx2,
+                                                             const int     idx3,
+                                                             const int     idx4,
+                                                             const double  minDihedralDeg,
+                                                             const double  maxDihedralDeg,
+                                                             const double  forceConstant,
+                                                             double*       grad) {
+  double       r[4][3];
+  double       t[2][3];
+  double       d[2];
+  const double dihedral     = radianToDegree * computeSignedDihedral(pos, idx1, idx2, idx3, idx4, nullptr, r, t, d);
+  const double dihedralTerm = computeDihedralConstraintTerm(dihedral, minDihedralDeg, maxDihedralDeg);
+  if (isDoubleZero(dihedralTerm)) {
+    return;
+  }
+  const double dE_dPhi = 2.0 * radianToDegree * forceConstant * dihedralTerm;
+
+  const double d23       = sqrt(distanceSquared(pos, idx2, idx3));
+  const double prefactor = dE_dPhi / fmax(d23, 1.0e-8);
+
+  double tt0[3], tt1[3];
+  crossProduct(r[0][0], r[0][1], r[0][2], r[1][0], r[1][1], r[1][2], tt0[0], tt0[1], tt0[2]);
+  crossProduct(r[2][0], r[2][1], r[2][2], r[3][0], r[3][1], r[3][2], tt1[0], tt1[1], tt1[2]);
+  const double tt0LenSq = fmax(tt0[0] * tt0[0] + tt0[1] * tt0[1] + tt0[2] * tt0[2], 1.0e-8);
+  const double tt1LenSq = fmax(tt1[0] * tt1[0] + tt1[1] * tt1[1] + tt1[2] * tt1[2], 1.0e-8);
+
+  double tmp0[3], tmp1[3];
+  crossProduct(tt0[0], tt0[1], tt0[2], r[2][0], r[2][1], r[2][2], tmp0[0], tmp0[1], tmp0[2]);
+  crossProduct(tt1[0], tt1[1], tt1[2], r[1][0], r[1][1], r[1][2], tmp1[0], tmp1[1], tmp1[2]);
+  const double dedt0[3] = {tmp0[0] / tt0LenSq * prefactor,
+                           tmp0[1] / tt0LenSq * prefactor,
+                           tmp0[2] / tt0LenSq * prefactor};
+  const double dedt1[3] = {tmp1[0] / tt1LenSq * prefactor,
+                           tmp1[1] / tt1LenSq * prefactor,
+                           tmp1[2] / tt1LenSq * prefactor};
+
+  const double r31[3] = {pos[3 * idx3 + 0] - pos[3 * idx1 + 0],
+                         pos[3 * idx3 + 1] - pos[3 * idx1 + 1],
+                         pos[3 * idx3 + 2] - pos[3 * idx1 + 2]};
+  const double r42[3] = {pos[3 * idx4 + 0] - pos[3 * idx2 + 0],
+                         pos[3 * idx4 + 1] - pos[3 * idx2 + 1],
+                         pos[3 * idx4 + 2] - pos[3 * idx2 + 2]};
+
+  double dedp0[3], dedp1[3], dedp2[3], dedp3[3];
+  crossProduct(r[2][0], r[2][1], r[2][2], dedt0[0], dedt0[1], dedt0[2], dedp0[0], dedp0[1], dedp0[2]);
+
+  double r31Cross[3], r3Cross[3];
+  crossProduct(r31[0], r31[1], r31[2], dedt0[0], dedt0[1], dedt0[2], r31Cross[0], r31Cross[1], r31Cross[2]);
+  crossProduct(r[3][0], r[3][1], r[3][2], dedt1[0], dedt1[1], dedt1[2], r3Cross[0], r3Cross[1], r3Cross[2]);
+  dedp1[0] = r31Cross[0] - r3Cross[0];
+  dedp1[1] = r31Cross[1] - r3Cross[1];
+  dedp1[2] = r31Cross[2] - r3Cross[2];
+
+  double r0Cross[3], r42Cross[3];
+  crossProduct(r[0][0], r[0][1], r[0][2], dedt0[0], dedt0[1], dedt0[2], r0Cross[0], r0Cross[1], r0Cross[2]);
+  crossProduct(r42[0], r42[1], r42[2], dedt1[0], dedt1[1], dedt1[2], r42Cross[0], r42Cross[1], r42Cross[2]);
+  dedp2[0] = r0Cross[0] + r42Cross[0];
+  dedp2[1] = r0Cross[1] + r42Cross[1];
+  dedp2[2] = r0Cross[2] + r42Cross[2];
+
+  crossProduct(r[2][0], r[2][1], r[2][2], dedt1[0], dedt1[1], dedt1[2], dedp3[0], dedp3[1], dedp3[2]);
+
+  atomicAdd(&grad[3 * idx1 + 0], dedp0[0]);
+  atomicAdd(&grad[3 * idx1 + 1], dedp0[1]);
+  atomicAdd(&grad[3 * idx1 + 2], dedp0[2]);
+  atomicAdd(&grad[3 * idx2 + 0], dedp1[0]);
+  atomicAdd(&grad[3 * idx2 + 1], dedp1[1]);
+  atomicAdd(&grad[3 * idx2 + 2], dedp1[2]);
+  atomicAdd(&grad[3 * idx3 + 0], dedp2[0]);
+  atomicAdd(&grad[3 * idx3 + 1], dedp2[1]);
+  atomicAdd(&grad[3 * idx3 + 2], dedp2[2]);
+  atomicAdd(&grad[3 * idx4 + 0], dedp3[0]);
+  atomicAdd(&grad[3 * idx4 + 1], dedp3[1]);
+  atomicAdd(&grad[3 * idx4 + 2], dedp3[2]);
+}
+
 namespace nvMolKit {
 namespace MMFF {
 
@@ -759,6 +1131,63 @@ static __device__ __inline__ double molEnergy(const EnergyForceContribsDevicePtr
     energy += eleEnergy(molCoords, localIdx1, localIdx2, chargeTerms[i], dielModel, is14);
   }
 
+  const auto& [dc_idx1s, dc_idx2s, minLens, maxLens, dcForceConstants] = terms.distanceConstraintTerms;
+  const int dcStart = systemIndices.distanceConstraintTermStarts[molIdx];
+  const int dcEnd   = systemIndices.distanceConstraintTermStarts[molIdx + 1];
+#pragma unroll 1
+  for (int i = dcStart + tid; i < dcEnd; i += stride) {
+    const int localIdx1 = dc_idx1s[i] - atomStart;
+    const int localIdx2 = dc_idx2s[i] - atomStart;
+    energy += distanceConstraintEnergy(molCoords, localIdx1, localIdx2, minLens[i], maxLens[i], dcForceConstants[i]);
+  }
+
+  const auto& [pc_idxs, refXs, refYs, refZs, maxDispls, pcForceConstants] = terms.positionConstraintTerms;
+  const int pcStart = systemIndices.positionConstraintTermStarts[molIdx];
+  const int pcEnd   = systemIndices.positionConstraintTermStarts[molIdx + 1];
+#pragma unroll 1
+  for (int i = pcStart + tid; i < pcEnd; i += stride) {
+    const int localIdx = pc_idxs[i] - atomStart;
+    energy +=
+      positionConstraintEnergy(molCoords, localIdx, refXs[i], refYs[i], refZs[i], maxDispls[i], pcForceConstants[i]);
+  }
+
+  const auto& [ac_idx1s, ac_idx2s, ac_idx3s, minAngleDegs, maxAngleDegs, acForceConstants] = terms.angleConstraintTerms;
+  const int acStart = systemIndices.angleConstraintTermStarts[molIdx];
+  const int acEnd   = systemIndices.angleConstraintTermStarts[molIdx + 1];
+#pragma unroll 1
+  for (int i = acStart + tid; i < acEnd; i += stride) {
+    const int localIdx1 = ac_idx1s[i] - atomStart;
+    const int localIdx2 = ac_idx2s[i] - atomStart;
+    const int localIdx3 = ac_idx3s[i] - atomStart;
+    energy += angleConstraintEnergy(molCoords,
+                                    localIdx1,
+                                    localIdx2,
+                                    localIdx3,
+                                    minAngleDegs[i],
+                                    maxAngleDegs[i],
+                                    acForceConstants[i]);
+  }
+
+  const auto& [tc_idx1s, tc_idx2s, tc_idx3s, tc_idx4s, minDihedralDegs, maxDihedralDegs, tcForceConstants] =
+    terms.torsionConstraintTerms;
+  const int tcStart = systemIndices.torsionConstraintTermStarts[molIdx];
+  const int tcEnd   = systemIndices.torsionConstraintTermStarts[molIdx + 1];
+#pragma unroll 1
+  for (int i = tcStart + tid; i < tcEnd; i += stride) {
+    const int localIdx1 = tc_idx1s[i] - atomStart;
+    const int localIdx2 = tc_idx2s[i] - atomStart;
+    const int localIdx3 = tc_idx3s[i] - atomStart;
+    const int localIdx4 = tc_idx4s[i] - atomStart;
+    energy += torsionConstraintEnergy(molCoords,
+                                      localIdx1,
+                                      localIdx2,
+                                      localIdx3,
+                                      localIdx4,
+                                      minDihedralDegs[i],
+                                      maxDihedralDegs[i],
+                                      tcForceConstants[i]);
+  }
+
   return energy;
 }
 
@@ -857,6 +1286,64 @@ static __device__ __inline__ void molGrad(const EnergyForceContribsDevicePtr& te
     const int  localIdx2 = e_idx2s[i] - atomStart;
     const bool is14      = is1_4s[i] > 0;
     eleGrad(molCoords, localIdx1, localIdx2, chargeTerms[i], dielModels[i], is14, grad);
+  }
+
+  const auto& [dc_idx1s, dc_idx2s, minLens, maxLens, dcForceConstants] = terms.distanceConstraintTerms;
+  const int dcStart = systemIndices.distanceConstraintTermStarts[molIdx];
+  const int dcEnd   = systemIndices.distanceConstraintTermStarts[molIdx + 1];
+#pragma unroll 1
+  for (int i = dcStart + tid; i < dcEnd; i += stride) {
+    const int localIdx1 = dc_idx1s[i] - atomStart;
+    const int localIdx2 = dc_idx2s[i] - atomStart;
+    distanceConstraintGrad(molCoords, localIdx1, localIdx2, minLens[i], maxLens[i], dcForceConstants[i], grad);
+  }
+
+  const auto& [pc_idxs, refXs, refYs, refZs, maxDispls, pcForceConstants] = terms.positionConstraintTerms;
+  const int pcStart = systemIndices.positionConstraintTermStarts[molIdx];
+  const int pcEnd   = systemIndices.positionConstraintTermStarts[molIdx + 1];
+#pragma unroll 1
+  for (int i = pcStart + tid; i < pcEnd; i += stride) {
+    const int localIdx = pc_idxs[i] - atomStart;
+    positionConstraintGrad(molCoords, localIdx, refXs[i], refYs[i], refZs[i], maxDispls[i], pcForceConstants[i], grad);
+  }
+
+  const auto& [ac_idx1s, ac_idx2s, ac_idx3s, minAngleDegs, maxAngleDegs, acForceConstants] = terms.angleConstraintTerms;
+  const int acStart = systemIndices.angleConstraintTermStarts[molIdx];
+  const int acEnd   = systemIndices.angleConstraintTermStarts[molIdx + 1];
+#pragma unroll 1
+  for (int i = acStart + tid; i < acEnd; i += stride) {
+    const int localIdx1 = ac_idx1s[i] - atomStart;
+    const int localIdx2 = ac_idx2s[i] - atomStart;
+    const int localIdx3 = ac_idx3s[i] - atomStart;
+    angleConstraintGrad(molCoords,
+                        localIdx1,
+                        localIdx2,
+                        localIdx3,
+                        minAngleDegs[i],
+                        maxAngleDegs[i],
+                        acForceConstants[i],
+                        grad);
+  }
+
+  const auto& [tc_idx1s, tc_idx2s, tc_idx3s, tc_idx4s, minDihedralDegs, maxDihedralDegs, tcForceConstants] =
+    terms.torsionConstraintTerms;
+  const int tcStart = systemIndices.torsionConstraintTermStarts[molIdx];
+  const int tcEnd   = systemIndices.torsionConstraintTermStarts[molIdx + 1];
+#pragma unroll 1
+  for (int i = tcStart + tid; i < tcEnd; i += stride) {
+    const int localIdx1 = tc_idx1s[i] - atomStart;
+    const int localIdx2 = tc_idx2s[i] - atomStart;
+    const int localIdx3 = tc_idx3s[i] - atomStart;
+    const int localIdx4 = tc_idx4s[i] - atomStart;
+    torsionConstraintGrad(molCoords,
+                          localIdx1,
+                          localIdx2,
+                          localIdx3,
+                          localIdx4,
+                          minDihedralDegs[i],
+                          maxDihedralDegs[i],
+                          tcForceConstants[i],
+                          grad);
   }
 }
 

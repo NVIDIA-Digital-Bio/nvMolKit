@@ -112,8 +112,8 @@ nvMolKit currently supports the following features:
     * Supports multiple GPUs
     * Does not support all RDKit `EmbedParameters` options. Defaults in ETKDGv3() are supported with a few exceptions (see API documentation)
 
-* **MMFF Geometry Relaxation**: GPU-accelerated molecular mechanics force field optimization
-    * MMFF94 force field implementation for conformer optimization
+* **Geometry Relaxation**: GPU-accelerated force field optimization of conformers
+    * MMFF94 and UFF force fields
     * Batch optimization of multiple molecules and conformers
     * Supports multiple GPUs
 
@@ -122,6 +122,8 @@ nvMolKit currently supports the following features:
 * **Substructure Search**: GPU-accelerated substructure matching against batches of molecules
     * Supports SMILES and recursive SMARTS-based query molecules via RDKit
     * Does not yet support chirality-aware matching, enhanced stereochemistry, or other advanced RDKit ``SubstructMatchParameters`` options
+
+* **Conformer RMSD**: GPU-accelerated pairwise RMSD matrix computation for conformer ensembles
 
 .. _async-results:
 

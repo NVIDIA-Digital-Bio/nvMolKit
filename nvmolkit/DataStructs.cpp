@@ -24,14 +24,6 @@
 #include "device.h"
 #include "similarity.h"
 
-template <typename T> boost::python::list vectorToList(const std::vector<T>& vec) {
-  boost::python::list list;
-  for (const auto& value : vec) {
-    list.append(value);
-  }
-  return list;
-}
-
 namespace {
 
 using ::nvMolKit::getSpanFromDictElems;

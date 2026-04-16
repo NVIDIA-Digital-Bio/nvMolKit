@@ -4,6 +4,6 @@ from rdkit.Chem import Mol
 def MMFFOptimizeMoleculesConfs(
     molecules: List[Mol],
     maxIters: int = 200,
-    nonBondedThreshold: float = 100.0,
+    properties: Any = None,
     hardwareOptions: Any = None
 ) -> List[List[float]]: ...

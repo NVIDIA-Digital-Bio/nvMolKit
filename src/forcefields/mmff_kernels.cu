@@ -292,6 +292,187 @@ __global__ void eleGradKernel(const int      numEles,
   }
 }
 
+__global__ void distanceConstraintEnergyKernel(const int     numConstraints,
+                                               const int*    idx1s,
+                                               const int*    idx2s,
+                                               const double* minLens,
+                                               const double* maxLens,
+                                               const double* forceConstants,
+                                               const double* pos,
+                                               double*       energyBuffer,
+                                               const int*    energyBufferStarts,
+                                               const int*    atomBatchMap,
+                                               const int*    termBatchStarts) {
+  const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < numConstraints) {
+    const double energy =
+      distanceConstraintEnergy(pos, idx1s[idx], idx2s[idx], minLens[idx], maxLens[idx], forceConstants[idx]);
+    const int batchIdx  = atomBatchMap[idx1s[idx]];
+    const int outputIdx = getEnergyAccumulatorIndex(idx, batchIdx, energyBufferStarts, termBatchStarts);
+    energyBuffer[outputIdx] += energy;
+  }
+}
+
+__global__ void distanceConstraintGradKernel(const int     numConstraints,
+                                             const int*    idx1s,
+                                             const int*    idx2s,
+                                             const double* minLens,
+                                             const double* maxLens,
+                                             const double* forceConstants,
+                                             const double* pos,
+                                             double*       grad) {
+  const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < numConstraints) {
+    distanceConstraintGrad(pos, idx1s[idx], idx2s[idx], minLens[idx], maxLens[idx], forceConstants[idx], grad);
+  }
+}
+
+__global__ void positionConstraintEnergyKernel(const int     numConstraints,
+                                               const int*    idxs,
+                                               const double* refXs,
+                                               const double* refYs,
+                                               const double* refZs,
+                                               const double* maxDispls,
+                                               const double* forceConstants,
+                                               const double* pos,
+                                               double*       energyBuffer,
+                                               const int*    energyBufferStarts,
+                                               const int*    atomBatchMap,
+                                               const int*    termBatchStarts) {
+  const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < numConstraints) {
+    const double energy =
+      positionConstraintEnergy(pos, idxs[idx], refXs[idx], refYs[idx], refZs[idx], maxDispls[idx], forceConstants[idx]);
+    const int batchIdx  = atomBatchMap[idxs[idx]];
+    const int outputIdx = getEnergyAccumulatorIndex(idx, batchIdx, energyBufferStarts, termBatchStarts);
+    energyBuffer[outputIdx] += energy;
+  }
+}
+
+__global__ void positionConstraintGradKernel(const int     numConstraints,
+                                             const int*    idxs,
+                                             const double* refXs,
+                                             const double* refYs,
+                                             const double* refZs,
+                                             const double* maxDispls,
+                                             const double* forceConstants,
+                                             const double* pos,
+                                             double*       grad) {
+  const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < numConstraints) {
+    positionConstraintGrad(pos,
+                           idxs[idx],
+                           refXs[idx],
+                           refYs[idx],
+                           refZs[idx],
+                           maxDispls[idx],
+                           forceConstants[idx],
+                           grad);
+  }
+}
+
+__global__ void angleConstraintEnergyKernel(const int     numConstraints,
+                                            const int*    idx1s,
+                                            const int*    idx2s,
+                                            const int*    idx3s,
+                                            const double* minAngleDegs,
+                                            const double* maxAngleDegs,
+                                            const double* forceConstants,
+                                            const double* pos,
+                                            double*       energyBuffer,
+                                            const int*    energyBufferStarts,
+                                            const int*    atomBatchMap,
+                                            const int*    termBatchStarts) {
+  const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < numConstraints) {
+    const double energy    = angleConstraintEnergy(pos,
+                                                idx1s[idx],
+                                                idx2s[idx],
+                                                idx3s[idx],
+                                                minAngleDegs[idx],
+                                                maxAngleDegs[idx],
+                                                forceConstants[idx]);
+    const int    batchIdx  = atomBatchMap[idx1s[idx]];
+    const int    outputIdx = getEnergyAccumulatorIndex(idx, batchIdx, energyBufferStarts, termBatchStarts);
+    energyBuffer[outputIdx] += energy;
+  }
+}
+
+__global__ void angleConstraintGradKernel(const int     numConstraints,
+                                          const int*    idx1s,
+                                          const int*    idx2s,
+                                          const int*    idx3s,
+                                          const double* minAngleDegs,
+                                          const double* maxAngleDegs,
+                                          const double* forceConstants,
+                                          const double* pos,
+                                          double*       grad) {
+  const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < numConstraints) {
+    angleConstraintGrad(pos,
+                        idx1s[idx],
+                        idx2s[idx],
+                        idx3s[idx],
+                        minAngleDegs[idx],
+                        maxAngleDegs[idx],
+                        forceConstants[idx],
+                        grad);
+  }
+}
+
+__global__ void torsionConstraintEnergyKernel(const int     numConstraints,
+                                              const int*    idx1s,
+                                              const int*    idx2s,
+                                              const int*    idx3s,
+                                              const int*    idx4s,
+                                              const double* minDihedralDegs,
+                                              const double* maxDihedralDegs,
+                                              const double* forceConstants,
+                                              const double* pos,
+                                              double*       energyBuffer,
+                                              const int*    energyBufferStarts,
+                                              const int*    atomBatchMap,
+                                              const int*    termBatchStarts) {
+  const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < numConstraints) {
+    const double energy    = torsionConstraintEnergy(pos,
+                                                  idx1s[idx],
+                                                  idx2s[idx],
+                                                  idx3s[idx],
+                                                  idx4s[idx],
+                                                  minDihedralDegs[idx],
+                                                  maxDihedralDegs[idx],
+                                                  forceConstants[idx]);
+    const int    batchIdx  = atomBatchMap[idx1s[idx]];
+    const int    outputIdx = getEnergyAccumulatorIndex(idx, batchIdx, energyBufferStarts, termBatchStarts);
+    energyBuffer[outputIdx] += energy;
+  }
+}
+
+__global__ void torsionConstraintGradKernel(const int     numConstraints,
+                                            const int*    idx1s,
+                                            const int*    idx2s,
+                                            const int*    idx3s,
+                                            const int*    idx4s,
+                                            const double* minDihedralDegs,
+                                            const double* maxDihedralDegs,
+                                            const double* forceConstants,
+                                            const double* pos,
+                                            double*       grad) {
+  const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < numConstraints) {
+    torsionConstraintGrad(pos,
+                          idx1s[idx],
+                          idx2s[idx],
+                          idx3s[idx],
+                          idx4s[idx],
+                          minDihedralDegs[idx],
+                          maxDihedralDegs[idx],
+                          forceConstants[idx],
+                          grad);
+  }
+}
+
 namespace nvMolKit {
 namespace MMFF {
 
@@ -639,6 +820,230 @@ cudaError_t launchEleGradientKernel(const int      numEles,
   constexpr int blockSize = 256;
   const int     numBlocks = (numEles + blockSize - 1) / blockSize;
   eleGradKernel<<<numBlocks, blockSize, 0, stream>>>(numEles, idx1, idx2, chargeTerm, dielModel, is1_4, pos, grad);
+  return cudaGetLastError();
+}
+
+cudaError_t launchDistanceConstraintEnergyKernel(const int     numConstraints,
+                                                 const int*    idx1,
+                                                 const int*    idx2,
+                                                 const double* minLen,
+                                                 const double* maxLen,
+                                                 const double* forceConstant,
+                                                 const double* pos,
+                                                 double*       energyBuffer,
+                                                 const int*    energyBufferStarts,
+                                                 const int*    atomBatchMap,
+                                                 const int*    termBatchStarts,
+                                                 cudaStream_t  stream) {
+  assert(numConstraints > 0);
+  constexpr int blockSize = 256;
+  const int     numBlocks = (numConstraints + blockSize - 1) / blockSize;
+  distanceConstraintEnergyKernel<<<numBlocks, blockSize, 0, stream>>>(numConstraints,
+                                                                      idx1,
+                                                                      idx2,
+                                                                      minLen,
+                                                                      maxLen,
+                                                                      forceConstant,
+                                                                      pos,
+                                                                      energyBuffer,
+                                                                      energyBufferStarts,
+                                                                      atomBatchMap,
+                                                                      termBatchStarts);
+  return cudaGetLastError();
+}
+
+cudaError_t launchDistanceConstraintGradientKernel(const int     numConstraints,
+                                                   const int*    idx1,
+                                                   const int*    idx2,
+                                                   const double* minLen,
+                                                   const double* maxLen,
+                                                   const double* forceConstant,
+                                                   const double* pos,
+                                                   double*       grad,
+                                                   cudaStream_t  stream) {
+  assert(numConstraints > 0);
+  constexpr int blockSize = 256;
+  const int     numBlocks = (numConstraints + blockSize - 1) / blockSize;
+  distanceConstraintGradKernel<<<numBlocks, blockSize, 0, stream>>>(numConstraints,
+                                                                    idx1,
+                                                                    idx2,
+                                                                    minLen,
+                                                                    maxLen,
+                                                                    forceConstant,
+                                                                    pos,
+                                                                    grad);
+  return cudaGetLastError();
+}
+
+cudaError_t launchPositionConstraintEnergyKernel(const int     numConstraints,
+                                                 const int*    idx,
+                                                 const double* refX,
+                                                 const double* refY,
+                                                 const double* refZ,
+                                                 const double* maxDispl,
+                                                 const double* forceConstant,
+                                                 const double* pos,
+                                                 double*       energyBuffer,
+                                                 const int*    energyBufferStarts,
+                                                 const int*    atomBatchMap,
+                                                 const int*    termBatchStarts,
+                                                 cudaStream_t  stream) {
+  assert(numConstraints > 0);
+  constexpr int blockSize = 256;
+  const int     numBlocks = (numConstraints + blockSize - 1) / blockSize;
+  positionConstraintEnergyKernel<<<numBlocks, blockSize, 0, stream>>>(numConstraints,
+                                                                      idx,
+                                                                      refX,
+                                                                      refY,
+                                                                      refZ,
+                                                                      maxDispl,
+                                                                      forceConstant,
+                                                                      pos,
+                                                                      energyBuffer,
+                                                                      energyBufferStarts,
+                                                                      atomBatchMap,
+                                                                      termBatchStarts);
+  return cudaGetLastError();
+}
+
+cudaError_t launchPositionConstraintGradientKernel(const int     numConstraints,
+                                                   const int*    idx,
+                                                   const double* refX,
+                                                   const double* refY,
+                                                   const double* refZ,
+                                                   const double* maxDispl,
+                                                   const double* forceConstant,
+                                                   const double* pos,
+                                                   double*       grad,
+                                                   cudaStream_t  stream) {
+  assert(numConstraints > 0);
+  constexpr int blockSize = 256;
+  const int     numBlocks = (numConstraints + blockSize - 1) / blockSize;
+  positionConstraintGradKernel<<<numBlocks, blockSize, 0, stream>>>(numConstraints,
+                                                                    idx,
+                                                                    refX,
+                                                                    refY,
+                                                                    refZ,
+                                                                    maxDispl,
+                                                                    forceConstant,
+                                                                    pos,
+                                                                    grad);
+  return cudaGetLastError();
+}
+
+cudaError_t launchAngleConstraintEnergyKernel(const int     numConstraints,
+                                              const int*    idx1,
+                                              const int*    idx2,
+                                              const int*    idx3,
+                                              const double* minAngleDeg,
+                                              const double* maxAngleDeg,
+                                              const double* forceConstant,
+                                              const double* pos,
+                                              double*       energyBuffer,
+                                              const int*    energyBufferStarts,
+                                              const int*    atomBatchMap,
+                                              const int*    termBatchStarts,
+                                              cudaStream_t  stream) {
+  assert(numConstraints > 0);
+  constexpr int blockSize = 256;
+  const int     numBlocks = (numConstraints + blockSize - 1) / blockSize;
+  angleConstraintEnergyKernel<<<numBlocks, blockSize, 0, stream>>>(numConstraints,
+                                                                   idx1,
+                                                                   idx2,
+                                                                   idx3,
+                                                                   minAngleDeg,
+                                                                   maxAngleDeg,
+                                                                   forceConstant,
+                                                                   pos,
+                                                                   energyBuffer,
+                                                                   energyBufferStarts,
+                                                                   atomBatchMap,
+                                                                   termBatchStarts);
+  return cudaGetLastError();
+}
+
+cudaError_t launchAngleConstraintGradientKernel(const int     numConstraints,
+                                                const int*    idx1,
+                                                const int*    idx2,
+                                                const int*    idx3,
+                                                const double* minAngleDeg,
+                                                const double* maxAngleDeg,
+                                                const double* forceConstant,
+                                                const double* pos,
+                                                double*       grad,
+                                                cudaStream_t  stream) {
+  assert(numConstraints > 0);
+  constexpr int blockSize = 256;
+  const int     numBlocks = (numConstraints + blockSize - 1) / blockSize;
+  angleConstraintGradKernel<<<numBlocks, blockSize, 0, stream>>>(numConstraints,
+                                                                 idx1,
+                                                                 idx2,
+                                                                 idx3,
+                                                                 minAngleDeg,
+                                                                 maxAngleDeg,
+                                                                 forceConstant,
+                                                                 pos,
+                                                                 grad);
+  return cudaGetLastError();
+}
+
+cudaError_t launchTorsionConstraintEnergyKernel(const int     numConstraints,
+                                                const int*    idx1,
+                                                const int*    idx2,
+                                                const int*    idx3,
+                                                const int*    idx4,
+                                                const double* minDihedralDeg,
+                                                const double* maxDihedralDeg,
+                                                const double* forceConstant,
+                                                const double* pos,
+                                                double*       energyBuffer,
+                                                const int*    energyBufferStarts,
+                                                const int*    atomBatchMap,
+                                                const int*    termBatchStarts,
+                                                cudaStream_t  stream) {
+  assert(numConstraints > 0);
+  constexpr int blockSize = 256;
+  const int     numBlocks = (numConstraints + blockSize - 1) / blockSize;
+  torsionConstraintEnergyKernel<<<numBlocks, blockSize, 0, stream>>>(numConstraints,
+                                                                     idx1,
+                                                                     idx2,
+                                                                     idx3,
+                                                                     idx4,
+                                                                     minDihedralDeg,
+                                                                     maxDihedralDeg,
+                                                                     forceConstant,
+                                                                     pos,
+                                                                     energyBuffer,
+                                                                     energyBufferStarts,
+                                                                     atomBatchMap,
+                                                                     termBatchStarts);
+  return cudaGetLastError();
+}
+
+cudaError_t launchTorsionConstraintGradientKernel(const int     numConstraints,
+                                                  const int*    idx1,
+                                                  const int*    idx2,
+                                                  const int*    idx3,
+                                                  const int*    idx4,
+                                                  const double* minDihedralDeg,
+                                                  const double* maxDihedralDeg,
+                                                  const double* forceConstant,
+                                                  const double* pos,
+                                                  double*       grad,
+                                                  cudaStream_t  stream) {
+  assert(numConstraints > 0);
+  constexpr int blockSize = 256;
+  const int     numBlocks = (numConstraints + blockSize - 1) / blockSize;
+  torsionConstraintGradKernel<<<numBlocks, blockSize, 0, stream>>>(numConstraints,
+                                                                   idx1,
+                                                                   idx2,
+                                                                   idx3,
+                                                                   idx4,
+                                                                   minDihedralDeg,
+                                                                   maxDihedralDeg,
+                                                                   forceConstant,
+                                                                   pos,
+                                                                   grad);
   return cudaGetLastError();
 }
 

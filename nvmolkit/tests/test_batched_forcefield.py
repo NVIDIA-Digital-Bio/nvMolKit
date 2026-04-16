@@ -1,3 +1,18 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import os
 
 import pytest
@@ -98,6 +113,7 @@ def get_mmff_reference_energy_and_grad(
     conf_id: int = -1,
     nonBondedThreshold: float = 100.0,
     ignoreInterfragInteractions: bool = True,
+    configure_forcefield=None,
 ):
     ff = make_rdkit_mmff_forcefield(
         mol,
@@ -106,6 +122,8 @@ def get_mmff_reference_energy_and_grad(
         nonBondedThreshold=nonBondedThreshold,
         ignoreInterfragInteractions=ignoreInterfragInteractions,
     )
+    if configure_forcefield is not None:
+        configure_forcefield(ff)
     return ff.CalcEnergy(), list(ff.CalcGrad())
 
 
@@ -120,6 +138,8 @@ def assert_single_batched_matches_rdkit(
     conf_id: int = -1,
     nonBondedThreshold: float = 100.0,
     ignoreInterfragInteractions: bool = True,
+    configure_batch=None,
+    configure_rdkit=None,
 ):
     nvmolkit_mol = Chem.Mol(mol)
     ff = MMFFBatchedForcefield(
@@ -129,6 +149,8 @@ def assert_single_batched_matches_rdkit(
         nonBondedThreshold=nonBondedThreshold,
         ignoreInterfragInteractions=ignoreInterfragInteractions,
     )
+    if configure_batch is not None:
+        configure_batch(ff[0])
     got_energy = ff.compute_energy()[0]
     got_grad = ff.compute_gradients()[0]
     want_energy, want_grad = get_mmff_reference_energy_and_grad(
@@ -137,6 +159,7 @@ def assert_single_batched_matches_rdkit(
         conf_id=conf_id,
         nonBondedThreshold=nonBondedThreshold,
         ignoreInterfragInteractions=ignoreInterfragInteractions,
+        configure_forcefield=configure_rdkit,
     )
     assert_energy_and_gradient_close(got_energy, want_energy, got_grad, want_grad)
 
@@ -256,3 +279,105 @@ def test_mmff_batched_forcefield_conf_ids_match_rdkit():
         assert_energy_and_gradient_close(got_energies[idx], want_energy, got_grads[idx], want_grad)
 
 
+def test_mmff_batched_forcefield_lazy_build_and_rebuild():
+    mol = make_embedded_mol("CCO")
+    ff = MMFFBatchedForcefield([Chem.Mol(mol)])
+
+    assert ff._native_ff is None
+    assert ff._dirty is True
+
+    first_energy = ff.compute_energy()[0]
+    first_native = ff._native_ff
+
+    assert first_native is not None
+    assert ff._dirty is False
+    assert ff.compute_energy()[0] == pytest.approx(first_energy, rel=1e-5, abs=1e-5)
+    assert ff._native_ff is first_native
+
+    ff[0].add_distance_constraint(0, 2, True, 0.2, 0.4, 25.0)
+    assert ff._dirty is True
+
+    ff.rebuild()
+    assert ff._dirty is False
+    assert ff._native_ff is not first_native
+
+
+def test_mmff_batched_forcefield_invalid_indices():
+    ff = MMFFBatchedForcefield([make_embedded_mol("CCO")])
+
+    with pytest.raises(IndexError, match="Batch element index"):
+        ff[1]
+
+    with pytest.raises(IndexError, match="Atom index"):
+        ff[0].add_distance_constraint(0, 99, False, 0.0, 1.0, 10.0)
+
+
+def test_mmff_distance_constraint_matches_rdkit():
+    mol = make_embedded_mol("CCO")
+    assert_single_batched_matches_rdkit(
+        mol,
+        configure_batch=lambda element: element.add_distance_constraint(0, 2, False, 0.0, 1.5, 25.0),
+        configure_rdkit=lambda ff: ff.MMFFAddDistanceConstraint(0, 2, False, 0.0, 1.5, 25.0),
+    )
+
+
+def test_mmff_distance_relative_constraint_matches_rdkit():
+    mol = make_embedded_mol("CCO")
+    assert_single_batched_matches_rdkit(
+        mol,
+        configure_batch=lambda element: element.add_distance_constraint(0, 2, True, 0.3, 0.6, 15.0),
+        configure_rdkit=lambda ff: ff.MMFFAddDistanceConstraint(0, 2, True, 0.3, 0.6, 15.0),
+    )
+
+
+def test_mmff_position_constraint_matches_rdkit_reference_pose():
+    mol = make_embedded_mol("CCO")
+    assert_single_batched_matches_rdkit(
+        mol,
+        configure_batch=lambda element: element.add_position_constraint(0, 0.1, 50.0),
+        configure_rdkit=lambda ff: ff.MMFFAddPositionConstraint(0, 0.1, 50.0),
+    )
+
+
+def test_mmff_angle_constraint_matches_rdkit():
+    mol = make_embedded_mol("CCC")
+    assert_single_batched_matches_rdkit(
+        mol,
+        configure_batch=lambda element: element.add_angle_constraint(0, 1, 2, True, 5.0, 10.0, 20.0),
+        configure_rdkit=lambda ff: ff.MMFFAddAngleConstraint(0, 1, 2, True, 5.0, 10.0, 20.0),
+    )
+
+
+def test_mmff_torsion_constraint_matches_rdkit():
+    mol = make_embedded_mol("CCCC")
+    assert_single_batched_matches_rdkit(
+        mol,
+        configure_batch=lambda element: element.add_torsion_constraint(0, 1, 2, 3, True, 15.0, 30.0, 12.0),
+        configure_rdkit=lambda ff: ff.MMFFAddTorsionConstraint(0, 1, 2, 3, True, 15.0, 30.0, 12.0),
+    )
+
+
+def test_mmff_mixed_properties_and_constraints_batch_matches_rdkit():
+    mols = [make_embedded_mol("CCO"), make_embedded_mol("CCCC")]
+    properties = [
+        make_rdkit_mmff_properties(mols[0], {"dielectric_constant": 2.0, "dielectric_model": 2}),
+        make_rdkit_mmff_properties(mols[1], {"variant": "MMFF94s"}),
+    ]
+    ff = MMFFBatchedForcefield(clone_mols(mols), properties=properties)
+    ff[0].add_distance_constraint(0, 2, True, 0.2, 0.5, 20.0)
+    ff[1].add_torsion_constraint(0, 1, 2, 3, True, 10.0, 20.0, 8.0)
+
+    got_energies = ff.compute_energy()
+    got_grads = ff.compute_gradients()
+
+    ref_specs = [
+        lambda forcefield: forcefield.MMFFAddDistanceConstraint(0, 2, True, 0.2, 0.5, 20.0),
+        lambda forcefield: forcefield.MMFFAddTorsionConstraint(0, 1, 2, 3, True, 10.0, 20.0, 8.0),
+    ]
+    for idx, (mol, prop, configure_forcefield) in enumerate(zip(mols, properties, ref_specs)):
+        want_energy, want_grad = get_mmff_reference_energy_and_grad(
+            Chem.Mol(mol),
+            properties=prop,
+            configure_forcefield=configure_forcefield,
+        )
+        assert_energy_and_gradient_close(got_energies[idx], want_energy, got_grads[idx], want_grad)
