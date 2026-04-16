@@ -33,7 +33,7 @@ Example usage:
     >>> # Python lists (RDKit-compatible, default)
     >>> tfd_matrix = tfd.GetTFDMatrix(mol)
     >>>
-    >>> # Numpy arrays (fast, CPU)
+    >>> # Numpy arrays
     >>> tfd_matrices = tfd.GetTFDMatrices(mols, return_type="numpy")
     >>>
     >>> # GPU tensors (fastest, no D2H copy)
@@ -114,59 +114,33 @@ def _extract_gpu_result(gpu_result, return_type):
         return gpu_result.to_lists()
 
 
-def _extract_cpu_result(arrays, return_type):
-    """Convert list of numpy arrays to requested return type."""
-    if return_type == "numpy":
-        return list(arrays)
-    elif return_type == "tensor":
-        return [torch.from_numpy(a) for a in arrays]
-    else:
-        return [a.tolist() for a in arrays]
-
-
 def GetTFDMatrices(
     mols: list,
     useWeights: bool = True,
     maxDev: str = "equal",
     symmRadius: int = 2,
     ignoreColinearBonds: bool = True,
-    backend: str = "gpu",
     return_type: str = "list",
 ) -> list[list[float]] | list[np.ndarray] | list[torch.Tensor]:
     """Calculate TFD matrices for multiple molecules.
 
     Args:
-        mols: List of RDKit molecules, each with multiple conformers.
+        mols: list of RDKit molecules, each with multiple conformers.
         useWeights: If True (default), use distance-based torsion weights.
         maxDev: Normalization mode ('equal' or 'spec').
         symmRadius: Radius for atom invariants (default: 2).
         ignoreColinearBonds: If True (default), ignore colinear bonds.
-        backend: Computation backend, 'gpu' (default) or 'cpu'.
         return_type: Output format:
-            'list' (default): List of Python lists (RDKit-compatible).
-            'numpy': List of numpy arrays (float64 for CPU, float32 for GPU).
-            'tensor': List of torch.Tensors (GPU tensors for GPU backend, CPU tensors for CPU backend).
+            'list' (default): list of Python lists (RDKit-compatible).
+            'numpy': list of numpy float32 arrays.
+            'tensor': list of GPU torch.Tensors (no D2H copy).
 
     Returns:
-        List of TFD matrices in the requested format.
+        list of TFD matrices in the requested format.
     """
-    if backend in ("gpu", "GPU"):
-        gpu_result = _get_gpu_result(mols, useWeights, maxDev, symmRadius, ignoreColinearBonds)
-        with _nvtx_range("GPU: split per-molecule results", color="yellow"):
-            return _extract_gpu_result(gpu_result, return_type)
-
-    if backend not in ("cpu", "CPU"):
-        raise ValueError(f"backend must be 'gpu' or 'cpu', got: '{backend}'")
-
-    arrays = _TFD.GetTFDMatricesCpuBuffer(
-        mols,
-        useWeights=useWeights,
-        maxDev=maxDev,
-        symmRadius=symmRadius,
-        ignoreColinearBonds=ignoreColinearBonds,
-    )
-    with _nvtx_range("CPU: convert result format", color="gray"):
-        return _extract_cpu_result(arrays, return_type)
+    gpu_result = _get_gpu_result(mols, useWeights, maxDev, symmRadius, ignoreColinearBonds)
+    with _nvtx_range("GPU: split per-molecule results", color="yellow"):
+        return _extract_gpu_result(gpu_result, return_type)
 
 
 def GetTFDMatrix(
@@ -175,7 +149,6 @@ def GetTFDMatrix(
     maxDev: str = "equal",
     symmRadius: int = 2,
     ignoreColinearBonds: bool = True,
-    backend: str = "gpu",
     return_type: str = "list",
 ) -> list[float] | np.ndarray | torch.Tensor:
     """Calculate the TFD matrix for conformers of a molecule.
@@ -188,10 +161,9 @@ def GetTFDMatrix(
         maxDev: Normalization mode ('equal' or 'spec').
         symmRadius: Radius for atom invariants (default: 2).
         ignoreColinearBonds: If True (default), ignore colinear bonds.
-        backend: Computation backend, 'gpu' (default) or 'cpu'.
         return_type: Output format:
             'list' (default): Python list of floats (RDKit-compatible).
-            'numpy': numpy float32 array (CPU).
+            'numpy': numpy float32 array.
             'tensor': GPU torch.Tensor (no D2H copy).
 
     Returns:
@@ -203,7 +175,6 @@ def GetTFDMatrix(
         maxDev=maxDev,
         symmRadius=symmRadius,
         ignoreColinearBonds=ignoreColinearBonds,
-        backend=backend,
         return_type=return_type,
     )
     if not results:

@@ -123,5 +123,5 @@ target_include_directories(
               ${Python_INCLUDE_DIRS})
 target_link_libraries(_TFD PUBLIC ${Boost_LIBRARIES} ${PYTHON_LIBRARIES}
                                   device_vector)
-target_link_libraries(_TFD PRIVATE ${RDKit_LIBS} tfd CUDA::cudart)
+target_link_libraries(_TFD PRIVATE ${RDKit_LIBS} tfd_gpu CUDA::cudart)
 installpythontarget(_TFD ./)

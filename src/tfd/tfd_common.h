@@ -26,12 +26,6 @@
 
 namespace nvMolKit {
 
-//! Device to run TFD computation on
-enum class TFDComputeBackend {
-  CPU,
-  GPU,
-};
-
 //! Maximum deviation mode for torsion normalization
 enum class TFDMaxDevMode {
   Equal,  //!< All torsions normalized by 180.0
@@ -59,15 +53,13 @@ struct TorsionList {
 //! Performance and algorithm options for TFD computation
 struct TFDComputeOptions {
   //! Whether to use distance-based weights for torsions
-  bool              useWeights          = true;
+  bool          useWeights          = true;
   //! Maximum deviation mode
-  TFDMaxDevMode     maxDevMode          = TFDMaxDevMode::Equal;
+  TFDMaxDevMode maxDevMode          = TFDMaxDevMode::Equal;
   //! Radius for Morgan fingerprint atom invariants (for symmetry detection)
-  int               symmRadius          = 2;
+  int           symmRadius          = 2;
   //! Whether to ignore single bonds adjacent to triple bonds
-  bool              ignoreColinearBonds = true;
-  //! Backend selection
-  TFDComputeBackend backend             = TFDComputeBackend::GPU;
+  bool          ignoreColinearBonds = true;
 };
 
 //! Flattened system data on host for a batch of molecules
