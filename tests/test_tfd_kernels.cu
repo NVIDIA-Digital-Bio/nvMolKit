@@ -28,7 +28,8 @@
 
 namespace {
 
-constexpr double kTolerance = 5e-4;  // GPU float32 vs CPU float64: worst case ~3.5e-4 on tested molecules
+constexpr double kTFDTolerance   = 5e-4;  // TFD values (0-1): GPU float32 vs CPU float64, worst case ~3.5e-4
+constexpr double kAngleTolerance = 0.05;  // Dihedral angles (0-360°): float32 atan2 can lose precision near 0°/180°
 
 //! Generate conformers for a molecule using RDKit
 void generateConformers(RDKit::ROMol& mol, int numConformers, int seed = 42) {
@@ -96,7 +97,7 @@ TEST_F(TFDKernelsTest, DihedralKernelBasic) {
   // Compare
   ASSERT_EQ(gpuAngles.size(), cpuAngles.size());
   for (size_t i = 0; i < cpuAngles.size(); ++i) {
-    EXPECT_NEAR(gpuAngles[i], cpuAngles[i], kTolerance) << "Mismatch at angle " << i;
+    EXPECT_NEAR(gpuAngles[i], cpuAngles[i], kAngleTolerance) << "Mismatch at angle " << i;
   }
 
   cudaStreamDestroy(stream);
@@ -161,7 +162,7 @@ TEST_F(TFDKernelsTest, TFDMatrixKernelMatchesCPU) {
   // Compare
   ASSERT_EQ(gpuTFD.size(), cpuTFD.size());
   for (size_t i = 0; i < cpuTFD.size(); ++i) {
-    EXPECT_NEAR(gpuTFD[i], cpuTFD[i], kTolerance) << "Mismatch at TFD index " << i;
+    EXPECT_NEAR(gpuTFD[i], cpuTFD[i], kTFDTolerance) << "Mismatch at TFD index " << i;
   }
 
   cudaStreamDestroy(stream);
@@ -250,7 +251,7 @@ TEST_F(TFDKernelsTest, BatchMultipleMolecules) {
     ASSERT_EQ(static_cast<size_t>(outEnd - outStart), cpuResults[m].size()) << "Size mismatch for molecule " << m;
 
     for (int i = outStart; i < outEnd; ++i) {
-      EXPECT_NEAR(gpuTFDFlat[i], cpuResults[m][i - outStart], kTolerance)
+      EXPECT_NEAR(gpuTFDFlat[i], cpuResults[m][i - outStart], kTFDTolerance)
         << "Mismatch at molecule " << m << " TFD index " << (i - outStart);
     }
   }
@@ -384,7 +385,7 @@ TEST_F(TFDKernelsTest, CompareWithRDKitReference) {
 
     ASSERT_EQ(gpuTFD.size(), tc.reference.size());
     for (size_t i = 0; i < gpuTFD.size(); ++i) {
-      EXPECT_NEAR(gpuTFD[i], tc.reference[i], kTolerance) << "TFD[" << i << "] mismatch with RDKit reference";
+      EXPECT_NEAR(gpuTFD[i], tc.reference[i], kTFDTolerance) << "TFD[" << i << "] mismatch with RDKit reference";
     }
 
     cudaStreamDestroy(stream);
@@ -447,7 +448,7 @@ TEST_F(TFDKernelsTest, TwoConformers) {
   }
 
   ASSERT_EQ(gpuTFD.size(), 1u);
-  EXPECT_NEAR(gpuTFD[0], cpuTFD[0], kTolerance);
+  EXPECT_NEAR(gpuTFD[0], cpuTFD[0], kTFDTolerance);
 
   cudaStreamDestroy(stream);
 }
@@ -523,7 +524,7 @@ TEST_F(TFDKernelsTest, BatchWithZeroTorsionMolecule) {
   int butaneEnd   = system.totalTFDOutputs();
   ASSERT_EQ(static_cast<size_t>(butaneEnd - butaneStart), cpuButane.size());
   for (int i = butaneStart; i < butaneEnd; ++i) {
-    EXPECT_NEAR(gpuTFD[i], cpuButane[i - butaneStart], kTolerance)
+    EXPECT_NEAR(gpuTFD[i], cpuButane[i - butaneStart], kTFDTolerance)
       << "Butane TFD mismatch at index " << (i - butaneStart);
   }
 
@@ -623,7 +624,7 @@ TEST_F(TFDKernelsTest, CompareWithRDKitReferenceAddHs) {
 
     ASSERT_EQ(gpuTFD.size(), tc.reference.size());
     for (size_t i = 0; i < gpuTFD.size(); ++i) {
-      EXPECT_NEAR(gpuTFD[i], tc.reference[i], kTolerance) << "TFD[" << i << "] mismatch with RDKit reference";
+      EXPECT_NEAR(gpuTFD[i], tc.reference[i], kTFDTolerance) << "TFD[" << i << "] mismatch with RDKit reference";
     }
 
     cudaStreamDestroy(stream);
