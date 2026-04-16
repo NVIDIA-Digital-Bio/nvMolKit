@@ -20,6 +20,7 @@
 #include <boost/python/numpy.hpp>
 
 #include "array_helpers.h"
+#include "boost_python_utils.h"
 #include "nvtx.h"
 #include "tfd_cpu.h"
 #include "tfd_gpu.h"
@@ -31,45 +32,30 @@ namespace numpy = boost::python::numpy;
 
 using CpuTFDResults = std::vector<std::vector<double>>;
 
-std::vector<const RDKit::ROMol*> listToMolVector(const boost::python::list& mols) {
-  std::vector<const RDKit::ROMol*> molsVec;
-  molsVec.reserve(len(mols));
-  for (int i = 0; i < len(mols); i++) {
-    const RDKit::ROMol* mol = boost::python::extract<const RDKit::ROMol*>(boost::python::object(mols[i]));
-    if (mol == nullptr) {
-      throw std::invalid_argument("Invalid molecule at index " + std::to_string(i));
-    }
-    molsVec.push_back(mol);
-  }
-  return molsVec;
-}
-
-boost::python::list intVectorToList(const std::vector<int>& vec) {
-  boost::python::list result;
-  for (const auto& value : vec) {
-    result.append(value);
-  }
-  return result;
+std::vector<const RDKit::ROMol*> extractConstMolecules(const boost::python::list& mols) {
+  auto nonConst = nvMolKit::extractMolecules(mols);
+  return {nonConst.begin(), nonConst.end()};
 }
 
 nvMolKit::TFDComputeOptions buildOptions(bool               useWeights,
                                          const std::string& maxDev,
                                          int                symmRadius,
                                          bool               ignoreColinearBonds) {
-  nvMolKit::TFDComputeOptions options;
-  options.useWeights          = useWeights;
-  options.symmRadius          = symmRadius;
-  options.ignoreColinearBonds = ignoreColinearBonds;
-
+  nvMolKit::TFDMaxDevMode maxDevMode;
   if (maxDev == "equal") {
-    options.maxDevMode = nvMolKit::TFDMaxDevMode::Equal;
+    maxDevMode = nvMolKit::TFDMaxDevMode::Equal;
   } else if (maxDev == "spec") {
-    options.maxDevMode = nvMolKit::TFDMaxDevMode::Spec;
+    maxDevMode = nvMolKit::TFDMaxDevMode::Spec;
   } else {
     throw std::invalid_argument("maxDev must be 'equal' or 'spec', got: " + maxDev);
   }
 
-  return options;
+  return {
+    .useWeights          = useWeights,
+    .maxDevMode          = maxDevMode,
+    .symmRadius          = symmRadius,
+    .ignoreColinearBonds = ignoreColinearBonds,
+  };
 }
 
 boost::python::object toOwnedPyArray(nvMolKit::PyArray* array) {
@@ -100,7 +86,7 @@ BOOST_PYTHON_MODULE(_TFD) {
         const std::string&         maxDev,
         int                        symmRadius,
         bool                       ignoreColinearBonds) -> boost::python::object {
-      auto molsVec    = listToMolVector(mols);
+      auto molsVec    = extractConstMolecules(mols);
       auto options    = buildOptions(useWeights, maxDev, symmRadius, ignoreColinearBonds);
       options.backend = nvMolKit::TFDComputeBackend::CPU;
       auto results    = getCpuGenerator().GetTFDMatrices(molsVec, options);
@@ -147,14 +133,14 @@ BOOST_PYTHON_MODULE(_TFD) {
         const std::string&         maxDev,
         int                        symmRadius,
         bool                       ignoreColinearBonds) -> boost::python::object {
-      auto molsVec    = listToMolVector(mols);
+      auto molsVec    = extractConstMolecules(mols);
       auto options    = buildOptions(useWeights, maxDev, symmRadius, ignoreColinearBonds);
       options.backend = nvMolKit::TFDComputeBackend::GPU;
 
       auto gpuResult = getGpuGenerator().GetTFDMatricesGpuBuffer(molsVec, options);
 
       nvMolKit::ScopedNvtxRange range("GPU: C++ to Python tuple", nvMolKit::NvtxColor::kYellow);
-      boost::python::list       outputStarts = intVectorToList(gpuResult.tfdOutputStarts);
+      boost::python::list       outputStarts = nvMolKit::vectorToList(gpuResult.tfdOutputStarts);
 
       size_t totalSize = gpuResult.tfdValues.size();
       auto*  pyArray   = nvMolKit::makePyArray(gpuResult.tfdValues, boost::python::make_tuple(totalSize));

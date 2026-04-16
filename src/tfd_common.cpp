@@ -20,8 +20,7 @@
 #include <GraphMol/Fingerprints/MorganGenerator.h>
 #include <GraphMol/MolOps.h>
 #include <GraphMol/RingInfo.h>
-#include <GraphMol/SmilesParse/SmilesParse.h>
-#include <GraphMol/Substruct/SubstructMatch.h>
+#include <omp.h>
 
 #include <algorithm>
 #include <cmath>
@@ -29,10 +28,6 @@
 #include <numeric>
 #include <stdexcept>
 #include <unordered_set>
-
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 #include "nvtx.h"
 
@@ -102,12 +97,13 @@ std::vector<std::uint32_t> getAtomInvariantsWithRadius(const RDKit::ROMol& mol, 
   (void)fpGen->getSparseCountFingerprint(mol, nullptr, nullptr, -1, &ao);
   const auto& bitInfo = ao.bitInfoMap;
 
-  if (bitInfo) {
-    for (const auto& [bitId, atomRadiusPairs] : *bitInfo) {
-      for (const auto& [atomIdx, r] : atomRadiusPairs) {
-        if (r == static_cast<unsigned int>(radius)) {
-          inv[atomIdx] = bitId;
-        }
+  if (!bitInfo) {
+    throw std::runtime_error("Morgan fingerprint bitInfoMap was not populated");
+  }
+  for (const auto& [bitId, atomRadiusPairs] : *bitInfo) {
+    for (const auto& [atomIdx, r] : atomRadiusPairs) {
+      if (r == static_cast<unsigned int>(radius)) {
+        inv[atomIdx] = bitId;
       }
     }
   }
@@ -129,12 +125,11 @@ std::vector<const RDKit::Atom*> getIndexForTorsion(const std::vector<const RDKit
       return {different};
     }
   }
-  // Fallback: sort and take first
-  auto sorted = neighbors;
-  std::sort(sorted.begin(), sorted.end(), [&inv](const RDKit::Atom* a, const RDKit::Atom* b) {
+  // Fallback: take the atom with the smallest invariant
+  auto it = std::min_element(neighbors.begin(), neighbors.end(), [&inv](const RDKit::Atom* a, const RDKit::Atom* b) {
     return inv[a->getIdx()] < inv[b->getIdx()];
   });
-  return {sorted[0]};
+  return {*it};
 }
 
 //! Information about a rotatable bond for torsion calculation
@@ -150,27 +145,26 @@ std::vector<BondInfo> getBondsForTorsions(const RDKit::ROMol& mol, bool ignoreCo
   // Flag atoms that cannot be middle atoms of torsion (triple bonds, allenes)
   std::vector<int> atomFlags(mol.getNumAtoms(), 0);
 
-  // Pattern for triple bonds
-  auto triplePattern = RDKit::SmartsToMol("*#*");
-  if (triplePattern) {
-    std::vector<RDKit::MatchVectType> matches;
-    RDKit::SubstructMatch(mol, *triplePattern, matches);
-    for (const auto& match : matches) {
-      for (const auto& [_, atomIdx] : match) {
-        atomFlags[atomIdx] = 1;
-      }
+  // Flag atoms adjacent to triple bonds
+  for (const auto* bond : mol.bonds()) {
+    if (bond->getBondTypeAsDouble() == 3.0) {
+      atomFlags[bond->getBeginAtomIdx()] = 1;
+      atomFlags[bond->getEndAtomIdx()]   = 1;
     }
   }
 
-  // Pattern for allenes
-  auto allenePattern = RDKit::SmartsToMol("[$([C](=*)=*)]");
-  if (allenePattern) {
-    std::vector<RDKit::MatchVectType> matches;
-    RDKit::SubstructMatch(mol, *allenePattern, matches);
-    for (const auto& match : matches) {
-      for (const auto& [_, atomIdx] : match) {
-        atomFlags[atomIdx] = 1;
+  // Flag allene centers: carbon atoms with exactly two double bonds
+  for (const auto* atom : mol.atoms()) {
+    if (atom->getAtomicNum() != 6)
+      continue;
+    int doubleBondCount = 0;
+    for (const auto* bond : mol.atomBonds(atom)) {
+      if (bond->getBondTypeAsDouble() == 2.0) {
+        doubleBondCount++;
       }
+    }
+    if (doubleBondCount == 2) {
+      atomFlags[atom->getIdx()] = 1;
     }
   }
 
@@ -610,7 +604,7 @@ static TFDSystemHost buildTFDSystemImpl(const RDKit::ROMol& mol, const TFDComput
   desc.torsStart     = torsStart;
   desc.numTorsions   = numTorsions;
   desc.tfdOutStart   = tfdOutStart;
-  system.molDescriptors.push_back(desc);
+  system.molDescriptors.push_back(std::move(desc));
 
   system.dihedralWorkStarts.push_back(system.dihedralWorkStarts.back() + numDihedrals);
   system.tfdWorkStarts.push_back(system.tfdWorkStarts.back() + numTFDOutputs);
@@ -720,9 +714,7 @@ TFDSystemHost buildTFDSystem(const std::vector<const RDKit::ROMol*>& mols, const
   std::vector<MolExtraction> extractions(N);
   {
     ScopedNvtxRange buildRange("Parallel RDKit extraction", NvtxColor::kCyan);
-#ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic)
-#endif
     for (int i = 0; i < N; ++i) {
       extractions[i] = extractMolData(*mols[i], options);
     }
@@ -785,10 +777,10 @@ TFDSystemHost buildTFDSystem(const std::vector<const RDKit::ROMol*>& mols, const
   system.totalDihedrals_  = totalDiheds;
 
   // ---- Pass 2: fill the system in parallel ----
-  // Each thread writes to its own slice of the pre-allocated arrays (no contention).
-#ifdef _OPENMP
-#pragma omp parallel for schedule(dynamic)
-#endif
+  // Each thread writes to its own contiguous block of molecules, avoiding false sharing
+  // on adjacent cache lines. static schedule with a chunk size ensures spatial locality.
+  const int chunkSize = std::max(1, N / (omp_get_max_threads() * 4));
+#pragma omp parallel for schedule(static, chunkSize)
   for (int i = 0; i < N; ++i) {
     const auto& ext = extractions[i];
 

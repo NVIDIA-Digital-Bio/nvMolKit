@@ -42,6 +42,9 @@ __device__ __forceinline__ int findMolecule(const int* starts, int numMolecules,
 //! One thread per (conformer, quartet) work item.
 //! Uses binary search on dihedralWorkStarts to find the molecule,
 //! then computes (confIdx, quartetIdx, outIdx) arithmetically.
+//! TODO: The binary search may cause warp divergence for large molecule counts.
+//! Consider precomputing a flat workItem→moleculeIdx lookup table if ncu profiling
+//! shows this is a bottleneck.
 __global__ void dihedralKernel(const int totalWorkItems,
                                const float* __restrict__ positions,
                                const int* __restrict__ confPositionStarts,
@@ -57,29 +60,33 @@ __global__ void dihedralKernel(const int totalWorkItems,
 
   int m = findMolecule(dihedralWorkStarts, numMolecules, idx);
 
-  const MolDescriptor& desc     = molDescriptors[m];
-  int                  localIdx = idx - dihedralWorkStarts[m];
-  int                  c        = localIdx / desc.numQuartets;
-  int                  q        = localIdx % desc.numQuartets;
+  const MolDescriptor& desc         = molDescriptors[m];
+  int                  localIdx     = idx - dihedralWorkStarts[m];
+  int                  localConfIdx = localIdx / desc.numQuartets;
+  int                  quartetIdx   = localIdx % desc.numQuartets;
 
-  int confIdx = desc.confStart + c;
-  int torsIdx = desc.quartetStart + q;
+  int confIdx = desc.confStart + localConfIdx;
+  int torsIdx = desc.quartetStart + quartetIdx;
   int outIdx  = desc.dihedStart + localIdx;
 
-  int a  = torsionAtoms[torsIdx * 4 + 0];
-  int b  = torsionAtoms[torsIdx * 4 + 1];
-  int cc = torsionAtoms[torsIdx * 4 + 2];
-  int d  = torsionAtoms[torsIdx * 4 + 3];
+  int atomA = torsionAtoms[torsIdx * 4 + 0];
+  int atomB = torsionAtoms[torsIdx * 4 + 1];
+  int atomC = torsionAtoms[torsIdx * 4 + 2];
+  int atomD = torsionAtoms[torsIdx * 4 + 3];
 
   const float* posBase = positions + confPositionStarts[confIdx];
 
-  dihedralAngles[outIdx] = computeDihedralAngle(posBase + a * 3, posBase + b * 3, posBase + cc * 3, posBase + d * 3);
+  dihedralAngles[outIdx] =
+    computeDihedralAngle(posBase + atomA * 3, posBase + atomB * 3, posBase + atomC * 3, posBase + atomD * 3);
 }
 
 //! Kernel to compute TFD matrix values.
 //! One block per molecule. Threads within a block cooperatively process
 //! all C*(C-1)/2 conformer pairs via grid-stride loop.
 //! All threads in a block share the same torsion types — no cross-molecule divergence.
+//! TODO: Consider sorting torsions by type on the host before transfer to reduce
+//! intra-block branch divergence. In practice, Single type dominates (~80-90% of
+//! torsions in drug-like molecules), so the benefit may be small.
 __global__ void tfdMatrixKernel(const int numMolecules,
                                 const float* __restrict__ dihedralAngles,
                                 const float* __restrict__ torsionWeights,

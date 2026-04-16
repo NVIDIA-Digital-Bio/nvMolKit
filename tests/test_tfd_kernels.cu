@@ -28,7 +28,7 @@
 
 namespace {
 
-constexpr double kTolerance = 1e-3;  // GPU has lower precision due to float
+constexpr double kTolerance = 5e-4;  // GPU float32 vs CPU float64: worst case ~3.5e-4 on tested molecules
 
 //! Generate conformers for a molecule using RDKit
 void generateConformers(RDKit::ROMol& mol, int numConformers, int seed = 42) {
@@ -40,43 +40,8 @@ void generateConformers(RDKit::ROMol& mol, int numConformers, int seed = 42) {
 
 }  // namespace
 
-// Global check for CUDA availability
-static bool gCudaAvailable = false;
-static bool gCudaChecked   = false;
-
-static bool checkCudaAvailable() {
-  if (!gCudaChecked) {
-    gCudaChecked = true;
-    try {
-      int         deviceCount = 0;
-      cudaError_t err         = cudaGetDeviceCount(&deviceCount);
-      if (err == cudaSuccess && deviceCount > 0) {
-        // Try to actually use the device
-        err = cudaSetDevice(0);
-        if (err == cudaSuccess) {
-          gCudaAvailable = true;
-        } else {
-          cudaGetLastError();  // Reset error state
-        }
-      } else {
-        cudaGetLastError();  // Reset error state
-      }
-    } catch (...) {
-      gCudaAvailable = false;
-    }
-  }
-  return gCudaAvailable;
-}
-
 class TFDKernelsTest : public ::testing::Test {
  protected:
-  void SetUp() override {
-    // Check if CUDA is available
-    if (!checkCudaAvailable()) {
-      GTEST_SKIP() << "No CUDA devices available, skipping GPU tests";
-    }
-  }
-
   nvMolKit::TFDCpuGenerator cpuGenerator_;
 };
 

@@ -39,43 +39,11 @@ void generateConformers(RDKit::ROMol& mol, int numConformers, int seed = 42) {
 
 }  // namespace
 
-// Global check for CUDA availability
-static bool gCudaAvailable = false;
-static bool gCudaChecked   = false;
-
-static bool checkCudaAvailable() {
-  if (!gCudaChecked) {
-    gCudaChecked = true;
-    try {
-      int         deviceCount = 0;
-      cudaError_t err         = cudaGetDeviceCount(&deviceCount);
-      if (err == cudaSuccess && deviceCount > 0) {
-        err = cudaSetDevice(0);
-        if (err == cudaSuccess) {
-          gCudaAvailable = true;
-        } else {
-          cudaGetLastError();
-        }
-      } else {
-        cudaGetLastError();
-      }
-    } catch (...) {
-      gCudaAvailable = false;
-    }
-  }
-  return gCudaAvailable;
-}
-
 // ========== GPU Generator Tests ==========
 
 class TFDGpuTest : public ::testing::Test {
  protected:
-  void SetUp() override {
-    if (!checkCudaAvailable()) {
-      GTEST_SKIP() << "No CUDA devices available, skipping GPU tests";
-    }
-    gpuGenerator_ = std::make_unique<nvMolKit::TFDGpuGenerator>();
-  }
+  void SetUp() override { gpuGenerator_ = std::make_unique<nvMolKit::TFDGpuGenerator>(); }
 
   nvMolKit::TFDCpuGenerator                  cpuGenerator_;
   std::unique_ptr<nvMolKit::TFDGpuGenerator> gpuGenerator_;

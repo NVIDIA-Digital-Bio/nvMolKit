@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// TODO: Consolidate shared math functions (dihedral angle, etc.) with
+// src/forcefields/kernel_utils.cuh once that file is moved out of forcefields/.
 #ifndef NVMOLKIT_TFD_DETAIL_H
 #define NVMOLKIT_TFD_DETAIL_H
 

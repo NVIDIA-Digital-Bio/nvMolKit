@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "cuda_error_check.h"
 #include "tfd_common.h"
 
 namespace nvMolKit {
@@ -57,18 +58,18 @@ void transferToDevice(const TFDSystemHost& host, TFDSystemDevice& device, cudaSt
   device.dihedralWorkStarts.setFromVector(host.dihedralWorkStarts);
   device.tfdWorkStarts.setFromVector(host.tfdWorkStarts);
 
-  // Allocate and zero output buffers
+  // Allocate and zero the active prefix of output buffers.
   int totalDihedrals = host.totalDihedrals();
   if (static_cast<int>(device.dihedralAngles.size()) < totalDihedrals) {
     device.dihedralAngles.resize(totalDihedrals);
   }
-  cudaMemsetAsync(device.dihedralAngles.data(), 0, totalDihedrals * sizeof(float), stream);
+  cudaCheckError(cudaMemsetAsync(device.dihedralAngles.data(), 0, totalDihedrals * sizeof(float), stream));
 
   int totalTFDOutputs = host.totalTFDOutputs();
   if (static_cast<int>(device.tfdOutput.size()) < totalTFDOutputs) {
     device.tfdOutput.resize(totalTFDOutputs);
   }
-  cudaMemsetAsync(device.tfdOutput.data(), 0, totalTFDOutputs * sizeof(float), stream);
+  cudaCheckError(cudaMemsetAsync(device.tfdOutput.data(), 0, totalTFDOutputs * sizeof(float), stream));
 }
 
 }  // namespace nvMolKit
