@@ -17,8 +17,7 @@
 
 Compares:
 - RDKit TorsionFingerprints.GetTFDMatrix (Python, single-threaded)
-- nvMolKit CPU backend (C++ with OpenMP, multi-threaded)
-- nvMolKit GPU backend (CUDA)
+- nvMolKit GPU (CUDA) with different return types (list, numpy, tensor)
 
 Usage:
     python tfd_bench.py [--smiles-file FILE] [--output FILE] [--skip-rdkit]
@@ -166,42 +165,27 @@ def bench_rdkit_batch(mols: List[Chem.Mol]) -> None:
         TorsionFingerprints.GetTFDMatrix(mol, useWeights=True, maxDev="equal")
 
 
-def bench_nvmol_cpu_single(mol: Chem.Mol) -> None:
-    """Benchmark nvMolKit CPU TFD for a single molecule."""
-    nvmol_tfd.GetTFDMatrix(mol, useWeights=True, maxDev="equal", backend="cpu")
-
-
-def bench_nvmol_cpu_list(mols: List[Chem.Mol]) -> None:
-    """Benchmark nvMolKit CPU TFD returning Python lists."""
-    nvmol_tfd.GetTFDMatrices(mols, useWeights=True, maxDev="equal", backend="cpu", return_type="list")
-
-
-def bench_nvmol_cpu_numpy(mols: List[Chem.Mol]) -> None:
-    """Benchmark nvMolKit CPU TFD returning numpy arrays."""
-    nvmol_tfd.GetTFDMatrices(mols, useWeights=True, maxDev="equal", backend="cpu", return_type="numpy")
-
-
 def bench_nvmol_gpu_single(mol: Chem.Mol) -> None:
     """Benchmark nvMolKit GPU TFD for a single molecule."""
-    nvmol_tfd.GetTFDMatrix(mol, useWeights=True, maxDev="equal", backend="gpu")
+    nvmol_tfd.GetTFDMatrix(mol, useWeights=True, maxDev="equal")
     torch.cuda.synchronize()
 
 
 def bench_nvmol_gpu_list(mols: List[Chem.Mol]) -> None:
     """Benchmark nvMolKit GPU TFD returning Python lists."""
-    nvmol_tfd.GetTFDMatrices(mols, useWeights=True, maxDev="equal", backend="gpu", return_type="list")
+    nvmol_tfd.GetTFDMatrices(mols, useWeights=True, maxDev="equal", return_type="list")
     torch.cuda.synchronize()
 
 
 def bench_nvmol_gpu_numpy(mols: List[Chem.Mol]) -> None:
     """Benchmark nvMolKit GPU TFD returning numpy arrays."""
-    nvmol_tfd.GetTFDMatrices(mols, useWeights=True, maxDev="equal", backend="gpu", return_type="numpy")
+    nvmol_tfd.GetTFDMatrices(mols, useWeights=True, maxDev="equal", return_type="numpy")
     torch.cuda.synchronize()
 
 
 def bench_nvmol_gpu_tensor(mols: List[Chem.Mol]) -> None:
     """Benchmark nvMolKit GPU TFD returning GPU tensors (no D2H)."""
-    nvmol_tfd.GetTFDMatrices(mols, useWeights=True, maxDev="equal", backend="gpu", return_type="tensor")
+    nvmol_tfd.GetTFDMatrices(mols, useWeights=True, maxDev="equal", return_type="tensor")
     torch.cuda.synchronize()
 
 
@@ -212,7 +196,7 @@ def verify_correctness(mol: Chem.Mol, tolerance: float = 0.01) -> bool:
     so results should match RDKit closely.
     """
     rdkit_result = TorsionFingerprints.GetTFDMatrix(mol, useWeights=True, maxDev="equal")
-    nvmol_result = nvmol_tfd.GetTFDMatrix(mol, useWeights=True, maxDev="equal", backend="gpu")
+    nvmol_result = nvmol_tfd.GetTFDMatrix(mol, useWeights=True, maxDev="equal")
 
     if len(rdkit_result) != len(nvmol_result):
         return False
@@ -278,7 +262,7 @@ def run_benchmarks(
     results = []
 
     print("=" * 70)
-    print("TFD Benchmark: RDKit vs nvMolKit (CPU) vs nvMolKit (GPU)")
+    print("TFD Benchmark: RDKit vs nvMolKit (GPU)")
     print(f"Molecule counts: {mol_counts}")
     print(f"Conformer counts: {conformer_counts}")
     print("=" * 70)
@@ -332,28 +316,6 @@ def run_benchmarks(
                 result["rdkit_time_ms"] = None
                 result["rdkit_std_ms"] = None
 
-            # nvMolKit CPU list benchmark (return_type="list")
-            try:
-                t, s = time_it(lambda: bench_nvmol_cpu_list(mols))
-                result["nvmol_cpu_list_time_ms"] = t
-                result["nvmol_cpu_list_std_ms"] = s
-                print(f"  nvMolKit (CPU list): {t:8.2f} ms (+/- {s:.2f})")
-            except Exception as e:
-                print(f"  nvMolKit CPU list failed: {e}")
-                result["nvmol_cpu_list_time_ms"] = None
-                result["nvmol_cpu_list_std_ms"] = None
-
-            # nvMolKit CPU numpy benchmark (return_type="numpy")
-            try:
-                t, s = time_it(lambda: bench_nvmol_cpu_numpy(mols))
-                result["nvmol_cpu_numpy_time_ms"] = t
-                result["nvmol_cpu_numpy_std_ms"] = s
-                print(f"  nvMolKit (CPU numpy):{t:8.2f} ms (+/- {s:.2f})")
-            except Exception as e:
-                print(f"  nvMolKit CPU numpy failed: {e}")
-                result["nvmol_cpu_numpy_time_ms"] = None
-                result["nvmol_cpu_numpy_std_ms"] = None
-
             # nvMolKit GPU list benchmark (return_type="list")
             try:
                 t, s = time_it(lambda: bench_nvmol_gpu_list(mols))
@@ -387,8 +349,6 @@ def run_benchmarks(
             # Calculate speedups vs RDKit
             speedups = {}
             for key, label in [
-                ("nvmol_cpu_list_time_ms", "CPU list"),
-                ("nvmol_cpu_numpy_time_ms", "CPU numpy"),
                 ("nvmol_gpu_list_time_ms", "GPU list"),
                 ("nvmol_gpu_numpy_time_ms", "GPU numpy"),
                 ("nvmol_gpu_tensor_time_ms", "GPU tensor"),

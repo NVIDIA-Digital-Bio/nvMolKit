@@ -17,20 +17,15 @@
 
 #include <boost/python.hpp>
 #include <boost/python/manage_new_object.hpp>
-#include <boost/python/numpy.hpp>
 
 #include "array_helpers.h"
 #include "boost_python_utils.h"
 #include "nvtx.h"
-#include "tfd_cpu.h"
 #include "tfd_gpu.h"
 
 namespace {
 
 using namespace boost::python;
-namespace numpy = boost::python::numpy;
-
-using CpuTFDResults = std::vector<std::vector<double>>;
 
 std::vector<const RDKit::ROMol*> extractConstMolecules(const boost::python::list& mols) {
   auto nonConst = nvMolKit::extractMolecules(mols);
@@ -63,11 +58,6 @@ boost::python::object toOwnedPyArray(nvMolKit::PyArray* array) {
   return boost::python::object(boost::python::handle<>(Converter()(array)));
 }
 
-nvMolKit::TFDCpuGenerator& getCpuGenerator() {
-  static nvMolKit::TFDCpuGenerator generator;
-  return generator;
-}
-
 nvMolKit::TFDGpuGenerator& getGpuGenerator() {
   static nvMolKit::TFDGpuGenerator generator;
   return generator;
@@ -76,55 +66,6 @@ nvMolKit::TFDGpuGenerator& getGpuGenerator() {
 }  // namespace
 
 BOOST_PYTHON_MODULE(_TFD) {
-  numpy::initialize();
-
-  // CPU path: returns flat numpy array + offsets (avoids per-element Python object creation)
-  def(
-    "GetTFDMatricesCpuBuffer",
-    +[](const boost::python::list& mols,
-        bool                       useWeights,
-        const std::string&         maxDev,
-        int                        symmRadius,
-        bool                       ignoreColinearBonds) -> boost::python::object {
-      auto molsVec    = extractConstMolecules(mols);
-      auto options    = buildOptions(useWeights, maxDev, symmRadius, ignoreColinearBonds);
-      options.backend = nvMolKit::TFDComputeBackend::CPU;
-      auto results    = getCpuGenerator().GetTFDMatrices(molsVec, options);
-
-      nvMolKit::ScopedNvtxRange range("CPU: wrap as numpy arrays", nvMolKit::NvtxColor::kGreen);
-
-      // Move results to heap so PyCapsule can own the memory
-      auto* owned = new CpuTFDResults(std::move(results));
-
-      auto deleter = [](PyObject* cap) {
-        delete reinterpret_cast<CpuTFDResults*>(PyCapsule_GetPointer(cap, "nvmolkit.cpu_tfd"));
-      };
-      PyObject* cap = PyCapsule_New(static_cast<void*>(owned), "nvmolkit.cpu_tfd", deleter);
-      if (cap == nullptr) {
-        delete owned;
-        throw std::runtime_error("Failed to create PyCapsule for CPU TFD results");
-      }
-      object owner{handle<>(cap)};
-
-      // Create per-molecule numpy array views (zero-copy, each backed by the capsule)
-      const Py_intptr_t   stride = static_cast<Py_intptr_t>(sizeof(double));
-      boost::python::list arrays;
-      for (auto& vec : *owned) {
-        const Py_intptr_t shape = static_cast<Py_intptr_t>(vec.size());
-        arrays.append(numpy::from_data(vec.data(),
-                                       numpy::dtype::get_builtin<double>(),
-                                       make_tuple(shape),
-                                       make_tuple(stride),
-                                       owner));
-      }
-      return arrays;
-    },
-    (arg("mols"),
-     arg("useWeights")          = true,
-     arg("maxDev")              = "equal",
-     arg("symmRadius")          = 2,
-     arg("ignoreColinearBonds") = true));
-
   // GPU path: returns GPU-resident buffer + metadata
   def(
     "GetTFDMatricesGpuBuffer",
@@ -133,9 +74,8 @@ BOOST_PYTHON_MODULE(_TFD) {
         const std::string&         maxDev,
         int                        symmRadius,
         bool                       ignoreColinearBonds) -> boost::python::object {
-      auto molsVec    = extractConstMolecules(mols);
-      auto options    = buildOptions(useWeights, maxDev, symmRadius, ignoreColinearBonds);
-      options.backend = nvMolKit::TFDComputeBackend::GPU;
+      auto molsVec = extractConstMolecules(mols);
+      auto options = buildOptions(useWeights, maxDev, symmRadius, ignoreColinearBonds);
 
       auto gpuResult = getGpuGenerator().GetTFDMatricesGpuBuffer(molsVec, options);
 

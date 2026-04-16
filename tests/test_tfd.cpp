@@ -21,7 +21,7 @@
 #include <memory>
 #include <vector>
 
-#include "tfd.h"
+#include "tfd_cpu.h"
 #include "tfd_gpu.h"
 
 namespace {
@@ -37,25 +37,21 @@ void generateConformers(RDKit::ROMol& mol, int numConformers, int seed = 42) {
 
 }  // namespace
 
-// ========== Unified TFDGenerator API Tests ==========
+// ========== TFDGpuGenerator API Tests (validated against CPU reference) ==========
 
 class TFDGeneratorTest : public ::testing::Test {};
 
-TEST_F(TFDGeneratorTest, UnifiedAPIBackendSelection) {
+TEST_F(TFDGeneratorTest, SingleMoleculeMatchesCPU) {
   auto mol = std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol("CCCCC"));
   ASSERT_NE(mol, nullptr);
 
   generateConformers(*mol, 4);
 
-  nvMolKit::TFDGenerator generator;
+  nvMolKit::TFDGpuGenerator generator;
+  nvMolKit::TFDCpuGenerator cpuGenerator;
 
-  nvMolKit::TFDComputeOptions gpuOptions;
-  gpuOptions.backend = nvMolKit::TFDComputeBackend::GPU;
-  auto gpuResult     = generator.GetTFDMatrix(*mol, gpuOptions);
-
-  nvMolKit::TFDComputeOptions cpuOptions;
-  cpuOptions.backend = nvMolKit::TFDComputeBackend::CPU;
-  auto cpuResult     = generator.GetTFDMatrix(*mol, cpuOptions);
+  auto gpuResult = generator.GetTFDMatrix(*mol);
+  auto cpuResult = cpuGenerator.GetTFDMatrix(*mol);
 
   ASSERT_EQ(gpuResult.size(), cpuResult.size());
   for (size_t i = 0; i < gpuResult.size(); ++i) {
@@ -63,7 +59,7 @@ TEST_F(TFDGeneratorTest, UnifiedAPIBackendSelection) {
   }
 }
 
-TEST_F(TFDGeneratorTest, UnifiedAPIBatchProcessing) {
+TEST_F(TFDGeneratorTest, BatchProcessingMatchesCPU) {
   std::vector<std::unique_ptr<RDKit::RWMol>> mols;
   std::vector<const RDKit::ROMol*>           molPtrs;
 
@@ -78,21 +74,17 @@ TEST_F(TFDGeneratorTest, UnifiedAPIBatchProcessing) {
 
   ASSERT_GE(mols.size(), 2u);
 
-  nvMolKit::TFDGenerator generator;
+  nvMolKit::TFDGpuGenerator generator;
+  nvMolKit::TFDCpuGenerator cpuGenerator;
 
-  nvMolKit::TFDComputeOptions gpuOptions;
-  gpuOptions.backend = nvMolKit::TFDComputeBackend::GPU;
-  auto gpuResults    = generator.GetTFDMatrices(molPtrs, gpuOptions);
-
-  nvMolKit::TFDComputeOptions cpuOptions;
-  cpuOptions.backend = nvMolKit::TFDComputeBackend::CPU;
-  auto cpuResults    = generator.GetTFDMatrices(molPtrs, cpuOptions);
+  auto gpuResults = generator.GetTFDMatrices(molPtrs);
+  auto cpuResults = cpuGenerator.GetTFDMatrices(molPtrs);
 
   ASSERT_EQ(gpuResults.size(), cpuResults.size());
   for (size_t m = 0; m < gpuResults.size(); ++m) {
     ASSERT_EQ(gpuResults[m].size(), cpuResults[m].size());
     for (size_t i = 0; i < gpuResults[m].size(); ++i) {
-      EXPECT_NEAR(gpuResults[m][i], cpuResults[m][i], kTolerance) << "Mismatch at molecule " << m << " index " << i;
+      EXPECT_NEAR(gpuResults[m][i], cpuResults[m][i], kTolerance) << "Molecule " << m << " index " << i;
     }
   }
 }
@@ -115,15 +107,9 @@ TEST_F(TFDGeneratorTest, GpuBufferMethodWorks) {
 }
 
 TEST_F(TFDGeneratorTest, EmptyInput) {
-  nvMolKit::TFDGenerator           generator;
+  nvMolKit::TFDGpuGenerator        generator;
   std::vector<const RDKit::ROMol*> emptyMols;
-  nvMolKit::TFDComputeOptions      options;
 
-  options.backend = nvMolKit::TFDComputeBackend::GPU;
-  auto gpuResults = generator.GetTFDMatrices(emptyMols, options);
-  EXPECT_TRUE(gpuResults.empty());
-
-  options.backend = nvMolKit::TFDComputeBackend::CPU;
-  auto cpuResults = generator.GetTFDMatrices(emptyMols, options);
-  EXPECT_TRUE(cpuResults.empty());
+  auto results = generator.GetTFDMatrices(emptyMols);
+  EXPECT_TRUE(results.empty());
 }

@@ -85,17 +85,6 @@ class TestGetTFDMatrix:
         result = tfd.GetTFDMatrix(mol)
         assert len(result) == 0
 
-    def test_cpu_backend(self, simple_mol_with_conformers):
-        """Test CPU backend gives same results as GPU."""
-        mol = simple_mol_with_conformers
-
-        gpu_result = tfd.GetTFDMatrix(mol, backend="gpu")
-        cpu_result = tfd.GetTFDMatrix(mol, backend="cpu")
-
-        assert len(gpu_result) == len(cpu_result)
-        for gpu_val, cpu_val in zip(gpu_result, cpu_result):
-            assert abs(gpu_val - cpu_val) < 1e-4
-
     def test_no_weights(self, simple_mol_with_conformers):
         """Test computation without weights."""
         mol = simple_mol_with_conformers
@@ -124,13 +113,6 @@ class TestGetTFDMatrix:
 
         with pytest.raises(Exception):
             tfd.GetTFDMatrix(mol, maxDev="invalid")
-
-    def test_invalid_backend_raises(self, simple_mol_with_conformers):
-        """Test that invalid backend raises error."""
-        mol = simple_mol_with_conformers
-
-        with pytest.raises(Exception):
-            tfd.GetTFDMatrix(mol, backend="invalid")
 
 
 class TestGetTFDMatrices:
@@ -301,42 +283,39 @@ class TestCompareWithRDKit:
         for nv, rd in zip(nvmolkit_result, rdkit_result):
             assert abs(nv - rd) < TOLERANCE, f"nvMolKit={nv}, RDKit={rd}"
 
-    @pytest.mark.parametrize("backend", ["gpu", "cpu"])
     @pytest.mark.parametrize(
         "smiles",
         ["CCCCC", "CC(C)CC"],
     )
-    def test_add_hs(self, backend, smiles):
+    def test_add_hs(self, smiles):
         """Test molecules with explicit hydrogens against RDKit."""
         mol = Chem.AddHs(Chem.MolFromSmiles(smiles))
         generate_conformers(mol, 4)
 
-        nvmolkit_result = tfd.GetTFDMatrix(mol, useWeights=True, maxDev="equal", backend=backend)
+        nvmolkit_result = tfd.GetTFDMatrix(mol, useWeights=True, maxDev="equal")
         rdkit_result = TorsionFingerprints.GetTFDMatrix(mol, useWeights=True, maxDev="equal")
 
         assert len(nvmolkit_result) == len(rdkit_result)
 
         for nv, rd in zip(nvmolkit_result, rdkit_result):
-            assert abs(nv - rd) < TOLERANCE, f"AddHs({smiles}), backend={backend}: nvMolKit={nv}, RDKit={rd}"
+            assert abs(nv - rd) < TOLERANCE, f"AddHs({smiles}): nvMolKit={nv}, RDKit={rd}"
 
-    @pytest.mark.parametrize("backend", ["gpu", "cpu"])
-    def test_symmetric_molecule_gpu_cpu_consistency(self, backend):
-        """Test branched molecule gives consistent results across backends."""
+    def test_symmetric_molecule(self):
+        """Test branched molecule against RDKit."""
         mol = Chem.MolFromSmiles("CC(C)CC")  # isopentane
         generate_conformers(mol, 4)
 
-        result = tfd.GetTFDMatrix(mol, backend=backend)
+        result = tfd.GetTFDMatrix(mol)
         rdkit_result = TorsionFingerprints.GetTFDMatrix(mol)
 
         assert len(result) == len(rdkit_result)
 
         for nv, rd in zip(result, rdkit_result):
-            assert abs(nv - rd) < TOLERANCE, f"backend={backend}: nvMolKit={nv}, RDKit={rd}"
+            assert abs(nv - rd) < TOLERANCE, f"nvMolKit={nv}, RDKit={rd}"
 
-    @pytest.mark.parametrize("backend", ["gpu", "cpu"])
     @pytest.mark.parametrize("symm_radius", [0, 1, 3])
-    def test_symm_radius(self, backend, symm_radius):
-        """Test different symmRadius values against RDKit on both backends.
+    def test_symm_radius(self, symm_radius):
+        """Test different symmRadius values against RDKit.
 
         Uses 4-propylheptane: the two propyl chains are symmetric at radius 1
         but distinguishable at radius 3 due to the longer heptane backbone.
@@ -347,7 +326,6 @@ class TestCompareWithRDKit:
         nvmolkit_result = tfd.GetTFDMatrix(
             mol,
             symmRadius=symm_radius,
-            backend=backend,
         )
         rdkit_result = TorsionFingerprints.GetTFDMatrix(
             mol,
@@ -357,18 +335,16 @@ class TestCompareWithRDKit:
         assert len(nvmolkit_result) == len(rdkit_result)
 
         for nv, rd in zip(nvmolkit_result, rdkit_result):
-            assert abs(nv - rd) < TOLERANCE, f"symmRadius={symm_radius}, backend={backend}: nvMolKit={nv}, RDKit={rd}"
+            assert abs(nv - rd) < TOLERANCE, f"symmRadius={symm_radius}: nvMolKit={nv}, RDKit={rd}"
 
-    @pytest.mark.parametrize("backend", ["gpu", "cpu"])
-    def test_ignore_colinear_bonds_false(self, backend):
-        """Test ignoreColinearBonds=False against RDKit on both backends."""
+    def test_ignore_colinear_bonds_false(self):
+        """Test ignoreColinearBonds=False against RDKit."""
         mol = Chem.MolFromSmiles("CCCC#CCC")
         generate_conformers(mol, 4)
 
         nvmolkit_result = tfd.GetTFDMatrix(
             mol,
             ignoreColinearBonds=False,
-            backend=backend,
         )
         rdkit_result = TorsionFingerprints.GetTFDMatrix(
             mol,
@@ -378,10 +354,9 @@ class TestCompareWithRDKit:
         assert len(nvmolkit_result) == len(rdkit_result)
 
         for nv, rd in zip(nvmolkit_result, rdkit_result):
-            assert abs(nv - rd) < TOLERANCE, f"ignoreColinearBonds=False, backend={backend}: nvMolKit={nv}, RDKit={rd}"
+            assert abs(nv - rd) < TOLERANCE, f"ignoreColinearBonds=False: nvMolKit={nv}, RDKit={rd}"
 
-    @pytest.mark.parametrize("backend", ["gpu", "cpu"])
-    def test_batch_against_rdkit(self, backend):
+    def test_batch_against_rdkit(self):
         """Test GetTFDMatrices batch against per-molecule RDKit on nontrivial molecules.
 
         Loads 10 diverse molecules from the MMFF94 validation SDF, generates
@@ -414,7 +389,7 @@ class TestCompareWithRDKit:
         assert len(mols) == 10, f"Expected 10 molecules, got {len(mols)}"
 
         # Batch call
-        nvmolkit_results = tfd.GetTFDMatrices(mols, backend=backend)
+        nvmolkit_results = tfd.GetTFDMatrices(mols)
 
         assert len(nvmolkit_results) == len(mols)
 
@@ -426,9 +401,7 @@ class TestCompareWithRDKit:
                 f"Mol {mol_idx}: size mismatch nvMolKit={len(nv_result)}, RDKit={len(rdkit_result)}"
             )
             for i, (nv, rd) in enumerate(zip(nv_result, rdkit_result)):
-                assert abs(nv - rd) < TOLERANCE, (
-                    f"Mol {mol_idx}, pair {i}, backend={backend}: nvMolKit={nv}, RDKit={rd}"
-                )
+                assert abs(nv - rd) < TOLERANCE, f"Mol {mol_idx}, pair {i}: nvMolKit={nv}, RDKit={rd}"
 
 
 class TestEdgeCases:

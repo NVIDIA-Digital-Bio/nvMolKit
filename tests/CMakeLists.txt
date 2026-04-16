@@ -293,7 +293,7 @@ target_link_libraries(test_tfd_gpu PRIVATE ${RDKit_LIBS} tfd_gpu device_vector
                                            test_utils)
 
 add_executable(test_tfd test_tfd.cpp)
-target_link_libraries(test_tfd PRIVATE ${RDKit_LIBS} tfd device_vector
+target_link_libraries(test_tfd PRIVATE ${RDKit_LIBS} tfd_gpu tfd_cpu device_vector
                                        test_utils)
 
 set(TEST_LIST

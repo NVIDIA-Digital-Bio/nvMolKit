@@ -36,8 +36,3 @@ target_link_libraries(
   PRIVATE tfd_kernels tfd_cpu ${RDKit_LIBS} nvtx
   PUBLIC device_vector device)
 target_include_directories(tfd_gpu PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-
-# TFD unified public API
-add_library(tfd tfd.cpp)
-target_link_libraries(tfd PUBLIC tfd_cpu tfd_gpu ${RDKit_LIBS})
-target_include_directories(tfd PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
