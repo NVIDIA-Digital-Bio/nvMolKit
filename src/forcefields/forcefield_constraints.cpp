@@ -126,9 +126,12 @@ double computeDihedralDeg(const std::vector<double>& positions,
   return kRadiansToDegrees * dihedral;
 }
 
-void appendDistanceConstraint(nvMolKit::MMFF::EnergyForceContribsHost& contribs,
-                              const std::vector<double>&               positions,
-                              const DistanceConstraintSpec&            spec) {
+namespace {
+
+template <typename Contribs>
+void appendDistanceConstraintImpl(Contribs&                    contribs,
+                                  const std::vector<double>&   positions,
+                                  const DistanceConstraintSpec& spec) {
   const int numAtoms = static_cast<int>(positions.size() / 3);
   validateAtomIndex(spec.idx1, numAtoms, "Distance constraint atom");
   validateAtomIndex(spec.idx2, numAtoms, "Distance constraint atom");
@@ -149,9 +152,10 @@ void appendDistanceConstraint(nvMolKit::MMFF::EnergyForceContribsHost& contribs,
   contribs.distanceConstraintTerms.forceConstant.push_back(spec.forceConstant);
 }
 
-void appendPositionConstraint(nvMolKit::MMFF::EnergyForceContribsHost& contribs,
-                              const std::vector<double>&               positions,
-                              const PositionConstraintSpec&            spec) {
+template <typename Contribs>
+void appendPositionConstraintImpl(Contribs&                    contribs,
+                                  const std::vector<double>&   positions,
+                                  const PositionConstraintSpec& spec) {
   const int numAtoms = static_cast<int>(positions.size() / 3);
   validateAtomIndex(spec.idx, numAtoms, "Position constraint atom");
   contribs.positionConstraintTerms.idx.push_back(spec.idx);
@@ -162,9 +166,10 @@ void appendPositionConstraint(nvMolKit::MMFF::EnergyForceContribsHost& contribs,
   contribs.positionConstraintTerms.forceConstant.push_back(spec.forceConstant);
 }
 
-void appendAngleConstraint(nvMolKit::MMFF::EnergyForceContribsHost& contribs,
-                           const std::vector<double>&               positions,
-                           const AngleConstraintSpec&               spec) {
+template <typename Contribs>
+void appendAngleConstraintImpl(Contribs&                  contribs,
+                               const std::vector<double>& positions,
+                               const AngleConstraintSpec& spec) {
   const int numAtoms = static_cast<int>(positions.size() / 3);
   validateAtomIndex(spec.idx1, numAtoms, "Angle constraint atom");
   validateAtomIndex(spec.idx2, numAtoms, "Angle constraint atom");
@@ -190,9 +195,10 @@ void appendAngleConstraint(nvMolKit::MMFF::EnergyForceContribsHost& contribs,
   contribs.angleConstraintTerms.forceConstant.push_back(spec.forceConstant);
 }
 
-void appendTorsionConstraint(nvMolKit::MMFF::EnergyForceContribsHost& contribs,
-                             const std::vector<double>&               positions,
-                             const TorsionConstraintSpec&             spec) {
+template <typename Contribs>
+void appendTorsionConstraintImpl(Contribs&                    contribs,
+                                 const std::vector<double>&   positions,
+                                 const TorsionConstraintSpec& spec) {
   const int numAtoms = static_cast<int>(positions.size() / 3);
   validateAtomIndex(spec.idx1, numAtoms, "Torsion constraint atom");
   validateAtomIndex(spec.idx2, numAtoms, "Torsion constraint atom");
@@ -218,5 +224,17 @@ void appendTorsionConstraint(nvMolKit::MMFF::EnergyForceContribsHost& contribs,
   contribs.torsionConstraintTerms.maxDihedralDeg.push_back(maxDihedralDeg);
   contribs.torsionConstraintTerms.forceConstant.push_back(spec.forceConstant);
 }
+
+}  // namespace
+
+void appendDistanceConstraint(nvMolKit::MMFF::EnergyForceContribsHost& c, const std::vector<double>& p, const DistanceConstraintSpec& s) { appendDistanceConstraintImpl(c, p, s); }
+void appendPositionConstraint(nvMolKit::MMFF::EnergyForceContribsHost& c, const std::vector<double>& p, const PositionConstraintSpec& s) { appendPositionConstraintImpl(c, p, s); }
+void appendAngleConstraint(nvMolKit::MMFF::EnergyForceContribsHost& c, const std::vector<double>& p, const AngleConstraintSpec& s) { appendAngleConstraintImpl(c, p, s); }
+void appendTorsionConstraint(nvMolKit::MMFF::EnergyForceContribsHost& c, const std::vector<double>& p, const TorsionConstraintSpec& s) { appendTorsionConstraintImpl(c, p, s); }
+
+void appendDistanceConstraint(nvMolKit::UFF::EnergyForceContribsHost& c, const std::vector<double>& p, const DistanceConstraintSpec& s) { appendDistanceConstraintImpl(c, p, s); }
+void appendPositionConstraint(nvMolKit::UFF::EnergyForceContribsHost& c, const std::vector<double>& p, const PositionConstraintSpec& s) { appendPositionConstraintImpl(c, p, s); }
+void appendAngleConstraint(nvMolKit::UFF::EnergyForceContribsHost& c, const std::vector<double>& p, const AngleConstraintSpec& s) { appendAngleConstraintImpl(c, p, s); }
+void appendTorsionConstraint(nvMolKit::UFF::EnergyForceContribsHost& c, const std::vector<double>& p, const TorsionConstraintSpec& s) { appendTorsionConstraintImpl(c, p, s); }
 
 }  // namespace nvMolKit::ForceFieldConstraints
