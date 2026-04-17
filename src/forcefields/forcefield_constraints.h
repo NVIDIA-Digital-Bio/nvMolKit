@@ -23,6 +23,7 @@
 // mmff.h / mmff_kernels.h but are forcefield-generic. They should be extracted into shared headers
 // so that UFF (and future forcefields) don't depend on MMFF.
 #include "mmff.h"
+#include "uff.h"
 
 namespace nvMolKit::ForceFieldConstraints {
 
@@ -80,6 +81,19 @@ void appendAngleConstraint(nvMolKit::MMFF::EnergyForceContribsHost& contribs,
 void appendTorsionConstraint(nvMolKit::MMFF::EnergyForceContribsHost& contribs,
                              const std::vector<double>&               positions,
                              const TorsionConstraintSpec&             spec);
+
+void appendDistanceConstraint(nvMolKit::UFF::EnergyForceContribsHost& contribs,
+                              const std::vector<double>&              positions,
+                              const DistanceConstraintSpec&           spec);
+void appendPositionConstraint(nvMolKit::UFF::EnergyForceContribsHost& contribs,
+                              const std::vector<double>&              positions,
+                              const PositionConstraintSpec&           spec);
+void appendAngleConstraint(nvMolKit::UFF::EnergyForceContribsHost& contribs,
+                           const std::vector<double>&              positions,
+                           const AngleConstraintSpec&              spec);
+void appendTorsionConstraint(nvMolKit::UFF::EnergyForceContribsHost& contribs,
+                             const std::vector<double>&              positions,
+                             const TorsionConstraintSpec&            spec);
 
 }  // namespace nvMolKit::ForceFieldConstraints
 
