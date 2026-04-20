@@ -43,7 +43,7 @@ Typical usage:
    gradients = ff.compute_gradients()  # [[5 grad-lists], [3 grad-lists]]
 
    ff[0].add_position_constraint(0, 0.1, 50.0)
-   opt_energies = ff.minimize()        # [[5 floats], [3 floats]]
+   opt_energies, converged = ff.minimize()  # ([[5 floats], [3 floats]], [[5 bools], [3 bools]])
 
 The wrapper also supports per-entry settings such as custom property objects,
 non-bonded thresholds, and interfragment interaction handling.  These options
@@ -68,7 +68,7 @@ Constraint terms are added through per-molecule element views:
    ff[0].add_distance_constraint(0, 2, True, 0.2, 0.5, 20.0)
    ff[1].add_torsion_constraint(0, 1, 2, 3, True, 10.0, 20.0, 8.0)
 
-   energies = ff.minimize()
+   energies, converged = ff.minimize()
 
 .. note::
    Calling :meth:`~MMFFBatchedForcefield.compute_energy` or
@@ -300,7 +300,7 @@ class MMFFBatchElement(_BatchElementBase):
        ff = MMFFBatchedForcefield([mol_a, mol_b])
        ff[0].add_position_constraint(0, 0.1, 50.0)
        ff[1].add_distance_constraint(1, 4, False, 2.0, 2.2, 25.0)
-       energies = ff.minimize()
+       energies, converged = ff.minimize()
     """
 
 
@@ -335,7 +335,7 @@ class MMFFBatchedForcefield:
            nonBondedThreshold=[100.0, 20.0],
        )
        ff[0].add_distance_constraint(0, 4, False, 1.8, 2.2, 50.0)
-       opt_energies = ff.minimize()
+       opt_energies, converged = ff.minimize()
     """
 
     def __init__(
@@ -489,7 +489,7 @@ class MMFFBatchedForcefield:
         self._ensure_built()
         return self._native_ff.computeGradients()
 
-    def minimize(self, maxIters: int = 200, forceTol: float = 1e-4) -> list[list[float]]:
+    def minimize(self, maxIters: int = 200, forceTol: float = 1e-4) -> tuple[list[list[float]], list[list[bool]]]:
         """Run BFGS minimization on all conformers of all molecules.
 
         Optimized coordinates are written back into the RDKit conformers
@@ -500,10 +500,12 @@ class MMFFBatchedForcefield:
             forceTol: Gradient convergence tolerance.
 
         Returns:
-            ``result[mol_idx][conf_idx]`` — optimized energy per conformer,
-            same shape as :meth:`compute_energy`.
+            A tuple ``(energies, converged)`` where both have shape
+            ``[mol_idx][conf_idx]``.  Each *converged* entry is ``True``
+            when that system satisfied *forceTol* within *maxIters*.
         """
         if not self._molecules:
-            return []
+            return [], []
         self._ensure_built()
-        return self._native_ff.minimize(maxIters, forceTol)
+        energies, converged = self._native_ff.minimize(maxIters, forceTol)
+        return energies, converged

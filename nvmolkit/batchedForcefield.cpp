@@ -55,6 +55,19 @@ std::vector<std::vector<double>> splitGradients(const std::vector<double>& flatG
   return result;
 }
 
+bp::list reshapeStatusesToNested(const std::vector<int16_t>& statuses, const std::vector<int>& numConformersPerMol) {
+  bp::list outer;
+  size_t   idx = 0;
+  for (const int nConfs : numConformersPerMol) {
+    bp::list inner;
+    for (int j = 0; j < nConfs; ++j) {
+      inner.append(statuses[idx++] == 0);
+    }
+    outer.append(inner);
+  }
+  return outer;
+}
+
 bp::list reshapeToNested(const std::vector<double>& flat, const std::vector<int>& numConformersPerMol) {
   bp::list outer;
   size_t   idx = 0;
@@ -297,7 +310,7 @@ class NativeMMFFBatchedForcefield {
     return reshapeGradientsToNested(perSystem, numConformersPerMol_);
   }
 
-  bp::list minimize(int maxIters, double gradTol) {
+  bp::tuple minimize(int maxIters, double gradTol) {
     gradDevice_.zero();
     energyOutsDevice_.zero();
 
@@ -312,7 +325,9 @@ class NativeMMFFBatchedForcefield {
     auto hostPositions = copyDeviceVector(positionsDevice_);
     writeBackPositions(conformerEntries_, hostPositions);
 
-    return reshapeToNested(copyDeviceVector(energyOutsDevice_), numConformersPerMol_);
+    bp::list energies  = reshapeToNested(copyDeviceVector(energyOutsDevice_), numConformersPerMol_);
+    bp::list converged = reshapeStatusesToNested(copyDeviceVector(bfgsMinimizer.statuses_), numConformersPerMol_);
+    return bp::make_tuple(energies, converged);
   }
 
  private:
