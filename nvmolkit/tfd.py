@@ -117,8 +117,10 @@ def _extract_gpu_result(gpu_result, return_type):
         return gpu_result.to_tensors()
     elif return_type == "numpy":
         return gpu_result.to_numpy()
-    else:
+    elif return_type == "list":
         return gpu_result.to_lists()
+    else:
+        raise ValueError(f"Invalid return_type {return_type!r}. Must be 'list', 'numpy', or 'tensor'.")
 
 
 def GetTFDMatrices(
