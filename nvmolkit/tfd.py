@@ -69,7 +69,14 @@ class _TFDGpuResult:
         self.output_starts = output_starts
 
     def to_tensors(self) -> list[torch.Tensor]:
-        """Extract as list of GPU tensors (no D2H copy)."""
+        """Extract as list of GPU tensors (no D2H copy).
+
+        The TFD kernel runs on the generator's private CUDA stream. Returned
+        tensors are valid for GPU-side ops ordered after this call on the same
+        stream. For CPU-side access (e.g. ``tensor.cpu()``, ``tensor.item()``,
+        ``tensor.numpy()``), call ``torch.cuda.synchronize()`` first to ensure
+        the kernel has completed.
+        """
         n = len(self.output_starts) - 1
         all_values = self.tfd_values.torch()
         return [all_values[self.output_starts[i] : self.output_starts[i + 1]] for i in range(n)]

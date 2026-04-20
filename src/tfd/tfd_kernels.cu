@@ -116,8 +116,12 @@ __global__ void tfdMatrixKernel(const int numMolecules,
     // i*(i-1)/2 + j = pairIdx, i > j >= 0
     // i = floor((1 + sqrt(1 + 8*pairIdx)) / 2)
     int i = static_cast<int>((1.0f + sqrtf(1.0f + 8.0f * pairIdx)) * 0.5f);
+    // Symmetric guards: float sqrtf can round either way when 8*pairIdx exceeds
+    // float32's 24-bit mantissa (pairIdx >~ 2M, i.e. >~2000 conformers).
     if (i * (i - 1) / 2 > pairIdx)
       i--;
+    else if ((i + 1) * i / 2 <= pairIdx)
+      i++;
     int j = pairIdx - i * (i - 1) / 2;
 
     int aI = desc.dihedStart + i * desc.numQuartets;
