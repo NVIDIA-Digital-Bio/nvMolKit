@@ -132,10 +132,7 @@ class _TorsionConstraint:
 
 
 def _serialize_distance_constraints(constraints: list[_DistanceConstraint]):
-    return [
-        (c.idx1, c.idx2, c.relative, c.min_len, c.max_len, c.force_constant)
-        for c in constraints
-    ]
+    return [(c.idx1, c.idx2, c.relative, c.min_len, c.max_len, c.force_constant) for c in constraints]
 
 
 def _serialize_position_constraints(constraints: list[_PositionConstraint]):
@@ -144,8 +141,7 @@ def _serialize_position_constraints(constraints: list[_PositionConstraint]):
 
 def _serialize_angle_constraints(constraints: list[_AngleConstraint]):
     return [
-        (c.idx1, c.idx2, c.idx3, c.relative, c.min_angle_deg, c.max_angle_deg, c.force_constant)
-        for c in constraints
+        (c.idx1, c.idx2, c.idx3, c.relative, c.min_angle_deg, c.max_angle_deg, c.force_constant) for c in constraints
     ]
 
 

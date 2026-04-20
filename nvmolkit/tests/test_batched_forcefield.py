@@ -277,12 +277,8 @@ def test_mmff_batched_forcefield_multi_conformer_matches_rdkit():
     assert len(got_grads[0]) == 3
 
     for conf_idx, conf in enumerate(mol.GetConformers()):
-        want_energy, want_grad = get_mmff_reference_energy_and_grad(
-            Chem.Mol(mol), conf_id=conf.GetId()
-        )
-        assert_energy_and_gradient_close(
-            got_energies[0][conf_idx], want_energy, got_grads[0][conf_idx], want_grad
-        )
+        want_energy, want_grad = get_mmff_reference_energy_and_grad(Chem.Mol(mol), conf_id=conf.GetId())
+        assert_energy_and_gradient_close(got_energies[0][conf_idx], want_energy, got_grads[0][conf_idx], want_grad)
 
 
 def test_mmff_batched_forcefield_lazy_build_and_rebuild():

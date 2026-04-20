@@ -82,8 +82,7 @@ bp::list reshapeGradientsToNested(const std::vector<std::vector<double>>& perSys
   return outer;
 }
 
-void writeBackPositions(const std::vector<ConformerEntry>& entries,
-                        const std::vector<double>&         hostPositions) {
+void writeBackPositions(const std::vector<ConformerEntry>& entries, const std::vector<double>& hostPositions) {
   for (const auto& entry : entries) {
     const uint32_t numAtoms = entry.mol->getNumAtoms();
     for (uint32_t j = 0; j < numAtoms; ++j) {
@@ -190,12 +189,19 @@ struct PerMolConstraints {
 
   bool empty() const { return distance.empty() && position.empty() && angle.empty() && torsion.empty(); }
 
-  template <typename Contribs>
-  void applyTo(Contribs& contribs, const std::vector<double>& positions) const {
-    for (const auto& s : distance) { nvMolKit::ForceFieldConstraints::appendDistanceConstraint(contribs, positions, s); }
-    for (const auto& s : position) { nvMolKit::ForceFieldConstraints::appendPositionConstraint(contribs, positions, s); }
-    for (const auto& s : angle) { nvMolKit::ForceFieldConstraints::appendAngleConstraint(contribs, positions, s); }
-    for (const auto& s : torsion) { nvMolKit::ForceFieldConstraints::appendTorsionConstraint(contribs, positions, s); }
+  template <typename Contribs> void applyTo(Contribs& contribs, const std::vector<double>& positions) const {
+    for (const auto& s : distance) {
+      nvMolKit::ForceFieldConstraints::appendDistanceConstraint(contribs, positions, s);
+    }
+    for (const auto& s : position) {
+      nvMolKit::ForceFieldConstraints::appendPositionConstraint(contribs, positions, s);
+    }
+    for (const auto& s : angle) {
+      nvMolKit::ForceFieldConstraints::appendAngleConstraint(contribs, positions, s);
+    }
+    for (const auto& s : torsion) {
+      nvMolKit::ForceFieldConstraints::appendTorsionConstraint(contribs, positions, s);
+    }
   }
 };
 
@@ -214,10 +220,16 @@ static std::vector<PerMolConstraints> extractAllConstraints(const bp::list& dist
                                                                                     numMols,
                                                                                     parsePositionConstraintTuple,
                                                                                     "position constraints");
-  const auto angleLists = extractConstraintLists<nvMolKit::ForceFieldConstraints::AngleConstraintSpec>(
-    angleConstraints, numMols, parseAngleConstraintTuple, "angle constraints");
-  const auto torsionLists = extractConstraintLists<nvMolKit::ForceFieldConstraints::TorsionConstraintSpec>(
-    torsionConstraints, numMols, parseTorsionConstraintTuple, "torsion constraints");
+  const auto angleLists =
+    extractConstraintLists<nvMolKit::ForceFieldConstraints::AngleConstraintSpec>(angleConstraints,
+                                                                                 numMols,
+                                                                                 parseAngleConstraintTuple,
+                                                                                 "angle constraints");
+  const auto torsionLists =
+    extractConstraintLists<nvMolKit::ForceFieldConstraints::TorsionConstraintSpec>(torsionConstraints,
+                                                                                   numMols,
+                                                                                   parseTorsionConstraintTuple,
+                                                                                   "torsion constraints");
 
   std::vector<PerMolConstraints> result(numMols);
   for (int i = 0; i < numMols; ++i) {
@@ -237,8 +249,8 @@ class NativeMMFFBatchedForcefield {
     const auto mols    = nvMolKit::extractMolecules(molecules);
     const int  numMols = static_cast<int>(mols.size());
     const auto props   = nvMolKit::extractMMFFPropertiesList(properties, numMols);
-    const auto constraints = extractAllConstraints(distanceConstraints, positionConstraints, angleConstraints,
-                                                   torsionConstraints, numMols);
+    const auto constraints =
+      extractAllConstraints(distanceConstraints, positionConstraints, angleConstraints, torsionConstraints, numMols);
 
     nvMolKit::MMFF::BatchedMolecularSystemHost systemHost;
     nvMolKit::BatchedForcefieldMetadata        metadata;
@@ -246,13 +258,12 @@ class NativeMMFFBatchedForcefield {
     uint32_t currentAtomOffset = 0;
 
     for (int molIdx = 0; molIdx < numMols; ++molIdx) {
-      auto* mol = mols[molIdx];
-      auto  baseContribs =
-        nvMolKit::MMFF::constructForcefieldContribs(*mol, props[molIdx]);
+      auto* mol          = mols[molIdx];
+      auto  baseContribs = nvMolKit::MMFF::constructForcefieldContribs(*mol, props[molIdx]);
 
       int confIdx = 0;
       for (auto confIter = mol->beginConformers(); confIter != mol->endConformers(); ++confIter, ++confIdx) {
-        auto& conf = **confIter;
+        auto&               conf = **confIter;
         std::vector<double> positions;
         nvMolKit::confPosToVect(conf, positions);
 
@@ -291,7 +302,11 @@ class NativeMMFFBatchedForcefield {
     energyOutsDevice_.zero();
 
     nvMolKit::BfgsBatchMinimizer bfgsMinimizer(
-      /*dataDim=*/3, nvMolKit::DebugLevel::NONE, true, nullptr, nvMolKit::BfgsBackend::BATCHED);
+      /*dataDim=*/3,
+      nvMolKit::DebugLevel::NONE,
+      true,
+      nullptr,
+      nvMolKit::BfgsBackend::BATCHED);
     bfgsMinimizer.minimize(maxIters, gradTol, *forcefield_, positionsDevice_, gradDevice_, energyOutsDevice_);
 
     auto hostPositions = copyDeviceVector(positionsDevice_);
@@ -324,13 +339,9 @@ BOOST_PYTHON_MODULE(_batchedForcefield) {
     .def_readwrite("vdwTerm", &nvMolKit::MMFFProperties::vdwTerm)
     .def_readwrite("eleTerm", &nvMolKit::MMFFProperties::eleTerm);
 
-  bp::class_<NativeMMFFBatchedForcefield, boost::noncopyable>("NativeMMFFBatchedForcefield",
-                                                              bp::init<const bp::list&,
-                                                                       const bp::list&,
-                                                                       const bp::list&,
-                                                                       const bp::list&,
-                                                                       const bp::list&,
-                                                                       const bp::list&>())
+  bp::class_<NativeMMFFBatchedForcefield, boost::noncopyable>(
+    "NativeMMFFBatchedForcefield",
+    bp::init<const bp::list&, const bp::list&, const bp::list&, const bp::list&, const bp::list&, const bp::list&>())
     .def("computeEnergy", &NativeMMFFBatchedForcefield::computeEnergy)
     .def("computeGradients", &NativeMMFFBatchedForcefield::computeGradients)
     .def("minimize", &NativeMMFFBatchedForcefield::minimize);
