@@ -26,15 +26,23 @@ target_link_libraries(batched_forcefield PUBLIC device_vector)
 target_include_directories(batched_forcefield PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
                                                      ${CMAKE_SOURCE_DIR}/src)
 
-add_library(mmff mmff.cu mmff_kernels.cu forcefield_constraints.cpp)
+add_library(forcefield_constraints forcefield_constraints.cpp)
+target_link_libraries(forcefield_constraints PUBLIC batched_forcefield)
+target_include_directories(forcefield_constraints
+                           PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_library(mmff mmff.cu mmff_kernels.cu)
 target_link_libraries(
   mmff
-  PUBLIC batched_forcefield
+  PUBLIC batched_forcefield forcefield_constraints
   PRIVATE device_vector ff_kernel_utils)
 target_include_directories(mmff PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(uff uff.cu uff_kernels.cu)
-target_link_libraries(uff PRIVATE device_vector ff_kernel_utils)
+target_link_libraries(
+  uff
+  PUBLIC forcefield_constraints
+  PRIVATE device_vector ff_kernel_utils)
 target_include_directories(uff PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(dist_geom dist_geom.cu dist_geom_kernels.cu coord_gen.cu)
