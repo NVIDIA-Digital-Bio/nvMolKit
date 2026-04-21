@@ -20,6 +20,7 @@
 
 #include "../hardware_options.h"
 #include "bfgs_minimize.h"
+#include "forcefield_constraints.h"
 #include "mmff_properties.h"
 
 namespace RDKit {
@@ -46,6 +47,30 @@ std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKi
                                                                 const std::vector<MMFFProperties>& properties,
                                                                 const BatchHardwareOptions&        perfOptions = {},
                                                                 BfgsBackend backend = BfgsBackend::HYBRID);
+
+//! \brief Result from constraint-aware MMFF minimization.
+struct MMFFMinimizeResult {
+  std::vector<std::vector<double>> energies;   //!< Per-molecule, per-conformer final energies.
+  std::vector<std::vector<bool>>   converged;  //!< Per-molecule, per-conformer convergence flags.
+};
+
+//! \brief Optimize with per-molecule constraints and return convergence status.
+//! \param mols The molecules to optimize (positions written back in-place).
+//! \param maxIters Maximum BFGS iterations.
+//! \param gradTol Gradient convergence tolerance.
+//! \param properties Per-molecule MMFF settings.
+//! \param constraints Per-molecule constraint specifications.
+//! \param perfOptions Hardware and batching configuration.
+//! \param backend BFGS backend selection.
+//! \return Energies and per-system convergence flags.
+MMFFMinimizeResult MMFFMinimizeMoleculesConfs(
+  std::vector<RDKit::ROMol*>&                                  mols,
+  int                                                          maxIters    = 200,
+  double                                                       gradTol     = 1e-4,
+  const std::vector<MMFFProperties>&                           properties  = {},
+  const std::vector<ForceFieldConstraints::PerMolConstraints>& constraints = {},
+  const BatchHardwareOptions&                                  perfOptions = {},
+  BfgsBackend                                                  backend     = BfgsBackend::HYBRID);
 
 }  // namespace nvMolKit::MMFF
 #endif  // NVMOLKIT_BFGS_MMFF_H

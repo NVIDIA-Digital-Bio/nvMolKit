@@ -85,6 +85,7 @@ from typing import TYPE_CHECKING
 
 from nvmolkit import _batchedForcefield  # type: ignore
 from nvmolkit._mmff_bridge import default_rdkit_mmff_properties, make_internal_mmff_properties
+from nvmolkit.types import HardwareOptions
 
 if TYPE_CHECKING:
     from rdkit.Chem import Mol
@@ -344,6 +345,7 @@ class MMFFBatchedForcefield:
         properties: "RDKitMMFFMolProperties | Sequence[RDKitMMFFMolProperties | None] | None" = None,
         nonBondedThreshold: float | Sequence[float] = 100.0,
         ignoreInterfragInteractions: bool | Sequence[bool] = True,
+        hardwareOptions: HardwareOptions | None = None,
     ):
         """Create a batched MMFF forcefield wrapper.
 
@@ -359,6 +361,8 @@ class MMFFBatchedForcefield:
                 values.
             ignoreInterfragInteractions: Whether to omit interfragment
                 non-bonded interactions, as a scalar or per-molecule list.
+            hardwareOptions: GPU device and batching configuration.  Uses
+                reasonable defaults when ``None``.
         """
         self._molecules = molecules
         self._properties = self._normalize_properties(properties)
@@ -368,6 +372,7 @@ class MMFFBatchedForcefield:
         self._ignore_interfrag_interactions = _normalize_scalar_or_list(
             ignoreInterfragInteractions, len(molecules), "ignoreInterfragInteractions"
         )
+        self._hardware_options = hardwareOptions if hardwareOptions is not None else HardwareOptions()
         self._distance_constraints: list[list[_DistanceConstraint]] = [[] for _ in molecules]
         self._position_constraints: list[list[_PositionConstraint]] = [[] for _ in molecules]
         self._angle_constraints: list[list[_AngleConstraint]] = [[] for _ in molecules]
@@ -455,6 +460,7 @@ class MMFFBatchedForcefield:
             pos,
             ang,
             tor,
+            self._hardware_options._as_native(),
         )
         self._dirty = False
 
@@ -489,7 +495,9 @@ class MMFFBatchedForcefield:
         self._ensure_built()
         return self._native_ff.computeGradients()
 
-    def minimize(self, maxIters: int = 200, forceTol: float = 1e-4) -> tuple[list[list[float]], list[list[bool]]]:
+    def minimize(
+        self, maxIters: int = 200, forceTol: float = 1e-4
+    ) -> tuple[list[list[float]], list[list[bool]]]:
         """Run BFGS minimization on all conformers of all molecules.
 
         Optimized coordinates are written back into the RDKit conformers
