@@ -51,7 +51,7 @@ std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKi
 //! \brief Result from constraint-aware MMFF minimization.
 struct MMFFMinimizeResult {
   std::vector<std::vector<double>> energies;   //!< Per-molecule, per-conformer final energies.
-  std::vector<std::vector<bool>>   converged;  //!< Per-molecule, per-conformer convergence flags.
+  std::vector<std::vector<int8_t>> converged;  //!< Per-molecule, per-conformer convergence flags (1 = converged).
 };
 
 //! \brief Optimize with per-molecule constraints and return convergence status.

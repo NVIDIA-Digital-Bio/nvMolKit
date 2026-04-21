@@ -495,9 +495,7 @@ class MMFFBatchedForcefield:
         self._ensure_built()
         return self._native_ff.computeGradients()
 
-    def minimize(
-        self, maxIters: int = 200, forceTol: float = 1e-4
-    ) -> tuple[list[list[float]], list[list[bool]]]:
+    def minimize(self, maxIters: int = 200, forceTol: float = 1e-4) -> tuple[list[list[float]], list[list[bool]]]:
         """Run BFGS minimization on all conformers of all molecules.
 
         Optimized coordinates are written back into the RDKit conformers

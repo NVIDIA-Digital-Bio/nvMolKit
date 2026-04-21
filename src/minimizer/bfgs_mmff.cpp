@@ -47,14 +47,13 @@ std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKi
                                         backend);
 }
 
-MMFFMinimizeResult MMFFMinimizeMoleculesConfs(
-  std::vector<RDKit::ROMol*>&                                  mols,
-  const int                                                    maxIters,
-  const double                                                 gradTol,
-  const std::vector<MMFFProperties>&                           properties,
-  const std::vector<ForceFieldConstraints::PerMolConstraints>& constraints,
-  const BatchHardwareOptions&                                  perfOptions,
-  const BfgsBackend                                            backend) {
+MMFFMinimizeResult MMFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>&                                  mols,
+                                              const int                                                    maxIters,
+                                              const double                                                 gradTol,
+                                              const std::vector<MMFFProperties>&                           properties,
+                                              const std::vector<ForceFieldConstraints::PerMolConstraints>& constraints,
+                                              const BatchHardwareOptions&                                  perfOptions,
+                                              const BfgsBackend                                            backend) {
   ScopedNvtxRange fullRange("BFGS MMFF Minimize Molecules Confs");
 
   if (properties.size() != mols.size()) {
@@ -68,9 +67,9 @@ MMFFMinimizeResult MMFFMinimizeMoleculesConfs(
   std::vector<std::vector<double>> moleculeEnergies;
   const auto                       allConformers = flattenConformers(mols, moleculeEnergies);
 
-  std::vector<std::vector<bool>> moleculeConverged(mols.size());
+  std::vector<std::vector<int8_t>> moleculeConverged(mols.size());
   for (size_t i = 0; i < mols.size(); ++i) {
-    moleculeConverged[i].resize(moleculeEnergies[i].size(), false);
+    moleculeConverged[i].resize(moleculeEnergies[i].size(), 0);
   }
 
   const size_t totalConformers    = allConformers.size();
@@ -194,8 +193,8 @@ MMFFMinimizeResult MMFFMinimizeMoleculesConfs(
       writeBackResults(batchConformers, conformerAtomStarts, buffers, moleculeEnergies);
 
       for (size_t i = 0; i < batchConformers.size(); ++i) {
-        const auto& confInfo = batchConformers[i];
-        moleculeConverged[confInfo.molIdx][confInfo.confIdx] = (statusesHost[i] == 0);
+        const auto& confInfo                                 = batchConformers[i];
+        moleculeConverged[confInfo.molIdx][confInfo.confIdx] = static_cast<int8_t>(statusesHost[i] == 0);
       }
     } catch (...) {
       exceptionHandler.store(std::current_exception());

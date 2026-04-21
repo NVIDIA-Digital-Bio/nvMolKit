@@ -296,11 +296,9 @@ def test_mmff_batched_forcefield_multi_conformer_matches_rdkit():
             for atom_idx in range(ff_mols[mol_idx].GetNumAtoms()):
                 got = conf.GetAtomPosition(atom_idx)
                 orig = ref_conf.GetAtomPosition(atom_idx)
-                assert (
-                    abs(got.x - orig.x) > 1e-10
-                    or abs(got.y - orig.y) > 1e-10
-                    or abs(got.z - orig.z) > 1e-10
-                ), f"Mol {mol_idx} conformer {conf_idx} positions were not written back"
+                assert abs(got.x - orig.x) > 1e-10 or abs(got.y - orig.y) > 1e-10 or abs(got.z - orig.z) > 1e-10, (
+                    f"Mol {mol_idx} conformer {conf_idx} positions were not written back"
+                )
 
 
 def test_mmff_batched_forcefield_lazy_build_and_rebuild():
