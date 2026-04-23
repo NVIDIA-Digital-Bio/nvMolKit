@@ -71,12 +71,12 @@ target_link_libraries(_batchedForcefield PUBLIC ${Boost_LIBRARIES}
 target_link_libraries(
   _batchedForcefield
   PRIVATE ${RDKit_LIBS}
+          bfgs_mmff
           mmff_batched_forcefield
           batched_forcefield
           rdkit_mmff_flattened
           device_vector
-          ff_utils
-          bfgs)
+          ff_utils)
 target_include_directories(
   _batchedForcefield PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils
                             ${Python_INCLUDE_DIRS})

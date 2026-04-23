@@ -95,6 +95,30 @@ void appendTorsionConstraint(nvMolKit::UFF::EnergyForceContribsHost& contribs,
                              const std::vector<double>&              positions,
                              const TorsionConstraintSpec&            spec);
 
+struct PerMolConstraints {
+  std::vector<DistanceConstraintSpec> distance;
+  std::vector<PositionConstraintSpec> position;
+  std::vector<AngleConstraintSpec>    angle;
+  std::vector<TorsionConstraintSpec>  torsion;
+
+  bool empty() const { return distance.empty() && position.empty() && angle.empty() && torsion.empty(); }
+
+  template <typename Contribs> void applyTo(Contribs& contribs, const std::vector<double>& positions) const {
+    for (const auto& s : distance) {
+      appendDistanceConstraint(contribs, positions, s);
+    }
+    for (const auto& s : position) {
+      appendPositionConstraint(contribs, positions, s);
+    }
+    for (const auto& s : angle) {
+      appendAngleConstraint(contribs, positions, s);
+    }
+    for (const auto& s : torsion) {
+      appendTorsionConstraint(contribs, positions, s);
+    }
+  }
+};
+
 }  // namespace nvMolKit::ForceFieldConstraints
 
 #endif  // NVMOLKIT_FORCEFIELD_CONSTRAINTS_H
