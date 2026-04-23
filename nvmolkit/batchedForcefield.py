@@ -421,9 +421,7 @@ class _BatchedForcefieldBase:
         self._ensure_built()
         return self._native_ff.computeGradients()
 
-    def _minimize(
-        self, maxIters: int, forceTol: float
-    ) -> tuple[list[list[float]], list[list[bool]]]:
+    def _minimize(self, maxIters: int, forceTol: float) -> tuple[list[list[float]], list[list[bool]]]:
         if not self._molecules:
             return [], []
         self._ensure_built()
