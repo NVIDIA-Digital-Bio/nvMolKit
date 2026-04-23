@@ -144,3 +144,5 @@ target_link_libraries(
   PRIVATE ${RDKit_LIBS})
 target_include_directories(conformer_rmsd_mol
                            PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_subdirectory(tfd)

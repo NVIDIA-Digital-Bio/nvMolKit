@@ -22,7 +22,7 @@ from rdkit.ForceField import rdForceField as _rdForceField  # noqa: F401
 from rdkit.Geometry import Point3D
 
 from nvmolkit._mmff_bridge import capture_mmff_settings
-from nvmolkit.batchedForcefield import MMFFBatchedForcefield
+from nvmolkit.batchedForcefield import MMFFBatchedForcefield, UFFBatchedForcefield
 
 
 def load_reference_mol():
@@ -265,24 +265,40 @@ def test_mmff_batched_forcefield_per_molecule_properties_match_rdkit():
 
 
 def test_mmff_batched_forcefield_multi_conformer_matches_rdkit():
-    mol = make_embedded_mol("CCCO", num_confs=3)
-    ff = MMFFBatchedForcefield([Chem.Mol(mol)])
+    mols = [
+        make_embedded_mol("CCO", num_confs=2),
+        make_embedded_mol("CCCO", num_confs=5),
+        make_embedded_mol("c1ccccc1CO", num_confs=3),
+    ]
+    conf_counts = [mol.GetNumConformers() for mol in mols]
+    ff_mols = clone_mols(mols)
+    ff = MMFFBatchedForcefield(ff_mols)
 
-    got_energies = ff.compute_energy()
-    got_grads = ff.compute_gradients()
+    opt_energies, converged = ff.minimize()
 
-    assert len(got_energies) == 1
-    assert len(got_energies[0]) == 3
-    assert len(got_grads) == 1
-    assert len(got_grads[0]) == 3
+    assert len(opt_energies) == len(mols)
+    assert len(converged) == len(mols)
 
-    for conf_idx, conf in enumerate(mol.GetConformers()):
-        want_energy, want_grad = get_mmff_reference_energy_and_grad(
-            Chem.Mol(mol), conf_id=conf.GetId()
-        )
-        assert_energy_and_gradient_close(
-            got_energies[0][conf_idx], want_energy, got_grads[0][conf_idx], want_grad
-        )
+    for mol_idx, mol in enumerate(mols):
+        assert len(opt_energies[mol_idx]) == conf_counts[mol_idx]
+        assert len(converged[mol_idx]) == conf_counts[mol_idx]
+        assert all(converged[mol_idx])
+
+        for conf_idx, conf in enumerate(mol.GetConformers()):
+            ref_mol = Chem.Mol(mol)
+            ref_ff = make_rdkit_mmff_forcefield(ref_mol, conf_id=conf.GetId())
+            ref_ff.Minimize()
+            want_energy = ref_ff.CalcEnergy()
+            assert opt_energies[mol_idx][conf_idx] == pytest.approx(want_energy, rel=1e-5, abs=1e-5)
+
+        for conf_idx, conf in enumerate(ff_mols[mol_idx].GetConformers()):
+            ref_conf = mols[mol_idx].GetConformer(conf.GetId())
+            for atom_idx in range(ff_mols[mol_idx].GetNumAtoms()):
+                got = conf.GetAtomPosition(atom_idx)
+                orig = ref_conf.GetAtomPosition(atom_idx)
+                assert abs(got.x - orig.x) > 1e-10 or abs(got.y - orig.y) > 1e-10 or abs(got.z - orig.z) > 1e-10, (
+                    f"Mol {mol_idx} conformer {conf_idx} positions were not written back"
+                )
 
 
 def test_mmff_batched_forcefield_lazy_build_and_rebuild():
@@ -387,3 +403,84 @@ def test_mmff_mixed_properties_and_constraints_batch_matches_rdkit():
             configure_forcefield=configure_forcefield,
         )
         assert_energy_and_gradient_close(got_energies[idx][0], want_energy, got_grads[idx][0], want_grad)
+
+
+def make_rdkit_uff_forcefield(
+    mol,
+    conf_id: int = -1,
+    vdwThreshold: float = 10.0,
+    ignoreInterfragInteractions: bool = True,
+):
+    return rdForceFieldHelpers.UFFGetMoleculeForceField(
+        mol,
+        vdwThresh=vdwThreshold,
+        confId=conf_id,
+        ignoreInterfragInteractions=ignoreInterfragInteractions,
+    )
+
+
+def get_uff_reference_energy_and_grad(
+    mol,
+    conf_id: int = -1,
+    vdwThreshold: float = 10.0,
+    ignoreInterfragInteractions: bool = True,
+    configure_forcefield=None,
+):
+    ff = make_rdkit_uff_forcefield(
+        mol,
+        conf_id=conf_id,
+        vdwThreshold=vdwThreshold,
+        ignoreInterfragInteractions=ignoreInterfragInteractions,
+    )
+    ff.Initialize()
+    if configure_forcefield is not None:
+        configure_forcefield(ff)
+    return ff.CalcEnergy(), list(ff.CalcGrad())
+
+
+def test_uff_batched_forcefield_matches_rdkit():
+    mol = make_embedded_mol("CCO")
+    nvmolkit_mol = Chem.Mol(mol)
+    ff = UFFBatchedForcefield([nvmolkit_mol])
+    got_energy = ff.compute_energy()[0][0]
+    got_grad = ff.compute_gradients()[0][0]
+    want_energy, want_grad = get_uff_reference_energy_and_grad(Chem.Mol(mol))
+    assert_energy_and_gradient_close(got_energy, want_energy, got_grad, want_grad)
+
+
+def test_uff_batched_forcefield_multi_conformer_matches_rdkit():
+    mols = [
+        make_embedded_mol("CCO", num_confs=2),
+        make_embedded_mol("CCCO", num_confs=5),
+        make_embedded_mol("c1ccccc1CO", num_confs=3),
+    ]
+    conf_counts = [mol.GetNumConformers() for mol in mols]
+    ff_mols = clone_mols(mols)
+    ff = UFFBatchedForcefield(ff_mols)
+
+    opt_energies, converged = ff.minimize()
+
+    assert len(opt_energies) == len(mols)
+    assert len(converged) == len(mols)
+
+    for mol_idx, mol in enumerate(mols):
+        assert len(opt_energies[mol_idx]) == conf_counts[mol_idx]
+        assert len(converged[mol_idx]) == conf_counts[mol_idx]
+        assert all(converged[mol_idx])
+
+        for conf_idx, conf in enumerate(mol.GetConformers()):
+            ref_mol = Chem.Mol(mol)
+            ref_ff = make_rdkit_uff_forcefield(ref_mol, conf_id=conf.GetId())
+            ref_ff.Initialize()
+            ref_ff.Minimize(maxIts=1000)
+            want_energy = ref_ff.CalcEnergy()
+            assert opt_energies[mol_idx][conf_idx] == pytest.approx(want_energy, rel=1e-5, abs=1e-5)
+
+        for conf_idx, conf in enumerate(ff_mols[mol_idx].GetConformers()):
+            ref_conf = mols[mol_idx].GetConformer(conf.GetId())
+            for atom_idx in range(ff_mols[mol_idx].GetNumAtoms()):
+                got = conf.GetAtomPosition(atom_idx)
+                orig = ref_conf.GetAtomPosition(atom_idx)
+                assert abs(got.x - orig.x) > 1e-10 or abs(got.y - orig.y) > 1e-10 or abs(got.z - orig.z) > 1e-10, (
+                    f"Mol {mol_idx} conformer {conf_idx} positions were not written back"
+                )

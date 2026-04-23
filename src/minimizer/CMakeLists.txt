@@ -37,6 +37,7 @@ target_link_libraries(
           bfgs_common
           mmff_batched_forcefield
           rdkit_mmff_flattened
+          forcefield_constraints
           device_vector
           OpenMP::OpenMP_CXX
           openmp_helpers
@@ -52,6 +53,7 @@ target_link_libraries(
           bfgs_common
           uff_batched_forcefield
           rdkit_uff_flattened
+          forcefield_constraints
           device_vector
           OpenMP::OpenMP_CXX
           openmp_helpers

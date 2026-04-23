@@ -47,38 +47,49 @@ std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKi
                                         backend);
 }
 
-std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKit::ROMol*>&        mols,
-                                                                const int                          maxIters,
-                                                                const std::vector<MMFFProperties>& properties,
-                                                                const BatchHardwareOptions&        perfOptions,
-                                                                const BfgsBackend                  backend) {
-  ScopedNvtxRange fullMinimizeRange("BFGS MMFF Optimize Molecules Confs");
-  ScopedNvtxRange setupRange("BFGS MMFF Optimize Molecules Confs");
+MMFFMinimizeResult MMFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>&                                  mols,
+                                              const int                                                    maxIters,
+                                              const double                                                 gradTol,
+                                              const std::vector<MMFFProperties>&                           properties,
+                                              const std::vector<ForceFieldConstraints::PerMolConstraints>& constraints,
+                                              const BatchHardwareOptions&                                  perfOptions,
+                                              const BfgsBackend                                            backend) {
+  ScopedNvtxRange fullRange("BFGS MMFF Minimize Molecules Confs");
 
   if (properties.size() != mols.size()) {
     throw std::invalid_argument("Expected one MMFFProperties entry per molecule");
+  }
+  if (!constraints.empty() && constraints.size() != mols.size()) {
+    throw std::invalid_argument("Expected one PerMolConstraints entry per molecule");
   }
 
   auto                             ctx = setupBatchExecution(perfOptions);
   std::vector<std::vector<double>> moleculeEnergies;
   const auto                       allConformers = flattenConformers(mols, moleculeEnergies);
 
+  std::vector<std::vector<int8_t>> moleculeConverged(mols.size());
+  for (size_t i = 0; i < mols.size(); ++i) {
+    moleculeConverged[i].resize(moleculeEnergies[i].size(), 0);
+  }
+
   const size_t totalConformers    = allConformers.size();
   const size_t effectiveBatchSize = (ctx.batchSize == 0) ? totalConformers : ctx.batchSize;
 
   if (totalConformers == 0) {
-    return moleculeEnergies;
+    return {moleculeEnergies, moleculeConverged};
   }
 
   std::vector<ThreadLocalBuffers> threadBuffers(ctx.numThreads);
   detail::OpenMPExceptionRegistry exceptionHandler;
-  setupRange.pop();
 #pragma omp parallel for num_threads(ctx.numThreads) schedule(dynamic) default(none) shared(allConformers,        \
                                                                                               moleculeEnergies,   \
+                                                                                              moleculeConverged,  \
                                                                                               totalConformers,    \
                                                                                               effectiveBatchSize, \
                                                                                               maxIters,           \
+                                                                                              gradTol,            \
                                                                                               properties,         \
+                                                                                              constraints,        \
                                                                                               ctx,                \
                                                                                               threadBuffers,      \
                                                                                               backend,            \
@@ -97,22 +108,17 @@ std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKi
 
       cudaStream_t streamPtr = ctx.streamPool[threadId].stream();
 
-      // Process this batch
       BatchedMolecularSystemHost    systemHost;
       BatchedMolecularDeviceBuffers systemDevice;
       BatchedForcefieldMetadata     metadata;
       std::vector<double>           pos;
+      std::vector<uint32_t>         conformerAtomStarts;
+      uint32_t                      currentAtomOffset = 0;
 
-      // Track conformer atom start positions for molecules with different sizes
-      std::vector<uint32_t> conformerAtomStarts;
-      uint32_t              currentAtomOffset = 0;
-
-      // Prepare batch - each conformer becomes a separate "molecule" in the batch
       for (const auto& confInfo : batchConformers) {
         auto*          mol      = confInfo.mol;
         const uint32_t numAtoms = mol->getNumAtoms();
 
-        // Look up or compute cached forcefield parameters and atom numbers
         auto it = moleculeCache.find(mol);
         if (it == moleculeCache.end()) {
           ScopedNvtxRange    computeCacheRange("Preprocess single molecule");
@@ -120,25 +126,25 @@ std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKi
           cached.ffParams = constructForcefieldContribs(*mol, properties[confInfo.molIdx]);
           it              = moleculeCache.insert({mol, std::move(cached)}).first;
         }
-        auto&           ffParams = it->second.ffParams;
+
         ScopedNvtxRange addToBatchRange("Add conformer to batch data");
-        // Add this conformer to the batch
         conformerAtomStarts.push_back(currentAtomOffset);
         currentAtomOffset += numAtoms;
 
         nvMolKit::confPosToVect(*confInfo.conformer, pos);
-        nvMolKit::MMFF::addMoleculeToBatch(ffParams, pos, systemHost, &metadata, confInfo.molIdx, confInfo.confIdx);
+
+        auto contribs = it->second.ffParams;
+        if (!constraints.empty()) {
+          constraints[confInfo.molIdx].applyTo(contribs, pos);
+        }
+        nvMolKit::MMFF::addMoleculeToBatch(contribs, pos, systemHost, &metadata, confInfo.molIdx, confInfo.confIdx);
       }
 
-      // Get thread-local buffers and ensure they have enough capacity
       auto& buffers = threadBuffers[threadId];
       buffers.ensureCapacity(systemHost.positions.size(), batchConformers.size());
-
-      // Copy to pinned memory for async transfer
       std::copy(systemHost.positions.begin(), systemHost.positions.end(), buffers.initialPositions.begin());
 
       nvMolKit::BfgsBatchMinimizer bfgsMinimizer(/*dataDim=*/3, nvMolKit::DebugLevel::NONE, true, streamPtr, backend);
-      constexpr double             gradTol          = 1e-4;  // hard-coded in RDKit.
       const auto                   effectiveBackend = bfgsMinimizer.resolveBackend(systemHost.indices.atomStarts);
       setupBatchRange.pop();
 
@@ -180,13 +186,30 @@ std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKi
         cudaStreamSynchronize(streamPtr);
       }
 
+      std::vector<int16_t> statusesHost(batchConformers.size());
+      bfgsMinimizer.statuses_.copyToHost(statusesHost.data(), batchConformers.size());
+      cudaStreamSynchronize(streamPtr);
+
       writeBackResults(batchConformers, conformerAtomStarts, buffers, moleculeEnergies);
+
+      for (size_t i = 0; i < batchConformers.size(); ++i) {
+        const auto& confInfo                                 = batchConformers[i];
+        moleculeConverged[confInfo.molIdx][confInfo.confIdx] = static_cast<int8_t>(statusesHost[i] == 0);
+      }
     } catch (...) {
       exceptionHandler.store(std::current_exception());
     }
   }
   exceptionHandler.rethrow();
-  return moleculeEnergies;
+  return {moleculeEnergies, moleculeConverged};
+}
+
+std::vector<std::vector<double>> MMFFOptimizeMoleculesConfsBfgs(std::vector<RDKit::ROMol*>&        mols,
+                                                                const int                          maxIters,
+                                                                const std::vector<MMFFProperties>& properties,
+                                                                const BatchHardwareOptions&        perfOptions,
+                                                                const BfgsBackend                  backend) {
+  return MMFFMinimizeMoleculesConfs(mols, maxIters, 1e-4, properties, {}, perfOptions, backend).energies;
 }
 
 }  // namespace nvMolKit::MMFF
