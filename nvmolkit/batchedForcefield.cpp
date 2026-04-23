@@ -35,13 +35,6 @@ namespace bp = boost::python;
 
 namespace {
 
-struct ConformerEntry {
-  RDKit::ROMol*     mol;
-  int               molIdx;
-  RDKit::Conformer* conformer;
-  uint32_t          atomStart;
-};
-
 std::vector<std::vector<double>> splitGradients(const std::vector<double>& flatGrad,
                                                 const std::vector<int>&    atomStarts,
                                                 int                        dim) {
@@ -53,19 +46,6 @@ std::vector<std::vector<double>> splitGradients(const std::vector<double>& flatG
     result.emplace_back(flatGrad.begin() + start, flatGrad.begin() + end);
   }
   return result;
-}
-
-bp::list reshapeStatusesToNested(const std::vector<int16_t>& statuses, const std::vector<int>& numConformersPerMol) {
-  bp::list outer;
-  size_t   idx = 0;
-  for (const int nConfs : numConformersPerMol) {
-    bp::list inner;
-    for (int j = 0; j < nConfs; ++j) {
-      inner.append(statuses[idx++] == 0);
-    }
-    outer.append(inner);
-  }
-  return outer;
 }
 
 bp::list reshapeToNested(const std::vector<double>& flat, const std::vector<int>& numConformersPerMol) {
@@ -89,6 +69,19 @@ bp::list reshapeGradientsToNested(const std::vector<std::vector<double>>& perSys
     bp::list inner;
     for (int j = 0; j < nConfs; ++j) {
       inner.append(nvMolKit::vectorToList(perSystem[idx++]));
+    }
+    outer.append(inner);
+  }
+  return outer;
+}
+
+template <typename T, typename Convert>
+bp::list nestedToList(const std::vector<std::vector<T>>& nested, Convert&& convert) {
+  bp::list outer;
+  for (const auto& innerVec : nested) {
+    bp::list inner;
+    for (const auto& val : innerVec) {
+      inner.append(convert(val));
     }
     outer.append(inner);
   }
@@ -228,14 +221,12 @@ class NativeMMFFBatchedForcefield {
   }
 
   bp::list computeEnergy() {
-    rebuildIfDirty();
     energyOutsDevice_.zero();
     throwIfCudaError(forcefield_->computeEnergy(energyOutsDevice_.data(), positionsDevice_.data()), "computeEnergy");
     return reshapeToNested(copyDeviceVector(energyOutsDevice_), numConformersPerMol_);
   }
 
   bp::list computeGradients() {
-    rebuildIfDirty();
     gradDevice_.zero();
     throwIfCudaError(forcefield_->computeGradients(gradDevice_.data(), positionsDevice_.data()), "computeGradients");
     auto perSystem = splitGradients(copyDeviceVector(gradDevice_), forcefield_->atomStartsHost(), 3);
@@ -246,21 +237,10 @@ class NativeMMFFBatchedForcefield {
     auto result =
       nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(mols_, maxIters, gradTol, properties_, constraints_, hwOpts_);
 
-    dirty_ = true;
+    syncPositions();
 
-    bp::list energies;
-    bp::list converged;
-    for (size_t molIdx = 0; molIdx < result.energies.size(); ++molIdx) {
-      bp::list eInner;
-      bp::list cInner;
-      for (size_t confIdx = 0; confIdx < result.energies[molIdx].size(); ++confIdx) {
-        eInner.append(result.energies[molIdx][confIdx]);
-        cInner.append(result.converged[molIdx][confIdx] != 0);
-      }
-      energies.append(eInner);
-      converged.append(cInner);
-    }
-    return bp::make_tuple(energies, converged);
+    return bp::make_tuple(nestedToList(result.energies, [](double v) { return v; }),
+                          nestedToList(result.converged, [](int8_t v) { return v != 0; }));
   }
 
  private:
@@ -294,13 +274,19 @@ class NativeMMFFBatchedForcefield {
     positionsDevice_.setFromVector(systemHost.positions);
     gradDevice_.resize(forcefield_->totalPositions());
     energyOutsDevice_.resize(forcefield_->numMolecules());
-    dirty_ = false;
   }
 
-  void rebuildIfDirty() {
-    if (dirty_) {
-      buildForcefield();
+  void syncPositions() {
+    std::vector<double> allPositions;
+    for (auto* mol : mols_) {
+      std::vector<double> pos;
+      for (auto confIter = mol->beginConformers(); confIter != mol->endConformers(); ++confIter) {
+        nvMolKit::confPosToVect(**confIter, pos);
+        allPositions.insert(allPositions.end(), pos.begin(), pos.end());
+      }
     }
+    positionsDevice_.copyFromHost(allPositions.data(), allPositions.size());
+    cudaStreamSynchronize(positionsDevice_.stream());
   }
 
   std::vector<RDKit::ROMol*>            mols_;
@@ -313,7 +299,6 @@ class NativeMMFFBatchedForcefield {
   nvMolKit::AsyncDeviceVector<double>              gradDevice_;
   nvMolKit::AsyncDeviceVector<double>              energyOutsDevice_;
   std::vector<int>                                 numConformersPerMol_;
-  bool                                             dirty_ = true;
 };
 
 BOOST_PYTHON_MODULE(_batchedForcefield) {
