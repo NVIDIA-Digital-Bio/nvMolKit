@@ -42,9 +42,6 @@ __device__ __forceinline__ int findMolecule(const int* starts, int numMolecules,
 //! One thread per (conformer, quartet) work item.
 //! Uses binary search on dihedralWorkStarts to find the molecule,
 //! then computes (confIdx, quartetIdx, outIdx) arithmetically.
-//! TODO: The binary search may cause warp divergence for large molecule counts.
-//! Consider precomputing a flat workItem→moleculeIdx lookup table if ncu profiling
-//! shows this is a bottleneck.
 __global__ void dihedralKernel(const int totalWorkItems,
                                const float* __restrict__ positions,
                                const int* __restrict__ confPositionStarts,
@@ -84,9 +81,6 @@ __global__ void dihedralKernel(const int totalWorkItems,
 //! One block per molecule. Threads within a block cooperatively process
 //! all C*(C-1)/2 conformer pairs via grid-stride loop.
 //! All threads in a block share the same torsion types — no cross-molecule divergence.
-//! TODO: Consider sorting torsions by type on the host before transfer to reduce
-//! intra-block branch divergence. In practice, Single type dominates (~80-90% of
-//! torsions in drug-like molecules), so the benefit may be small.
 __global__ void tfdMatrixKernel(const int numMolecules,
                                 const float* __restrict__ dihedralAngles,
                                 const float* __restrict__ torsionWeights,
