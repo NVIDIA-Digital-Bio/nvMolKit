@@ -22,7 +22,8 @@ if(NVMOLKIT_CUDA_TARGET_MODE STREQUAL "native")
       "NVMOLKIT_CUDA_TARGET_MODE=native: Using native CUDA architecture for fast local builds"
   )
 elseif(NVMOLKIT_CUDA_TARGET_MODE STREQUAL "full")
-  set(_nvmolkit_cuda_arch_list "70-real;75-real;80-real;86-real;89-real;90-real")
+  set(_nvmolkit_cuda_arch_list
+      "70-real;75-real;80-real;86-real;89-real;90-real")
   if(DEFINED CUDAToolkit_VERSION)
     string(REPLACE "." ";" _cuda_version_list "${CUDAToolkit_VERSION}")
     list(GET _cuda_version_list 0 _cuda_major)
