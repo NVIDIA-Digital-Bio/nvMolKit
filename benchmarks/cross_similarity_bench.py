@@ -57,6 +57,8 @@ df = pd.read_csv(args.input)
 smis = df.iloc[:, 0].to_list()
 mols = [MolFromSmiles(smi) for smi in smis]
 mols = [mol for mol in mols if mol is not None]
+if not mols:
+    raise ValueError(f"No molecules parsed from {args.input}")
 while len(mols) < max_size:
     mols += mols
 mols = mols[:max_size]
