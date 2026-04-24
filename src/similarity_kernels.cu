@@ -35,32 +35,31 @@ bool supportsTensorOps(const int major, const int minor) {
   if (major != 8 && major != 9 && major != 10 && major != 12) {
     return false;
   }
-}
 
-// Now we do compile time checks. Account for forward compatibilty,
-// so if we're built for 80, we can run on 80, 86, 89
-if constexpr (NVMOLKIT_CUDA_CC_80) {
-  return true;
-}
-// If built or 86, we can run on 86 and 89.
-if (NVMOLKIT_CUDA_CC_86 && minor >= 6) {
-  return true;
-}
-// If built for 89, we can run on 89.
-if (NVMOLKIT_CUDA_CC_89 && minor == 9) {
-  return true;
-}
-if (NVMOLKIT_CUDA_CC_90 && major == 9) {
-  return true;
-}
-// Blackwell builds are per-arch (-real); each macro only matches its exact SM.
-if (NVMOLKIT_CUDA_CC_100 && major == 10 && minor == 0) {
-  return true;
-}
-if (NVMOLKIT_CUDA_CC_120 && major == 12 && minor == 0) {
-  return true;
-}
-return false;
+  // Now we do compile time checks. Account for forward compatibilty,
+  // so if we're built for 80, we can run on 80, 86, 89
+  if constexpr (NVMOLKIT_CUDA_CC_80) {
+    return true;
+  }
+  // If built or 86, we can run on 86 and 89.
+  if (NVMOLKIT_CUDA_CC_86 && minor >= 6) {
+    return true;
+  }
+  // If built for 89, we can run on 89.
+  if (NVMOLKIT_CUDA_CC_89 && minor == 9) {
+    return true;
+  }
+  if (NVMOLKIT_CUDA_CC_90 && major == 9) {
+    return true;
+  }
+  // Blackwell builds are per-arch (-real); each macro only matches its exact SM.
+  if (NVMOLKIT_CUDA_CC_100 && major == 10 && minor == 0) {
+    return true;
+  }
+  if (NVMOLKIT_CUDA_CC_120 && major == 12 && minor == 0) {
+    return true;
+  }
+  return false;
 }
 
 //! Cast a device vector to a span of a type smaller or equal to self.
