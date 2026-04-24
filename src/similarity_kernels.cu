@@ -30,9 +30,10 @@ namespace {
 //! Detects if we can use BMMA tensor operations for the given device compute capability,
 //! taking into account compile-time targets.
 bool supportsTensorOps(const int major, const int minor) {
-  if (major != 8 && major != 9) {
-    return false;  // BMMA instructions are only available on Ampere, Ada, Hopper.
-    // TODO: Check if blackwell accepts BMMA instructions.
+  // BMMA m16n8k256 .b1 {.and,.xor}.popc is supported on sm_80+ per PTX ISA, including Blackwell.
+  // We explicitly support Ampere/Ada (8.x), Hopper (9.0), and Blackwell sm_100 / sm_120.
+  if (major != 8 && major != 9 && major != 10 && major != 12) {
+    return false;
   }
 
   // Now we do compile time checks. Account for forward compatibilty,
@@ -49,6 +50,13 @@ bool supportsTensorOps(const int major, const int minor) {
     return true;
   }
   if (NVMOLKIT_CUDA_CC_90 && major == 9) {
+    return true;
+  }
+  // Blackwell builds are per-arch (-real); each macro only matches its exact SM.
+  if (NVMOLKIT_CUDA_CC_100 && major == 10 && minor == 0) {
+    return true;
+  }
+  if (NVMOLKIT_CUDA_CC_120 && major == 12 && minor == 0) {
     return true;
   }
   return false;
@@ -371,7 +379,7 @@ __global__ void tanimotoCrossSimilarityKernel(const cuda::std::span<const kThrea
                                               const size_t                                      elementsPerMolecule,
                                               cuda::std::span<double>                           similarities,
                                               const size_t                                      offset) {
-#if __CUDA_ARCH__ >= 800 && __CUDA_ARCH__ < 1000
+#if __CUDA_ARCH__ >= 800
   crossSimilarityKernelTensorOp<SimilarityType::Tanimoto,
                                 kThreadReductionType,
                                 double,
@@ -593,7 +601,7 @@ __global__ void cosineCrossSimilarityKernel(const cuda::std::span<const kThreadR
                                             const size_t                                      elementsPerMolecule,
                                             cuda::std::span<double>                           similarities,
                                             const size_t                                      offset) {
-#if __CUDA_ARCH__ >= 800 && __CUDA_ARCH__ < 1000
+#if __CUDA_ARCH__ >= 800
   crossSimilarityKernelTensorOp<SimilarityType::Cosine,
                                 kThreadReductionType,
                                 double,
