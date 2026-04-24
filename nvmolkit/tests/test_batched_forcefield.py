@@ -16,17 +16,21 @@
 import os
 
 import pytest
-from rdkit import Chem
+import torch
+from rdkit import Chem, RDLogger
 from rdkit.Chem import rdDistGeom, rdForceFieldHelpers
 from rdkit.ForceField import rdForceField as _rdForceField  # noqa: F401
 from rdkit.Geometry import Point3D
 
 from nvmolkit._mmff_bridge import capture_mmff_settings
 from nvmolkit.batchedForcefield import MMFFBatchedForcefield, UFFBatchedForcefield
+from nvmolkit.types import HardwareOptions
 
 
 def load_reference_mol():
-    mol2_path = os.path.join(
+    # File has a .mol2 extension for historical reasons but is actually MOL V2000 format.
+    # The header claims 2D but coords are 3D, which RDKit warns about; silence that warning.
+    mol_path = os.path.join(
         os.path.dirname(__file__),
         "..",
         "..",
@@ -34,9 +38,14 @@ def load_reference_mol():
         "test_data",
         "rdkit_smallmol_1.mol2",
     )
-    if not os.path.exists(mol2_path):
-        pytest.skip(f"Test data file not found: {mol2_path}")
-    mol = Chem.MolFromMol2File(mol2_path, sanitize=False, removeHs=False)
+    if not os.path.exists(mol_path):
+        pytest.skip(f"Test data file not found: {mol_path}")
+    logger = RDLogger.logger()
+    logger.setLevel(RDLogger.ERROR)
+    try:
+        mol = Chem.MolFromMolFile(mol_path, sanitize=False, removeHs=False)
+    finally:
+        logger.setLevel(RDLogger.WARNING)
     if mol is None:
         pytest.skip("Failed to load rdkit_smallmol_1.mol2")
     Chem.SanitizeMol(mol)
@@ -69,6 +78,30 @@ def make_fragmented_mol():
 
 def clone_mols(molecules):
     return [Chem.Mol(mol) for mol in molecules]
+
+
+def perturb_conformers(mol, amplitude: float = 0.3, seed: int = 0xBEEF):
+    """Displace every atom of every conformer by a small random vector in-place.
+
+    Used to force starting geometries away from the forcefield minimum so that
+    relative-offset constraints (which anchor to the starting geometry) produce
+    observably different results vs. an unconstrained minimize.
+    """
+    import random
+
+    rng = random.Random(seed)
+    for conf in mol.GetConformers():
+        for atom_idx in range(mol.GetNumAtoms()):
+            pos = conf.GetAtomPosition(atom_idx)
+            conf.SetAtomPosition(
+                atom_idx,
+                Point3D(
+                    pos.x + rng.uniform(-amplitude, amplitude),
+                    pos.y + rng.uniform(-amplitude, amplitude),
+                    pos.z + rng.uniform(-amplitude, amplitude),
+                ),
+            )
+    return mol
 
 
 def make_rdkit_mmff_properties(mol, settings: dict | None = None):
@@ -132,136 +165,171 @@ def assert_energy_and_gradient_close(got_energy, want_energy, got_grad, want_gra
     assert got_grad == pytest.approx(want_grad, rel=1e-4, abs=1e-4)
 
 
-def assert_single_batched_matches_rdkit(
-    mol,
-    properties=None,
-    nonBondedThreshold: float = 100.0,
-    ignoreInterfragInteractions: bool = True,
-    configure_batch=None,
-    configure_rdkit=None,
-):
-    nvmolkit_mol = Chem.Mol(mol)
-    ff = MMFFBatchedForcefield(
-        [nvmolkit_mol],
-        properties=properties,
-        nonBondedThreshold=nonBondedThreshold,
-        ignoreInterfragInteractions=ignoreInterfragInteractions,
-    )
-    if configure_batch is not None:
-        configure_batch(ff[0])
-    got_energy = ff.compute_energy()[0][0]
-    got_grad = ff.compute_gradients()[0][0]
-    want_energy, want_grad = get_mmff_reference_energy_and_grad(
-        Chem.Mol(mol),
-        properties=properties,
-        nonBondedThreshold=nonBondedThreshold,
-        ignoreInterfragInteractions=ignoreInterfragInteractions,
-        configure_forcefield=configure_rdkit,
-    )
-    assert_energy_and_gradient_close(got_energy, want_energy, got_grad, want_grad)
+def _assert_batched_compute_matches_rdkit_mmff(mol_specs):
+    """Build a single MMFFBatchedForcefield from ``mol_specs`` and verify that
+    per-mol ``compute_energy``/``compute_gradients`` match RDKit's single-mol FF
+    for each mol, with its configured properties and (optionally) constraint.
 
+    When any mol has a constraint configured, additionally verify that the
+    constraint has an observable effect on that mol's energy AND gradient — as
+    long as RDKit's own constrained-vs-unconstrained delta is above a small
+    threshold (which guards against pathological zero-contribution geometries,
+    e.g. an undisplaced position constraint).
 
-def test_mmff_batched_forcefield_matches_rdkit():
-    assert_single_batched_matches_rdkit(load_reference_mol())
-
-
-def test_mmff_batched_forcefield_batch_matches_single():
-    mols = [load_reference_mol(), load_reference_mol()]
-
-    batch_ff = MMFFBatchedForcefield(clone_mols(mols))
-    batch_energies = batch_ff.compute_energy()
-    batch_grads = batch_ff.compute_gradients()
-
-    single_energies = []
-    single_grads = []
-    for mol in clone_mols(mols):
-        single_ff = MMFFBatchedForcefield([mol])
-        single_energies.append(single_ff.compute_energy()[0][0])
-        single_grads.append(single_ff.compute_gradients()[0][0])
-
-    for mol_idx in range(len(mols)):
-        assert batch_energies[mol_idx][0] == pytest.approx(single_energies[mol_idx], rel=1e-5, abs=1e-5)
-        assert batch_grads[mol_idx][0] == pytest.approx(single_grads[mol_idx], rel=1e-4, abs=1e-4)
-
-
-@pytest.mark.parametrize(
-    ("mol_factory", "property_settings", "non_bonded_threshold", "ignore_interfrag_interactions"),
-    [
-        pytest.param(
-            lambda: make_embedded_mol("CC(=O)NC"),
-            {"variant": "MMFF94s"},
-            100.0,
-            True,
-            id="variant-mmff94s",
-        ),
-        pytest.param(
-            load_reference_mol,
-            {"dielectric_constant": 2.5, "dielectric_model": 2},
-            100.0,
-            True,
-            id="dielectric-settings",
-        ),
-        pytest.param(
-            load_reference_mol,
-            {
-                "bond_term": False,
-                "angle_term": False,
-                "stretch_bend_term": False,
-                "oop_term": False,
-                "torsion_term": False,
-            },
-            100.0,
-            True,
-            id="term-toggles",
-        ),
-        pytest.param(
-            make_fragmented_mol,
-            None,
-            25.0,
-            False,
-            id="interfragment-interactions",
-        ),
-    ],
-)
-def test_mmff_batched_forcefield_properties_match_rdkit(
-    mol_factory, property_settings, non_bonded_threshold, ignore_interfrag_interactions
-):
-    mol = mol_factory()
-    properties = None if property_settings is None else make_rdkit_mmff_properties(mol, property_settings)
-    assert_single_batched_matches_rdkit(
-        mol,
-        properties=properties,
-        nonBondedThreshold=non_bonded_threshold,
-        ignoreInterfragInteractions=ignore_interfrag_interactions,
-    )
-
-
-def test_mmff_batched_forcefield_per_molecule_properties_match_rdkit():
-    mols = [make_embedded_mol("CCO"), make_fragmented_mol()]
+    Each spec is a dict with keys:
+        factory: callable returning an RDKit mol
+        property_settings (optional): dict for ``make_rdkit_mmff_properties`` or ``None``
+        non_bonded_threshold (optional): defaults to 100.0
+        ignore_interfrag_interactions (optional): defaults to True
+        configure_batch (optional): ``lambda element: ...`` adding a constraint
+        configure_rdkit (optional): ``lambda ff: ...`` adding the matching RDKit constraint
+    """
+    mols = [spec["factory"]() for spec in mol_specs]
     properties = [
-        make_rdkit_mmff_properties(mols[0], {"dielectric_constant": 3.0, "dielectric_model": 2}),
-        make_rdkit_mmff_properties(mols[1]),
+        make_rdkit_mmff_properties(mol, spec["property_settings"]) if spec.get("property_settings") else None
+        for mol, spec in zip(mols, mol_specs)
     ]
-    non_bonded_thresholds = [100.0, 20.0]
-    ignore_interfrag_interactions = [True, False]
+    thresholds = [spec.get("non_bonded_threshold", 100.0) for spec in mol_specs]
+    interfrags = [spec.get("ignore_interfrag_interactions", True) for spec in mol_specs]
 
-    ff = MMFFBatchedForcefield(
+    forcefield = MMFFBatchedForcefield(
         clone_mols(mols),
         properties=properties,
-        nonBondedThreshold=non_bonded_thresholds,
-        ignoreInterfragInteractions=ignore_interfrag_interactions,
+        nonBondedThreshold=thresholds,
+        ignoreInterfragInteractions=interfrags,
     )
-    got_energies = ff.compute_energy()
-    got_grads = ff.compute_gradients()
+    for mol_idx, spec in enumerate(mol_specs):
+        if spec.get("configure_batch") is not None:
+            spec["configure_batch"](forcefield[mol_idx])
+    got_energies = forcefield.compute_energy()
+    got_grads = forcefield.compute_gradients()
 
-    for idx, (mol, prop) in enumerate(zip(mols, properties)):
+    want_energies = []
+    want_grads = []
+    for mol, spec, prop, threshold, interfrag in zip(mols, mol_specs, properties, thresholds, interfrags):
         want_energy, want_grad = get_mmff_reference_energy_and_grad(
             Chem.Mol(mol),
             properties=prop,
-            nonBondedThreshold=non_bonded_thresholds[idx],
-            ignoreInterfragInteractions=ignore_interfrag_interactions[idx],
+            nonBondedThreshold=threshold,
+            ignoreInterfragInteractions=interfrag,
+            configure_forcefield=spec.get("configure_rdkit"),
         )
-        assert_energy_and_gradient_close(got_energies[idx][0], want_energy, got_grads[idx][0], want_grad)
+        want_energies.append(want_energy)
+        want_grads.append(want_grad)
+
+    for mol_idx in range(len(mol_specs)):
+        assert_energy_and_gradient_close(
+            got_energies[mol_idx][0], want_energies[mol_idx], got_grads[mol_idx][0], want_grads[mol_idx]
+        )
+
+    if not any(spec.get("configure_batch") is not None for spec in mol_specs):
+        return
+
+    unconstrained_forcefield = MMFFBatchedForcefield(
+        clone_mols(mols),
+        properties=properties,
+        nonBondedThreshold=thresholds,
+        ignoreInterfragInteractions=interfrags,
+    )
+    unconstrained_energies = unconstrained_forcefield.compute_energy()
+    unconstrained_grads = unconstrained_forcefield.compute_gradients()
+
+    for mol_idx, (mol, spec, prop, threshold, interfrag) in enumerate(
+        zip(mols, mol_specs, properties, thresholds, interfrags)
+    ):
+        if spec.get("configure_batch") is None:
+            continue
+        want_unconstrained_energy, want_unconstrained_grad = get_mmff_reference_energy_and_grad(
+            Chem.Mol(mol),
+            properties=prop,
+            nonBondedThreshold=threshold,
+            ignoreInterfragInteractions=interfrag,
+        )
+        rdkit_energy_delta = abs(want_energies[mol_idx] - want_unconstrained_energy)
+        rdkit_grad_delta = max(
+            abs(got_component - want_component)
+            for got_component, want_component in zip(want_grads[mol_idx], want_unconstrained_grad)
+        )
+        if rdkit_energy_delta <= 1e-6 and rdkit_grad_delta <= 1e-6:
+            continue
+        assert abs(got_energies[mol_idx][0] - unconstrained_energies[mol_idx][0]) > 1e-6, (
+            f"mol {mol_idx}: constraint had no observable effect on energy"
+        )
+        assert (
+            max(
+                abs(got_component - unconstrained_component)
+                for got_component, unconstrained_component in zip(
+                    got_grads[mol_idx][0], unconstrained_grads[mol_idx][0]
+                )
+            )
+            > 1e-6
+        ), f"mol {mol_idx}: constraint had no observable effect on gradient"
+
+
+def test_mmff_batched_forcefield_properties_match_rdkit():
+    """Batch of mols with varied per-mol property configurations (default, MMFF variant,
+    dielectric model, term toggles, fragmented+interfrag)."""
+    _assert_batched_compute_matches_rdkit_mmff(
+        [
+            {"factory": load_reference_mol},
+            {"factory": lambda: make_embedded_mol("CC(=O)NC"), "property_settings": {"variant": "MMFF94s"}},
+            {
+                "factory": load_reference_mol,
+                "property_settings": {"dielectric_constant": 2.5, "dielectric_model": 2},
+            },
+            {
+                "factory": load_reference_mol,
+                "property_settings": {
+                    "bond_term": False,
+                    "angle_term": False,
+                    "stretch_bend_term": False,
+                    "oop_term": False,
+                    "torsion_term": False,
+                },
+            },
+            {
+                "factory": make_fragmented_mol,
+                "non_bonded_threshold": 25.0,
+                "ignore_interfrag_interactions": False,
+            },
+        ]
+    )
+
+
+def test_mmff_batched_forcefield_constraints_match_rdkit():
+    """Batch of mols with all 5 MMFF constraint types applied (one per mol), some also
+    carrying non-default property settings to exercise the properties+constraints path."""
+    _assert_batched_compute_matches_rdkit_mmff(
+        [
+            {
+                "factory": lambda: make_embedded_mol("CCO"),
+                "configure_batch": lambda element: element.add_distance_constraint(0, 2, False, 0.0, 1.5, 25.0),
+                "configure_rdkit": lambda ff: ff.MMFFAddDistanceConstraint(0, 2, False, 0.0, 1.5, 25.0),
+            },
+            {
+                "factory": lambda: make_embedded_mol("CCO"),
+                "property_settings": {"dielectric_constant": 2.0, "dielectric_model": 2},
+                "configure_batch": lambda element: element.add_distance_constraint(0, 2, True, 0.3, 0.6, 15.0),
+                "configure_rdkit": lambda ff: ff.MMFFAddDistanceConstraint(0, 2, True, 0.3, 0.6, 15.0),
+            },
+            {
+                "factory": lambda: make_embedded_mol("CCO"),
+                "configure_batch": lambda element: element.add_position_constraint(0, 0.1, 50.0),
+                "configure_rdkit": lambda ff: ff.MMFFAddPositionConstraint(0, 0.1, 50.0),
+            },
+            {
+                "factory": lambda: make_embedded_mol("CCC"),
+                "configure_batch": lambda element: element.add_angle_constraint(0, 1, 2, True, 5.0, 10.0, 20.0),
+                "configure_rdkit": lambda ff: ff.MMFFAddAngleConstraint(0, 1, 2, True, 5.0, 10.0, 20.0),
+            },
+            {
+                "factory": lambda: make_embedded_mol("CCCC"),
+                "property_settings": {"variant": "MMFF94s"},
+                "configure_batch": lambda element: element.add_torsion_constraint(0, 1, 2, 3, True, 15.0, 30.0, 12.0),
+                "configure_rdkit": lambda ff: ff.MMFFAddTorsionConstraint(0, 1, 2, 3, True, 15.0, 30.0, 12.0),
+            },
+        ]
+    )
 
 
 def test_mmff_batched_forcefield_multi_conformer_matches_rdkit():
@@ -301,108 +369,215 @@ def test_mmff_batched_forcefield_multi_conformer_matches_rdkit():
                 )
 
 
-def test_mmff_batched_forcefield_lazy_build_and_rebuild():
+@pytest.mark.parametrize(
+    "ff_factory",
+    [
+        pytest.param(lambda mols: MMFFBatchedForcefield(mols), id="mmff"),
+        pytest.param(lambda mols: UFFBatchedForcefield(mols), id="uff"),
+    ],
+)
+def test_batched_forcefield_metadata_and_element_view(ff_factory):
+    mols = [make_embedded_mol("CCO"), make_embedded_mol("CCCC")]
+    forcefield = ff_factory(clone_mols(mols))
+
+    assert len(forcefield) == len(mols)
+    assert forcefield.num_molecules == len(mols)
+    assert forcefield.data_dim == 3
+    for mol_idx, mol in enumerate(mols):
+        assert forcefield[mol_idx].num_atoms == mol.GetNumAtoms()
+
+
+@pytest.mark.parametrize(
+    "ff_factory",
+    [
+        pytest.param(lambda mols: MMFFBatchedForcefield(mols), id="mmff"),
+        pytest.param(lambda mols: UFFBatchedForcefield(mols), id="uff"),
+    ],
+)
+def test_batched_forcefield_lazy_build_and_rebuild(ff_factory):
     mol = make_embedded_mol("CCO")
-    ff = MMFFBatchedForcefield([Chem.Mol(mol)])
+    forcefield = ff_factory([Chem.Mol(mol)])
 
-    assert ff._native_ff is None
-    assert ff._dirty is True
+    assert forcefield._native_ff is None
+    assert forcefield._dirty is True
 
-    first_energy = ff.compute_energy()[0][0]
-    first_native = ff._native_ff
+    first_energy = forcefield.compute_energy()[0][0]
+    first_native = forcefield._native_ff
 
     assert first_native is not None
-    assert ff._dirty is False
-    assert ff.compute_energy()[0][0] == pytest.approx(first_energy, rel=1e-5, abs=1e-5)
-    assert ff._native_ff is first_native
+    assert forcefield._dirty is False
+    assert forcefield.compute_energy()[0][0] == pytest.approx(first_energy, rel=1e-5, abs=1e-5)
+    assert forcefield._native_ff is first_native
 
-    ff[0].add_distance_constraint(0, 2, True, 0.2, 0.4, 25.0)
-    assert ff._dirty is True
+    forcefield[0].add_distance_constraint(0, 2, True, 0.2, 0.4, 25.0)
+    assert forcefield._dirty is True
 
-    ff.rebuild()
-    assert ff._dirty is False
-    assert ff._native_ff is not first_native
+    forcefield.rebuild()
+    assert forcefield._dirty is False
+    assert forcefield._native_ff is not first_native
 
 
-def test_mmff_batched_forcefield_invalid_indices():
-    ff = MMFFBatchedForcefield([make_embedded_mol("CCO")])
+@pytest.mark.parametrize(
+    "ff_factory",
+    [
+        pytest.param(lambda mols: MMFFBatchedForcefield(mols), id="mmff"),
+        pytest.param(lambda mols: UFFBatchedForcefield(mols), id="uff"),
+    ],
+)
+@pytest.mark.parametrize(
+    "apply_bad_constraint",
+    [
+        pytest.param(lambda element: element.add_distance_constraint(0, 99, False, 0.0, 1.0, 10.0), id="distance"),
+        pytest.param(lambda element: element.add_position_constraint(99, 0.1, 10.0), id="position"),
+        pytest.param(lambda element: element.add_angle_constraint(0, 1, 99, True, 0.0, 10.0, 10.0), id="angle"),
+        pytest.param(lambda element: element.add_torsion_constraint(0, 1, 2, 99, True, 0.0, 10.0, 10.0), id="torsion"),
+    ],
+)
+def test_batched_forcefield_invalid_indices(ff_factory, apply_bad_constraint):
+    forcefield = ff_factory([make_embedded_mol("CCCC")])
 
     with pytest.raises(IndexError, match="Batch element index"):
-        ff[1]
+        forcefield[1]
 
     with pytest.raises(IndexError, match="Atom index"):
-        ff[0].add_distance_constraint(0, 99, False, 0.0, 1.0, 10.0)
+        apply_bad_constraint(forcefield[0])
 
 
-def test_mmff_distance_constraint_matches_rdkit():
-    mol = make_embedded_mol("CCO")
-    assert_single_batched_matches_rdkit(
-        mol,
-        configure_batch=lambda element: element.add_distance_constraint(0, 2, False, 0.0, 1.5, 25.0),
-        configure_rdkit=lambda ff: ff.MMFFAddDistanceConstraint(0, 2, False, 0.0, 1.5, 25.0),
-    )
+# Per-mol constraint specs used across batched MMFF tests. Each entry drives both the
+# nvMolKit constraint application and the matching RDKit reference. Different atom indices,
+# constraint kinds, and parameter magnitudes verify the batched path routes each mol's
+# constraints correctly.
+_MMFF_BATCH_CONSTRAINT_SPECS = [
+    {
+        "smiles": "CCCCO",
+        "num_confs": 3,
+        "apply": lambda element: element.add_distance_constraint(0, 2, True, -0.05, 0.05, 100.0),
+        "apply_rdkit": lambda ff: ff.MMFFAddDistanceConstraint(0, 2, True, -0.05, 0.05, 100.0),
+    },
+    {
+        "smiles": "CCCCCCO",
+        "num_confs": 2,
+        "apply": lambda element: element.add_angle_constraint(0, 1, 2, True, -5.0, 5.0, 30.0),
+        "apply_rdkit": lambda ff: ff.MMFFAddAngleConstraint(0, 1, 2, True, -5.0, 5.0, 30.0),
+    },
+    {
+        "smiles": "c1ccccc1CCO",
+        "num_confs": 4,
+        "apply": lambda element: element.add_position_constraint(0, 0.1, 50.0),
+        "apply_rdkit": lambda ff: ff.MMFFAddPositionConstraint(0, 0.1, 50.0),
+    },
+    {
+        "smiles": "CCCC",
+        "num_confs": 2,
+        "apply": lambda element: element.add_torsion_constraint(0, 1, 2, 3, True, -10.0, 10.0, 15.0),
+        "apply_rdkit": lambda ff: ff.MMFFAddTorsionConstraint(0, 1, 2, 3, True, -10.0, 10.0, 15.0),
+    },
+]
 
 
-def test_mmff_distance_relative_constraint_matches_rdkit():
-    mol = make_embedded_mol("CCO")
-    assert_single_batched_matches_rdkit(
-        mol,
-        configure_batch=lambda element: element.add_distance_constraint(0, 2, True, 0.3, 0.6, 15.0),
-        configure_rdkit=lambda ff: ff.MMFFAddDistanceConstraint(0, 2, True, 0.3, 0.6, 15.0),
-    )
+def _build_constrained_mmff_batch(specs=_MMFF_BATCH_CONSTRAINT_SPECS, hardwareOptions=None):
+    mols = [perturb_conformers(make_embedded_mol(s["smiles"], num_confs=s["num_confs"])) for s in specs]
+    ff_mols = clone_mols(mols)
+    ff = MMFFBatchedForcefield(ff_mols, hardwareOptions=hardwareOptions)
+    for idx, spec in enumerate(specs):
+        spec["apply"](ff[idx])
+    return mols, ff_mols, ff
 
 
-def test_mmff_position_constraint_matches_rdkit_reference_pose():
-    mol = make_embedded_mol("CCO")
-    assert_single_batched_matches_rdkit(
-        mol,
-        configure_batch=lambda element: element.add_position_constraint(0, 0.1, 50.0),
-        configure_rdkit=lambda ff: ff.MMFFAddPositionConstraint(0, 0.1, 50.0),
-    )
+def _assert_batched_minimize_matches_rdkit(specs, mols, opt_energies, converged, make_ref_ff):
+    """Compare nvMolKit minimize() result to RDKit minimize per (mol, conformer), with each
+    mol carrying a different constraint from `specs`."""
+    for mol_idx, (mol, spec) in enumerate(zip(mols, specs)):
+        assert len(opt_energies[mol_idx]) == mol.GetNumConformers()
+        assert all(converged[mol_idx]), f"Mol {mol_idx} failed to converge"
+
+        for conf_idx, conf in enumerate(mol.GetConformers()):
+            ref_mol = Chem.Mol(mol)
+            ref_ff = make_ref_ff(ref_mol, conf.GetId())
+            spec["apply_rdkit"](ref_ff)
+            ref_ff.Minimize(maxIts=500)
+            want_energy = ref_ff.CalcEnergy()
+            assert opt_energies[mol_idx][conf_idx] == pytest.approx(want_energy, rel=1e-3, abs=1e-3)
 
 
-def test_mmff_angle_constraint_matches_rdkit():
-    mol = make_embedded_mol("CCC")
-    assert_single_batched_matches_rdkit(
-        mol,
-        configure_batch=lambda element: element.add_angle_constraint(0, 1, 2, True, 5.0, 10.0, 20.0),
-        configure_rdkit=lambda ff: ff.MMFFAddAngleConstraint(0, 1, 2, True, 5.0, 10.0, 20.0),
-    )
+def test_mmff_batched_minimize_with_constraints_batch_matches_rdkit():
+    """Batch minimize with different constraint types on different-size mols
+    and different conformer counts, comparing each (mol, conformer) energy
+    to RDKit's minimize with the same constraint."""
+    mols, _, ff = _build_constrained_mmff_batch()
+    opt_energies, converged = ff.minimize(maxIters=500)
+
+    def make_ref(mol, conf_id):
+        return make_rdkit_mmff_forcefield(mol, conf_id=conf_id)
+
+    _assert_batched_minimize_matches_rdkit(_MMFF_BATCH_CONSTRAINT_SPECS, mols, opt_energies, converged, make_ref)
 
 
-def test_mmff_torsion_constraint_matches_rdkit():
-    mol = make_embedded_mol("CCCC")
-    assert_single_batched_matches_rdkit(
-        mol,
-        configure_batch=lambda element: element.add_torsion_constraint(0, 1, 2, 3, True, 15.0, 30.0, 12.0),
-        configure_rdkit=lambda ff: ff.MMFFAddTorsionConstraint(0, 1, 2, 3, True, 15.0, 30.0, 12.0),
-    )
-
-
-def test_mmff_mixed_properties_and_constraints_batch_matches_rdkit():
-    mols = [make_embedded_mol("CCO"), make_embedded_mol("CCCC")]
-    properties = [
-        make_rdkit_mmff_properties(mols[0], {"dielectric_constant": 2.0, "dielectric_model": 2}),
-        make_rdkit_mmff_properties(mols[1], {"variant": "MMFF94s"}),
+def test_mmff_batched_minimize_respects_maxiters_and_forcetol():
+    """maxIters and forceTol must be plumbed through: a single-iteration minimize
+    should not converge and should leave energies closer to the starting point
+    than a generous-iteration minimize."""
+    perturbed_mols = [
+        perturb_conformers(make_embedded_mol("CCCO", num_confs=2)),
+        perturb_conformers(make_embedded_mol("c1ccccc1CCO", num_confs=2)),
     ]
-    ff = MMFFBatchedForcefield(clone_mols(mols), properties=properties)
-    ff[0].add_distance_constraint(0, 2, True, 0.2, 0.5, 20.0)
-    ff[1].add_torsion_constraint(0, 1, 2, 3, True, 10.0, 20.0, 8.0)
+    starting_energies = MMFFBatchedForcefield(clone_mols(perturbed_mols)).compute_energy()
 
-    got_energies = ff.compute_energy()
-    got_grads = ff.compute_gradients()
+    tight_ff = MMFFBatchedForcefield(clone_mols(perturbed_mols))
+    tight_energies, tight_converged = tight_ff.minimize(maxIters=1, forceTol=1e-12)
+    for mol_converged in tight_converged:
+        assert not any(mol_converged), "1 iteration at 1e-12 forceTol should not converge"
 
-    ref_specs = [
-        lambda forcefield: forcefield.MMFFAddDistanceConstraint(0, 2, True, 0.2, 0.5, 20.0),
-        lambda forcefield: forcefield.MMFFAddTorsionConstraint(0, 1, 2, 3, True, 10.0, 20.0, 8.0),
-    ]
-    for idx, (mol, prop, configure_forcefield) in enumerate(zip(mols, properties, ref_specs)):
-        want_energy, want_grad = get_mmff_reference_energy_and_grad(
-            Chem.Mol(mol),
-            properties=prop,
-            configure_forcefield=configure_forcefield,
-        )
-        assert_energy_and_gradient_close(got_energies[idx][0], want_energy, got_grads[idx][0], want_grad)
+    loose_ff = MMFFBatchedForcefield(clone_mols(perturbed_mols))
+    loose_energies, loose_converged = loose_ff.minimize(maxIters=500, forceTol=1e-4)
+    for mol_converged in loose_converged:
+        assert all(mol_converged), "500 iterations at 1e-4 forceTol should converge"
+
+    for mol_idx in range(len(perturbed_mols)):
+        for conf_idx in range(len(starting_energies[mol_idx])):
+            assert loose_energies[mol_idx][conf_idx] < tight_energies[mol_idx][conf_idx], (
+                "loose minimize should reach lower energy than 1-iter minimize"
+            )
+            assert tight_energies[mol_idx][conf_idx] <= starting_energies[mol_idx][conf_idx] + 1e-6, (
+                "1-iter minimize should not increase energy above starting point"
+            )
+
+
+@pytest.mark.parametrize("batch_size", [0, 2])
+@pytest.mark.parametrize("batches_per_gpu", [1, 3])
+def test_mmff_batched_minimize_single_gpu_hardware_options_matches_default(batch_size, batches_per_gpu):
+    """HardwareOptions must produce same results as default on a varied constrained batch."""
+    _, _, default_ff = _build_constrained_mmff_batch()
+    default_energies, default_converged = default_ff.minimize(maxIters=500)
+
+    hw_opts = HardwareOptions(gpuIds=[0], batchSize=batch_size, batchesPerGpu=batches_per_gpu)
+    _, _, tuned_ff = _build_constrained_mmff_batch(hardwareOptions=hw_opts)
+    tuned_energies, tuned_converged = tuned_ff.minimize(maxIters=500)
+
+    assert tuned_converged == default_converged
+    for mol_idx in range(len(tuned_energies)):
+        for conf_idx in range(len(default_energies[mol_idx])):
+            assert tuned_energies[mol_idx][conf_idx] == pytest.approx(
+                default_energies[mol_idx][conf_idx], rel=1e-4, abs=1e-4
+            )
+
+
+def test_mmff_batched_minimize_multi_gpu_matches_single_gpu():
+    if torch.cuda.device_count() < 2:
+        pytest.skip("Test requires at least 2 GPUs")
+
+    _, _, single_ff = _build_constrained_mmff_batch(hardwareOptions=HardwareOptions(gpuIds=[0]))
+    single_energies, single_converged = single_ff.minimize(maxIters=500)
+
+    _, _, multi_ff = _build_constrained_mmff_batch(hardwareOptions=HardwareOptions(gpuIds=[0, 1]))
+    multi_energies, multi_converged = multi_ff.minimize(maxIters=500)
+
+    assert multi_converged == single_converged
+    for mol_idx in range(len(single_energies)):
+        for conf_idx in range(len(single_energies[mol_idx])):
+            assert multi_energies[mol_idx][conf_idx] == pytest.approx(
+                single_energies[mol_idx][conf_idx], rel=1e-4, abs=1e-4
+            )
 
 
 def make_rdkit_uff_forcefield(
@@ -438,14 +613,128 @@ def get_uff_reference_energy_and_grad(
     return ff.CalcEnergy(), list(ff.CalcGrad())
 
 
-def test_uff_batched_forcefield_matches_rdkit():
-    mol = make_embedded_mol("CCO")
-    nvmolkit_mol = Chem.Mol(mol)
-    ff = UFFBatchedForcefield([nvmolkit_mol])
-    got_energy = ff.compute_energy()[0][0]
-    got_grad = ff.compute_gradients()[0][0]
-    want_energy, want_grad = get_uff_reference_energy_and_grad(Chem.Mol(mol))
-    assert_energy_and_gradient_close(got_energy, want_energy, got_grad, want_grad)
+def _assert_batched_compute_matches_rdkit_uff(mol_specs):
+    """UFF analog of _assert_batched_compute_matches_rdkit_mmff.
+
+    Each spec is a dict with keys:
+        factory: callable returning an RDKit mol
+        vdw_threshold (optional): defaults to 10.0
+        ignore_interfrag_interactions (optional): defaults to True
+        configure_batch (optional): ``lambda element: ...`` adding a constraint
+        configure_rdkit (optional): ``lambda ff: ...`` adding the matching RDKit constraint
+    """
+    mols = [spec["factory"]() for spec in mol_specs]
+    vdw_thresholds = [spec.get("vdw_threshold", 10.0) for spec in mol_specs]
+    interfrags = [spec.get("ignore_interfrag_interactions", True) for spec in mol_specs]
+
+    forcefield = UFFBatchedForcefield(
+        clone_mols(mols), vdwThreshold=vdw_thresholds, ignoreInterfragInteractions=interfrags
+    )
+    for mol_idx, spec in enumerate(mol_specs):
+        if spec.get("configure_batch") is not None:
+            spec["configure_batch"](forcefield[mol_idx])
+    got_energies = forcefield.compute_energy()
+    got_grads = forcefield.compute_gradients()
+
+    want_energies = []
+    want_grads = []
+    for mol, spec, vdw_threshold, interfrag in zip(mols, mol_specs, vdw_thresholds, interfrags):
+        want_energy, want_grad = get_uff_reference_energy_and_grad(
+            Chem.Mol(mol),
+            vdwThreshold=vdw_threshold,
+            ignoreInterfragInteractions=interfrag,
+            configure_forcefield=spec.get("configure_rdkit"),
+        )
+        want_energies.append(want_energy)
+        want_grads.append(want_grad)
+
+    for mol_idx in range(len(mol_specs)):
+        assert_energy_and_gradient_close(
+            got_energies[mol_idx][0], want_energies[mol_idx], got_grads[mol_idx][0], want_grads[mol_idx]
+        )
+
+    if not any(spec.get("configure_batch") is not None for spec in mol_specs):
+        return
+
+    unconstrained_forcefield = UFFBatchedForcefield(
+        clone_mols(mols), vdwThreshold=vdw_thresholds, ignoreInterfragInteractions=interfrags
+    )
+    unconstrained_energies = unconstrained_forcefield.compute_energy()
+    unconstrained_grads = unconstrained_forcefield.compute_gradients()
+
+    for mol_idx, (mol, spec, vdw_threshold, interfrag) in enumerate(zip(mols, mol_specs, vdw_thresholds, interfrags)):
+        if spec.get("configure_batch") is None:
+            continue
+        want_unconstrained_energy, want_unconstrained_grad = get_uff_reference_energy_and_grad(
+            Chem.Mol(mol), vdwThreshold=vdw_threshold, ignoreInterfragInteractions=interfrag
+        )
+        rdkit_energy_delta = abs(want_energies[mol_idx] - want_unconstrained_energy)
+        rdkit_grad_delta = max(
+            abs(got_component - want_component)
+            for got_component, want_component in zip(want_grads[mol_idx], want_unconstrained_grad)
+        )
+        if rdkit_energy_delta <= 1e-6 and rdkit_grad_delta <= 1e-6:
+            continue
+        assert abs(got_energies[mol_idx][0] - unconstrained_energies[mol_idx][0]) > 1e-6, (
+            f"mol {mol_idx}: constraint had no observable effect on energy"
+        )
+        assert (
+            max(
+                abs(got_component - unconstrained_component)
+                for got_component, unconstrained_component in zip(
+                    got_grads[mol_idx][0], unconstrained_grads[mol_idx][0]
+                )
+            )
+            > 1e-6
+        ), f"mol {mol_idx}: constraint had no observable effect on gradient"
+
+
+def test_uff_batched_forcefield_settings_match_rdkit():
+    """Batch of mols with varied vdw thresholds and interfragment settings."""
+    _assert_batched_compute_matches_rdkit_uff(
+        [
+            {"factory": lambda: make_embedded_mol("CCO")},
+            {"factory": lambda: make_embedded_mol("CC(=O)NC")},
+            {
+                "factory": make_fragmented_mol,
+                "vdw_threshold": 5.0,
+                "ignore_interfrag_interactions": False,
+            },
+        ]
+    )
+
+
+def test_uff_batched_forcefield_constraints_match_rdkit():
+    """Batch of mols with all 5 UFF constraint types applied (one per mol)."""
+    _assert_batched_compute_matches_rdkit_uff(
+        [
+            {
+                "factory": lambda: make_embedded_mol("CCO"),
+                "configure_batch": lambda element: element.add_distance_constraint(0, 2, False, 0.0, 1.5, 25.0),
+                "configure_rdkit": lambda ff: ff.UFFAddDistanceConstraint(0, 2, False, 0.0, 1.5, 25.0),
+            },
+            {
+                "factory": lambda: make_embedded_mol("CCO"),
+                "configure_batch": lambda element: element.add_distance_constraint(0, 2, True, 0.3, 0.6, 15.0),
+                "configure_rdkit": lambda ff: ff.UFFAddDistanceConstraint(0, 2, True, 0.3, 0.6, 15.0),
+            },
+            {
+                "factory": lambda: make_embedded_mol("CCO"),
+                "configure_batch": lambda element: element.add_position_constraint(0, 0.1, 50.0),
+                "configure_rdkit": lambda ff: ff.UFFAddPositionConstraint(0, 0.1, 50.0),
+            },
+            {
+                "factory": lambda: make_embedded_mol("CCC"),
+                "configure_batch": lambda element: element.add_angle_constraint(0, 1, 2, True, 5.0, 10.0, 20.0),
+                "configure_rdkit": lambda ff: ff.UFFAddAngleConstraint(0, 1, 2, True, 5.0, 10.0, 20.0),
+            },
+            {
+                "factory": lambda: make_embedded_mol("CCCC"),
+                "configure_batch": lambda element: element.add_torsion_constraint(0, 1, 2, 3, True, 15.0, 30.0, 12.0),
+                "configure_rdkit": lambda ff: ff.UFFAddTorsionConstraint(0, 1, 2, 3, True, 15.0, 30.0, 12.0),
+            },
+        ]
+    )
 
 
 def test_uff_batched_forcefield_multi_conformer_matches_rdkit():
@@ -484,3 +773,88 @@ def test_uff_batched_forcefield_multi_conformer_matches_rdkit():
                 assert abs(got.x - orig.x) > 1e-10 or abs(got.y - orig.y) > 1e-10 or abs(got.z - orig.z) > 1e-10, (
                     f"Mol {mol_idx} conformer {conf_idx} positions were not written back"
                 )
+
+
+_UFF_BATCH_CONSTRAINT_SPECS = [
+    {
+        "smiles": "CCCCO",
+        "num_confs": 3,
+        "apply": lambda element: element.add_distance_constraint(0, 2, True, -0.05, 0.05, 100.0),
+        "apply_rdkit": lambda ff: ff.UFFAddDistanceConstraint(0, 2, True, -0.05, 0.05, 100.0),
+    },
+    {
+        "smiles": "CCCCCCO",
+        "num_confs": 2,
+        "apply": lambda element: element.add_angle_constraint(0, 1, 2, True, -5.0, 5.0, 30.0),
+        "apply_rdkit": lambda ff: ff.UFFAddAngleConstraint(0, 1, 2, True, -5.0, 5.0, 30.0),
+    },
+    {
+        "smiles": "c1ccccc1CCO",
+        "num_confs": 4,
+        "apply": lambda element: element.add_position_constraint(0, 0.1, 50.0),
+        "apply_rdkit": lambda ff: ff.UFFAddPositionConstraint(0, 0.1, 50.0),
+    },
+    {
+        "smiles": "CCCC",
+        "num_confs": 2,
+        "apply": lambda element: element.add_torsion_constraint(0, 1, 2, 3, True, -10.0, 10.0, 15.0),
+        "apply_rdkit": lambda ff: ff.UFFAddTorsionConstraint(0, 1, 2, 3, True, -10.0, 10.0, 15.0),
+    },
+]
+
+
+def _build_constrained_uff_batch(specs=_UFF_BATCH_CONSTRAINT_SPECS, hardwareOptions=None):
+    mols = [perturb_conformers(make_embedded_mol(s["smiles"], num_confs=s["num_confs"])) for s in specs]
+    ff_mols = clone_mols(mols)
+    ff = UFFBatchedForcefield(ff_mols, hardwareOptions=hardwareOptions)
+    for idx, spec in enumerate(specs):
+        spec["apply"](ff[idx])
+    return mols, ff_mols, ff
+
+
+def test_uff_batched_minimize_with_constraints_batch_matches_rdkit():
+    mols, _, ff = _build_constrained_uff_batch()
+    opt_energies, converged = ff.minimize(maxIters=500)
+
+    def make_ref(mol, conf_id):
+        ref_ff = make_rdkit_uff_forcefield(mol, conf_id=conf_id)
+        ref_ff.Initialize()
+        return ref_ff
+
+    _assert_batched_minimize_matches_rdkit(_UFF_BATCH_CONSTRAINT_SPECS, mols, opt_energies, converged, make_ref)
+
+
+@pytest.mark.parametrize("batch_size", [0, 2])
+@pytest.mark.parametrize("batches_per_gpu", [1, 3])
+def test_uff_batched_minimize_single_gpu_hardware_options_matches_default(batch_size, batches_per_gpu):
+    _, _, default_ff = _build_constrained_uff_batch()
+    default_energies, default_converged = default_ff.minimize(maxIters=500)
+
+    hw_opts = HardwareOptions(gpuIds=[0], batchSize=batch_size, batchesPerGpu=batches_per_gpu)
+    _, _, tuned_ff = _build_constrained_uff_batch(hardwareOptions=hw_opts)
+    tuned_energies, tuned_converged = tuned_ff.minimize(maxIters=500)
+
+    assert tuned_converged == default_converged
+    for mol_idx in range(len(tuned_energies)):
+        for conf_idx in range(len(default_energies[mol_idx])):
+            assert tuned_energies[mol_idx][conf_idx] == pytest.approx(
+                default_energies[mol_idx][conf_idx], rel=1e-4, abs=1e-4
+            )
+
+
+def test_uff_batched_minimize_multi_gpu_matches_single_gpu():
+    if torch.cuda.device_count() < 2:
+        pytest.skip("Test requires at least 2 GPUs")
+
+    _, _, single_ff = _build_constrained_uff_batch(hardwareOptions=HardwareOptions(gpuIds=[0]))
+    single_energies, single_converged = single_ff.minimize(maxIters=500)
+
+    _, _, multi_ff = _build_constrained_uff_batch(hardwareOptions=HardwareOptions(gpuIds=[0, 1]))
+    multi_energies, multi_converged = multi_ff.minimize(maxIters=500)
+
+    assert multi_converged == single_converged
+    for mol_idx in range(len(single_energies)):
+        for conf_idx in range(len(single_energies[mol_idx])):
+            assert multi_energies[mol_idx][conf_idx] == pytest.approx(
+                single_energies[mol_idx][conf_idx], rel=1e-4, abs=1e-4
+            )
