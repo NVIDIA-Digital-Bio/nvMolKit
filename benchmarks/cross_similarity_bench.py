@@ -24,6 +24,7 @@ from nvmolkit.fingerprints import MorganFingerprintGenerator
 
 
 SIZES = [2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000, 20000, 24000, 28000, 32000]
+CPU_SINGLE_VALUE_ABOVE = 6000
 
 
 def rdkit_sim(fps, sim_type):
@@ -52,6 +53,7 @@ args = runner.parse_args()
 sim_types = ("tanimoto", "cosine") if args.cosine else ("tanimoto",)
 fpsize = 1024
 max_size = max(SIZES)
+default_values = runner.args.values
 
 df = pd.read_csv(args.input)
 smis = df.iloc[:, 0].to_list()
@@ -73,8 +75,10 @@ for sim_type in sim_types:
         fps = rdkit_fps_all[:molNum]
         nvmolkit_fps_cu = nvmolkit_fps_all[:molNum].contiguous()
 
+        runner.args.values = 1 if molNum > CPU_SINGLE_VALUE_ABOVE else default_values
         name = f"rdkit_{sim_type}sim_fpsize_{fpsize}_{molNum}mols"
         runner.bench_func(name, rdkit_sim, fps, sim_type, metadata={"name": name})
 
+        runner.args.values = default_values
         name2 = f"nvmolkit_gpu-only_{sim_type}sim_fpsize_{fpsize}_{molNum}mols_gpu_only"
         runner.bench_func(name2, nvmolkit_sim_gpu_only, nvmolkit_fps_cu, sim_type, metadata={"name": name2})
