@@ -38,10 +38,21 @@ namespace ForceFields {
 /// the underlying \c MMFFMolProperties through its public shared_ptr member.
 /// The class has no virtual methods in RDKit, so only the single member needs
 /// to match for RTTI-based lookup to resolve.
+///
+/// \warning This is brittle and relies on Linux symbol resolution to make the
+/// \c type_info here compare equal to RDKit's. The long-term fix is for RDKit
+/// to expose the scalar-setting getters on its Python binding so this shim
+/// can go away.
+/// TODO: This will go away after https://github.com/rdkit/rdkit/issues/9253 is implemented
+///       but we'll need to keep it as backup as long as we support older versions of RDKit.
 class PyMMFFMolProperties {
  public:
   boost::shared_ptr<RDKit::MMFF::MMFFMolProperties> mmffMolProperties;
 };
+
+static_assert(sizeof(PyMMFFMolProperties) == sizeof(boost::shared_ptr<RDKit::MMFF::MMFFMolProperties>),
+              "nvMolKit's PyMMFFMolProperties shim must hold exactly one boost::shared_ptr; "
+              "adding fields or virtual methods here breaks the layout contract with RDKit.");
 
 }  // namespace ForceFields
 
