@@ -15,9 +15,9 @@
 
 """Batched forcefield wrappers with energy, gradient, and minimization support.
 
-This module provides :class:`MMFFBatchedForcefield` for GPU-accelerated
-evaluation and BFGS minimization of multiple molecules with multiple
-conformers each.
+This module provides :class:`MMFFBatchedForcefield` and
+:class:`UFFBatchedForcefield` for GPU-accelerated evaluation and BFGS
+minimization of multiple molecules with multiple conformers each.
 
 All conformers of each molecule are evaluated as a batch.  Properties and
 constraints are specified per-molecule and apply to every conformer of that
@@ -305,6 +305,22 @@ class MMFFBatchElement(_BatchElementBase):
     """
 
 
+class UFFBatchElement(_BatchElementBase):
+    """Per-molecule view for configuring one molecule in a UFF batch.
+
+    Retrieve an element with ``ff[i]`` and use it to add constraints for
+    that molecule.  Constraints apply to all conformers of the molecule.
+
+    Example:
+
+    .. code-block:: python
+
+       ff = UFFBatchedForcefield([mol_a, mol_b])
+       ff[0].add_position_constraint(0, 0.1, 50.0)
+       energies, converged = ff.minimize()
+    """
+
+
 def _normalize_scalar_or_list(value, n: int, name: str):
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
         if len(value) != n:
@@ -313,7 +329,107 @@ def _normalize_scalar_or_list(value, n: int, name: str):
     return [value for _ in range(n)]
 
 
-class MMFFBatchedForcefield:
+class _BatchedForcefieldBase:
+    """Shared implementation for MMFF and UFF batched forcefield wrappers."""
+
+    _element_class: type[_BatchElementBase] = _BatchElementBase
+
+    def _init_common(
+        self,
+        molecules: list["Mol"],
+        ignoreInterfragInteractions,
+        hardwareOptions: HardwareOptions | None,
+    ) -> None:
+        self._molecules = molecules
+        self._ignore_interfrag_interactions = _normalize_scalar_or_list(
+            ignoreInterfragInteractions, len(molecules), "ignoreInterfragInteractions"
+        )
+        self._hardware_options = hardwareOptions if hardwareOptions is not None else HardwareOptions()
+        self._distance_constraints: list[list[_DistanceConstraint]] = [[] for _ in molecules]
+        self._position_constraints: list[list[_PositionConstraint]] = [[] for _ in molecules]
+        self._angle_constraints: list[list[_AngleConstraint]] = [[] for _ in molecules]
+        self._torsion_constraints: list[list[_TorsionConstraint]] = [[] for _ in molecules]
+        self._native_ff = None
+        self._dirty = True
+        self.num_molecules = len(molecules)
+        self.data_dim = 3
+
+    def __len__(self) -> int:
+        """Return the number of molecules in the batch."""
+        return len(self._molecules)
+
+    def __getitem__(self, idx: int):
+        """Return a per-molecule view for adding constraints."""
+        if idx < 0 or idx >= len(self._molecules):
+            raise IndexError(f"Batch element index {idx} out of range")
+        return self._element_class(self, idx)
+
+    def _validate_atom_indices(self, batch_idx: int, *indices: int) -> None:
+        num_atoms = self._molecules[batch_idx].GetNumAtoms()
+        for idx in indices:
+            if idx < 0 or idx >= num_atoms:
+                raise IndexError(f"Atom index {idx} out of range for molecule {batch_idx} with {num_atoms} atoms")
+
+    def _serialized_constraints(self):
+        return _serialize_all_constraints(
+            self._distance_constraints,
+            self._position_constraints,
+            self._angle_constraints,
+            self._torsion_constraints,
+        )
+
+    def _build_native(self):
+        raise NotImplementedError
+
+    def _build(self) -> None:
+        """Build the native forcefield for the current batch settings."""
+        if not self._molecules:
+            self._native_ff = None
+            self._dirty = False
+            return
+        self._native_ff = self._build_native()
+        self._dirty = False
+
+    def _ensure_built(self) -> None:
+        if self._dirty or self._native_ff is None:
+            self._build()
+
+    def rebuild(self) -> None:
+        """Rebuild the forcefield after changing constraints or settings."""
+        self._build()
+
+    def compute_energy(self) -> list[list[float]]:
+        """Return forcefield energies for all conformers of all molecules.
+
+        Returns:
+            ``result[mol_idx][conf_idx]`` — one energy per conformer.
+        """
+        if not self._molecules:
+            return []
+        self._ensure_built()
+        return self._native_ff.computeEnergy()
+
+    def compute_gradients(self) -> list[list[list[float]]]:
+        """Return forcefield gradients for all conformers of all molecules.
+
+        Returns:
+            ``result[mol_idx][conf_idx]`` — one flattened ``[x0, y0, z0, ...]``
+            gradient vector per conformer.
+        """
+        if not self._molecules:
+            return []
+        self._ensure_built()
+        return self._native_ff.computeGradients()
+
+    def _minimize(self, maxIters: int, forceTol: float) -> tuple[list[list[float]], list[list[bool]]]:
+        if not self._molecules:
+            return [], []
+        self._ensure_built()
+        energies, converged = self._native_ff.minimize(maxIters, forceTol)
+        return energies, converged
+
+
+class MMFFBatchedForcefield(_BatchedForcefieldBase):
     """Evaluate MMFF energies and gradients, or run BFGS minimization, for a
     batch of molecules with all their conformers.
 
@@ -338,6 +454,8 @@ class MMFFBatchedForcefield:
        ff[0].add_distance_constraint(0, 4, False, 1.8, 2.2, 50.0)
        opt_energies, converged = ff.minimize()
     """
+
+    _element_class = MMFFBatchElement
 
     def __init__(
         self,
@@ -364,42 +482,14 @@ class MMFFBatchedForcefield:
             hardwareOptions: GPU device and batching configuration.  Uses
                 reasonable defaults when ``None``.
         """
-        self._molecules = molecules
+        self._init_common(molecules, ignoreInterfragInteractions, hardwareOptions)
         self._properties = self._normalize_properties(properties)
         self._non_bonded_thresholds = _normalize_scalar_or_list(
             nonBondedThreshold, len(molecules), "nonBondedThreshold"
         )
-        self._ignore_interfrag_interactions = _normalize_scalar_or_list(
-            ignoreInterfragInteractions, len(molecules), "ignoreInterfragInteractions"
-        )
-        self._hardware_options = hardwareOptions if hardwareOptions is not None else HardwareOptions()
-        self._distance_constraints: list[list[_DistanceConstraint]] = [[] for _ in molecules]
-        self._position_constraints: list[list[_PositionConstraint]] = [[] for _ in molecules]
-        self._angle_constraints: list[list[_AngleConstraint]] = [[] for _ in molecules]
-        self._torsion_constraints: list[list[_TorsionConstraint]] = [[] for _ in molecules]
-        self._native_ff = None
-        self._dirty = True
-        self.num_molecules = len(molecules)
-        self.data_dim = 3
-
-    def __len__(self) -> int:
-        """Return the number of molecules in the batch."""
-        return len(self._molecules)
 
     def __getitem__(self, idx: int) -> MMFFBatchElement:
-        """Return a per-molecule view for adding constraints.
-
-        Example:
-
-        .. code-block:: python
-
-           ff = MMFFBatchedForcefield([mol_a, mol_b, mol_c])
-           ff[1].add_angle_constraint(0, 1, 2, True, 5.0, 10.0, 50.0)
-           ff[2].add_position_constraint(3, 0.2, 100.0)
-        """
-        if idx < 0 or idx >= len(self._molecules):
-            raise IndexError(f"Batch element index {idx} out of range")
-        return MMFFBatchElement(self, idx)
+        return super().__getitem__(idx)
 
     def _normalize_properties(
         self, properties: "RDKitMMFFMolProperties | Sequence[RDKitMMFFMolProperties | None] | None"
@@ -412,32 +502,18 @@ class MMFFBatchedForcefield:
             return list(properties)
         return [properties for _ in self._molecules]
 
-    def _default_mmff_properties(self, mol: "Mol"):
-        return default_rdkit_mmff_properties(mol)
-
     def _copy_mmff_properties(
         self, mol: "Mol", properties, non_bonded_threshold: float, ignore_interfrag_interactions: bool
     ):
         """Convert RDKit MMFF properties into the native representation."""
-        source = self._default_mmff_properties(mol) if properties is None else properties
+        source = default_rdkit_mmff_properties(mol) if properties is None else properties
         return make_internal_mmff_properties(
             source,
             non_bonded_threshold=float(non_bonded_threshold),
             ignore_interfrag_interactions=bool(ignore_interfrag_interactions),
         )
 
-    def _validate_atom_indices(self, batch_idx: int, *indices: int) -> None:
-        num_atoms = self._molecules[batch_idx].GetNumAtoms()
-        for idx in indices:
-            if idx < 0 or idx >= num_atoms:
-                raise IndexError(f"Atom index {idx} out of range for molecule {batch_idx} with {num_atoms} atoms")
-
-    def _build(self) -> None:
-        """Build the native forcefield for the current batch settings."""
-        if not self._molecules:
-            self._native_ff = None
-            self._dirty = False
-            return
+    def _build_native(self):
         native_properties = [
             self._copy_mmff_properties(mol, props, threshold, ignore)
             for mol, props, threshold, ignore in zip(
@@ -447,13 +523,8 @@ class MMFFBatchedForcefield:
                 self._ignore_interfrag_interactions,
             )
         ]
-        dist, pos, ang, tor = _serialize_all_constraints(
-            self._distance_constraints,
-            self._position_constraints,
-            self._angle_constraints,
-            self._torsion_constraints,
-        )
-        self._native_ff = _batchedForcefield.NativeMMFFBatchedForcefield(
+        dist, pos, ang, tor = self._serialized_constraints()
+        return _batchedForcefield.NativeMMFFBatchedForcefield(
             self._molecules,
             native_properties,
             dist,
@@ -462,38 +533,6 @@ class MMFFBatchedForcefield:
             tor,
             self._hardware_options._as_native(),
         )
-        self._dirty = False
-
-    def _ensure_built(self) -> None:
-        if self._dirty or self._native_ff is None:
-            self._build()
-
-    def rebuild(self) -> None:
-        """Rebuild the forcefield after changing constraints or settings."""
-        self._build()
-
-    def compute_energy(self) -> list[list[float]]:
-        """Return MMFF energies for all conformers of all molecules.
-
-        Returns:
-            ``result[mol_idx][conf_idx]`` — one energy per conformer.
-        """
-        if not self._molecules:
-            return []
-        self._ensure_built()
-        return self._native_ff.computeEnergy()
-
-    def compute_gradients(self) -> list[list[list[float]]]:
-        """Return MMFF gradients for all conformers of all molecules.
-
-        Returns:
-            ``result[mol_idx][conf_idx]`` — one flattened ``[x0, y0, z0, ...]``
-            gradient vector per conformer.
-        """
-        if not self._molecules:
-            return []
-        self._ensure_built()
-        return self._native_ff.computeGradients()
 
     def minimize(self, maxIters: int = 200, forceTol: float = 1e-4) -> tuple[list[list[float]], list[list[bool]]]:
         """Run BFGS minimization on all conformers of all molecules.
@@ -510,8 +549,85 @@ class MMFFBatchedForcefield:
             ``[mol_idx][conf_idx]``.  Each *converged* entry is ``True``
             when that system satisfied *forceTol* within *maxIters*.
         """
-        if not self._molecules:
-            return [], []
-        self._ensure_built()
-        energies, converged = self._native_ff.minimize(maxIters, forceTol)
-        return energies, converged
+        return self._minimize(maxIters, forceTol)
+
+
+class UFFBatchedForcefield(_BatchedForcefieldBase):
+    """Evaluate UFF energies and gradients, or run BFGS minimization, for a
+    batch of molecules with all their conformers.
+
+    Constraints are per-molecule and are shared across all conformers of
+    that molecule.  Results are nested as ``list[list[...]]`` — outer
+    per-molecule, inner per-conformer.
+
+    Examples:
+
+    .. code-block:: python
+
+       ff = UFFBatchedForcefield([mol_a, mol_b])
+       energies = ff.compute_energy()  # [[...], [...]]
+
+    .. code-block:: python
+
+       ff = UFFBatchedForcefield([mol_a, mol_b])
+       ff[0].add_position_constraint(0, 0.1, 50.0)
+       opt_energies, converged = ff.minimize()
+    """
+
+    _element_class = UFFBatchElement
+
+    def __init__(
+        self,
+        molecules: list["Mol"],
+        vdwThreshold: float | Sequence[float] = 10.0,
+        ignoreInterfragInteractions: bool | Sequence[bool] = True,
+        hardwareOptions: HardwareOptions | None = None,
+    ):
+        """Create a batched UFF forcefield wrapper.
+
+        All conformers of each molecule are included in the batch
+        automatically.
+
+        Args:
+            molecules: RDKit molecules to evaluate.
+            vdwThreshold: Van der Waals threshold, scalar or per-molecule.
+            ignoreInterfragInteractions: Whether to omit interfragment
+                non-bonded interactions, as a scalar or per-molecule list.
+            hardwareOptions: GPU device and batching configuration.  Uses
+                reasonable defaults when ``None``.
+        """
+        self._init_common(molecules, ignoreInterfragInteractions, hardwareOptions)
+        self._vdw_thresholds = _normalize_scalar_or_list(vdwThreshold, len(molecules), "vdwThreshold")
+
+    def __getitem__(self, idx: int) -> UFFBatchElement:
+        return super().__getitem__(idx)
+
+    def _build_native(self):
+        dist, pos, ang, tor = self._serialized_constraints()
+        return _batchedForcefield.NativeUFFBatchedForcefield(
+            self._molecules,
+            [float(v) for v in self._vdw_thresholds],
+            [bool(v) for v in self._ignore_interfrag_interactions],
+            dist,
+            pos,
+            ang,
+            tor,
+            self._hardware_options._as_native(),
+        )
+
+    def minimize(self, maxIters: int = 1000, forceTol: float = 1e-4) -> tuple[list[list[float]], list[list[bool]]]:
+        """Run BFGS minimization on all conformers of all molecules.
+
+        Optimized coordinates are written back into the RDKit conformers
+        in-place.
+
+        Args:
+            maxIters: Maximum number of BFGS iterations.
+            forceTol: Gradient convergence tolerance.
+
+        Returns:
+            A tuple ``(energies, converged)`` where both have shape
+            ``[mol_idx][conf_idx]``.  Each *converged* entry is ``True``
+            when that system satisfied *forceTol* within *maxIters*.
+        """
+        return self._minimize(maxIters, forceTol)

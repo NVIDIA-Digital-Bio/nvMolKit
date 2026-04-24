@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "bfgs_mmff.h"
+#include "bfgs_uff.h"
 #include "boost_python_utils.h"
 #include "device_vector.h"
 #include "ff_utils.h"
@@ -30,6 +31,8 @@
 #include "mmff_flattened_builder.h"
 #include "mmff_properties.h"
 #include "mmff_python_utils.h"
+#include "uff_batched_forcefield.h"
+#include "uff_flattened_builder.h"
 
 namespace bp = boost::python;
 
@@ -88,9 +91,7 @@ bp::list nestedToList(const std::vector<std::vector<T>>& nested, Convert&& conve
   return outer;
 }
 
-}  // namespace
-
-static void throwIfCudaError(cudaError_t err, const std::string& context) {
+void throwIfCudaError(cudaError_t err, const std::string& context) {
   if (err != cudaSuccess) {
     throw std::runtime_error(context + ": " + cudaGetErrorString(err));
   }
@@ -102,6 +103,41 @@ template <typename T> std::vector<T> copyDeviceVector(nvMolKit::AsyncDeviceVecto
   cudaStreamSynchronize(deviceVec.stream());
   return hostVec;
 }
+
+void uploadConformerPositions(const std::vector<RDKit::ROMol*>&    mols,
+                              nvMolKit::AsyncDeviceVector<double>& positionsDevice) {
+  std::vector<double> allPositions;
+  for (auto* mol : mols) {
+    std::vector<double> pos;
+    for (auto confIter = mol->beginConformers(); confIter != mol->endConformers(); ++confIter) {
+      nvMolKit::confPosToVect(**confIter, pos);
+      allPositions.insert(allPositions.end(), pos.begin(), pos.end());
+    }
+  }
+  positionsDevice.copyFromHost(allPositions.data(), allPositions.size());
+  cudaStreamSynchronize(positionsDevice.stream());
+}
+
+bp::list computeBatchedEnergy(nvMolKit::BatchedForcefield&         forcefield,
+                              nvMolKit::AsyncDeviceVector<double>& positionsDevice,
+                              nvMolKit::AsyncDeviceVector<double>& energyOutsDevice,
+                              const std::vector<int>&              numConformersPerMol) {
+  energyOutsDevice.zero();
+  throwIfCudaError(forcefield.computeEnergy(energyOutsDevice.data(), positionsDevice.data()), "computeEnergy");
+  return reshapeToNested(copyDeviceVector(energyOutsDevice), numConformersPerMol);
+}
+
+bp::list computeBatchedGradients(nvMolKit::BatchedForcefield&         forcefield,
+                                 nvMolKit::AsyncDeviceVector<double>& positionsDevice,
+                                 nvMolKit::AsyncDeviceVector<double>& gradDevice,
+                                 const std::vector<int>&              numConformersPerMol) {
+  gradDevice.zero();
+  throwIfCudaError(forcefield.computeGradients(gradDevice.data(), positionsDevice.data()), "computeGradients");
+  auto perSystem = splitGradients(copyDeviceVector(gradDevice), forcefield.atomStartsHost(), 3);
+  return reshapeGradientsToNested(perSystem, numConformersPerMol);
+}
+
+}  // namespace
 
 template <typename Spec, typename Parser>
 static std::vector<std::vector<Spec>> extractConstraintLists(const bp::list&    outerList,
@@ -221,23 +257,18 @@ class NativeMMFFBatchedForcefield {
   }
 
   bp::list computeEnergy() {
-    energyOutsDevice_.zero();
-    throwIfCudaError(forcefield_->computeEnergy(energyOutsDevice_.data(), positionsDevice_.data()), "computeEnergy");
-    return reshapeToNested(copyDeviceVector(energyOutsDevice_), numConformersPerMol_);
+    return computeBatchedEnergy(*forcefield_, positionsDevice_, energyOutsDevice_, numConformersPerMol_);
   }
 
   bp::list computeGradients() {
-    gradDevice_.zero();
-    throwIfCudaError(forcefield_->computeGradients(gradDevice_.data(), positionsDevice_.data()), "computeGradients");
-    auto perSystem = splitGradients(copyDeviceVector(gradDevice_), forcefield_->atomStartsHost(), 3);
-    return reshapeGradientsToNested(perSystem, numConformersPerMol_);
+    return computeBatchedGradients(*forcefield_, positionsDevice_, gradDevice_, numConformersPerMol_);
   }
 
   bp::tuple minimize(int maxIters, double gradTol) {
     auto result =
       nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(mols_, maxIters, gradTol, properties_, constraints_, hwOpts_);
 
-    syncPositions();
+    uploadConformerPositions(mols_, positionsDevice_);
 
     return bp::make_tuple(nestedToList(result.energies, [](double v) { return v; }),
                           nestedToList(result.converged, [](int8_t v) { return v != 0; }));
@@ -249,7 +280,6 @@ class NativeMMFFBatchedForcefield {
     nvMolKit::MMFF::BatchedMolecularSystemHost systemHost;
     nvMolKit::BatchedForcefieldMetadata        metadata;
     numConformersPerMol_.resize(numMols);
-    uint32_t currentAtomOffset = 0;
 
     for (int molIdx = 0; molIdx < numMols; ++molIdx) {
       auto* mol          = mols_[molIdx];
@@ -265,7 +295,6 @@ class NativeMMFFBatchedForcefield {
         constraints_[molIdx].applyTo(contribs, positions);
 
         nvMolKit::MMFF::addMoleculeToBatch(contribs, positions, systemHost, &metadata, molIdx, confIdx);
-        currentAtomOffset += mol->getNumAtoms();
       }
       numConformersPerMol_[molIdx] = confIdx;
     }
@@ -274,19 +303,6 @@ class NativeMMFFBatchedForcefield {
     positionsDevice_.setFromVector(systemHost.positions);
     gradDevice_.resize(forcefield_->totalPositions());
     energyOutsDevice_.resize(forcefield_->numMolecules());
-  }
-
-  void syncPositions() {
-    std::vector<double> allPositions;
-    for (auto* mol : mols_) {
-      std::vector<double> pos;
-      for (auto confIter = mol->beginConformers(); confIter != mol->endConformers(); ++confIter) {
-        nvMolKit::confPosToVect(**confIter, pos);
-        allPositions.insert(allPositions.end(), pos.begin(), pos.end());
-      }
-    }
-    positionsDevice_.copyFromHost(allPositions.data(), allPositions.size());
-    cudaStreamSynchronize(positionsDevice_.stream());
   }
 
   std::vector<RDKit::ROMol*>            mols_;
@@ -299,6 +315,96 @@ class NativeMMFFBatchedForcefield {
   nvMolKit::AsyncDeviceVector<double>              gradDevice_;
   nvMolKit::AsyncDeviceVector<double>              energyOutsDevice_;
   std::vector<int>                                 numConformersPerMol_;
+};
+
+class NativeUFFBatchedForcefield {
+ public:
+  NativeUFFBatchedForcefield(const bp::list&                       molecules,
+                             const bp::list&                       vdwThresholds,
+                             const bp::list&                       ignoreInterfragInteractions,
+                             const bp::list&                       distanceConstraints,
+                             const bp::list&                       positionConstraints,
+                             const bp::list&                       angleConstraints,
+                             const bp::list&                       torsionConstraints,
+                             const nvMolKit::BatchHardwareOptions& hwOpts)
+      : hwOpts_(hwOpts) {
+    mols_             = nvMolKit::extractMolecules(molecules);
+    const int numMols = static_cast<int>(mols_.size());
+    vdwThresholds_    = nvMolKit::extractDoubleList(vdwThresholds, numMols, "vdwThreshold");
+    ignoreInterfragInteractions_ =
+      nvMolKit::extractBoolList(ignoreInterfragInteractions, numMols, "ignoreInterfragInteractions");
+    constraints_ =
+      extractAllConstraints(distanceConstraints, positionConstraints, angleConstraints, torsionConstraints, numMols);
+
+    buildForcefield();
+  }
+
+  bp::list computeEnergy() {
+    return computeBatchedEnergy(*forcefield_, positionsDevice_, energyOutsDevice_, numConformersPerMol_);
+  }
+
+  bp::list computeGradients() {
+    return computeBatchedGradients(*forcefield_, positionsDevice_, gradDevice_, numConformersPerMol_);
+  }
+
+  bp::tuple minimize(int maxIters, double gradTol) {
+    auto result = nvMolKit::UFF::UFFMinimizeMoleculesConfs(mols_,
+                                                           maxIters,
+                                                           gradTol,
+                                                           vdwThresholds_,
+                                                           ignoreInterfragInteractions_,
+                                                           constraints_,
+                                                           hwOpts_);
+
+    uploadConformerPositions(mols_, positionsDevice_);
+
+    return bp::make_tuple(nestedToList(result.energies, [](double v) { return v; }),
+                          nestedToList(result.converged, [](int8_t v) { return v != 0; }));
+  }
+
+ private:
+  void buildForcefield() {
+    const int                                 numMols = static_cast<int>(mols_.size());
+    nvMolKit::UFF::BatchedMolecularSystemHost systemHost;
+    nvMolKit::BatchedForcefieldMetadata       metadata;
+    numConformersPerMol_.resize(numMols);
+
+    for (int molIdx = 0; molIdx < numMols; ++molIdx) {
+      auto* mol     = mols_[molIdx];
+      int   confIdx = 0;
+      for (auto confIter = mol->beginConformers(); confIter != mol->endConformers(); ++confIter, ++confIdx) {
+        auto&               conf = **confIter;
+        std::vector<double> positions;
+        nvMolKit::confPosToVect(conf, positions);
+
+        auto contribs = nvMolKit::UFF::constructForcefieldContribs(*mol,
+                                                                   vdwThresholds_[molIdx],
+                                                                   conf.getId(),
+                                                                   ignoreInterfragInteractions_[molIdx]);
+        constraints_[molIdx].applyTo(contribs, positions);
+
+        nvMolKit::UFF::addMoleculeToBatch(contribs, positions, systemHost, metadata, molIdx, confIdx);
+      }
+      numConformersPerMol_[molIdx] = confIdx;
+    }
+
+    forcefield_ = std::make_unique<nvMolKit::UFFBatchedForcefield>(systemHost, metadata);
+    positionsDevice_.setFromVector(systemHost.positions);
+    gradDevice_.resize(forcefield_->totalPositions());
+    energyOutsDevice_.resize(forcefield_->numMolecules());
+  }
+
+  std::vector<RDKit::ROMol*>         mols_;
+  std::vector<double>                vdwThresholds_;
+  std::vector<bool>                  ignoreInterfragInteractions_;
+  std::vector<FC::PerMolConstraints> constraints_;
+  nvMolKit::BatchHardwareOptions     hwOpts_;
+
+  std::unique_ptr<nvMolKit::UFFBatchedForcefield> forcefield_;
+  nvMolKit::AsyncDeviceVector<double>             positionsDevice_;
+  nvMolKit::AsyncDeviceVector<double>             gradDevice_;
+  nvMolKit::AsyncDeviceVector<double>             energyOutsDevice_;
+  std::vector<int>                                numConformersPerMol_;
 };
 
 BOOST_PYTHON_MODULE(_batchedForcefield) {
@@ -327,4 +433,17 @@ BOOST_PYTHON_MODULE(_batchedForcefield) {
     .def("computeEnergy", &NativeMMFFBatchedForcefield::computeEnergy)
     .def("computeGradients", &NativeMMFFBatchedForcefield::computeGradients)
     .def("minimize", &NativeMMFFBatchedForcefield::minimize);
+
+  bp::class_<NativeUFFBatchedForcefield, boost::noncopyable>("NativeUFFBatchedForcefield",
+                                                             bp::init<const bp::list&,
+                                                                      const bp::list&,
+                                                                      const bp::list&,
+                                                                      const bp::list&,
+                                                                      const bp::list&,
+                                                                      const bp::list&,
+                                                                      const bp::list&,
+                                                                      const nvMolKit::BatchHardwareOptions&>())
+    .def("computeEnergy", &NativeUFFBatchedForcefield::computeEnergy)
+    .def("computeGradients", &NativeUFFBatchedForcefield::computeGradients)
+    .def("minimize", &NativeUFFBatchedForcefield::minimize);
 }

@@ -72,9 +72,12 @@ target_link_libraries(
   _batchedForcefield
   PRIVATE ${RDKit_LIBS}
           bfgs_mmff
+          bfgs_uff
           mmff_batched_forcefield
+          uff_batched_forcefield
           batched_forcefield
           rdkit_mmff_flattened
+          rdkit_uff_flattened
           device_vector
           ff_utils)
 target_include_directories(

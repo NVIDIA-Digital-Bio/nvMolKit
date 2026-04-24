@@ -632,15 +632,17 @@ static __device__ __forceinline__ void eleGrad(const double* pos,
   const float distSquared = distanceSquared(pos, idx1, idx2);
   const float invDistance = rsqrtf(distSquared);
   const float distance    = 1.0f / invDistance;
-  float       distTerm    = distance + bufferingConstant;
+  const float rBuf        = distance + bufferingConstant;
   float       numerator   = -prefactor * chargeTerm;
-
+  // E_1 = q / (r+b)         -> dE/dr = -q / (r+b)^2
+  // E_2 = q / (r+b)^2       -> dE/dr = -2q / (r+b)^3
+  float       denominator = rBuf * rBuf;
   if (dielModel == 2) {
-    distTerm *= distTerm;
     numerator *= 2;
+    denominator *= rBuf;
   }
 
-  float dE_dr = numerator / (distTerm * distTerm);
+  float dE_dr = numerator / denominator;
   if (is1_4) {
     dE_dr *= 0.75;
   }

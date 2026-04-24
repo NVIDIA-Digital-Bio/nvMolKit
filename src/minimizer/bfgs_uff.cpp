@@ -30,13 +30,14 @@
 
 namespace nvMolKit::UFF {
 
-std::vector<std::vector<double>> UFFOptimizeMoleculesConfsBfgs(std::vector<RDKit::ROMol*>& mols,
-                                                               const int                   maxIters,
-                                                               const std::vector<double>&  vdwThresholds,
-                                                               const std::vector<bool>&    ignoreInterfragInteractions,
-                                                               const BatchHardwareOptions& perfOptions) {
-  ScopedNvtxRange fullMinimizeRange("BFGS UFF Optimize Molecules Confs");
-  ScopedNvtxRange setupRange("BFGS UFF Optimize Molecules Confs");
+UFFMinimizeResult UFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>& mols,
+                                            const int                   maxIters,
+                                            const double                gradTol,
+                                            const std::vector<double>&  vdwThresholds,
+                                            const std::vector<bool>&    ignoreInterfragInteractions,
+                                            const std::vector<ForceFieldConstraints::PerMolConstraints>& constraints,
+                                            const BatchHardwareOptions&                                  perfOptions) {
+  ScopedNvtxRange fullRange("BFGS UFF Minimize Molecules Confs");
 
   if (vdwThresholds.size() != mols.size()) {
     throw std::invalid_argument("Expected one vdw threshold per molecule");
@@ -44,28 +45,38 @@ std::vector<std::vector<double>> UFFOptimizeMoleculesConfsBfgs(std::vector<RDKit
   if (ignoreInterfragInteractions.size() != mols.size()) {
     throw std::invalid_argument("Expected one interfragment interaction flag per molecule");
   }
+  if (!constraints.empty() && constraints.size() != mols.size()) {
+    throw std::invalid_argument("Expected one PerMolConstraints entry per molecule");
+  }
 
   auto                             ctx = setupBatchExecution(perfOptions);
   std::vector<std::vector<double>> moleculeEnergies;
   const auto                       allConformers = flattenConformers(mols, moleculeEnergies);
 
+  std::vector<std::vector<int8_t>> moleculeConverged(mols.size());
+  for (size_t i = 0; i < mols.size(); ++i) {
+    moleculeConverged[i].resize(moleculeEnergies[i].size(), 0);
+  }
+
   const size_t totalConformers    = allConformers.size();
   const size_t effectiveBatchSize = ctx.batchSize == 0 ? totalConformers : ctx.batchSize;
   if (totalConformers == 0) {
-    return moleculeEnergies;
+    return {moleculeEnergies, moleculeConverged};
   }
 
   std::vector<ThreadLocalBuffers> threadBuffers(ctx.numThreads);
   detail::OpenMPExceptionRegistry exceptionHandler;
-  setupRange.pop();
 #pragma omp parallel for num_threads(ctx.numThreads) schedule(dynamic) default(none) \
   shared(allConformers,                                                              \
            moleculeEnergies,                                                         \
+           moleculeConverged,                                                        \
            totalConformers,                                                          \
            effectiveBatchSize,                                                       \
            maxIters,                                                                 \
+           gradTol,                                                                  \
            vdwThresholds,                                                            \
            ignoreInterfragInteractions,                                              \
+           constraints,                                                              \
            ctx,                                                                      \
            threadBuffers,                                                            \
            exceptionHandler)
@@ -98,6 +109,9 @@ std::vector<std::vector<double>> UFFOptimizeMoleculesConfsBfgs(std::vector<RDKit
                                                     vdwThresholds[confInfo.molIdx],
                                                     confInfo.conformerId,
                                                     ignoreInterfragInteractions[confInfo.molIdx]);
+        if (!constraints.empty()) {
+          constraints[confInfo.molIdx].applyTo(ffParams, pos);
+        }
         addMoleculeToBatch(ffParams, pos, systemHost, metadata, confInfo.molIdx, static_cast<int>(confInfo.confIdx));
       }
 
@@ -125,22 +139,38 @@ std::vector<std::vector<double>> UFFOptimizeMoleculesConfsBfgs(std::vector<RDKit
         true,
         streamPtr,
         nvMolKit::BfgsBackend::BATCHED);
-      constexpr double gradTol = 1e-4;
       setupBatchRange.pop();
       bfgsMinimizer.minimize(maxIters, gradTol, forcefield, positionsDevice, gradDevice, energyOutsDevice);
 
       ScopedNvtxRange finalizeBatchRange("OpenMP loop finalizing batch");
       positionsDevice.copyToHost(buffers.positions.data(), positionsDevice.size());
       energyOutsDevice.copyToHost(buffers.energies.data(), energyOutsDevice.size());
+
+      std::vector<int16_t> statusesHost(batchConformers.size());
+      bfgsMinimizer.statuses_.copyToHost(statusesHost.data(), batchConformers.size());
       cudaStreamSynchronize(streamPtr);
 
       writeBackResults(batchConformers, conformerAtomStarts, buffers, moleculeEnergies);
+
+      for (size_t i = 0; i < batchConformers.size(); ++i) {
+        const auto& confInfo                                 = batchConformers[i];
+        moleculeConverged[confInfo.molIdx][confInfo.confIdx] = static_cast<int8_t>(statusesHost[i] == 0);
+      }
     } catch (...) {
       exceptionHandler.store(std::current_exception());
     }
   }
   exceptionHandler.rethrow();
-  return moleculeEnergies;
+  return {moleculeEnergies, moleculeConverged};
+}
+
+std::vector<std::vector<double>> UFFOptimizeMoleculesConfsBfgs(std::vector<RDKit::ROMol*>& mols,
+                                                               const int                   maxIters,
+                                                               const std::vector<double>&  vdwThresholds,
+                                                               const std::vector<bool>&    ignoreInterfragInteractions,
+                                                               const BatchHardwareOptions& perfOptions) {
+  return UFFMinimizeMoleculesConfs(mols, maxIters, 1e-4, vdwThresholds, ignoreInterfragInteractions, {}, perfOptions)
+    .energies;
 }
 
 }  // namespace nvMolKit::UFF
