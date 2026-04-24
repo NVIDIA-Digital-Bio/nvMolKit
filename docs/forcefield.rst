@@ -93,16 +93,28 @@ a per-molecule sequence:
     from rdkit.Chem import AllChem
     from nvmolkit.batchedForcefield import MMFFBatchedForcefield
 
-    # Custom properties on the first molecule, defaults on the others.
-    props_a = AllChem.MMFFGetMoleculeProperties(mols[0])
-    props_a.SetMMFFVariant("MMFF94s")
+    # Molecule 0: None for default MMFF94 settings
+    # Molecule 1: unmodified from defaults
+    props_b = AllChem.MMFFGetMoleculeProperties(mols[1])
+
+    # Molecule 2: MMFF94s variant with a non-default dielectric.
+    props_c = AllChem.MMFFGetMoleculeProperties(mols[2])
+    props_c.SetMMFFVariant("MMFF94s")
+    props_c.SetMMFFDielectricConstant(4.0)
+    props_c.SetMMFFDielectricModel(2)  # 1 = constant, 2 = distance-dependent
 
     ff = MMFFBatchedForcefield(
         mols,
-        properties=[props_a, None, None],
+        properties=[None, props_b, props_c],
         nonBondedThreshold=[100.0, 25.0, 25.0],
         ignoreInterfragInteractions=[True, False, True],
     )
+
+Every per-term toggle that RDKit's ``MMFFMolProperties`` exposes is honored:
+``SetMMFFBondTerm``, ``SetMMFFAngleTerm``, ``SetMMFFStretchBendTerm``,
+``SetMMFFOopTerm``, ``SetMMFFTorsionTerm``, ``SetMMFFVdWTerm``, and
+``SetMMFFEleTerm``. Configure the RDKit object before passing it in; the
+batched forcefield reads the settings at build time.
 
 Per-element constraints are added through the ``ff[i]`` view. Constraints
 attached to molecule ``i`` apply to every conformer of that molecule. The
