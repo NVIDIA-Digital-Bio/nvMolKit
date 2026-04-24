@@ -75,6 +75,4 @@ for sim_type in sim_types:
         runner.bench_func(name, rdkit_sim, fps, sim_type, metadata={"name": name})
 
         name2 = f"nvmolkit_gpu-only_{sim_type}sim_fpsize_{fpsize}_{molNum}mols_gpu_only"
-        runner.bench_func(
-            name2, nvmolkit_sim_gpu_only, nvmolkit_fps_cu, sim_type, metadata={"name": name2}
-        )
+        runner.bench_func(name2, nvmolkit_sim_gpu_only, nvmolkit_fps_cu, sim_type, metadata={"name": name2})
