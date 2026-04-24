@@ -422,6 +422,11 @@ BOOST_PYTHON_MODULE(_batchedForcefield) {
     .def_readwrite("vdwTerm", &nvMolKit::MMFFProperties::vdwTerm)
     .def_readwrite("eleTerm", &nvMolKit::MMFFProperties::eleTerm);
 
+  bp::def("buildMMFFPropertiesFromRDKit",
+          &nvMolKit::buildMMFFPropertiesFromRDKit,
+          (bp::arg("rdkit_properties"), bp::arg("non_bonded_threshold"), bp::arg("ignore_interfrag_interactions")),
+          "Build an nvMolKit MMFFProperties transport from an RDKit MMFFMolProperties Python object.");
+
   bp::class_<NativeMMFFBatchedForcefield, boost::noncopyable>("NativeMMFFBatchedForcefield",
                                                               bp::init<const bp::list&,
                                                                        const bp::list&,
