@@ -49,6 +49,13 @@ MMFF Optimization
 
    mmffOptimization.MMFFOptimizeMoleculesConfs
 
+.. autosummary::
+   :toctree: generated/
+   :template: class_template.rst
+
+   batchedForcefield.MMFFBatchedForcefield
+   batchedForcefield.MMFFBatchElement
+
 UFF Optimization
 ----------------
 
@@ -57,6 +64,13 @@ UFF Optimization
    :template: function_template.rst
 
    uffOptimization.UFFOptimizeMoleculesConfs
+
+.. autosummary::
+   :toctree: generated/
+   :template: class_template.rst
+
+   batchedForcefield.UFFBatchedForcefield
+   batchedForcefield.UFFBatchElement
 
 Butina Clustering
 -----------------
