@@ -22,6 +22,8 @@ option(NVMOLKIT_EXTRA_DEV_FLAGS "Enable extra development QA flags" ON)
 # Optional compilation options
 option(NVMOLKIT_BUILD_TESTS "Whether or not to build tests" ON)
 option(NVMOLKIT_BUILD_BENCHMARKS "Whether or not to build benchmarks" ON)
+option(NVMOLKIT_BUILD_PYTHON_BINDINGS "Whether or not to build python bindings"
+       OFF)
 
 set(NVMOLKIT_CUDA_TARGET_MODE
     "default"
