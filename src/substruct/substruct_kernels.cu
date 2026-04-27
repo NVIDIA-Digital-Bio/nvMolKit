@@ -85,8 +85,12 @@ __host__ __device__ constexpr int getComputeCapability() {
 
 /// Max threads per SM for each compute capability
 __host__ __device__ constexpr int getMaxThreadsPerSM(int sm) {
+  if (sm == 120)
+    return 1536;  // Consumer Blackwell (sm_120)
+  if (sm == 100)
+    return 2048;  // Datacenter Blackwell (sm_100)
   if (sm >= 90)
-    return 2048;  // Hopper+
+    return 2048;  // Hopper
   if (sm == 80)
     return 2048;  // A100
   if (sm >= 86)
