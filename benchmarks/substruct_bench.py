@@ -59,7 +59,7 @@ import random
 import sys
 from functools import partial
 from multiprocessing import Pool
-from typing import Callable
+from typing import Callable, Iterator
 
 import nvtx
 import pandas as pd
@@ -104,38 +104,55 @@ def _parse_smiles(smi: str, sanitize: bool) -> Chem.Mol | None:
     return Chem.MolFromSmiles(smi, sanitize=sanitize)
 
 
+def _iter_smiles_tokens(filepath: str, sanitize: bool) -> Iterator[str]:
+    """Yield SMILES tokens from a file, skipping blanks/comments and a parse-failing first line.
+
+    The first non-comment line is parsed quietly; if it fails to parse it is treated as a header
+    and dropped, matching the original loader's behavior.
+    """
+    with open(filepath, "r") as f:
+        first_data_seen = False
+        for line in f:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            smi = stripped.split()[0]
+            if not first_data_seen:
+                first_data_seen = True
+                RDLogger.DisableLog("rdApp.*")
+                mol = Chem.MolFromSmiles(smi, sanitize=sanitize)
+                RDLogger.EnableLog("rdApp.*")
+                if mol is None:
+                    continue
+            yield smi
+
+
 def load_smiles(filepath: str, max_count: int = 0, sanitize: bool = True, seed: int | None = None) -> list[Chem.Mol]:
     """Load and parse molecules from a SMILES file.
 
-    When ``max_count > 0``, a uniform random sample of lines is drawn (with a 10% buffer
-    to absorb parse failures) so only the sampled SMILES are parsed.
+    When ``max_count > 0``, reservoir sampling draws a uniform random sample of lines in a single
+    streaming pass (with a 10% buffer to absorb parse failures) so the file isn't fully loaded into
+    memory and only the sampled SMILES are parsed.
     """
-    mols = []
-    smiles_list = []
-
     # Use a 10% buffer to account for potential parse failures
     # "On parse failures continue down the file. Load 10% more molecules than needed"
     read_limit = int(max_count * 1.1) if max_count > 0 else 0
 
-    with open(filepath, "r") as f:
-        candidate_lines = [line for line in f if line.strip() and not line.lstrip().startswith("#")]
+    if read_limit > 0:
+        rng = random.Random(seed)
+        reservoir: list[str] = []
+        for index, smi in enumerate(_iter_smiles_tokens(filepath, sanitize)):
+            if index < read_limit:
+                reservoir.append(smi)
+            else:
+                replace_index = rng.randint(0, index)
+                if replace_index < read_limit:
+                    reservoir[replace_index] = smi
+        smiles_list = reservoir
+    else:
+        smiles_list = list(_iter_smiles_tokens(filepath, sanitize))
 
-    if read_limit > 0 and len(candidate_lines) > read_limit:
-        candidate_lines = random.Random(seed).sample(candidate_lines, read_limit)
-
-    for i, line in enumerate(candidate_lines):
-        smi = line.strip().split()[0]
-        if i == 0:
-            # Try to parse line 0 quietly in case it's a header
-            RDLogger.DisableLog("rdApp.*")
-            mol = Chem.MolFromSmiles(smi, sanitize=sanitize)
-            RDLogger.EnableLog("rdApp.*")
-            if mol:
-                mols.append(mol)
-            # If mol is None, we skip it and don't count as failure (potential header)
-        else:
-            smiles_list.append(smi)
-
+    mols: list[Chem.Mol] = []
     if smiles_list:
         parse_func = partial(_parse_smiles, sanitize=sanitize)
         parsed = process_map(parse_func, smiles_list, desc="Parsing molecules", chunksize=1000)
