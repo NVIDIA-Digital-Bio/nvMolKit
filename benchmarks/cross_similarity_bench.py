@@ -13,95 +13,72 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import argparse
-import multiprocessing
-
 import pandas as pd
 import pyperf
 import torch
 from rdkit.Chem import MolFromSmiles, rdFingerprintGenerator
 from rdkit.DataStructs import BulkCosineSimilarity, BulkTanimotoSimilarity
 
-from nvmolkit.similarity import (
-    crossCosineSimilarity,
-    crossTanimotoSimilarity,
-    crossCosineSimilarityMemoryConstrained,
-    crossTanimotoSimilarityMemoryConstrained,
-)
+from nvmolkit.similarity import crossCosineSimilarity, crossTanimotoSimilarity
 from nvmolkit.fingerprints import MorganFingerprintGenerator
 
-df = pd.read_csv("data/benchmark_smiles.csv")
-smis = df.iloc[:, 0].to_list()[:2000]
-mols = [MolFromSmiles(smi) for smi in smis]
 
-
-runner = pyperf.Runner(min_time=0.01, values=3, processes=1, loops=3)
-runner.metadata["description"] = f"Cross Similarity benchmark"
+SIZES = [2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000, 20000, 24000, 28000, 32000]
+CPU_SINGLE_VALUE_ABOVE = 6000
 
 
 def rdkit_sim(fps, sim_type):
     if sim_type.lower() == "tanimoto":
-        sim = [BulkTanimotoSimilarity(fps[i], fps) for i in range(len(fps))]
+        [BulkTanimotoSimilarity(fps[i], fps) for i in range(len(fps))]
     elif sim_type.lower() == "cosine":
-        sim = [BulkCosineSimilarity(fps[i], fps) for i in range(len(fps))]
-
-
-def _internal_mp(fps, idx, sim_type):
-    if sim_type.lower() == "tanimoto":
-        return BulkTanimotoSimilarity(fps[idx], fps)
-    elif sim_type.lower() == "cosine":
-        return BulkCosineSimilarity(fps[idx], fps)
-
-
-def rdkit_sim_mp(fps, sim_type):
-    with multiprocessing.Pool(16) as pool:
-        sim = pool.starmap(_internal_mp, ([fps, i, sim_type] for i in range(len(fps))))
+        [BulkCosineSimilarity(fps[i], fps) for i in range(len(fps))]
 
 
 def nvmolkit_sim_gpu_only(fps, sim_type):
     if sim_type.lower() == "tanimoto":
-        sim = crossTanimotoSimilarity(fps)
+        crossTanimotoSimilarity(fps)
     elif sim_type.lower() == "cosine":
-        sim = crossCosineSimilarity(fps)
+        crossCosineSimilarity(fps)
     torch.cuda.synchronize()
 
 
-def nvmolkit_sim_cpu_collect(fps, sim_type):
-    if sim_type.lower() == "tanimoto":
-        out = crossTanimotoSimilarityMemoryConstrained(fps)
-    elif sim_type.lower() == "cosine":
-        out = crossCosineSimilarityMemoryConstrained(fps)
+runner = pyperf.Runner(min_time=0.01, values=3, processes=1, loops=3)
+runner.metadata["description"] = "Cross Similarity benchmark"
+runner.argparser.add_argument(
+    "--input", type=str, default="data/benchmark_smiles.csv", help="Path to input SMILES CSV file"
+)
+runner.argparser.add_argument("--cosine", action="store_true", help="Include cosine similarity benchmarks")
+args = runner.parse_args()
 
+sim_types = ("tanimoto", "cosine") if args.cosine else ("tanimoto",)
+fpsize = 1024
+max_size = max(SIZES)
+default_values = runner.args.values
 
-for sim_type in ("tanimoto", "cosine"):
-    for molNum in (
-        100,
-        1000,
-        2000,
-    ):
-        for fpsize in (1024,):
-            generator = rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=fpsize)
-            fps = [generator.GetFingerprint(mol) for mol in mols[:molNum]]
-            while len(fps) < molNum:
-                fps += fps
-            fps = fps[:molNum]
+df = pd.read_csv(args.input)
+smis = df.iloc[:, 0].to_list()
+mols = [MolFromSmiles(smi) for smi in smis]
+mols = [mol for mol in mols if mol is not None]
+if not mols:
+    raise ValueError(f"No molecules parsed from {args.input}")
+while len(mols) < max_size:
+    mols += mols
+mols = mols[:max_size]
 
-            name = f"rdkit_{sim_type}sim_fpsize_{fpsize}_{molNum}mols"
-            runner.bench_func(name, rdkit_sim, fps, sim_type, metadata={"name": name})
+rdkit_fpgen = rdFingerprintGenerator.GetMorganGenerator(radius=3, fpSize=fpsize)
+rdkit_fps_all = [rdkit_fpgen.GetFingerprint(mol) for mol in mols]
+nvmolkit_fpgen = MorganFingerprintGenerator(radius=3, fpSize=fpsize)
+nvmolkit_fps_all = torch.as_tensor(nvmolkit_fpgen.GetFingerprints(mols), device="cuda")
 
-            name2 = f"rdkit_multiprocess_{sim_type}sim_fpsize_{fpsize}_{molNum}mols"
-            runner.bench_func(name2, rdkit_sim_mp, fps, sim_type, metadata={"name": str(name2)})
+for sim_type in sim_types:
+    for molNum in SIZES:
+        fps = rdkit_fps_all[:molNum]
+        nvmolkit_fps_cu = nvmolkit_fps_all[:molNum].contiguous()
 
-            while len(mols) < molNum:
-                mols += mols
-            mols = mols[:molNum]
-            nvmolkit_fpgen = MorganFingerprintGenerator(radius=3, fpSize=fpsize)
+        runner.args.values = 1 if molNum > CPU_SINGLE_VALUE_ABOVE else default_values
+        name = f"rdkit_{sim_type}sim_fpsize_{fpsize}_{molNum}mols"
+        runner.bench_func(name, rdkit_sim, fps, sim_type, metadata={"name": name})
 
-            nvmolkit_fps_cu = torch.as_tensor(nvmolkit_fpgen.GetFingerprints(mols[:molNum]), device="cuda")
-            name3 = f"nvmolkit_gpu-only_{sim_type}sim_fpsize_{fpsize}_{molNum}mols_gpu_only"
-            runner.bench_func(name3, nvmolkit_sim_gpu_only, nvmolkit_fps_cu, sim_type, metadata={"name": str(name3)})
-
-            name4 = f"nvmolkit_cpu-collect_{sim_type}sim_fpsize_{fpsize}_{molNum}mols_cpu_result"
-            runner.bench_func(
-                name4, nvmolkit_sim_cpu_collect, nvmolkit_fps_cu, sim_type, metadata={"name": str(name4)}
-            )
+        runner.args.values = default_values
+        name2 = f"nvmolkit_gpu-only_{sim_type}sim_fpsize_{fpsize}_{molNum}mols_gpu_only"
+        runner.bench_func(name2, nvmolkit_sim_gpu_only, nvmolkit_fps_cu, sim_type, metadata={"name": name2})
