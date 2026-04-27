@@ -295,6 +295,37 @@ def test_mmff_batched_forcefield_properties_match_rdkit():
     )
 
 
+def test_mmff_batched_forcefield_reads_externally_configured_properties():
+    """Configure RDKit MMFF properties via raw ``rdForceFieldHelpers.MMFFGetMoleculeProperties``
+    plus direct ``SetMMFF*Term``/``SetMMFFDielectricConstant`` calls — no nvmolkit helpers
+    in the path — then hand the object to ``MMFFBatchedForcefield``.
+
+    Needed because of our workaround for RDKit bug https://github.com/rdkit/rdkit/issues/9253
+    """
+    mol = make_embedded_mol("CCO")
+
+    props = rdForceFieldHelpers.MMFFGetMoleculeProperties(mol)
+    assert props is not None
+    props.SetMMFFBondTerm(False)
+    props.SetMMFFTorsionTerm(False)
+    props.SetMMFFDielectricConstant(2.5)
+
+    forcefield = MMFFBatchedForcefield(clone_mols([mol]), properties=[props])
+    got_energy = forcefield.compute_energy()[0][0]
+    got_grad = forcefield.compute_gradients()[0][0]
+
+    rd_ff = rdForceFieldHelpers.MMFFGetMoleculeForceField(mol, props)
+    rd_energy = rd_ff.CalcEnergy()
+    rd_grad = list(rd_ff.CalcGrad())
+    assert_energy_and_gradient_close(got_energy, rd_energy, got_grad, rd_grad)
+
+    default_forcefield = MMFFBatchedForcefield(clone_mols([mol]))
+    default_energy = default_forcefield.compute_energy()[0][0]
+    assert abs(got_energy - default_energy) > 1e-6, (
+        "term toggles on externally-configured MMFFMolProperties had no observable effect on the batched energy"
+    )
+
+
 def test_mmff_batched_forcefield_constraints_match_rdkit():
     """Batch of mols with all 5 MMFF constraint types applied (one per mol), some also
     carrying non-default property settings to exercise the properties+constraints path."""
