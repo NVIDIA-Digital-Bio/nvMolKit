@@ -22,7 +22,6 @@ from rdkit.Chem import rdDistGeom, rdForceFieldHelpers
 from rdkit.ForceField import rdForceField as _rdForceField  # noqa: F401
 from rdkit.Geometry import Point3D
 
-from nvmolkit._mmff_bridge import capture_mmff_settings
 from nvmolkit.batchedForcefield import MMFFBatchedForcefield, UFFBatchedForcefield
 from nvmolkit.types import HardwareOptions
 
@@ -120,7 +119,7 @@ def make_rdkit_mmff_properties(mol, settings: dict | None = None):
     mmff_props.SetMMFFTorsionTerm(settings.get("torsion_term", True))
     mmff_props.SetMMFFVdWTerm(settings.get("vdw_term", True))
     mmff_props.SetMMFFEleTerm(settings.get("ele_term", True))
-    return capture_mmff_settings(mmff_props, settings)
+    return mmff_props
 
 
 def make_rdkit_mmff_forcefield(
@@ -293,6 +292,37 @@ def test_mmff_batched_forcefield_properties_match_rdkit():
                 "ignore_interfrag_interactions": False,
             },
         ]
+    )
+
+
+def test_mmff_batched_forcefield_reads_externally_configured_properties():
+    """Configure RDKit MMFF properties via raw ``rdForceFieldHelpers.MMFFGetMoleculeProperties``
+    plus direct ``SetMMFF*Term``/``SetMMFFDielectricConstant`` calls — no nvmolkit helpers
+    in the path — then hand the object to ``MMFFBatchedForcefield``.
+
+    Needed because of our workaround for RDKit bug https://github.com/rdkit/rdkit/issues/9253
+    """
+    mol = make_embedded_mol("CCO")
+
+    props = rdForceFieldHelpers.MMFFGetMoleculeProperties(mol)
+    assert props is not None
+    props.SetMMFFBondTerm(False)
+    props.SetMMFFTorsionTerm(False)
+    props.SetMMFFDielectricConstant(2.5)
+
+    forcefield = MMFFBatchedForcefield(clone_mols([mol]), properties=[props])
+    got_energy = forcefield.compute_energy()[0][0]
+    got_grad = forcefield.compute_gradients()[0][0]
+
+    rd_ff = rdForceFieldHelpers.MMFFGetMoleculeForceField(mol, props)
+    rd_energy = rd_ff.CalcEnergy()
+    rd_grad = list(rd_ff.CalcGrad())
+    assert_energy_and_gradient_close(got_energy, rd_energy, got_grad, rd_grad)
+
+    default_forcefield = MMFFBatchedForcefield(clone_mols([mol]))
+    default_energy = default_forcefield.compute_energy()[0][0]
+    assert abs(got_energy - default_energy) > 1e-6, (
+        "term toggles on externally-configured MMFFMolProperties had no observable effect on the batched energy"
     )
 
 

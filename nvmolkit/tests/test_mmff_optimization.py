@@ -22,7 +22,6 @@ from rdkit.Chem.AllChem import ETKDGv3
 from rdkit.ForceField import rdForceField as _rdForceField  # noqa: F401
 from rdkit.Geometry import Point3D
 
-from nvmolkit._mmff_bridge import capture_mmff_settings
 from nvmolkit.embedMolecules import EmbedMolecules
 import nvmolkit.mmffOptimization as nvmolkit_mmff
 from nvmolkit.types import HardwareOptions
@@ -120,7 +119,7 @@ def make_rdkit_mmff_properties(mol, settings: dict | None = None):
     mmff_props.SetMMFFTorsionTerm(settings.get("torsion_term", True))
     mmff_props.SetMMFFVdWTerm(settings.get("vdw_term", True))
     mmff_props.SetMMFFEleTerm(settings.get("ele_term", True))
-    return capture_mmff_settings(mmff_props, settings)
+    return mmff_props
 
 
 def calculate_rdkit_mmff_energies(
