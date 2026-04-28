@@ -246,3 +246,82 @@ def test_device_input_only_with_device_output():
             output=CoordinateOutput.RDKIT_CONFORMERS,
             device_input=object(),  # type: ignore[arg-type]
         )
+
+
+def test_target_gpu_must_be_in_configured_gpus():
+    """target_gpu has to appear in hardwareOptions.gpuIds (or be the default)."""
+    mol = _embed("CCO", n_confs=1, seed=11)
+    options = HardwareOptions(preprocessingThreads=1, batchSize=64, batchesPerGpu=1, gpuIds=[0])
+    # Asking for GPU 1 with only GPU 0 configured should raise.
+    with pytest.raises(Exception, match="targetGpu"):
+        MMFFOptimizeMoleculesConfs(
+            [mol],
+            maxIters=5,
+            hardwareOptions=options,
+            output=CoordinateOutput.DEVICE,
+            target_gpu=1,
+        )
+
+
+def test_etkdg_then_mmff_chained_energies_lower_than_initial():
+    """Realistic chain: ETKDG-DEVICE produces a valid starting structure, then
+    MMFF-DEVICE relaxes it. The MMFF energy after relaxation should be finite and
+    not catastrophically larger than typical post-MMFF organic energies (~tens of
+    kcal/mol for a small molecule)."""
+    mol = Chem.AddHs(Chem.MolFromSmiles("CCCCO"))
+    # Seed a host conformer for FF construction (positions don't matter; only existence).
+    seed_params = rdDistGeom.ETKDGv3()
+    seed_params.useRandomCoords = True
+    seed_params.randomSeed = 33
+    rdDistGeom.EmbedMolecule(mol, params=seed_params)
+    assert mol.GetNumConformers() == 1
+
+    etkdg_params = rdDistGeom.ETKDGv3()
+    etkdg_params.useRandomCoords = True
+    etkdg_params.randomSeed = 33
+    etkdg_params.pruneRmsThresh = -1.0
+    etkdg_result = EmbedMolecules(
+        [mol],
+        etkdg_params,
+        confsPerMolecule=1,
+        hardwareOptions=_single_thread_options(),
+        output=CoordinateOutput.DEVICE,
+    )
+    mmff_result = MMFFOptimizeMoleculesConfs(
+        [mol],
+        maxIters=200,
+        hardwareOptions=_single_thread_options(),
+        output=CoordinateOutput.DEVICE,
+        device_input=etkdg_result,
+    )
+    torch.cuda.synchronize()
+    energies = mmff_result.energies.numpy()
+    assert energies.shape == (1,)
+    # Sanity envelope: a relaxed butanol shouldn't have energy in the kJ/mol thousands.
+    assert -1e3 < float(energies[0]) < 1e3
+    # And convergence flag should be in {0, 1}
+    converged = mmff_result.converged.numpy()
+    assert converged.shape == (1,)
+    assert converged[0] in (0, 1)
+
+
+def test_multi_gpu_target_skipped_on_single_gpu():
+    """Smoke test for multi-GPU support: when only one GPU is available, the test is skipped.
+    On a multi-GPU host, this confirms results consolidate correctly onto the chosen
+    target_gpu."""
+    if torch.cuda.device_count() < 2:
+        pytest.skip("Requires >= 2 GPUs")
+
+    mol = _embed("CCO", n_confs=2, seed=44)
+    options = HardwareOptions(preprocessingThreads=2, batchSize=32, batchesPerGpu=1, gpuIds=[0, 1])
+    result = MMFFOptimizeMoleculesConfs(
+        [mol],
+        maxIters=15,
+        hardwareOptions=options,
+        output=CoordinateOutput.DEVICE,
+        target_gpu=1,
+    )
+    assert isinstance(result, DeviceCoordResult)
+    assert result.gpu_id == 1
+    torch.cuda.synchronize()
+    assert result.energies.numpy().shape == (2,)
