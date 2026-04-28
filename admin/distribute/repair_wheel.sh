@@ -47,6 +47,12 @@ fi
 DEST_DIR=$1
 WHEEL=$2
 
+# Clear stale wheels from a prior failed invocation that left files in
+# DEST_DIR. Without this, the post-auditwheel `ls` could pick up an old
+# wheel and silently re-process it instead of the one we just produced.
+mkdir -p "${DEST_DIR}"
+rm -f "${DEST_DIR}"/*.whl
+
 auditwheel repair \
     --exclude 'libRDKit*' \
     --exclude 'libboost_*' \
@@ -64,9 +70,15 @@ auditwheel repair \
     --exclude 'libbz2*' \
     -w "${DEST_DIR}" "${WHEEL}"
 
-# auditwheel produced exactly one repaired wheel for this input. Open it,
-# rewrite RPATH on each compiled extension, repack.
-REPAIRED_WHEEL=$(ls -1 "${DEST_DIR}"/*.whl | tail -n 1)
+# auditwheel produced exactly one repaired wheel for this input.
+shopt -s nullglob
+REPAIRED_WHEELS=("${DEST_DIR}"/*.whl)
+shopt -u nullglob
+if [ "${#REPAIRED_WHEELS[@]}" -ne 1 ]; then
+    echo "Error: expected exactly one repaired wheel in ${DEST_DIR}, got ${#REPAIRED_WHEELS[@]}: ${REPAIRED_WHEELS[*]}" >&2
+    exit 1
+fi
+REPAIRED_WHEEL=${REPAIRED_WHEELS[0]}
 WORK=$(mktemp -d)
 trap 'rm -rf "${WORK}"' EXIT
 
