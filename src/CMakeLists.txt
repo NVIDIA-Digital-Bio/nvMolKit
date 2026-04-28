@@ -23,6 +23,10 @@ add_subdirectory(utils)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/versions.h.in
                ${CMAKE_CURRENT_BINARY_DIR}/versions.h @ONLY)
 
+add_library(coord_collect coord_collect.cpp)
+target_link_libraries(coord_collect PUBLIC CUDA::cudart cuda_error_check device)
+target_include_directories(coord_collect PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
 add_library(similarity_kernels similarity_kernels.cu)
 target_link_libraries(similarity_kernels PRIVATE cuda_error_check device
                                                  cccl_interface)
