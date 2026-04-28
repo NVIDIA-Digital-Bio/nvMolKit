@@ -18,6 +18,16 @@ cmake_policy(SET CMP0167 NEW)
 
 if(NVMOLKIT_BUILD_AGAINST_PIP_RDKIT)
   message(STATUS "Using boost libs from pip RDKit")
+  # rdkit.cmake already enumerated every .so under rdkit.libs/ as an IMPORTED
+  # target and appended each to RDKit_LIBS. Filter out the boost ones so
+  # targets that link against ${Boost_LIBRARIES} (rather than ${RDKit_LIBS})
+  # still pull in libboost_python312, libboost_serialization, etc.
+  set(Boost_LIBRARIES "")
+  foreach(lib IN LISTS RDKit_LIBS)
+    if(lib MATCHES "^libboost_")
+      list(APPEND Boost_LIBRARIES ${lib})
+    endif()
+  endforeach()
 else()
   set(BOOST_TARGET_LIBS system serialization iostreams)
   if(NVMOLKIT_BUILD_PYTHON_BINDINGS)

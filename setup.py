@@ -44,6 +44,29 @@ if nvmolkit_build_against_pip:
         ]
     )
 
+    # find_package(RDKit) is skipped on the pip path, so the version variables
+    # that src/versions.h.in expects (RDKit_VERSION_{MAJOR,MINOR,PATCH}) are
+    # never populated. Derive them from the RDKIT_VERSION env var the CI/dev
+    # driver is required to set.
+    rdkit_version_str = os.getenv("RDKIT_VERSION")
+    if not rdkit_version_str:
+        raise ValueError(
+            "RDKIT_VERSION must be set to a value of the form 'YYYY.M.P' when "
+            "building against pip rdkit"
+        )
+    rdkit_parts = rdkit_version_str.split(".")
+    if len(rdkit_parts) != 3 or not all(p.isdigit() for p in rdkit_parts):
+        raise ValueError(
+            f"RDKIT_VERSION must be 'YYYY.M.P' (got: {rdkit_version_str!r})"
+        )
+    cmake_extra_args.extend(
+        [
+            f"-DRDKit_VERSION_MAJOR={rdkit_parts[0]}",
+            f"-DRDKit_VERSION_MINOR={rdkit_parts[1]}",
+            f"-DRDKit_VERSION_PATCH={rdkit_parts[2]}",
+        ]
+    )
+
 
 if __name__ == "__main__":
     setup(

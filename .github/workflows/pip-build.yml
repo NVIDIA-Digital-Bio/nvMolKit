@@ -1,0 +1,170 @@
+name: Pip Wheel Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      rdkit_version:
+        description: "Override the rdkit version to build against (must be in admin/distribute/rdkit_build_matrix.yaml)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: pip-build-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-image:
+    name: Build manylinux+CUDA image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+    steps:
+      - name: Check out source tree
+        uses: actions/checkout@v4
+
+      - name: Resolve image tag
+        id: image
+        shell: bash
+        run: |
+          set -xeuo pipefail
+          dockerfile_hash=$(sha256sum admin/container/manylinux_2_28_cuda12.Dockerfile | cut -c1-12)
+          image="ghcr.io/${{ github.repository_owner }}/nvmolkit-manylinux-cuda12:${dockerfile_hash}"
+          # Force lower-case (ghcr requires it) and emit.
+          image=$(echo "$image" | tr '[:upper:]' '[:lower:]')
+          echo "image=${image}" >> "${GITHUB_OUTPUT}"
+          echo "Image: ${image}"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull existing image (cache hit) or build
+        shell: bash
+        run: |
+          set -xeuo pipefail
+          if docker pull "${{ steps.image.outputs.image }}"; then
+            echo "Image already published, skipping build"
+            exit 0
+          fi
+          docker build \
+            -f admin/container/manylinux_2_28_cuda12.Dockerfile \
+            -t "${{ steps.image.outputs.image }}" \
+            .
+          docker push "${{ steps.image.outputs.image }}"
+
+  build-wheels:
+    name: Wheels rdkit=${{ matrix.rdkit_version }}
+    needs: build-image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        rdkit_version:
+          - "2026.3.1"
+    steps:
+      - name: Check out source tree
+        uses: actions/checkout@v4
+
+      - name: Resolve effective rdkit version
+        id: rv
+        shell: bash
+        env:
+          DISPATCH_RDKIT: ${{ github.event.inputs.rdkit_version }}
+          MATRIX_RDKIT: ${{ matrix.rdkit_version }}
+        run: |
+          set -xeuo pipefail
+          # On workflow_dispatch with a non-empty override, use it; otherwise
+          # use the matrix value.
+          if [ -n "${DISPATCH_RDKIT}" ]; then
+            rv="${DISPATCH_RDKIT}"
+          else
+            rv="${MATRIX_RDKIT}"
+          fi
+          echo "rdkit_version=${rv}" >> "${GITHUB_OUTPUT}"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build wheels
+        shell: bash
+        env:
+          CIBW_MANYLINUX_X86_64_IMAGE: ${{ needs.build-image.outputs.image }}
+        run: |
+          set -xeuo pipefail
+          bash admin/deploy/build_pip_wheels.sh "${{ steps.rv.outputs.rdkit_version }}" wheelhouse
+
+      - name: Upload wheels
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nvmolkit-wheels-rdkit${{ steps.rv.outputs.rdkit_version }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+
+  smoke-test:
+    name: GPU smoke test rdkit=${{ matrix.rdkit_version }} py${{ matrix.python }}
+    needs: build-wheels
+    runs-on: colossus
+    timeout-minutes: 30
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        rdkit_version:
+          - "2026.3.1"
+        python:
+          - "3.12"
+    steps:
+      - name: Verify GPU access
+        shell: bash
+        run: |
+          set -xeuo pipefail
+          nvidia-smi
+
+      - name: Check out source tree
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          name: nvmolkit-wheels-rdkit${{ matrix.rdkit_version }}
+          path: wheelhouse
+
+      - name: Install + import + tests
+        shell: bash
+        run: |
+          set -xeuo pipefail
+          py_tag="cp${{ matrix.python }}"
+          py_tag="${py_tag/./}"
+          wheel=$(ls wheelhouse/nvmolkit-*-${py_tag}-${py_tag}-manylinux_2_28_x86_64.whl)
+          python -m pip install --upgrade pip
+          python -m pip install "${wheel}" pytest pandas
+          python -c "import nvmolkit; print(nvmolkit.__version__ if hasattr(nvmolkit, '__version__') else 'imported ok')"
+          (cd && pytest --pyargs nvmolkit -k 'not long')

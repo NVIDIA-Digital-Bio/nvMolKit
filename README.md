@@ -185,18 +185,24 @@ nvMolKit supports building for multiple GPU architectures. Build behavior is con
 
 #### Building Against pip-installed RDKit
 
-**Note**: The conda-based setup above is strongly recommended. This section is for advanced users only.
+The pip wheel pipeline reproduces the [kuelumbus/rdkit-pypi](https://github.com/kuelumbus/rdkit-pypi) build at a pinned tag to obtain bit-exact rdkit headers and matching boost headers, links nvMolKit against the pip-installed rdkit's auditwheel-rewritten libraries, and produces a `manylinux_2_28` wheel. The supported (rdkit, python) pairs are listed in [`admin/distribute/rdkit_build_matrix.yaml`](admin/distribute/rdkit_build_matrix.yaml).
 
-If you must build against pip-installed RDKit (not recommended), you'll need to manually provide headers since pip packages don't include them. This requires downloading RDKit source code and boost headers separately:
+The conda-based development setup above is still the recommended path for day-to-day development. The pip pipeline is driven exclusively by [cibuildwheel](https://cibuildwheel.pypa.io/) so the build environment matches kuelumbus/rdkit-pypi's CI exactly (manylinux entrypoint, gcc-toolset activation, and `before-all` system-dep install).
+
+To build wheels locally, use the same path CI uses:
 
 ```bash
-# Set environment variables for pip install
-NVMOLKIT_BUILD_AGAINST_PIP=ON \
-NVMOLKIT_BUILD_AGAINST_PIP_LIBDIR=<path to rdkit.libs> \
-NVMOLKIT_BUILD_AGAINST_PIP_INCDIR=<path to rdkit headers> \
-NVMOLKIT_BUILD_AGAINST_PIP_BOOSTINCLUDEDIR=<path to boost headers> \
-pip install .
+docker build -f admin/container/manylinux_2_28_cuda12.Dockerfile \
+  -t nvmolkit-manylinux-cuda12:test .
+pip install cibuildwheel
+CIBW_MANYLINUX_X86_64_IMAGE=nvmolkit-manylinux-cuda12:test \
+  RDKIT_VERSION=2026.3.1 \
+  bash admin/deploy/build_pip_wheels.sh 2026.3.1 wheelhouse
 ```
 
-This approach is error-prone. We recommend using the conda environment setup instead.
+To narrow the matrix while iterating, set `CIBW_BUILD=cp312-manylinux_x86_64` (or whichever python tag you care about) before invoking the script. Wheels land in `wheelhouse/`.
+
+The full CI pipeline is at [`.github/workflows/pip-build.yml`](.github/workflows/pip-build.yml). It builds and caches the manylinux+CUDA image to GHCR, runs `admin/deploy/build_pip_wheels.sh` against the pinned rdkit version, and uploads the resulting wheels as artifacts.
+
+Internally, cibuildwheel's `before-build` hook (see [`admin/distribute/cibuildwheel_before_build.sh`](admin/distribute/cibuildwheel_before_build.sh)) clones rdkit-pypi at the matching tag, runs [`admin/distribute/build_rdkit_recipe.sh`](admin/distribute/build_rdkit_recipe.sh) to reproduce its build (~30-60 min on first invocation; cached afterwards), pip-installs the matching rdkit wheel for runtime SONAME-matching libs, and stages everything at stable paths under `/tmp/nvmolkit_pip_inputs/`. setup.py picks those up via `NVMOLKIT_BUILD_AGAINST_PIP_*` env vars set in pyproject.toml's `[tool.cibuildwheel.linux].environment`.
 

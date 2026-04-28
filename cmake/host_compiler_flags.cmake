@@ -20,11 +20,6 @@ if(NVMOLKIT_EXTRA_DEV_FLAGS)
 else()
   set(NVMOLKIT_HOST_CUDA_FLAGS "")
 endif()
-if(NVMOLKIT_BUILD_AGAINST_PIP_RDKIT)
-  message(STATUS "Using pre-cxx11 ABI")
-  add_compile_definitions(_GLIBCXX_USE_CXX11_ABI=0)
-endif()
-
 set(NVMOLKIT_RELEASE_FLAGS "-ffast-math -O3 -DNDEBUG")
 
 set(CMAKE_C_FLAGS_RELEASE
