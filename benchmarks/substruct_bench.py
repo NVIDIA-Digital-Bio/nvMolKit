@@ -55,10 +55,11 @@ Usage:
 import argparse
 import gc
 import pickle
+import random
 import sys
 from functools import partial
 from multiprocessing import Pool
-from typing import Callable
+from typing import Callable, Iterator
 
 import nvtx
 import pandas as pd
@@ -74,12 +75,15 @@ def time_it(func: Callable, runs: int = 1, gpu_sync: bool = False) -> tuple[floa
     return result.mean_ms, result.std_ms
 
 
-def load_pickle(filepath: str, max_count: int = 0) -> list[Chem.Mol]:
-    """Load molecules from a pickled file containing binary mol data."""
+def load_pickle(filepath: str, max_count: int = 0, seed: int | None = None) -> list[Chem.Mol]:
+    """Load molecules from a pickled file containing binary mol data.
+
+    When ``max_count > 0``, a uniform random sample of binary mols is drawn.
+    """
     with open(filepath, "rb") as f:
         binary_mols = pickle.load(f)
-    if max_count > 0:
-        binary_mols = binary_mols[:max_count]
+    if max_count > 0 and len(binary_mols) > max_count:
+        binary_mols = random.Random(seed).sample(binary_mols, max_count)
     mols = process_map(
         _mol_from_binary,
         binary_mols,
@@ -100,35 +104,55 @@ def _parse_smiles(smi: str, sanitize: bool) -> Chem.Mol | None:
     return Chem.MolFromSmiles(smi, sanitize=sanitize)
 
 
-def load_smiles(filepath: str, max_count: int = 0, sanitize: bool = True) -> list[Chem.Mol]:
-    """Load and parse molecules from a SMILES file."""
-    mols = []
-    smiles_list = []
+def _iter_smiles_tokens(filepath: str, sanitize: bool) -> Iterator[str]:
+    """Yield SMILES tokens from a file, skipping blanks/comments and a parse-failing first line.
 
+    The first non-comment line is parsed quietly; if it fails to parse it is treated as a header
+    and dropped, matching the original loader's behavior.
+    """
+    with open(filepath, "r") as f:
+        first_data_seen = False
+        for line in f:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            smi = stripped.split()[0]
+            if not first_data_seen:
+                first_data_seen = True
+                RDLogger.DisableLog("rdApp.*")
+                mol = Chem.MolFromSmiles(smi, sanitize=sanitize)
+                RDLogger.EnableLog("rdApp.*")
+                if mol is None:
+                    continue
+            yield smi
+
+
+def load_smiles(filepath: str, max_count: int = 0, sanitize: bool = True, seed: int | None = None) -> list[Chem.Mol]:
+    """Load and parse molecules from a SMILES file.
+
+    When ``max_count > 0``, reservoir sampling draws a uniform random sample of lines in a single
+    streaming pass (with a 10% buffer to absorb parse failures) so the file isn't fully loaded into
+    memory and only the sampled SMILES are parsed.
+    """
     # Use a 10% buffer to account for potential parse failures
     # "On parse failures continue down the file. Load 10% more molecules than needed"
     read_limit = int(max_count * 1.1) if max_count > 0 else 0
 
-    with open(filepath, "r") as f:
-        for i, line in enumerate(f):
-            if read_limit > 0 and (len(mols) + len(smiles_list)) >= read_limit:
-                break
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-
-            smi = line.split()[0]
-            if i == 0:
-                # Try to parse line 0 quietly in case it's a header
-                RDLogger.DisableLog("rdApp.*")
-                mol = Chem.MolFromSmiles(smi, sanitize=sanitize)
-                RDLogger.EnableLog("rdApp.*")
-                if mol:
-                    mols.append(mol)
-                # If mol is None, we skip it and don't count as failure (potential header)
+    if read_limit > 0:
+        rng = random.Random(seed)
+        reservoir: list[str] = []
+        for index, smi in enumerate(_iter_smiles_tokens(filepath, sanitize)):
+            if index < read_limit:
+                reservoir.append(smi)
             else:
-                smiles_list.append(smi)
+                replace_index = rng.randint(0, index)
+                if replace_index < read_limit:
+                    reservoir[replace_index] = smi
+        smiles_list = reservoir
+    else:
+        smiles_list = list(_iter_smiles_tokens(filepath, sanitize))
 
+    mols: list[Chem.Mol] = []
     if smiles_list:
         parse_func = partial(_parse_smiles, sanitize=sanitize)
         parsed = process_map(parse_func, smiles_list, desc="Parsing molecules", chunksize=1000)
@@ -364,6 +388,12 @@ def main():
         ),
     )
     parser.add_argument("--num_mols", "-n", type=int, default=0, help="Max number of molecules (default: 0 = all)")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for sampling SMILES when --num_mols > 0 (default: 42)",
+    )
     parser.add_argument("--sanitize", action="store_true", dest="sanitize", help="Sanitize SMILES during parsing")
     parser.add_argument(
         "--no_sanitize", action="store_false", dest="sanitize", help="Skip sanitization (preprocessed SMILES)"
@@ -438,6 +468,8 @@ def main():
     print(f"  Input file: {input_file} ({input_type})")
     print(f"  Sanitize: {sanitize_value}")
     print(f"  Max molecules: {args.num_mols if args.num_mols > 0 else 'all'}")
+    if args.num_mols > 0:
+        print(f"  Sampling seed: {args.seed}")
     print(f"  Max matches: {args.max_matches if args.max_matches > 0 else 'all'}")
     print(f"  Runs: {args.runs}")
     print(f"  Warmup: {args.warmup}")
@@ -461,9 +493,9 @@ def main():
 
     print("\nLoading molecules...")
     if args.pickle:
-        mols = load_pickle(args.pickle, args.num_mols)
+        mols = load_pickle(args.pickle, args.num_mols, seed=args.seed)
     else:
-        mols = load_smiles(args.smiles, args.num_mols, args.sanitize)
+        mols = load_smiles(args.smiles, args.num_mols, args.sanitize, seed=args.seed)
 
     if len(mols) == 0:
         print("Error: No valid molecules loaded")
