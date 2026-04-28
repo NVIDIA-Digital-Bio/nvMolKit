@@ -1,99 +1,86 @@
 name: Pip Wheel Build
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
   workflow_dispatch:
     inputs:
       rdkit_version:
-        description: "Override the rdkit version to build against (must be in admin/distribute/rdkit_build_matrix.yaml)"
+        description: "Restrict to a single rdkit version (e.g. 2026.3.1). Empty = all entries in admin/distribute/rdkit_build_matrix.yaml."
+        required: false
+        default: ""
+      python_version:
+        description: "Restrict to a single python version (e.g. 3.12). Empty = all supported pythons for the selected rdkit version(s)."
         required: false
         default: ""
 
 permissions:
   contents: read
-  packages: write
+  packages: read
 
 concurrency:
-  group: pip-build-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: pip-build-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Pre-built manylinux+CUDA image hosted on the org's GHCR. Bump the date tag
+  # whenever admin/container/manylinux_2_28_cuda12.Dockerfile changes (and push
+  # the new tag manually). The workflow does not build images.
+  MANYLINUX_CUDA_IMAGE: ghcr.io/nvidia-digital-bio/nvmolkit-manylinux-cuda12:2026.04.28
+
 jobs:
-  build-image:
-    name: Build manylinux+CUDA image
+  matrix:
+    name: Resolve build matrix
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
     outputs:
-      image: ${{ steps.image.outputs.image }}
+      include: ${{ steps.gen.outputs.include }}
     steps:
       - name: Check out source tree
         uses: actions/checkout@v4
 
-      - name: Resolve image tag
-        id: image
-        shell: bash
-        run: |
-          set -xeuo pipefail
-          dockerfile_hash=$(sha256sum admin/container/manylinux_2_28_cuda12.Dockerfile | cut -c1-12)
-          image="ghcr.io/${{ github.repository_owner }}/nvmolkit-manylinux-cuda12:${dockerfile_hash}"
-          # Force lower-case (ghcr requires it) and emit.
-          image=$(echo "$image" | tr '[:upper:]' '[:lower:]')
-          echo "image=${image}" >> "${GITHUB_OUTPUT}"
-          echo "Image: ${image}"
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          python-version: "3.12"
 
-      - name: Pull existing image (cache hit) or build
+      - name: Generate matrix from rdkit_build_matrix.yaml
+        id: gen
         shell: bash
+        env:
+          DISPATCH_RDKIT: ${{ github.event.inputs.rdkit_version }}
+          DISPATCH_PY: ${{ github.event.inputs.python_version }}
         run: |
           set -xeuo pipefail
-          if docker pull "${{ steps.image.outputs.image }}"; then
-            echo "Image already published, skipping build"
-            exit 0
-          fi
-          docker build \
-            -f admin/container/manylinux_2_28_cuda12.Dockerfile \
-            -t "${{ steps.image.outputs.image }}" \
-            .
-          docker push "${{ steps.image.outputs.image }}"
+          python -m pip install --quiet pyyaml
+          python <<'PY' >> "${GITHUB_OUTPUT}"
+          import json, os, re, sys, yaml
+          matrix = yaml.safe_load(open("admin/distribute/rdkit_build_matrix.yaml"))
+          rdkit_filter = os.environ.get("DISPATCH_RDKIT", "").strip()
+          py_filter = os.environ.get("DISPATCH_PY", "").strip()
+          include = []
+          for rdkit_version, entry in matrix.items():
+              if rdkit_filter and rdkit_version != rdkit_filter:
+                  continue
+              for py in entry["python_versions"]:
+                  if py_filter and py != py_filter:
+                      continue
+                  include.append({"rdkit_version": rdkit_version, "python": py})
+          if not include:
+              print(f"No matrix entries match rdkit={rdkit_filter!r} python={py_filter!r}", file=sys.stderr)
+              sys.exit(1)
+          print("include=" + json.dumps(include))
+          PY
 
   build-wheels:
-    name: Wheels rdkit=${{ matrix.rdkit_version }}
-    needs: build-image
+    name: Wheel rdkit=${{ matrix.rdkit_version }} py${{ matrix.python }}
+    needs: matrix
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
-        rdkit_version:
-          - "2026.3.1"
+        include: ${{ fromJson(needs.matrix.outputs.include) }}
     steps:
       - name: Check out source tree
         uses: actions/checkout@v4
-
-      - name: Resolve effective rdkit version
-        id: rv
-        shell: bash
-        env:
-          DISPATCH_RDKIT: ${{ github.event.inputs.rdkit_version }}
-          MATRIX_RDKIT: ${{ matrix.rdkit_version }}
-        run: |
-          set -xeuo pipefail
-          # On workflow_dispatch with a non-empty override, use it; otherwise
-          # use the matrix value.
-          if [ -n "${DISPATCH_RDKIT}" ]; then
-            rv="${DISPATCH_RDKIT}"
-          else
-            rv="${MATRIX_RDKIT}"
-          fi
-          echo "rdkit_version=${rv}" >> "${GITHUB_OUTPUT}"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -107,35 +94,35 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Build wheels
+      - name: Build wheel
         shell: bash
         env:
-          CIBW_MANYLINUX_X86_64_IMAGE: ${{ needs.build-image.outputs.image }}
+          CIBW_MANYLINUX_X86_64_IMAGE: ${{ env.MANYLINUX_CUDA_IMAGE }}
+          CIBW_BUILD: cp${{ matrix.python }}-manylinux_x86_64
         run: |
           set -xeuo pipefail
-          bash admin/deploy/build_pip_wheels.sh "${{ steps.rv.outputs.rdkit_version }}" wheelhouse
+          # CIBW_BUILD format expects no dot in the python tag.
+          export CIBW_BUILD="${CIBW_BUILD/./}"
+          bash admin/deploy/build_pip_wheels.sh "${{ matrix.rdkit_version }}" wheelhouse
 
-      - name: Upload wheels
+      - name: Upload wheel
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: nvmolkit-wheels-rdkit${{ steps.rv.outputs.rdkit_version }}
+          name: nvmolkit-wheel-rdkit${{ matrix.rdkit_version }}-py${{ matrix.python }}
           path: wheelhouse/*.whl
           if-no-files-found: error
 
   smoke-test:
-    name: GPU smoke test rdkit=${{ matrix.rdkit_version }} py${{ matrix.python }}
-    needs: build-wheels
+    name: Smoke rdkit=${{ matrix.rdkit_version }} py${{ matrix.python }}
+    needs: [matrix, build-wheels]
     runs-on: colossus
     timeout-minutes: 30
     continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
-        rdkit_version:
-          - "2026.3.1"
-        python:
-          - "3.12"
+        include: ${{ fromJson(needs.matrix.outputs.include) }}
     steps:
       - name: Verify GPU access
         shell: bash
@@ -151,10 +138,10 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
-      - name: Download wheels
+      - name: Download wheel
         uses: actions/download-artifact@v4
         with:
-          name: nvmolkit-wheels-rdkit${{ matrix.rdkit_version }}
+          name: nvmolkit-wheel-rdkit${{ matrix.rdkit_version }}-py${{ matrix.python }}
           path: wheelhouse
 
       - name: Install + import + tests
@@ -165,6 +152,6 @@ jobs:
           py_tag="${py_tag/./}"
           wheel=$(ls wheelhouse/nvmolkit-*-${py_tag}-${py_tag}-manylinux_2_28_x86_64.whl)
           python -m pip install --upgrade pip
-          python -m pip install "${wheel}" pytest pandas
+          python -m pip install "${wheel}" "rdkit==${{ matrix.rdkit_version }}" pytest pandas
           python -c "import nvmolkit; print(nvmolkit.__version__ if hasattr(nvmolkit, '__version__') else 'imported ok')"
           (cd && pytest --pyargs nvmolkit -k 'not long')

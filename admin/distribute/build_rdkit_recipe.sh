@@ -114,29 +114,9 @@ WORK_DIR="${OUT_DIR}/work"
 mkdir -p "${WORK_DIR}"
 RDKIT_PYPI_DIR="${WORK_DIR}/rdkit-pypi"
 
-# Helper: retry an arbitrary command up to N times. We need this for the two
-# git clones the recipe performs (rdkit-pypi here, rdkit upstream inside their
-# setup.py) because GitHub occasionally drops a connection mid-clone with
-# "RPC failed; curl 18 ..." and we don't want to lose ~30 min of upstream
-# boost work to a transient blip.
-retry_command() {
-    local max_attempts=$1
-    shift
-    local attempt=1
-    until "$@"; do
-        if [ "${attempt}" -ge "${max_attempts}" ]; then
-            echo "Command failed after ${attempt} attempts: $*" >&2
-            return 1
-        fi
-        echo "Attempt ${attempt} failed; retrying..." >&2
-        attempt=$((attempt + 1))
-        sleep 5
-    done
-}
-
 if [ ! -d "${RDKIT_PYPI_DIR}/.git" ]; then
     rm -rf "${RDKIT_PYPI_DIR}"
-    retry_command 3 git clone --depth 1 -b "${RDKIT_PYPI_TAG}" \
+    git clone --depth 1 -b "${RDKIT_PYPI_TAG}" \
         https://github.com/kuelumbus/rdkit-pypi.git "${RDKIT_PYPI_DIR}"
 fi
 
@@ -165,11 +145,7 @@ mkdir -p "${BUILD_TEMP}" "${BUILD_LIB}"
 
 (
     cd "${RDKIT_PYPI_DIR}"
-    # rdkit-pypi's setup.py git-clones rdkit upstream as part of build_rdkit.
-    # We retry the whole build_ext on failure: conan boost is cached on second
-    # attempt, the only redo is the rdkit clone + cmake configure/build, which
-    # is what we want to re-attempt on a transient git failure.
-    retry_command 2 "${PY}" setup.py build_ext \
+    "${PY}" setup.py build_ext \
         --build-temp="${BUILD_TEMP}" \
         --build-lib="${BUILD_LIB}"
 )

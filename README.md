@@ -202,7 +202,7 @@ CIBW_MANYLINUX_X86_64_IMAGE=nvmolkit-manylinux-cuda12:test \
 
 To narrow the matrix while iterating, set `CIBW_BUILD=cp312-manylinux_x86_64` (or whichever python tag you care about) before invoking the script. Wheels land in `wheelhouse/`.
 
-The full CI pipeline is at [`.github/workflows/pip-build.yml`](.github/workflows/pip-build.yml). It builds and caches the manylinux+CUDA image to GHCR, runs `admin/deploy/build_pip_wheels.sh` against the pinned rdkit version, and uploads the resulting wheels as artifacts.
+The full CI pipeline is at [`.github/workflows/pip-build.yml`](.github/workflows/pip-build.yml). It runs on demand (`workflow_dispatch` only), expands the (rdkit, python) matrix from [`admin/distribute/rdkit_build_matrix.yaml`](admin/distribute/rdkit_build_matrix.yaml), and pulls the pre-built manylinux+CUDA image from the org's GHCR (`ghcr.io/nvidia-digital-bio/nvmolkit-manylinux-cuda12`). The image is rebuilt and pushed manually when the Dockerfile changes; the build script header documents the push command.
 
 Internally, cibuildwheel's `before-build` hook (see [`admin/distribute/cibuildwheel_before_build.sh`](admin/distribute/cibuildwheel_before_build.sh)) clones rdkit-pypi at the matching tag, runs [`admin/distribute/build_rdkit_recipe.sh`](admin/distribute/build_rdkit_recipe.sh) to reproduce its build (~30-60 min on first invocation; cached afterwards), pip-installs the matching rdkit wheel for runtime SONAME-matching libs, and stages everything at stable paths under `/tmp/nvmolkit_pip_inputs/`. setup.py picks those up via `NVMOLKIT_BUILD_AGAINST_PIP_*` env vars set in pyproject.toml's `[tool.cibuildwheel.linux].environment`.
 

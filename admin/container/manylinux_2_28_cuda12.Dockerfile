@@ -3,11 +3,17 @@
 #
 # manylinux_2_28 image with CUDA + rdkit native build dependencies + Python
 # build dependencies pre-installed across all supported CPython interpreters.
-# Used by the pip wheel CI pipeline. Build via:
+# Used by the pip wheel CI pipeline. Hosted on the org's GHCR; the workflow
+# pulls a fixed date tag rather than rebuilding. To produce a new tag (only
+# needed when this Dockerfile changes), build and push manually:
 #
+#   tag=$(date -u +%Y.%m.%d)
 #   docker build --network host \
 #     -f admin/container/manylinux_2_28_cuda12.Dockerfile \
-#     -t ghcr.io/nvidia-digital-bio/nvmolkit-manylinux-cuda12:<tag> .
+#     -t ghcr.io/nvidia-digital-bio/nvmolkit-manylinux-cuda12:${tag} .
+#   docker push ghcr.io/nvidia-digital-bio/nvmolkit-manylinux-cuda12:${tag}
+#
+# Then bump MANYLINUX_CUDA_IMAGE in .github/workflows/pip-build.yml.
 #
 # Image contents:
 #   - PyPA manylinux_2_28 x86_64 base, RHEL 8 with /opt/python/cp310..cp314
