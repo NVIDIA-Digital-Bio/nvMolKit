@@ -18,10 +18,13 @@
 #include <GraphMol/ROMol.h>
 #include <omp.h>
 
+#include <algorithm>
+#include <stdexcept>
 #include <vector>
 
 #include "bfgs_common.h"
 #include "bfgs_minimize.h"
+#include "ff_device_collect.h"
 #include "ff_utils.h"
 #include "nvtx.h"
 #include "openmp_helpers.h"
@@ -36,7 +39,9 @@ UFFMinimizeResult UFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>& mols,
                                             const std::vector<double>&  vdwThresholds,
                                             const std::vector<bool>&    ignoreInterfragInteractions,
                                             const std::vector<ForceFieldConstraints::PerMolConstraints>& constraints,
-                                            const BatchHardwareOptions&                                  perfOptions) {
+                                            const BatchHardwareOptions&                                  perfOptions,
+                                            const CoordinateOutput                                       output,
+                                            int                                                          targetGpu) {
   ScopedNvtxRange fullRange("BFGS UFF Minimize Molecules Confs");
 
   if (vdwThresholds.size() != mols.size()) {
@@ -49,7 +54,22 @@ UFFMinimizeResult UFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>& mols,
     throw std::invalid_argument("Expected one PerMolConstraints entry per molecule");
   }
 
-  auto                             ctx = setupBatchExecution(perfOptions);
+  const bool deviceOutput = output == CoordinateOutput::DEVICE;
+
+  auto ctx = setupBatchExecution(perfOptions);
+
+  if (deviceOutput) {
+    if (targetGpu < 0) {
+      targetGpu = ctx.devicesPerThread.empty() ? 0 : ctx.devicesPerThread.front();
+    }
+    if (std::find(ctx.devicesPerThread.begin(), ctx.devicesPerThread.end(), targetGpu) ==
+        ctx.devicesPerThread.end()) {
+      throw std::invalid_argument(
+        "targetGpu " + std::to_string(targetGpu) +
+        " is not in the configured set of execution GPUs; pass it via perfOptions.gpuIds first.");
+    }
+  }
+
   std::vector<std::vector<double>> moleculeEnergies;
   const auto                       allConformers = flattenConformers(mols, moleculeEnergies);
 
@@ -61,10 +81,25 @@ UFFMinimizeResult UFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>& mols,
   const size_t totalConformers    = allConformers.size();
   const size_t effectiveBatchSize = ctx.batchSize == 0 ? totalConformers : ctx.batchSize;
   if (totalConformers == 0) {
-    return {moleculeEnergies, moleculeConverged};
+    if (deviceOutput) {
+      std::vector<FFDeviceCoordCollector> emptyCollectors;
+      return {{}, {}, finalizeOnTarget(emptyCollectors, targetGpu)};
+    }
+    return {moleculeEnergies, moleculeConverged, std::nullopt};
   }
 
-  std::vector<ThreadLocalBuffers> threadBuffers(ctx.numThreads);
+  std::vector<ThreadLocalBuffers>     threadBuffers(ctx.numThreads);
+  std::vector<FFDeviceCoordCollector> deviceCollectors(deviceOutput ? ctx.numThreads : 0);
+  if (deviceOutput) {
+    for (int threadId = 0; threadId < ctx.numThreads; ++threadId) {
+      auto& collector  = deviceCollectors[threadId];
+      collector.gpuId  = ctx.devicesPerThread[threadId];
+      collector.stream = ctx.streamPool[threadId].stream();
+      collector.positions.setStream(collector.stream);
+      collector.energies.setStream(collector.stream);
+      collector.converged.setStream(collector.stream);
+    }
+  }
   detail::OpenMPExceptionRegistry exceptionHandler;
 #pragma omp parallel for num_threads(ctx.numThreads) schedule(dynamic) default(none) \
   shared(allConformers,                                                              \
@@ -79,6 +114,8 @@ UFFMinimizeResult UFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>& mols,
            constraints,                                                              \
            ctx,                                                                      \
            threadBuffers,                                                            \
+           deviceCollectors,                                                         \
+           deviceOutput,                                                             \
            exceptionHandler)
   for (size_t batchStart = 0; batchStart < totalConformers; batchStart += effectiveBatchSize) {
     try {
@@ -142,26 +179,37 @@ UFFMinimizeResult UFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>& mols,
       setupBatchRange.pop();
       bfgsMinimizer.minimize(maxIters, gradTol, forcefield, positionsDevice, gradDevice, energyOutsDevice);
 
-      ScopedNvtxRange finalizeBatchRange("OpenMP loop finalizing batch");
-      positionsDevice.copyToHost(buffers.positions.data(), positionsDevice.size());
-      energyOutsDevice.copyToHost(buffers.energies.data(), energyOutsDevice.size());
+      if (deviceOutput) {
+        appendBatch(batchConformers,
+                    positionsDevice,
+                    energyOutsDevice,
+                    bfgsMinimizer.statuses_,
+                    deviceCollectors[threadId]);
+      } else {
+        ScopedNvtxRange finalizeBatchRange("OpenMP loop finalizing batch");
+        positionsDevice.copyToHost(buffers.positions.data(), positionsDevice.size());
+        energyOutsDevice.copyToHost(buffers.energies.data(), energyOutsDevice.size());
 
-      std::vector<int16_t> statusesHost(batchConformers.size());
-      bfgsMinimizer.statuses_.copyToHost(statusesHost.data(), batchConformers.size());
-      cudaStreamSynchronize(streamPtr);
+        std::vector<int16_t> statusesHost(batchConformers.size());
+        bfgsMinimizer.statuses_.copyToHost(statusesHost.data(), batchConformers.size());
+        cudaStreamSynchronize(streamPtr);
 
-      writeBackResults(batchConformers, conformerAtomStarts, buffers, moleculeEnergies);
+        writeBackResults(batchConformers, conformerAtomStarts, buffers, moleculeEnergies);
 
-      for (size_t i = 0; i < batchConformers.size(); ++i) {
-        const auto& confInfo                                 = batchConformers[i];
-        moleculeConverged[confInfo.molIdx][confInfo.confIdx] = static_cast<int8_t>(statusesHost[i] == 0);
+        for (size_t i = 0; i < batchConformers.size(); ++i) {
+          const auto& confInfo                                 = batchConformers[i];
+          moleculeConverged[confInfo.molIdx][confInfo.confIdx] = static_cast<int8_t>(statusesHost[i] == 0);
+        }
       }
     } catch (...) {
       exceptionHandler.store(std::current_exception());
     }
   }
   exceptionHandler.rethrow();
-  return {moleculeEnergies, moleculeConverged};
+  if (deviceOutput) {
+    return {{}, {}, finalizeOnTarget(deviceCollectors, targetGpu)};
+  }
+  return {moleculeEnergies, moleculeConverged, std::nullopt};
 }
 
 std::vector<std::vector<double>> UFFOptimizeMoleculesConfsBfgs(std::vector<RDKit::ROMol*>& mols,

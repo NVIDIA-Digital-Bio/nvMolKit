@@ -29,12 +29,21 @@ target_link_libraries(
   PRIVATE ${RDKit_LIBS} OpenMP::OpenMP_CXX)
 target_include_directories(bfgs_common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_library(ff_device_collect ff_device_collect.cpp)
+target_link_libraries(
+  ff_device_collect
+  PUBLIC bfgs_common device_vector
+  PRIVATE coord_collect device cuda_error_check ${RDKit_LIBS})
+target_include_directories(ff_device_collect PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
+                                                    ${CMAKE_SOURCE_DIR}/src)
+
 add_library(bfgs_mmff bfgs_mmff.cpp)
 target_link_libraries(
   bfgs_mmff
   PUBLIC bfgs
   PRIVATE ${RDKit_LIBS}
           bfgs_common
+          ff_device_collect
           mmff_batched_forcefield
           rdkit_mmff_flattened
           forcefield_constraints
@@ -51,6 +60,7 @@ target_link_libraries(
   PUBLIC bfgs
   PRIVATE ${RDKit_LIBS}
           bfgs_common
+          ff_device_collect
           uff_batched_forcefield
           rdkit_uff_flattened
           forcefield_constraints
