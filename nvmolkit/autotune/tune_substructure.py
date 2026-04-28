@@ -108,8 +108,7 @@ def tune_substructure(
 
     if api not in _API_FUNCTIONS:
         raise ValueError(
-            "api must be one of nvmolkit.substructure.hasSubstructMatch, "
-            "countSubstructMatches, or getSubstructMatches"
+            "api must be one of nvmolkit.substructure.hasSubstructMatch, countSubstructMatches, or getSubstructMatches"
         )
     if not targets:
         raise ValueError("targets must be non-empty for autotuning")

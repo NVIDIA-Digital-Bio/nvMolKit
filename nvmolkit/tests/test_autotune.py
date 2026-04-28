@@ -187,7 +187,9 @@ def test_save_load_hardware_options_roundtrip(tmp_path):
 
 
 def test_save_load_substruct_config_roundtrip(tmp_path):
-    config = SubstructSearchConfig(batchSize=2048, workerThreads=2, preprocessingThreads=8, maxMatches=4, uniquify=True)
+    config = SubstructSearchConfig(
+        batchSize=2048, workerThreads=2, preprocessingThreads=8, maxMatches=4, uniquify=True
+    )
     path = tmp_path / "ss.json"
     autotune.save(config, path)
     loaded = autotune.load(path)
