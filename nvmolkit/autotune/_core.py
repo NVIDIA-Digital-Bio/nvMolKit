@@ -65,14 +65,9 @@ class CalibrationState:
         indices: Indices into the user-provided workload that participate in
             each trial. Each adaptive-shrink iteration replaces this list with
             a smaller subsample.
-        items_per_trial: Number of work items represented by ``indices``. For
-            APIs operating on conformers this may differ from ``len(indices)``
-            when each molecule contributes multiple conformers; the trial
-            function decides what counts as one item.
     """
 
     indices: list[int]
-    items_per_trial: int
 
 
 @dataclass
@@ -162,7 +157,7 @@ def _run_warmup(
         new_size = max(min_calibration_size, int(len(state.indices) * shrink_factor))
         if new_size >= len(state.indices):
             break
-        state = CalibrationState(indices=state.indices[:new_size], items_per_trial=new_size)
+        state = CalibrationState(indices=state.indices[:new_size])
 
     return state
 
@@ -289,12 +284,13 @@ def suggest_from_space(trial, name: str, spec: Any) -> Any:
 
     ``spec`` may be:
 
-    - ``(low, high)`` — uniform integer range.
-    - ``(low, high, "log")`` — log-uniform integer range.
-    - ``list`` / ``tuple`` of more than two values — categorical.
+    - ``(low, high)`` tuple — uniform integer range.
+    - ``(low, high, "log")`` tuple — log-uniform integer range.
+    - ``list`` of choices — categorical search.
 
     A literal scalar is returned unchanged (acts as a fixed value rather than
-    a search dimension).
+    a search dimension). A 2- or 3-element ``list`` shaped like a range raises
+    :class:`TypeError` rather than being treated as categorical.
     """
     if isinstance(spec, tuple) and len(spec) == 2 and all(isinstance(v, int) for v in spec):
         low, high = spec
@@ -302,6 +298,17 @@ def suggest_from_space(trial, name: str, spec: Any) -> Any:
     if isinstance(spec, tuple) and len(spec) == 3 and spec[2] == "log":
         low, high, _ = spec
         return trial.suggest_int(name, int(low), int(high), log=True)
+    if isinstance(spec, list) and len(spec) == 2 and all(isinstance(v, int) for v in spec):
+        raise TypeError(
+            f"Search-space override for {name!r} is a 2-element int list {spec!r}; "
+            "use a tuple (low, high) for an integer range, or wrap in a list of "
+            "more than two values to request a categorical search."
+        )
+    if isinstance(spec, list) and len(spec) == 3 and spec[2] == "log":
+        raise TypeError(
+            f"Search-space override for {name!r} is a 3-element list {spec!r} ending in 'log'; "
+            "use a tuple (low, high, 'log') for a log-uniform integer range."
+        )
     if isinstance(spec, (list, tuple)):
         choices = list(spec)
         return trial.suggest_categorical(name, choices)

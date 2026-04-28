@@ -159,7 +159,7 @@ def tune_substructure(
         merged = {name: params_dict.get(name, collect_int_from_space(spec)) for name, spec in space.items()}
         return _make_config(merged)
 
-    initial_state = CalibrationState(indices=list(indices), items_per_trial=len(indices) * len(queries_list))
+    initial_state = CalibrationState(indices=list(indices))
     return run_study(
         default_runner=default_runner,
         trial_runner=trial_runner,

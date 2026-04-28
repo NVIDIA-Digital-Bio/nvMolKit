@@ -154,10 +154,7 @@ def tune_mmff_optimize(
         merged = {name: params_dict.get(name, collect_int_from_space(spec)) for name, spec in space.items()}
         return _make_options(merged)
 
-    initial_state = CalibrationState(
-        indices=list(indices),
-        items_per_trial=sum(molecules[i].GetNumConformers() for i in indices),
-    )
+    initial_state = CalibrationState(indices=list(indices))
     return run_study(
         default_runner=default_runner,
         trial_runner=trial_runner,

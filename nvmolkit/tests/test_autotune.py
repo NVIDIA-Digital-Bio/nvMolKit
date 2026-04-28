@@ -246,7 +246,7 @@ def test_shrink_halves_within_floor():
 
 def test_warmup_shrinks_when_default_is_too_slow(monkeypatch):
     """Warm-up shrinks the calibration when the default exceeds the time budget."""
-    state = _core.CalibrationState(indices=list(range(64)), items_per_trial=64)
+    state = _core.CalibrationState(indices=list(range(64)))
 
     call_log: list[int] = []
 
@@ -278,7 +278,7 @@ def test_warmup_shrinks_when_default_is_too_slow(monkeypatch):
 
 def test_warmup_stops_after_max_shrinks(monkeypatch):
     """Warm-up returns the smallest tried slice once retries are exhausted."""
-    state = _core.CalibrationState(indices=list(range(32)), items_per_trial=32)
+    state = _core.CalibrationState(indices=list(range(32)))
 
     def fake_timed_run(runner, current_state):
         runner(current_state)
@@ -301,7 +301,7 @@ def test_warmup_stops_after_max_shrinks(monkeypatch):
 def test_run_study_returns_completed_result(monkeypatch):
     """A simple run_study with a synthetic objective returns a sane TuneResult."""
     optuna = pytest.importorskip("optuna")
-    state = _core.CalibrationState(indices=list(range(10)), items_per_trial=10)
+    state = _core.CalibrationState(indices=list(range(10)))
 
     def fake_timed_run(runner, current_state):
         items = runner(current_state)

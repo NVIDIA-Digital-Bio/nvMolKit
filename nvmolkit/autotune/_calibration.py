@@ -53,7 +53,10 @@ def normalize_calibration_set(
     max_size: int = 2000,
     seed: int = 0,
 ) -> list[int]:
-    """Return a sorted unique index list from an explicit set or auto-sample.
+    """Return calibration indices from an explicit set or auto-sample.
+
+    Explicitly-provided indices are returned as given; order and duplicates
+    are preserved. Out-of-range entries raise :class:`IndexError`.
 
     Args:
         calibration_set: User-provided iterable of indices, or ``None`` to
