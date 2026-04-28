@@ -64,16 +64,25 @@ struct MMFFMinimizeResult {
 
 //! \brief Optimize with per-molecule constraints and return convergence status.
 //! \param mols The molecules to optimize (positions written back in-place in RDKIT_CONFORMERS mode).
+//!             When @p deviceInput is provided, each mol still needs at least one RDKit
+//!             conformer; that conformer is only consulted for force-field construction (e.g.
+//!             special-case hybridization checks) - the actual starting coordinates come from
+//!             @p deviceInput.
 //! \param maxIters Maximum BFGS iterations.
 //! \param gradTol Gradient convergence tolerance.
 //! \param properties Per-molecule MMFF settings.
-//! \param constraints Per-molecule constraint specifications.
+//! \param constraints Per-molecule constraint specifications. Must be empty when @p deviceInput
+//!                    is provided (combining constraints with device input is not yet supported).
 //! \param perfOptions Hardware and batching configuration.
 //! \param backend BFGS backend selection.
 //! \param output Whether to write coordinates back into RDKit conformers (default) or return them
 //!               on-device as a DeviceCoordResult.
 //! \param targetGpu In DEVICE mode, the GPU to consolidate the result onto. -1 selects the first
 //!                  configured execution GPU (or device 0).
+//! \param deviceInput Optional on-device starting coordinates. When supplied, the conformer count
+//!                    and (molIdx, confIdx) labels must exactly match the host-side flattening of
+//!                    @p mols (one entry per RDKit conformer, in input-mol order, then conformer
+//!                    order). Positions are broadcast from @p deviceInput onto each executing GPU.
 //! \return Either host-side energies/convergence (RDKIT mode) or a populated `device` field (DEVICE mode).
 MMFFMinimizeResult MMFFMinimizeMoleculesConfs(
   std::vector<RDKit::ROMol*>&                                  mols,
@@ -84,7 +93,8 @@ MMFFMinimizeResult MMFFMinimizeMoleculesConfs(
   const BatchHardwareOptions&                                  perfOptions = {},
   BfgsBackend                                                  backend     = BfgsBackend::HYBRID,
   CoordinateOutput                                             output      = CoordinateOutput::RDKIT_CONFORMERS,
-  int                                                          targetGpu   = -1);
+  int                                                          targetGpu   = -1,
+  const DeviceCoordResult*                                     deviceInput = nullptr);
 
 }  // namespace nvMolKit::MMFF
 #endif  // NVMOLKIT_BFGS_MMFF_H

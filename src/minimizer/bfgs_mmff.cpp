@@ -58,7 +58,8 @@ MMFFMinimizeResult MMFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>&       
                                               const BatchHardwareOptions&                                  perfOptions,
                                               const BfgsBackend                                            backend,
                                               const CoordinateOutput                                       output,
-                                              int                                                          targetGpu) {
+                                              int                                                          targetGpu,
+                                              const DeviceCoordResult* deviceInput) {
   ScopedNvtxRange fullRange("BFGS MMFF Minimize Molecules Confs");
 
   if (properties.size() != mols.size()) {
@@ -66,6 +67,9 @@ MMFFMinimizeResult MMFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>&       
   }
   if (!constraints.empty() && constraints.size() != mols.size()) {
     throw std::invalid_argument("Expected one PerMolConstraints entry per molecule");
+  }
+  if (deviceInput != nullptr && !constraints.empty()) {
+    throw std::invalid_argument("Combining device_input with constraints is not supported in this release.");
   }
 
   const bool deviceOutput = output == CoordinateOutput::DEVICE;
@@ -91,6 +95,15 @@ MMFFMinimizeResult MMFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>&       
   for (size_t i = 0; i < mols.size(); ++i) {
     moleculeConverged[i].resize(moleculeEnergies[i].size(), 0);
   }
+
+  // Build & validate the device-input index up front so per-batch broadcasts can do an O(1)
+  // source lookup for each batch slot. The validation also catches mismatched conformer
+  // counts/labels before we start any GPU work.
+  DeviceInputIndex deviceInputIndex;
+  if (deviceInput != nullptr) {
+    deviceInputIndex = buildDeviceInputIndex(*deviceInput, allConformers);
+  }
+  const bool useDeviceInput = deviceInput != nullptr;
 
   const size_t totalConformers    = allConformers.size();
   const size_t effectiveBatchSize = (ctx.batchSize == 0) ? totalConformers : ctx.batchSize;
@@ -129,6 +142,9 @@ MMFFMinimizeResult MMFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>&       
                                                                                               threadBuffers,      \
                                                                                               deviceCollectors,   \
                                                                                               deviceOutput,       \
+                                                                                              useDeviceInput,     \
+                                                                                              deviceInput,        \
+                                                                                              deviceInputIndex,   \
                                                                                               backend,            \
                                                                                               exceptionHandler)
   for (size_t batchStart = 0; batchStart < totalConformers; batchStart += effectiveBatchSize) {
@@ -137,11 +153,24 @@ MMFFMinimizeResult MMFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>&       
       ScopedNvtxRange                                       singleBatchRange("OpenMP loop thread");
       ScopedNvtxRange                                       setupBatchRange("OpenMP loop preprocessing");
       const int                                             threadId = omp_get_thread_num();
-      const WithDevice                                      dev(ctx.devicesPerThread[threadId]);
+      const int                                             executingGpu = ctx.devicesPerThread[threadId];
+      const WithDevice                                      dev(executingGpu);
       const size_t batchEnd = std::min(batchStart + effectiveBatchSize, totalConformers);
 
       std::vector<nvMolKit::ConformerInfo> batchConformers(allConformers.begin() + batchStart,
                                                            allConformers.begin() + batchEnd);
+
+      // Precompute per-batch source indices and atom counts when we'll broadcast device input.
+      std::vector<int> batchSrcIndices;
+      std::vector<int> batchAtomCounts;
+      if (useDeviceInput) {
+        batchSrcIndices.reserve(batchConformers.size());
+        batchAtomCounts.reserve(batchConformers.size());
+        for (size_t k = 0; k < batchConformers.size(); ++k) {
+          batchSrcIndices.push_back(deviceInputIndex.conformerIndexBy[batchStart + k]);
+          batchAtomCounts.push_back(static_cast<int>(batchConformers[k].mol->getNumAtoms()));
+        }
+      }
 
       cudaStream_t streamPtr = ctx.streamPool[threadId].stream();
 
@@ -198,6 +227,10 @@ MMFFMinimizeResult MMFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>&       
         energyOutsDevice.setStream(streamPtr);
         positionsDevice.resize(systemHost.positions.size());
         positionsDevice.copyFromHost(buffers.initialPositions.data(), systemHost.positions.size());
+        if (useDeviceInput) {
+          broadcastDeviceInputBatch(*deviceInput, deviceInputIndex, batchSrcIndices, batchAtomCounts, executingGpu,
+                                    streamPtr, positionsDevice);
+        }
         gradDevice.resize(systemHost.positions.size());
         gradDevice.zero();
         energyOutsDevice.resize(batchConformers.size());
@@ -220,6 +253,10 @@ MMFFMinimizeResult MMFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>&       
         nvMolKit::MMFF::allocateIntermediateBuffers(systemHost, systemDevice);
         systemDevice.positions.resize(systemHost.positions.size());
         systemDevice.positions.copyFromHost(buffers.initialPositions.data(), systemHost.positions.size());
+        if (useDeviceInput) {
+          broadcastDeviceInputBatch(*deviceInput, deviceInputIndex, batchSrcIndices, batchAtomCounts, executingGpu,
+                                    streamPtr, systemDevice.positions);
+        }
         systemDevice.grad.resize(systemHost.positions.size());
         systemDevice.grad.zero();
 
