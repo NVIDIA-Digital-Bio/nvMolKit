@@ -13,6 +13,8 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
+# cmake-lint: disable=C0103
+
 # Suppress deprecation warning using old find boost method
 cmake_policy(SET CMP0167 NEW)
 
@@ -28,7 +30,6 @@ if(NVMOLKIT_BUILD_AGAINST_PIP_RDKIT)
       list(APPEND BOOST_LIBRARIES_FROM_PIP ${lib})
     endif()
   endforeach()
-  # cmake-lint: disable=C0103
   set(Boost_LIBRARIES ${BOOST_LIBRARIES_FROM_PIP})
 else()
   set(BOOST_TARGET_LIBS system serialization iostreams)
