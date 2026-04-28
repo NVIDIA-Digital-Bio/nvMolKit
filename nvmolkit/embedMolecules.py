@@ -116,7 +116,6 @@ def EmbedMolecules(
     if hardwareOptions is None:
         hardwareOptions = HardwareOptions()
     native_options = hardwareOptions._as_native()
-    output_mode = output.value if hasattr(output, "value") else int(output)
     output_mode_int = 1 if output == CoordinateOutput.DEVICE else 0
     return _embedMolecules.EmbedMolecules(
         molecules,

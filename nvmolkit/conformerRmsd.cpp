@@ -52,7 +52,8 @@ BOOST_PYTHON_MODULE(_conformerRmsd) {
       for (int m = 0; m < numMols; ++m) {
         const int nc       = molsVec[m]->getNumConformers();
         const int numPairs = nc >= 2 ? nc * (nc - 1) / 2 : 0;
-        results.append(nvMolKit::toOwnedPyArray(nvMolKit::makePyArray(buffers[m], boost::python::make_tuple(numPairs))));
+        results.append(
+          nvMolKit::toOwnedPyArray(nvMolKit::makePyArray(buffers[m], boost::python::make_tuple(numPairs))));
       }
       return results;
     },

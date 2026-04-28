@@ -96,12 +96,6 @@ bp::list nestedToList(const std::vector<std::vector<T>>& nested, Convert&& conve
   return outer;
 }
 
-void throwIfCudaError(cudaError_t err, const std::string& context) {
-  if (err != cudaSuccess) {
-    throw std::runtime_error(context + ": " + cudaGetErrorString(err));
-  }
-}
-
 template <typename T> std::vector<T> copyDeviceVector(nvMolKit::AsyncDeviceVector<T>& deviceVec) {
   std::vector<T> hostVec(deviceVec.size());
   deviceVec.copyToHost(hostVec);
@@ -128,7 +122,7 @@ bp::list computeBatchedEnergy(nvMolKit::BatchedForcefield&         forcefield,
                               nvMolKit::AsyncDeviceVector<double>& energyOutsDevice,
                               const std::vector<int>&              numConformersPerMol) {
   energyOutsDevice.zero();
-  throwIfCudaError(forcefield.computeEnergy(energyOutsDevice.data(), positionsDevice.data()), "computeEnergy");
+  cudaCheckError(forcefield.computeEnergy(energyOutsDevice.data(), positionsDevice.data()));
   return reshapeToNested(copyDeviceVector(energyOutsDevice), numConformersPerMol);
 }
 
@@ -137,7 +131,7 @@ bp::list computeBatchedGradients(nvMolKit::BatchedForcefield&         forcefield
                                  nvMolKit::AsyncDeviceVector<double>& gradDevice,
                                  const std::vector<int>&              numConformersPerMol) {
   gradDevice.zero();
-  throwIfCudaError(forcefield.computeGradients(gradDevice.data(), positionsDevice.data()), "computeGradients");
+  cudaCheckError(forcefield.computeGradients(gradDevice.data(), positionsDevice.data()));
   auto perSystem = splitGradients(copyDeviceVector(gradDevice), forcefield.atomStartsHost(), 3);
   return reshapeGradientsToNested(perSystem, numConformersPerMol);
 }
@@ -284,7 +278,7 @@ class NativeMMFFBatchedForcefield {
                               const bp::list&                       torsionConstraints,
                               const nvMolKit::BatchHardwareOptions& hwOpts)
       : hwOpts_(hwOpts) {
-    cudaGetDevice(&gpuId_);
+    cudaCheckError(cudaGetDevice(&gpuId_));
     mols_             = nvMolKit::extractMolecules(molecules);
     const int numMols = static_cast<int>(mols_.size());
     properties_       = nvMolKit::extractMMFFPropertiesList(properties, numMols);
@@ -317,13 +311,13 @@ class NativeMMFFBatchedForcefield {
 
   nvMolKit::PyArray* computeEnergyDevice() {
     energyOutsDevice_.zero();
-    throwIfCudaError(forcefield_->computeEnergy(energyOutsDevice_.data(), positionsDevice_.data()), "computeEnergy");
+    cudaCheckError(forcefield_->computeEnergy(energyOutsDevice_.data(), positionsDevice_.data()));
     return nvMolKit::makePyArrayBorrowed(energyOutsDevice_);
   }
 
   nvMolKit::PyArray* computeGradientsDevice() {
     gradDevice_.zero();
-    throwIfCudaError(forcefield_->computeGradients(gradDevice_.data(), positionsDevice_.data()), "computeGradients");
+    cudaCheckError(forcefield_->computeGradients(gradDevice_.data(), positionsDevice_.data()));
     return nvMolKit::makePyArrayBorrowed(gradDevice_);
   }
 
@@ -353,19 +347,19 @@ class NativeMMFFBatchedForcefield {
     // compute_gradients calls see the optimized coords without a host roundtrip. The result's
     // GPU and the wrapper's GPU are the same when the user defaults targetGpu.
     if (dev.gpuId == gpuId_ && dev.positions.size() == positionsDevice_.size()) {
-      cudaMemcpyAsync(positionsDevice_.data(),
-                      dev.positions.data(),
-                      positionsDevice_.size() * sizeof(double),
-                      cudaMemcpyDeviceToDevice,
-                      positionsDevice_.stream());
-      cudaStreamSynchronize(positionsDevice_.stream());
+      cudaCheckError(cudaMemcpyAsync(positionsDevice_.data(),
+                                     dev.positions.data(),
+                                     positionsDevice_.size() * sizeof(double),
+                                     cudaMemcpyDeviceToDevice,
+                                     positionsDevice_.stream()));
+      cudaCheckError(cudaStreamSynchronize(positionsDevice_.stream()));
     }
     return nvMolKit::pyDeviceCoordResultFromOwned(std::move(*result.device));
   }
 
   bp::object indexBuffers() {
-    bp::object                        types_module = bp::import("nvmolkit.types");
-    bp::object                        async_cls    = types_module.attr("AsyncGpuResult");
+    bp::object                         types_module = bp::import("nvmolkit.types");
+    bp::object                         async_cls    = types_module.attr("AsyncGpuResult");
     std::unique_ptr<nvMolKit::PyArray> atomStartsPy(nvMolKit::makePyArrayBorrowed(persistentIndexBuffers_.atomStarts));
     std::unique_ptr<nvMolKit::PyArray> molIdxPy(nvMolKit::makePyArrayBorrowed(persistentIndexBuffers_.molIndices));
     std::unique_ptr<nvMolKit::PyArray> confIdxPy(nvMolKit::makePyArrayBorrowed(persistentIndexBuffers_.confIndices));
@@ -433,7 +427,7 @@ class NativeUFFBatchedForcefield {
                              const bp::list&                       torsionConstraints,
                              const nvMolKit::BatchHardwareOptions& hwOpts)
       : hwOpts_(hwOpts) {
-    cudaGetDevice(&gpuId_);
+    cudaCheckError(cudaGetDevice(&gpuId_));
     mols_             = nvMolKit::extractMolecules(molecules);
     const int numMols = static_cast<int>(mols_.size());
     vdwThresholds_    = nvMolKit::extractDoubleList(vdwThresholds, numMols, "vdwThreshold");
@@ -470,13 +464,13 @@ class NativeUFFBatchedForcefield {
 
   nvMolKit::PyArray* computeEnergyDevice() {
     energyOutsDevice_.zero();
-    throwIfCudaError(forcefield_->computeEnergy(energyOutsDevice_.data(), positionsDevice_.data()), "computeEnergy");
+    cudaCheckError(forcefield_->computeEnergy(energyOutsDevice_.data(), positionsDevice_.data()));
     return nvMolKit::makePyArrayBorrowed(energyOutsDevice_);
   }
 
   nvMolKit::PyArray* computeGradientsDevice() {
     gradDevice_.zero();
-    throwIfCudaError(forcefield_->computeGradients(gradDevice_.data(), positionsDevice_.data()), "computeGradients");
+    cudaCheckError(forcefield_->computeGradients(gradDevice_.data(), positionsDevice_.data()));
     return nvMolKit::makePyArrayBorrowed(gradDevice_);
   }
 
@@ -503,19 +497,19 @@ class NativeUFFBatchedForcefield {
     }
     auto& dev = *result.device;
     if (dev.gpuId == gpuId_ && dev.positions.size() == positionsDevice_.size()) {
-      cudaMemcpyAsync(positionsDevice_.data(),
-                      dev.positions.data(),
-                      positionsDevice_.size() * sizeof(double),
-                      cudaMemcpyDeviceToDevice,
-                      positionsDevice_.stream());
-      cudaStreamSynchronize(positionsDevice_.stream());
+      cudaCheckError(cudaMemcpyAsync(positionsDevice_.data(),
+                                     dev.positions.data(),
+                                     positionsDevice_.size() * sizeof(double),
+                                     cudaMemcpyDeviceToDevice,
+                                     positionsDevice_.stream()));
+      cudaCheckError(cudaStreamSynchronize(positionsDevice_.stream()));
     }
     return nvMolKit::pyDeviceCoordResultFromOwned(std::move(*result.device));
   }
 
   bp::object indexBuffers() {
-    bp::object                        types_module = bp::import("nvmolkit.types");
-    bp::object                        async_cls    = types_module.attr("AsyncGpuResult");
+    bp::object                         types_module = bp::import("nvmolkit.types");
+    bp::object                         async_cls    = types_module.attr("AsyncGpuResult");
     std::unique_ptr<nvMolKit::PyArray> atomStartsPy(nvMolKit::makePyArrayBorrowed(persistentIndexBuffers_.atomStarts));
     std::unique_ptr<nvMolKit::PyArray> molIdxPy(nvMolKit::makePyArrayBorrowed(persistentIndexBuffers_.molIndices));
     std::unique_ptr<nvMolKit::PyArray> confIdxPy(nvMolKit::makePyArrayBorrowed(persistentIndexBuffers_.confIndices));
