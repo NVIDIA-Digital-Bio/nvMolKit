@@ -84,8 +84,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from nvmolkit import _batchedForcefield  # type: ignore
+from nvmolkit._arrayHelpers import *  # noqa: F403  # registers PyArray for DEVICE-mode returns
 from nvmolkit._mmff_bridge import default_rdkit_mmff_properties, make_internal_mmff_properties
-from nvmolkit.types import HardwareOptions
+from nvmolkit.types import AsyncGpuResult, CoordinateOutput, DeviceCoordResult, HardwareOptions
 
 if TYPE_CHECKING:
     from rdkit.Chem import Mol
@@ -398,33 +399,98 @@ class _BatchedForcefieldBase:
         """Rebuild the forcefield after changing constraints or settings."""
         self._build()
 
-    def compute_energy(self) -> list[list[float]]:
+    def compute_energy(self, output: CoordinateOutput = CoordinateOutput.RDKIT_CONFORMERS):
         """Return forcefield energies for all conformers of all molecules.
 
+        Args:
+            output: ``RDKIT_CONFORMERS`` (default) returns a nested list with
+                one float per conformer. ``DEVICE`` returns an
+                :class:`AsyncGpuResult` view of the on-device energy buffer
+                (length ``n_total_conformers``) borrowed from the wrapper. The
+                view is valid for the lifetime of this forcefield instance and
+                until the next ``compute_energy(output=DEVICE)`` call.
+
         Returns:
-            ``result[mol_idx][conf_idx]`` — one energy per conformer.
+            For RDKit mode: ``result[mol_idx][conf_idx]`` -- one energy per
+            conformer.
+            For DEVICE mode: an :class:`AsyncGpuResult` of length
+            ``n_total_conformers`` (flat, in input-mol then conformer order).
         """
         if not self._molecules:
+            if output == CoordinateOutput.DEVICE:
+                raise ValueError("compute_energy(output=DEVICE) requires at least one molecule")
             return []
         self._ensure_built()
+        if output == CoordinateOutput.DEVICE:
+            return AsyncGpuResult(self._native_ff.computeEnergyDevice(), gpu_id=self._native_ff.gpuId())
         return self._native_ff.computeEnergy()
 
-    def compute_gradients(self) -> list[list[list[float]]]:
+    def compute_gradients(self, output: CoordinateOutput = CoordinateOutput.RDKIT_CONFORMERS):
         """Return forcefield gradients for all conformers of all molecules.
 
+        Args:
+            output: ``RDKIT_CONFORMERS`` (default) returns a nested list per
+                conformer. ``DEVICE`` returns a flat
+                :class:`AsyncGpuResult` of shape ``(total_positions,)`` (one
+                contiguous ``[x, y, z, ...]`` block per conformer in batch
+                order). Index information is available via :meth:`positions`
+                and :meth:`indices`.
+
         Returns:
-            ``result[mol_idx][conf_idx]`` — one flattened ``[x0, y0, z0, ...]``
-            gradient vector per conformer.
+            For RDKit mode: ``result[mol_idx][conf_idx]`` -- one flattened
+            ``[x0, y0, z0, ...]`` gradient vector per conformer.
+            For DEVICE mode: a flat :class:`AsyncGpuResult` of length
+            ``sum(n_atoms_i) * 3``.
         """
         if not self._molecules:
+            if output == CoordinateOutput.DEVICE:
+                raise ValueError("compute_gradients(output=DEVICE) requires at least one molecule")
             return []
         self._ensure_built()
+        if output == CoordinateOutput.DEVICE:
+            return AsyncGpuResult(self._native_ff.computeGradientsDevice(), gpu_id=self._native_ff.gpuId())
         return self._native_ff.computeGradients()
 
-    def _minimize(self, maxIters: int, forceTol: float) -> tuple[list[list[float]], list[list[bool]]]:
+    def positions(self) -> AsyncGpuResult:
+        """Return a borrowed device view of the wrapper's persistent positions buffer.
+
+        The returned :class:`AsyncGpuResult` shares storage with the
+        wrapper's internal positions and is invalidated when this object is
+        destroyed. It is updated in-place after each :meth:`minimize` call
+        so the buffer always reflects the most recently optimized
+        coordinates.
+        """
         if not self._molecules:
+            raise ValueError("positions() requires at least one molecule")
+        self._ensure_built()
+        return AsyncGpuResult(self._native_ff.positionsDevice(), gpu_id=self._native_ff.gpuId())
+
+    def indices(self) -> tuple[AsyncGpuResult, AsyncGpuResult, AsyncGpuResult]:
+        """Return ``(atom_starts, mol_indices, conf_indices)`` matching the device layout.
+
+        These are persistent borrowed device buffers that describe how
+        :meth:`positions` and the DEVICE-mode results from :meth:`compute_energy`
+        / :meth:`compute_gradients` are organized.
+        """
+        if not self._molecules:
+            raise ValueError("indices() requires at least one molecule")
+        self._ensure_built()
+        return self._native_ff.indexBuffers()
+
+    def _minimize(
+        self,
+        maxIters: int,
+        forceTol: float,
+        output: CoordinateOutput = CoordinateOutput.RDKIT_CONFORMERS,
+        target_gpu: int | None = None,
+    ):
+        if not self._molecules:
+            if output == CoordinateOutput.DEVICE:
+                raise ValueError("minimize(output=DEVICE) requires at least one molecule")
             return [], []
         self._ensure_built()
+        if output == CoordinateOutput.DEVICE:
+            return self._native_ff.minimizeDevice(maxIters, forceTol, -1 if target_gpu is None else int(target_gpu))
         energies, converged = self._native_ff.minimize(maxIters, forceTol)
         return energies, converged
 
@@ -534,22 +600,33 @@ class MMFFBatchedForcefield(_BatchedForcefieldBase):
             self._hardware_options._as_native(),
         )
 
-    def minimize(self, maxIters: int = 200, forceTol: float = 1e-4) -> tuple[list[list[float]], list[list[bool]]]:
+    def minimize(
+        self,
+        maxIters: int = 200,
+        forceTol: float = 1e-4,
+        output: CoordinateOutput = CoordinateOutput.RDKIT_CONFORMERS,
+        target_gpu: int | None = None,
+    ):
         """Run BFGS minimization on all conformers of all molecules.
 
-        Optimized coordinates are written back into the RDKit conformers
-        in-place.
+        In ``RDKIT_CONFORMERS`` mode, optimized coordinates are written back
+        into the RDKit conformers in-place. In ``DEVICE`` mode, optimized
+        coordinates and energies stay on the GPU, the wrapper's persistent
+        on-device positions buffer is updated in-place (no host roundtrip),
+        and a :class:`DeviceCoordResult` is returned.
 
         Args:
             maxIters: Maximum number of BFGS iterations.
             forceTol: Gradient convergence tolerance.
+            output: ``RDKIT_CONFORMERS`` (default) or ``DEVICE``.
+            target_gpu: In DEVICE mode, the GPU to consolidate the result
+                onto. ``None`` selects the wrapper's own GPU.
 
         Returns:
-            A tuple ``(energies, converged)`` where both have shape
-            ``[mol_idx][conf_idx]``.  Each *converged* entry is ``True``
-            when that system satisfied *forceTol* within *maxIters*.
+            For RDKit mode: ``(energies, converged)`` nested host lists.
+            For DEVICE mode: a :class:`DeviceCoordResult`.
         """
-        return self._minimize(maxIters, forceTol)
+        return self._minimize(maxIters, forceTol, output=output, target_gpu=target_gpu)
 
 
 class UFFBatchedForcefield(_BatchedForcefieldBase):
@@ -615,19 +692,30 @@ class UFFBatchedForcefield(_BatchedForcefieldBase):
             self._hardware_options._as_native(),
         )
 
-    def minimize(self, maxIters: int = 1000, forceTol: float = 1e-4) -> tuple[list[list[float]], list[list[bool]]]:
+    def minimize(
+        self,
+        maxIters: int = 1000,
+        forceTol: float = 1e-4,
+        output: CoordinateOutput = CoordinateOutput.RDKIT_CONFORMERS,
+        target_gpu: int | None = None,
+    ):
         """Run BFGS minimization on all conformers of all molecules.
 
-        Optimized coordinates are written back into the RDKit conformers
-        in-place.
+        In ``RDKIT_CONFORMERS`` mode, optimized coordinates are written back
+        into the RDKit conformers in-place. In ``DEVICE`` mode, optimized
+        coordinates and energies stay on the GPU, the wrapper's persistent
+        on-device positions buffer is updated in-place (no host roundtrip),
+        and a :class:`DeviceCoordResult` is returned.
 
         Args:
             maxIters: Maximum number of BFGS iterations.
             forceTol: Gradient convergence tolerance.
+            output: ``RDKIT_CONFORMERS`` (default) or ``DEVICE``.
+            target_gpu: In DEVICE mode, the GPU to consolidate the result
+                onto. ``None`` selects the wrapper's own GPU.
 
         Returns:
-            A tuple ``(energies, converged)`` where both have shape
-            ``[mol_idx][conf_idx]``.  Each *converged* entry is ``True``
-            when that system satisfied *forceTol* within *maxIters*.
+            For RDKit mode: ``(energies, converged)`` nested host lists.
+            For DEVICE mode: a :class:`DeviceCoordResult`.
         """
-        return self._minimize(maxIters, forceTol)
+        return self._minimize(maxIters, forceTol, output=output, target_gpu=target_gpu)

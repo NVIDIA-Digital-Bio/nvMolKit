@@ -51,8 +51,9 @@ target_link_libraries(
           OpenMP::OpenMP_CXX
           openmp_helpers
           cccl_interface)
-target_include_directories(bfgs_mmff PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
-                                            ${CMAKE_SOURCE_DIR}/src/forcefields)
+target_include_directories(
+  bfgs_mmff PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src
+                   ${CMAKE_SOURCE_DIR}/src/forcefields)
 
 add_library(bfgs_uff bfgs_uff.cpp)
 target_link_libraries(
@@ -68,5 +69,6 @@ target_link_libraries(
           OpenMP::OpenMP_CXX
           openmp_helpers
           cccl_interface)
-target_include_directories(bfgs_uff PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
-                                           ${CMAKE_SOURCE_DIR}/src/forcefields)
+target_include_directories(
+  bfgs_uff PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src
+                  ${CMAKE_SOURCE_DIR}/src/forcefields)
