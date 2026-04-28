@@ -31,8 +31,8 @@ bp::object pyDeviceCoordResultFromOwned(DeviceCoordResult&& result) {
   const int gpuId  = result.gpuId;
   const int natoms = static_cast<int>(result.positions.size() / 3);
 
-  auto handlePtr = std::make_shared<NativeDeviceCoordResult>(std::move(result));
-  auto& payload  = *handlePtr->mutablePtr();
+  auto  handlePtr = std::make_shared<NativeDeviceCoordResult>(std::move(result));
+  auto& payload   = *handlePtr->mutablePtr();
 
   auto posPy        = makePyArrayBorrowed(payload.positions, "f8", bp::make_tuple(natoms, 3));
   auto atomStartsPy = makePyArrayBorrowed(payload.atomStarts);
@@ -50,7 +50,7 @@ bp::object pyDeviceCoordResultFromOwned(DeviceCoordResult&& result) {
     convergedObj     = async_cls(bp::object(bp::ptr(convergedPy)), gpuId);
   }
 
-  bp::object dcr = dcr_cls(async_cls(bp::object(bp::ptr(posPy)), gpuId),
+  bp::object dcr             = dcr_cls(async_cls(bp::object(bp::ptr(posPy)), gpuId),
                            async_cls(bp::object(bp::ptr(atomStartsPy)), gpuId),
                            async_cls(bp::object(bp::ptr(molIdxPy)), gpuId),
                            async_cls(bp::object(bp::ptr(confIdxPy)), gpuId),
@@ -71,7 +71,7 @@ const DeviceCoordResult* extractDeviceInputPtr(const bp::object& deviceInput) {
       "call; user-constructed DeviceCoordResults do not carry the native handle required for "
       "device_input.");
   }
-  bp::object handleObj = deviceInput.attr("_native_handle");
+  bp::object                                            handleObj = deviceInput.attr("_native_handle");
   bp::extract<std::shared_ptr<NativeDeviceCoordResult>> get(handleObj);
   if (!get.check()) {
     throw std::invalid_argument("device_input has an invalid _native_handle");
@@ -81,7 +81,8 @@ const DeviceCoordResult* extractDeviceInputPtr(const bp::object& deviceInput) {
 
 void registerNativeDeviceCoordResult() {
   bp::class_<NativeDeviceCoordResult, std::shared_ptr<NativeDeviceCoordResult>, boost::noncopyable>(
-    "_NativeDeviceCoordResult", bp::no_init);
+    "_NativeDeviceCoordResult",
+    bp::no_init);
 }
 
 }  // namespace nvMolKit

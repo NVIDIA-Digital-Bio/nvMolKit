@@ -54,15 +54,15 @@ BOOST_PYTHON_MODULE(_mmffOptimization) {
       const auto properties = nvMolKit::extractMMFFPropertiesList(propertiesList, static_cast<int>(molsVec.size()));
       const nvMolKit::DeviceCoordResult* devicePtr = nvMolKit::extractDeviceInputPtr(deviceInput);
       auto                               result    = nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(molsVec,
-                                                                  maxIters,
-                                                                  gradTol,
-                                                                  properties,
-                                                                  /*constraints=*/{},
-                                                                  hardwareOptions,
-                                                                  nvMolKit::BfgsBackend::HYBRID,
-                                                                  nvMolKit::CoordinateOutput::DEVICE,
-                                                                  targetGpu,
-                                                                  devicePtr);
+                                                               maxIters,
+                                                               gradTol,
+                                                               properties,
+                                                               /*constraints=*/{},
+                                                               hardwareOptions,
+                                                               nvMolKit::BfgsBackend::HYBRID,
+                                                               nvMolKit::CoordinateOutput::DEVICE,
+                                                               targetGpu,
+                                                               devicePtr);
       if (!result.device.has_value()) {
         throw std::runtime_error("MMFFMinimizeMoleculesConfs(DEVICE) returned no device result");
       }

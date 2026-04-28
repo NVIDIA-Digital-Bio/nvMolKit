@@ -46,17 +46,16 @@ namespace nvMolKit {
  * are left untouched in this mode. ETKDG conformer pruning (@c params.pruneRmsThresh) must be
  * disabled when using DEVICE mode; an exception is thrown otherwise.
  */
-std::optional<DeviceCoordResult> embedMolecules(
-  const std::vector<RDKit::ROMol*>&           mols,
-  const RDKit::DGeomHelpers::EmbedParameters& params,
-  int                                         confsPerMolecule = 1,
-  int                                         maxIterations    = -1,
-  bool                                        debugMode        = false,
-  std::vector<std::vector<int16_t>>*          failures         = nullptr,
-  const BatchHardwareOptions&                 hardwareOptions  = {},
-  BfgsBackend                                 backend          = BfgsBackend::HYBRID,
-  CoordinateOutput                            output           = CoordinateOutput::RDKIT_CONFORMERS,
-  int                                         targetGpu        = -1);
+std::optional<DeviceCoordResult> embedMolecules(const std::vector<RDKit::ROMol*>&           mols,
+                                                const RDKit::DGeomHelpers::EmbedParameters& params,
+                                                int                                         confsPerMolecule = 1,
+                                                int                                         maxIterations    = -1,
+                                                bool                                        debugMode        = false,
+                                                std::vector<std::vector<int16_t>>*          failures         = nullptr,
+                                                const BatchHardwareOptions&                 hardwareOptions  = {},
+                                                BfgsBackend      backend   = BfgsBackend::HYBRID,
+                                                CoordinateOutput output    = CoordinateOutput::RDKIT_CONFORMERS,
+                                                int              targetGpu = -1);
 
 }  // namespace nvMolKit
 

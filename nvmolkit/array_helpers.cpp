@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include "array_helpers.h"
+
 #include "device_coord_python.h"
 
 namespace {

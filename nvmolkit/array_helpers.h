@@ -122,15 +122,15 @@ PyArray* makePyArrayBorrowed(const AsyncDeviceVector<T>& deviceVector,
 
   dict["shape"]   = shape;
   dict["typestr"] = boost::python::str("|" + dTypeStr);
-  dict["data"] = boost::python::make_tuple(reinterpret_cast<std::size_t>(deviceVector.data()), /*readOnly=*/false);
+  dict["data"]    = boost::python::make_tuple(reinterpret_cast<std::size_t>(deviceVector.data()), /*readOnly=*/false);
   dict["version"] = 2;
 
   return thisPyArray;
 }
 
 template <typename T, typename = std::enable_if_t<std::is_integral_v<T> || std::is_floating_point_v<T>>>
-PyArray* makePyArrayBorrowed(const AsyncDeviceVector<T>&          deviceVector,
-                             std::optional<boost::python::tuple>  shape = std::nullopt) {
+PyArray* makePyArrayBorrowed(const AsyncDeviceVector<T>&         deviceVector,
+                             std::optional<boost::python::tuple> shape = std::nullopt) {
   return makePyArrayBorrowed(deviceVector,
                              getNumpyType<T>(),
                              shape.value_or(boost::python::make_tuple(deviceVector.size())));

@@ -95,9 +95,7 @@ def test_mmff_device_energies_match_host():
     mol_dev = _embed("CCO", n_confs=2, seed=11)
     assert mol_host.GetNumConformers() == mol_dev.GetNumConformers() == 2
 
-    energies_host = MMFFOptimizeMoleculesConfs(
-        [mol_host], maxIters=30, hardwareOptions=_single_thread_options()
-    )
+    energies_host = MMFFOptimizeMoleculesConfs([mol_host], maxIters=30, hardwareOptions=_single_thread_options())
     flat_host = [e for inner in energies_host for e in inner]
 
     result = MMFFOptimizeMoleculesConfs(
@@ -118,9 +116,7 @@ def test_uff_device_energies_match_host():
     mol_host = _embed("CCO", n_confs=2, seed=22)
     mol_dev = _embed("CCO", n_confs=2, seed=22)
 
-    energies_host = UFFOptimizeMoleculesConfs(
-        [mol_host], maxIters=50, hardwareOptions=_single_thread_options()
-    )
+    energies_host = UFFOptimizeMoleculesConfs([mol_host], maxIters=50, hardwareOptions=_single_thread_options())
     flat_host = [e for inner in energies_host for e in inner]
 
     result = UFFOptimizeMoleculesConfs(
@@ -193,6 +189,7 @@ def test_device_input_requires_native_handle():
     mol_indices = torch.tensor([0], dtype=torch.int32, device="cuda")
     conf_indices = torch.tensor([0], dtype=torch.int32, device="cuda")
     from nvmolkit.types import AsyncGpuResult
+
     fake = DeviceCoordResult(
         positions=AsyncGpuResult(positions),
         atom_starts=AsyncGpuResult(atom_starts),

@@ -36,13 +36,14 @@ target_include_directories(_Fingerprints PRIVATE ${Python_INCLUDE_DIRS})
 installpythontarget(_Fingerprints ./)
 
 add_library(device_coord_python STATIC device_coord_python.cpp)
-target_link_libraries(device_coord_python PUBLIC ${Boost_LIBRARIES} device_vector)
+target_link_libraries(device_coord_python PUBLIC ${Boost_LIBRARIES}
+                                                 device_vector)
 target_include_directories(
-  device_coord_python PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils
-                             ${CMAKE_SOURCE_DIR}/src
-                             ${CMAKE_CURRENT_SOURCE_DIR}
-                             ${Python_INCLUDE_DIRS})
-target_include_directories(device_coord_python SYSTEM PUBLIC ${Boost_INCLUDE_DIRS})
+  device_coord_python
+  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils ${CMAKE_SOURCE_DIR}/src
+         ${CMAKE_CURRENT_SOURCE_DIR} ${Python_INCLUDE_DIRS})
+target_include_directories(device_coord_python SYSTEM
+                           PUBLIC ${Boost_INCLUDE_DIRS})
 set_property(TARGET device_coord_python PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 add_library(_arrayHelpers MODULE array_helpers.cpp)

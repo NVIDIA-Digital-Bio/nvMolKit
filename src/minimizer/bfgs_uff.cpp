@@ -42,7 +42,7 @@ UFFMinimizeResult UFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>& mols,
                                             const BatchHardwareOptions&                                  perfOptions,
                                             const CoordinateOutput                                       output,
                                             int                                                          targetGpu,
-                                            const DeviceCoordResult* deviceInput) {
+                                            const DeviceCoordResult*                                     deviceInput) {
   ScopedNvtxRange fullRange("BFGS UFF Minimize Molecules Confs");
 
   if (vdwThresholds.size() != mols.size()) {
@@ -66,8 +66,7 @@ UFFMinimizeResult UFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>& mols,
     if (targetGpu < 0) {
       targetGpu = ctx.devicesPerThread.empty() ? 0 : ctx.devicesPerThread.front();
     }
-    if (std::find(ctx.devicesPerThread.begin(), ctx.devicesPerThread.end(), targetGpu) ==
-        ctx.devicesPerThread.end()) {
+    if (std::find(ctx.devicesPerThread.begin(), ctx.devicesPerThread.end(), targetGpu) == ctx.devicesPerThread.end()) {
       throw std::invalid_argument(
         "targetGpu " + std::to_string(targetGpu) +
         " is not in the configured set of execution GPUs; pass it via perfOptions.gpuIds first.");
@@ -191,8 +190,13 @@ UFFMinimizeResult UFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>& mols,
       positionsDevice.resize(systemHost.positions.size());
       positionsDevice.copyFromHost(buffers.initialPositions.data(), systemHost.positions.size());
       if (useDeviceInput) {
-        broadcastDeviceInputBatch(*deviceInput, deviceInputIndex, batchSrcIndices, batchAtomCounts, executingGpu,
-                                  streamPtr, positionsDevice);
+        broadcastDeviceInputBatch(*deviceInput,
+                                  deviceInputIndex,
+                                  batchSrcIndices,
+                                  batchAtomCounts,
+                                  executingGpu,
+                                  streamPtr,
+                                  positionsDevice);
       }
       gradDevice.resize(systemHost.positions.size());
       gradDevice.zero();

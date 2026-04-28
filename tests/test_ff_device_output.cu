@@ -73,9 +73,15 @@ TEST(MMFFDeviceOutput, EthanolMatchesShape) {
   std::vector<RDKit::ROMol*>            mols = {ethanol.get()};
   std::vector<nvMolKit::MMFFProperties> props(mols.size());
 
-  auto result = nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(mols, /*maxIters=*/50, /*gradTol=*/1e-4, props, {},
-                                                          singleThreadOptions(), nvMolKit::BfgsBackend::PER_MOLECULE,
-                                                          nvMolKit::CoordinateOutput::DEVICE, /*targetGpu=*/0);
+  auto result = nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(mols,
+                                                           /*maxIters=*/50,
+                                                           /*gradTol=*/1e-4,
+                                                           props,
+                                                           {},
+                                                           singleThreadOptions(),
+                                                           nvMolKit::BfgsBackend::PER_MOLECULE,
+                                                           nvMolKit::CoordinateOutput::DEVICE,
+                                                           /*targetGpu=*/0);
   ASSERT_TRUE(result.device.has_value());
   EXPECT_TRUE(result.energies.empty());
   EXPECT_TRUE(result.converged.empty());
@@ -126,12 +132,18 @@ TEST(MMFFDeviceOutput, MultipleMoleculesCorrectIndices) {
   ASSERT_NE(methanol, nullptr);
   ASSERT_NE(propanol, nullptr);
 
-  std::vector<RDKit::ROMol*>            mols  = {methanol.get(), propanol.get()};
+  std::vector<RDKit::ROMol*>            mols = {methanol.get(), propanol.get()};
   std::vector<nvMolKit::MMFFProperties> props(mols.size());
 
-  auto result = nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(mols, 30, 1e-4, props, {}, singleThreadOptions(),
-                                                          nvMolKit::BfgsBackend::PER_MOLECULE,
-                                                          nvMolKit::CoordinateOutput::DEVICE, /*targetGpu=*/0);
+  auto result = nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(mols,
+                                                           30,
+                                                           1e-4,
+                                                           props,
+                                                           {},
+                                                           singleThreadOptions(),
+                                                           nvMolKit::BfgsBackend::PER_MOLECULE,
+                                                           nvMolKit::CoordinateOutput::DEVICE,
+                                                           /*targetGpu=*/0);
   ASSERT_TRUE(result.device.has_value());
   const auto& dev        = *result.device;
   const auto  molIndices = downloadDeviceVector(dev.molIndices);
@@ -154,9 +166,15 @@ TEST(MMFFDeviceOutput, MultipleMoleculesCorrectIndices) {
 TEST(MMFFDeviceOutput, EmptyInputProducesEmptyResult) {
   std::vector<RDKit::ROMol*>            mols;
   std::vector<nvMolKit::MMFFProperties> props;
-  auto result = nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(mols, 10, 1e-4, props, {}, singleThreadOptions(),
-                                                          nvMolKit::BfgsBackend::PER_MOLECULE,
-                                                          nvMolKit::CoordinateOutput::DEVICE, /*targetGpu=*/0);
+  auto                                  result = nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(mols,
+                                                           10,
+                                                           1e-4,
+                                                           props,
+                                                                                            {},
+                                                           singleThreadOptions(),
+                                                           nvMolKit::BfgsBackend::PER_MOLECULE,
+                                                           nvMolKit::CoordinateOutput::DEVICE,
+                                                           /*targetGpu=*/0);
   ASSERT_TRUE(result.device.has_value());
   EXPECT_EQ(result.device->positions.size(), 0u);
   // atomStarts has length n_conformers + 1; for n=0 it is a single trailing zero.
@@ -175,17 +193,29 @@ TEST(MMFFDeviceInput, RoundTripMatchesNoInput) {
   std::vector<nvMolKit::MMFFProperties> props(mols.size());
 
   // Step 1: get a device result by running MMFF DEVICE.
-  auto first = nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(mols, 25, 1e-4, props, {}, singleThreadOptions(),
-                                                         nvMolKit::BfgsBackend::PER_MOLECULE,
-                                                         nvMolKit::CoordinateOutput::DEVICE, /*targetGpu=*/0);
+  auto first = nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(mols,
+                                                          25,
+                                                          1e-4,
+                                                          props,
+                                                          {},
+                                                          singleThreadOptions(),
+                                                          nvMolKit::BfgsBackend::PER_MOLECULE,
+                                                          nvMolKit::CoordinateOutput::DEVICE,
+                                                          /*targetGpu=*/0);
   ASSERT_TRUE(first.device.has_value());
 
   // Step 2: feed that result back as device_input and confirm a no-op-ish second pass
   // (running again from already-converged coords with the same iters cap should not change them).
-  auto second = nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(mols, 25, 1e-4, props, {}, singleThreadOptions(),
-                                                          nvMolKit::BfgsBackend::PER_MOLECULE,
-                                                          nvMolKit::CoordinateOutput::DEVICE, /*targetGpu=*/0,
-                                                          /*deviceInput=*/&(*first.device));
+  auto second = nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(mols,
+                                                           25,
+                                                           1e-4,
+                                                           props,
+                                                           {},
+                                                           singleThreadOptions(),
+                                                           nvMolKit::BfgsBackend::PER_MOLECULE,
+                                                           nvMolKit::CoordinateOutput::DEVICE,
+                                                           /*targetGpu=*/0,
+                                                           /*deviceInput=*/&(*first.device));
   ASSERT_TRUE(second.device.has_value());
 
   const auto firstPos  = downloadDeviceVector(first.device->positions);
@@ -214,17 +244,28 @@ TEST(MMFFDeviceInput, MismatchedConformerCountThrows) {
   // Get a 1-mol device result, then try to feed it to a 2-mol minimization.
   std::vector<RDKit::ROMol*>            singleMol = {methanol.get()};
   std::vector<nvMolKit::MMFFProperties> singleProps(singleMol.size());
-  auto                                  smallResult =
-    nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(singleMol, 5, 1e-4, singleProps, {}, singleThreadOptions(),
-                                               nvMolKit::BfgsBackend::PER_MOLECULE,
-                                               nvMolKit::CoordinateOutput::DEVICE, /*targetGpu=*/0);
+  auto                                  smallResult = nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(singleMol,
+                                                                5,
+                                                                1e-4,
+                                                                singleProps,
+                                                                                                 {},
+                                                                singleThreadOptions(),
+                                                                nvMolKit::BfgsBackend::PER_MOLECULE,
+                                                                nvMolKit::CoordinateOutput::DEVICE,
+                                                                /*targetGpu=*/0);
   ASSERT_TRUE(smallResult.device.has_value());
 
   std::vector<RDKit::ROMol*>            twoMols = {methanol.get(), propanol.get()};
   std::vector<nvMolKit::MMFFProperties> twoProps(twoMols.size());
-  EXPECT_THROW(nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(twoMols, 5, 1e-4, twoProps, {}, singleThreadOptions(),
+  EXPECT_THROW(nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(twoMols,
+                                                          5,
+                                                          1e-4,
+                                                          twoProps,
+                                                          {},
+                                                          singleThreadOptions(),
                                                           nvMolKit::BfgsBackend::PER_MOLECULE,
-                                                          nvMolKit::CoordinateOutput::DEVICE, /*targetGpu=*/0,
+                                                          nvMolKit::CoordinateOutput::DEVICE,
+                                                          /*targetGpu=*/0,
                                                           /*deviceInput=*/&(*smallResult.device)),
                std::invalid_argument);
 }
@@ -235,16 +276,27 @@ TEST(MMFFDeviceInput, ConstraintsRejected) {
 
   std::vector<RDKit::ROMol*>            mols = {ethanol.get()};
   std::vector<nvMolKit::MMFFProperties> props(mols.size());
-  auto firstResult =
-    nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(mols, 5, 1e-4, props, {}, singleThreadOptions(),
-                                               nvMolKit::BfgsBackend::PER_MOLECULE,
-                                               nvMolKit::CoordinateOutput::DEVICE, /*targetGpu=*/0);
+  auto                                  firstResult = nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(mols,
+                                                                5,
+                                                                1e-4,
+                                                                props,
+                                                                                                 {},
+                                                                singleThreadOptions(),
+                                                                nvMolKit::BfgsBackend::PER_MOLECULE,
+                                                                nvMolKit::CoordinateOutput::DEVICE,
+                                                                /*targetGpu=*/0);
   ASSERT_TRUE(firstResult.device.has_value());
 
   std::vector<nvMolKit::ForceFieldConstraints::PerMolConstraints> constraints(mols.size());
-  EXPECT_THROW(nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(mols, 5, 1e-4, props, constraints, singleThreadOptions(),
+  EXPECT_THROW(nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(mols,
+                                                          5,
+                                                          1e-4,
+                                                          props,
+                                                          constraints,
+                                                          singleThreadOptions(),
                                                           nvMolKit::BfgsBackend::PER_MOLECULE,
-                                                          nvMolKit::CoordinateOutput::DEVICE, /*targetGpu=*/0,
+                                                          nvMolKit::CoordinateOutput::DEVICE,
+                                                          /*targetGpu=*/0,
                                                           /*deviceInput=*/&(*firstResult.device)),
                std::invalid_argument);
 }
@@ -258,19 +310,24 @@ TEST(UFFDeviceOutput, EthanolMatchesShape) {
   const std::vector<double>  vdw(mols.size(), 100.0);
   const std::vector<bool>    ignore(mols.size(), false);
 
-  auto result =
-    nvMolKit::UFF::UFFMinimizeMoleculesConfs(mols, /*maxIters=*/50, /*gradTol=*/1e-4, vdw, ignore, {},
-                                             singleThreadOptions(), nvMolKit::CoordinateOutput::DEVICE,
-                                             /*targetGpu=*/0);
+  auto result = nvMolKit::UFF::UFFMinimizeMoleculesConfs(mols,
+                                                         /*maxIters=*/50,
+                                                         /*gradTol=*/1e-4,
+                                                         vdw,
+                                                         ignore,
+                                                         {},
+                                                         singleThreadOptions(),
+                                                         nvMolKit::CoordinateOutput::DEVICE,
+                                                         /*targetGpu=*/0);
   ASSERT_TRUE(result.device.has_value());
   EXPECT_TRUE(result.energies.empty());
-  const auto& dev        = *result.device;
+  const auto& dev = *result.device;
   EXPECT_EQ(dev.gpuId, 0);
-  const auto positions   = downloadDeviceVector(dev.positions);
-  const auto atomStarts  = downloadDeviceVector(dev.atomStarts);
-  const auto molIndices  = downloadDeviceVector(dev.molIndices);
-  const auto energies    = downloadDeviceVector(dev.energies);
-  const auto converged   = downloadDeviceVector(dev.converged);
+  const auto positions  = downloadDeviceVector(dev.positions);
+  const auto atomStarts = downloadDeviceVector(dev.atomStarts);
+  const auto molIndices = downloadDeviceVector(dev.molIndices);
+  const auto energies   = downloadDeviceVector(dev.energies);
+  const auto converged  = downloadDeviceVector(dev.converged);
 
   ASSERT_EQ(molIndices.size(), 1u);
   ASSERT_EQ(atomStarts.size(), 2u);

@@ -67,15 +67,15 @@ BOOST_PYTHON_MODULE(_embedMolecules) {
       auto       molsVec = nvMolKit::extractMolecules(molecules);
       const auto output  = static_cast<nvMolKit::CoordinateOutput>(outputMode);
       auto       result  = nvMolKit::embedMolecules(molsVec,
-                                              params,
-                                              confsPerMolecule,
-                                              maxIterations,
-                                              false,
-                                              nullptr,
-                                              hardwareOptions,
-                                              nvMolKit::BfgsBackend::HYBRID,
-                                              output,
-                                              targetGpu);
+                                             params,
+                                             confsPerMolecule,
+                                             maxIterations,
+                                             false,
+                                             nullptr,
+                                             hardwareOptions,
+                                             nvMolKit::BfgsBackend::HYBRID,
+                                             output,
+                                             targetGpu);
       if (!result.has_value()) {
         return bp::object();
       }

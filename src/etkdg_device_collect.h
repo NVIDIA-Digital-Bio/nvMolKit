@@ -44,9 +44,9 @@ namespace detail {
 struct DeviceCoordCollector {
   int                       gpuId  = -1;
   cudaStream_t              stream = nullptr;
-  AsyncDeviceVector<double> positions;       //!< Packed 3D, length = sum(atomCounts)*3
-  std::vector<int>          atomCounts;      //!< One per accumulated conformer
-  std::vector<int>          molIds;          //!< Global molecule index per accumulated conformer
+  AsyncDeviceVector<double> positions;   //!< Packed 3D, length = sum(atomCounts)*3
+  std::vector<int>          atomCounts;  //!< One per accumulated conformer
+  std::vector<int>          molIds;      //!< Global molecule index per accumulated conformer
 };
 
 /**
@@ -109,7 +109,7 @@ class ETKDGCollectDeviceCoordsStage final : public ETKDGStage {
         cap_(cap),
         collector_(collector) {}
 
-  void execute(ETKDGContext& ctx) override { appendActive(ctx, dim_, batchGlobalMolIds_, cap_, collector_); }
+  void        execute(ETKDGContext& ctx) override { appendActive(ctx, dim_, batchGlobalMolIds_, cap_, collector_); }
   std::string name() const override { return "Collect Device Coords"; }
 
  private:

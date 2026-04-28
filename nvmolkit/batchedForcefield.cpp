@@ -259,8 +259,8 @@ void buildPersistentIndexBuffers(const std::vector<RDKit::ROMol*>& mols,
   std::vector<int32_t> confIndicesHost;
   int                  cursor = 0;
   for (size_t molIdx = 0; molIdx < mols.size(); ++molIdx) {
-    const int natoms  = static_cast<int>(mols[molIdx]->getNumAtoms());
-    const int nconfs  = numConformersPerMol[molIdx];
+    const int natoms = static_cast<int>(mols[molIdx]->getNumAtoms());
+    const int nconfs = numConformersPerMol[molIdx];
     for (int confIdx = 0; confIdx < nconfs; ++confIdx) {
       cursor += natoms;
       atomStartsHost.push_back(cursor);
@@ -317,15 +317,13 @@ class NativeMMFFBatchedForcefield {
 
   nvMolKit::PyArray* computeEnergyDevice() {
     energyOutsDevice_.zero();
-    throwIfCudaError(forcefield_->computeEnergy(energyOutsDevice_.data(), positionsDevice_.data()),
-                     "computeEnergy");
+    throwIfCudaError(forcefield_->computeEnergy(energyOutsDevice_.data(), positionsDevice_.data()), "computeEnergy");
     return nvMolKit::makePyArrayBorrowed(energyOutsDevice_);
   }
 
   nvMolKit::PyArray* computeGradientsDevice() {
     gradDevice_.zero();
-    throwIfCudaError(forcefield_->computeGradients(gradDevice_.data(), positionsDevice_.data()),
-                     "computeGradients");
+    throwIfCudaError(forcefield_->computeGradients(gradDevice_.data(), positionsDevice_.data()), "computeGradients");
     return nvMolKit::makePyArrayBorrowed(gradDevice_);
   }
 
@@ -472,15 +470,13 @@ class NativeUFFBatchedForcefield {
 
   nvMolKit::PyArray* computeEnergyDevice() {
     energyOutsDevice_.zero();
-    throwIfCudaError(forcefield_->computeEnergy(energyOutsDevice_.data(), positionsDevice_.data()),
-                     "computeEnergy");
+    throwIfCudaError(forcefield_->computeEnergy(energyOutsDevice_.data(), positionsDevice_.data()), "computeEnergy");
     return nvMolKit::makePyArrayBorrowed(energyOutsDevice_);
   }
 
   nvMolKit::PyArray* computeGradientsDevice() {
     gradDevice_.zero();
-    throwIfCudaError(forcefield_->computeGradients(gradDevice_.data(), positionsDevice_.data()),
-                     "computeGradients");
+    throwIfCudaError(forcefield_->computeGradients(gradDevice_.data(), positionsDevice_.data()), "computeGradients");
     return nvMolKit::makePyArrayBorrowed(gradDevice_);
   }
 
@@ -609,11 +605,14 @@ BOOST_PYTHON_MODULE(_batchedForcefield) {
     .def("computeEnergy", &NativeMMFFBatchedForcefield::computeEnergy)
     .def("computeGradients", &NativeMMFFBatchedForcefield::computeGradients)
     .def("minimize", &NativeMMFFBatchedForcefield::minimize)
-    .def("computeEnergyDevice", &NativeMMFFBatchedForcefield::computeEnergyDevice,
+    .def("computeEnergyDevice",
+         &NativeMMFFBatchedForcefield::computeEnergyDevice,
          bp::return_value_policy<bp::manage_new_object>())
-    .def("computeGradientsDevice", &NativeMMFFBatchedForcefield::computeGradientsDevice,
+    .def("computeGradientsDevice",
+         &NativeMMFFBatchedForcefield::computeGradientsDevice,
          bp::return_value_policy<bp::manage_new_object>())
-    .def("positionsDevice", &NativeMMFFBatchedForcefield::positionsDevicePy,
+    .def("positionsDevice",
+         &NativeMMFFBatchedForcefield::positionsDevicePy,
          bp::return_value_policy<bp::manage_new_object>())
     .def("minimizeDevice", &NativeMMFFBatchedForcefield::minimizeDevice)
     .def("indexBuffers", &NativeMMFFBatchedForcefield::indexBuffers)
@@ -631,11 +630,14 @@ BOOST_PYTHON_MODULE(_batchedForcefield) {
     .def("computeEnergy", &NativeUFFBatchedForcefield::computeEnergy)
     .def("computeGradients", &NativeUFFBatchedForcefield::computeGradients)
     .def("minimize", &NativeUFFBatchedForcefield::minimize)
-    .def("computeEnergyDevice", &NativeUFFBatchedForcefield::computeEnergyDevice,
+    .def("computeEnergyDevice",
+         &NativeUFFBatchedForcefield::computeEnergyDevice,
          bp::return_value_policy<bp::manage_new_object>())
-    .def("computeGradientsDevice", &NativeUFFBatchedForcefield::computeGradientsDevice,
+    .def("computeGradientsDevice",
+         &NativeUFFBatchedForcefield::computeGradientsDevice,
          bp::return_value_policy<bp::manage_new_object>())
-    .def("positionsDevice", &NativeUFFBatchedForcefield::positionsDevicePy,
+    .def("positionsDevice",
+         &NativeUFFBatchedForcefield::positionsDevicePy,
          bp::return_value_policy<bp::manage_new_object>())
     .def("minimizeDevice", &NativeUFFBatchedForcefield::minimizeDevice)
     .def("indexBuffers", &NativeUFFBatchedForcefield::indexBuffers)

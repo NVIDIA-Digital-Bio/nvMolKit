@@ -62,15 +62,15 @@ BOOST_PYTHON_MODULE(_uffOptimization) {
         nvMolKit::extractBoolList(ignoreInterfragInteractions, numMols, "ignoreInterfragInteractions");
       const nvMolKit::DeviceCoordResult* devicePtr = nvMolKit::extractDeviceInputPtr(deviceInput);
       auto                               result    = nvMolKit::UFF::UFFMinimizeMoleculesConfs(molsVec,
-                                                                 maxIters,
-                                                                 gradTol,
-                                                                 thresholdVec,
-                                                                 ignoreVec,
-                                                                 /*constraints=*/{},
-                                                                 hardwareOptions,
-                                                                 nvMolKit::CoordinateOutput::DEVICE,
-                                                                 targetGpu,
-                                                                 devicePtr);
+                                                             maxIters,
+                                                             gradTol,
+                                                             thresholdVec,
+                                                             ignoreVec,
+                                                             /*constraints=*/{},
+                                                             hardwareOptions,
+                                                             nvMolKit::CoordinateOutput::DEVICE,
+                                                             targetGpu,
+                                                             devicePtr);
       if (!result.device.has_value()) {
         throw std::runtime_error("UFFMinimizeMoleculesConfs(DEVICE) returned no device result");
       }

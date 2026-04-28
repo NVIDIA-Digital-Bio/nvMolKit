@@ -368,7 +368,7 @@ std::optional<DeviceCoordResult> embedMolecules(const std::vector<RDKit::ROMol*>
         // mode we append the surviving conformers of this batch onto the thread-local
         // collector for later cross-GPU collection.
         if (deviceOutput) {
-          auto& collector = collectorsPerThread[static_cast<size_t>(omp_get_thread_num())];
+          auto&            collector = collectorsPerThread[static_cast<size_t>(omp_get_thread_num())];
           // molIds index into sortedMols; remap to original-input order for the user-visible
           // CSR output.
           std::vector<int> originalMolIds(molIds.size());

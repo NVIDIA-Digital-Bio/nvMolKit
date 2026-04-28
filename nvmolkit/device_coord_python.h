@@ -17,7 +17,6 @@
 #define NVMOLKIT_PY_DEVICE_COORD_PYTHON_H
 
 #include <boost/python.hpp>
-
 #include <memory>
 #include <utility>
 

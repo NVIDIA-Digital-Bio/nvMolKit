@@ -13,8 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "etkdg_device_collect.h"
-
 #include <cuda_runtime.h>
 
 #include <algorithm>
@@ -25,6 +23,7 @@
 #include "coord_collect.h"
 #include "cuda_error_check.h"
 #include "device.h"
+#include "etkdg_device_collect.h"
 
 namespace nvMolKit {
 namespace detail {
@@ -43,8 +42,8 @@ __global__ void packKernel4DTo3D(const double* __restrict__ srcPositions,
                                  const int* __restrict__ srcStartsAtoms,
                                  const int* __restrict__ dstStartsAtoms,
                                  const int* __restrict__ atomCounts,
-                                 int       dim,
-                                 int       numConformers,
+                                 int dim,
+                                 int numConformers,
                                  double* __restrict__ dst3D) {
   const int conformerIdx = blockIdx.y;
   if (conformerIdx >= numConformers) {
@@ -124,7 +123,7 @@ void appendActive(const ETKDGContext&      ctx,
   }
 
   const WithDevice withDevice(collector.gpuId);
-  const size_t newPositionsSize = static_cast<size_t>(runningAtoms) * 3;
+  const size_t     newPositionsSize = static_cast<size_t>(runningAtoms) * 3;
   collector.positions.resize(newPositionsSize);
 
   AsyncDeviceVector<int> srcStartsDev(static_cast<size_t>(numActive), collector.stream);
@@ -172,7 +171,7 @@ DeviceCoordResult finalizeOnTarget(std::vector<DeviceCoordCollector>& collectors
   const WithDevice  withTarget(targetGpu);
   ScopedStream      targetStream("ETKDG DeviceCoord Finalize");
   DeviceCoordResult result;
-  result.gpuId = targetGpu;
+  result.gpuId       = targetGpu;
   result.positions   = AsyncDeviceVector<double>(static_cast<size_t>(totalAtoms) * 3, targetStream.stream());
   result.atomStarts  = AsyncDeviceVector<int32_t>(static_cast<size_t>(totalConformers + 1), targetStream.stream());
   result.molIndices  = AsyncDeviceVector<int32_t>(static_cast<size_t>(totalConformers), targetStream.stream());
@@ -201,9 +200,9 @@ DeviceCoordResult finalizeOnTarget(std::vector<DeviceCoordCollector>& collectors
                             targetStream.stream());
 
     for (int conformerIdx = 0; conformerIdx < numConfs; ++conformerIdx) {
-      atomStartsHost[static_cast<size_t>(confCursor)] = atomCursor;
-      const int molId                                 = collector.molIds[conformerIdx];
-      molIndicesHost[static_cast<size_t>(confCursor)] = molId;
+      atomStartsHost[static_cast<size_t>(confCursor)]  = atomCursor;
+      const int molId                                  = collector.molIds[conformerIdx];
+      molIndicesHost[static_cast<size_t>(confCursor)]  = molId;
       confIndicesHost[static_cast<size_t>(confCursor)] = perMolCounter[molId]++;
       atomCursor += collector.atomCounts[conformerIdx];
       ++confCursor;
