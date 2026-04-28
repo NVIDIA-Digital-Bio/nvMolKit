@@ -16,7 +16,6 @@
 #include <GraphMol/ROMol.h>
 
 #include <boost/python.hpp>
-#include <boost/python/manage_new_object.hpp>
 
 #include "array_helpers.h"
 #include "boost_python_utils.h"
@@ -53,11 +52,6 @@ nvMolKit::TFDComputeOptions buildOptions(bool               useWeights,
   };
 }
 
-boost::python::object toOwnedPyArray(nvMolKit::PyArray* array) {
-  using Converter = boost::python::manage_new_object::apply<nvMolKit::PyArray*>::type;
-  return boost::python::object(boost::python::handle<>(Converter()(array)));
-}
-
 nvMolKit::TFDGpuGenerator& getGpuGenerator() {
   static nvMolKit::TFDGpuGenerator generator;
   return generator;
@@ -85,7 +79,7 @@ BOOST_PYTHON_MODULE(_TFD) {
       size_t totalSize = gpuResult.tfdValues.size();
       auto*  pyArray   = nvMolKit::makePyArray(gpuResult.tfdValues, boost::python::make_tuple(totalSize));
 
-      return boost::python::make_tuple(toOwnedPyArray(pyArray), outputStarts);
+      return boost::python::make_tuple(nvMolKit::toOwnedPyArray(pyArray), outputStarts);
     },
     (arg("mols"),
      arg("useWeights")          = true,

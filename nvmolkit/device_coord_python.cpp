@@ -15,6 +15,7 @@
 
 #include "device_coord_python.h"
 
+#include <memory>
 #include <stdexcept>
 
 #include "array_helpers.h"
@@ -34,26 +35,29 @@ bp::object pyDeviceCoordResultFromOwned(DeviceCoordResult&& result) {
   auto  handlePtr = std::make_shared<NativeDeviceCoordResult>(std::move(result));
   auto& payload   = *handlePtr->mutablePtr();
 
-  auto posPy        = makePyArrayBorrowed(payload.positions, "f8", bp::make_tuple(natoms, 3));
-  auto atomStartsPy = makePyArrayBorrowed(payload.atomStarts);
-  auto molIdxPy     = makePyArrayBorrowed(payload.molIndices);
-  auto confIdxPy    = makePyArrayBorrowed(payload.confIndices);
+  // Hold each PyArray in a unique_ptr until ownership is handed to Python via toOwnedPyArray.
+  // If any subsequent step throws (e.g. the dcr_cls call), the PyArrays still in unique_ptrs are
+  // freed; the ones already converted are owned by Python and cleaned up via Python's GC.
+  std::unique_ptr<PyArray> posPy(makePyArrayBorrowed(payload.positions, "f8", bp::make_tuple(natoms, 3)));
+  std::unique_ptr<PyArray> atomStartsPy(makePyArrayBorrowed(payload.atomStarts));
+  std::unique_ptr<PyArray> molIdxPy(makePyArrayBorrowed(payload.molIndices));
+  std::unique_ptr<PyArray> confIdxPy(makePyArrayBorrowed(payload.confIndices));
 
   bp::object energiesObj  = bp::object();
   bp::object convergedObj = bp::object();
   if (payload.energies.size() > 0) {
-    auto energiesPy = makePyArrayBorrowed(payload.energies);
-    energiesObj     = async_cls(bp::object(bp::ptr(energiesPy)), gpuId);
+    std::unique_ptr<PyArray> energiesPy(makePyArrayBorrowed(payload.energies));
+    energiesObj = async_cls(toOwnedPyArray(std::move(energiesPy)), gpuId);
   }
   if (payload.converged.size() > 0) {
-    auto convergedPy = makePyArrayBorrowed(payload.converged);
-    convergedObj     = async_cls(bp::object(bp::ptr(convergedPy)), gpuId);
+    std::unique_ptr<PyArray> convergedPy(makePyArrayBorrowed(payload.converged));
+    convergedObj = async_cls(toOwnedPyArray(std::move(convergedPy)), gpuId);
   }
 
-  bp::object dcr             = dcr_cls(async_cls(bp::object(bp::ptr(posPy)), gpuId),
-                           async_cls(bp::object(bp::ptr(atomStartsPy)), gpuId),
-                           async_cls(bp::object(bp::ptr(molIdxPy)), gpuId),
-                           async_cls(bp::object(bp::ptr(confIdxPy)), gpuId),
+  bp::object dcr             = dcr_cls(async_cls(toOwnedPyArray(std::move(posPy)), gpuId),
+                           async_cls(toOwnedPyArray(std::move(atomStartsPy)), gpuId),
+                           async_cls(toOwnedPyArray(std::move(molIdxPy)), gpuId),
+                           async_cls(toOwnedPyArray(std::move(confIdxPy)), gpuId),
                            gpuId,
                            energiesObj,
                            convergedObj);

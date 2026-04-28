@@ -17,6 +17,8 @@
 #define NVMOLKIT_ARRAY_HELPERS
 
 #include <boost/python.hpp>
+#include <boost/python/manage_new_object.hpp>
+#include <memory>
 #include <optional>
 
 #include "device_vector.h"
@@ -134,6 +136,26 @@ PyArray* makePyArrayBorrowed(const AsyncDeviceVector<T>&         deviceVector,
   return makePyArrayBorrowed(deviceVector,
                              getNumpyType<T>(),
                              shape.value_or(boost::python::make_tuple(deviceVector.size())));
+}
+
+/**
+ * @brief Hand a heap-allocated PyArray off to Python with full ownership.
+ *
+ * The returned Python object owns the C++ PyArray and triggers its destructor on garbage
+ * collection. Use this at every site that constructs a PyArray for return to Python so the
+ * struct (and, for owning PyArrays, the underlying CUDA allocation) is freed correctly.
+ *
+ * Prefer the unique_ptr overload at sites where multiple PyArrays are constructed before
+ * being handed to Python: it keeps the intermediate allocations exception-safe and only
+ * releases ownership at the moment of handoff.
+ */
+inline boost::python::object toOwnedPyArray(PyArray* array) {
+  using Converter = boost::python::manage_new_object::apply<PyArray*>::type;
+  return boost::python::object(boost::python::handle<>(Converter()(array)));
+}
+
+inline boost::python::object toOwnedPyArray(std::unique_ptr<PyArray> array) {
+  return toOwnedPyArray(array.release());
 }
 
 }  // namespace nvMolKit

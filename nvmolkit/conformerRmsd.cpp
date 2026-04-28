@@ -16,7 +16,6 @@
 #include <GraphMol/GraphMol.h>
 
 #include <boost/python.hpp>
-#include <boost/python/manage_new_object.hpp>
 #include <cstdint>
 #include <stdexcept>
 #include <vector>
@@ -24,15 +23,6 @@
 #include "array_helpers.h"
 #include "conformer_rmsd_mol.h"
 #include "device.h"
-
-namespace {
-
-boost::python::object toOwnedPyArray(nvMolKit::PyArray* array) {
-  using Converter = boost::python::manage_new_object::apply<nvMolKit::PyArray*>::type;
-  return boost::python::object(boost::python::handle<>(Converter()(array)));
-}
-
-}  // namespace
 
 BOOST_PYTHON_MODULE(_conformerRmsd) {
   boost::python::def(
@@ -62,7 +52,7 @@ BOOST_PYTHON_MODULE(_conformerRmsd) {
       for (int m = 0; m < numMols; ++m) {
         const int nc       = molsVec[m]->getNumConformers();
         const int numPairs = nc >= 2 ? nc * (nc - 1) / 2 : 0;
-        results.append(toOwnedPyArray(nvMolKit::makePyArray(buffers[m], boost::python::make_tuple(numPairs))));
+        results.append(nvMolKit::toOwnedPyArray(nvMolKit::makePyArray(buffers[m], boost::python::make_tuple(numPairs))));
       }
       return results;
     },
@@ -79,7 +69,7 @@ BOOST_PYTHON_MODULE(_conformerRmsd) {
       const int     numConfs = mol.getNumConformers();
       const int64_t numPairs = numConfs >= 2 ? static_cast<int64_t>(numConfs) * (numConfs - 1) / 2 : 0;
       auto          buffer   = nvMolKit::conformerRmsdMatrixMol(mol, prealigned, *streamOpt);
-      return toOwnedPyArray(nvMolKit::makePyArray(buffer, boost::python::make_tuple(numPairs)));
+      return nvMolKit::toOwnedPyArray(nvMolKit::makePyArray(buffer, boost::python::make_tuple(numPairs)));
     },
     (boost::python::arg("mol"), boost::python::arg("prealigned") = false, boost::python::arg("stream") = 0));
 }

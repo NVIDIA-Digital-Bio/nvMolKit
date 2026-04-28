@@ -364,14 +364,14 @@ class NativeMMFFBatchedForcefield {
   }
 
   bp::object indexBuffers() {
-    bp::object types_module = bp::import("nvmolkit.types");
-    bp::object async_cls    = types_module.attr("AsyncGpuResult");
-    auto       atomStartsPy = nvMolKit::makePyArrayBorrowed(persistentIndexBuffers_.atomStarts);
-    auto       molIdxPy     = nvMolKit::makePyArrayBorrowed(persistentIndexBuffers_.molIndices);
-    auto       confIdxPy    = nvMolKit::makePyArrayBorrowed(persistentIndexBuffers_.confIndices);
-    return bp::make_tuple(async_cls(bp::object(boost::python::ptr(atomStartsPy)), gpuId_),
-                          async_cls(bp::object(boost::python::ptr(molIdxPy)), gpuId_),
-                          async_cls(bp::object(boost::python::ptr(confIdxPy)), gpuId_));
+    bp::object                        types_module = bp::import("nvmolkit.types");
+    bp::object                        async_cls    = types_module.attr("AsyncGpuResult");
+    std::unique_ptr<nvMolKit::PyArray> atomStartsPy(nvMolKit::makePyArrayBorrowed(persistentIndexBuffers_.atomStarts));
+    std::unique_ptr<nvMolKit::PyArray> molIdxPy(nvMolKit::makePyArrayBorrowed(persistentIndexBuffers_.molIndices));
+    std::unique_ptr<nvMolKit::PyArray> confIdxPy(nvMolKit::makePyArrayBorrowed(persistentIndexBuffers_.confIndices));
+    return bp::make_tuple(async_cls(nvMolKit::toOwnedPyArray(std::move(atomStartsPy)), gpuId_),
+                          async_cls(nvMolKit::toOwnedPyArray(std::move(molIdxPy)), gpuId_),
+                          async_cls(nvMolKit::toOwnedPyArray(std::move(confIdxPy)), gpuId_));
   }
 
   int gpuId() const { return gpuId_; }
@@ -514,14 +514,14 @@ class NativeUFFBatchedForcefield {
   }
 
   bp::object indexBuffers() {
-    bp::object types_module = bp::import("nvmolkit.types");
-    bp::object async_cls    = types_module.attr("AsyncGpuResult");
-    auto       atomStartsPy = nvMolKit::makePyArrayBorrowed(persistentIndexBuffers_.atomStarts);
-    auto       molIdxPy     = nvMolKit::makePyArrayBorrowed(persistentIndexBuffers_.molIndices);
-    auto       confIdxPy    = nvMolKit::makePyArrayBorrowed(persistentIndexBuffers_.confIndices);
-    return bp::make_tuple(async_cls(bp::object(boost::python::ptr(atomStartsPy)), gpuId_),
-                          async_cls(bp::object(boost::python::ptr(molIdxPy)), gpuId_),
-                          async_cls(bp::object(boost::python::ptr(confIdxPy)), gpuId_));
+    bp::object                        types_module = bp::import("nvmolkit.types");
+    bp::object                        async_cls    = types_module.attr("AsyncGpuResult");
+    std::unique_ptr<nvMolKit::PyArray> atomStartsPy(nvMolKit::makePyArrayBorrowed(persistentIndexBuffers_.atomStarts));
+    std::unique_ptr<nvMolKit::PyArray> molIdxPy(nvMolKit::makePyArrayBorrowed(persistentIndexBuffers_.molIndices));
+    std::unique_ptr<nvMolKit::PyArray> confIdxPy(nvMolKit::makePyArrayBorrowed(persistentIndexBuffers_.confIndices));
+    return bp::make_tuple(async_cls(nvMolKit::toOwnedPyArray(std::move(atomStartsPy)), gpuId_),
+                          async_cls(nvMolKit::toOwnedPyArray(std::move(molIdxPy)), gpuId_),
+                          async_cls(nvMolKit::toOwnedPyArray(std::move(confIdxPy)), gpuId_));
   }
 
   int gpuId() const { return gpuId_; }
