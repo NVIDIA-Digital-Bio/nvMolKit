@@ -96,12 +96,14 @@ add_library(
   etkdg_stages
   etkdg_stage_coordgen.cu etkdg_stage_distgeom_minimize.cu
   etkdg_stage_update_conformers.cu etkdg_stage_stereochem_checks.cu
-  etkdg_stage_etk_minimization.cu)
+  etkdg_stage_etk_minimization.cu etkdg_device_collect.cu)
 
 target_link_libraries(
   etkdg_stages
   PUBLIC bfgs
-  PRIVATE device_vector
+  PRIVATE coord_collect
+          device
+          device_vector
           ${RDKit_LIBS}
           dg_batched_forcefield
           etk_batched_forcefield
@@ -117,6 +119,8 @@ target_link_libraries(
   PUBLIC bfgs
   PRIVATE ${RDKit_LIBS}
           conformer_pruning
+          coord_collect
+          device
           device_vector
           dist_geom
           embedder_utils
