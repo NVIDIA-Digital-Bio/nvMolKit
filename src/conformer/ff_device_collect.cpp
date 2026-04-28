@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <unordered_map>
 
 #include "coord_collect.h"
 #include "cuda_error_check.h"
@@ -184,6 +185,103 @@ DeviceCoordResult finalizeOnTarget(std::vector<FFDeviceCoordCollector>& collecto
   result.energies.setStream(nullptr);
   result.converged.setStream(nullptr);
   return result;
+}
+
+namespace {
+
+template <typename T> std::vector<T> downloadToHost(const AsyncDeviceVector<T>& vec) {
+  std::vector<T> host(vec.size());
+  if (!host.empty()) {
+    vec.copyToHost(host);
+    cudaCheckError(cudaStreamSynchronize(vec.stream()));
+  }
+  return host;
+}
+
+}  // namespace
+
+DeviceInputIndex buildDeviceInputIndex(const DeviceCoordResult&          deviceInput,
+                                       const std::vector<ConformerInfo>& allConformers) {
+  DeviceInputIndex index;
+  index.sourceGpu = deviceInput.gpuId;
+
+  const WithDevice withSrc(deviceInput.gpuId);
+  index.atomStartsHost                = downloadToHost(deviceInput.atomStarts);
+  const std::vector<int32_t> molIdxHost  = downloadToHost(deviceInput.molIndices);
+  const std::vector<int32_t> confIdxHost = downloadToHost(deviceInput.confIndices);
+
+  if (molIdxHost.size() != allConformers.size() || confIdxHost.size() != allConformers.size()) {
+    throw std::invalid_argument("device_input conformer count (" + std::to_string(molIdxHost.size()) +
+                                ") does not match host-flattened conformer count (" +
+                                std::to_string(allConformers.size()) + ")");
+  }
+  if (index.atomStartsHost.size() != allConformers.size() + 1) {
+    throw std::invalid_argument("device_input atom_starts has unexpected length");
+  }
+
+  // Build a quick lookup from (molIdx, confIdx) -> source conformer index, then validate that
+  // the host-flattened list maps one-to-one onto the source list.
+  std::unordered_map<long long, int> srcLookup;
+  srcLookup.reserve(molIdxHost.size());
+  for (size_t i = 0; i < molIdxHost.size(); ++i) {
+    const long long key = (static_cast<long long>(molIdxHost[i]) << 32) | static_cast<uint32_t>(confIdxHost[i]);
+    srcLookup.insert({key, static_cast<int>(i)});
+  }
+  index.conformerIndexBy.resize(allConformers.size());
+  for (size_t i = 0; i < allConformers.size(); ++i) {
+    const auto&     confInfo = allConformers[i];
+    const long long key = (static_cast<long long>(confInfo.molIdx) << 32) | static_cast<uint32_t>(confInfo.confIdx);
+    auto            it  = srcLookup.find(key);
+    if (it == srcLookup.end()) {
+      throw std::invalid_argument("device_input is missing an entry for (molIdx=" +
+                                  std::to_string(confInfo.molIdx) + ", confIdx=" +
+                                  std::to_string(confInfo.confIdx) + ")");
+    }
+    index.conformerIndexBy[i] = it->second;
+  }
+
+  // Verify per-conformer atom counts match.
+  for (size_t i = 0; i < allConformers.size(); ++i) {
+    const int srcIdx        = index.conformerIndexBy[i];
+    const int srcAtomCount  = index.atomStartsHost[srcIdx + 1] - index.atomStartsHost[srcIdx];
+    const int hostAtomCount = static_cast<int>(allConformers[i].mol->getNumAtoms());
+    if (srcAtomCount != hostAtomCount) {
+      throw std::invalid_argument("device_input atom count mismatch for conformer " + std::to_string(i) + ": got " +
+                                  std::to_string(srcAtomCount) + ", expected " + std::to_string(hostAtomCount));
+    }
+  }
+
+  return index;
+}
+
+void broadcastDeviceInputBatch(const DeviceCoordResult&   deviceInput,
+                               const DeviceInputIndex&    index,
+                               const std::vector<int>&    batchSrcIndices,
+                               const std::vector<int>&    batchAtomCounts,
+                               const int                  executingGpu,
+                               cudaStream_t               executingStream,
+                               AsyncDeviceVector<double>& positionsDevice) {
+  if (batchSrcIndices.size() != batchAtomCounts.size()) {
+    throw std::invalid_argument("batchSrcIndices and batchAtomCounts must have the same size");
+  }
+  if (executingGpu != index.sourceGpu) {
+    enablePeerAccess(executingGpu, index.sourceGpu);
+  }
+
+  size_t dstAtomOffset = 0;
+  for (size_t i = 0; i < batchSrcIndices.size(); ++i) {
+    const int srcIdx       = batchSrcIndices[i];
+    const int natoms       = batchAtomCounts[i];
+    const size_t srcAtomStart = static_cast<size_t>(index.atomStartsHost[srcIdx]);
+    copyDeviceToDeviceAsync(positionsDevice.data() + dstAtomOffset * 3,
+                            deviceInput.positions.data() + srcAtomStart * 3,
+                            static_cast<size_t>(natoms) * 3 * sizeof(double),
+                            index.sourceGpu,
+                            deviceInput.positions.stream(),
+                            executingGpu,
+                            executingStream);
+    dstAtomOffset += static_cast<size_t>(natoms);
+  }
 }
 
 }  // namespace nvMolKit

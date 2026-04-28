@@ -81,6 +81,53 @@ void appendBatch(const std::vector<ConformerInfo>&   batchConformers,
  */
 DeviceCoordResult finalizeOnTarget(std::vector<FFDeviceCoordCollector>& collectors, int targetGpu);
 
+/**
+ * @brief Host-side index over a DeviceCoordResult used as starting coordinates.
+ *
+ * Built once per minimization call; downloads atom_starts, mol_indices, and conf_indices from
+ * the input device result and validates that the per-conformer (molIdx, confIdx) labels match
+ * the host-side flattened conformer list one-to-one. Provides the source GPU offsets needed for
+ * cross-GPU broadcasting in @ref broadcastDeviceInputBatch.
+ */
+struct DeviceInputIndex {
+  int                  sourceGpu = -1;
+  std::vector<int32_t> atomStartsHost;   //!< length n + 1
+  std::vector<int32_t> conformerIndexBy; //!< maps allConformers index -> source conformer index
+};
+
+/**
+ * @brief Build and validate a DeviceInputIndex against the host-flattened conformer list.
+ *
+ * @param deviceInput Source device coordinates (must be non-null and on a known GPU).
+ * @param allConformers Host-flattened ConformerInfo list (one entry per RDKit conformer,
+ *                      input-mol order then conformer order).
+ * @throws std::invalid_argument if sizes or (molIdx, confIdx) labels do not align.
+ */
+DeviceInputIndex buildDeviceInputIndex(const DeviceCoordResult&          deviceInput,
+                                       const std::vector<ConformerInfo>& allConformers);
+
+/**
+ * @brief Copy the positions for a single batch from the input device result into @p positionsDevice.
+ *
+ * For each batch slot i, copies @p batchAtomCounts[i] * 3 doubles from
+ * `deviceInput.positions[index.atomStartsHost[batchSrcIndices[i]] * 3 ..]` into
+ * `positionsDevice[dstOffset(i) * 3 ..]`, where dstOffset(i) is the running prefix sum of
+ * @p batchAtomCounts.
+ *
+ * Caller responsibilities:
+ *   - @p positionsDevice must already be sized to hold all of the batch's atom positions
+ *     (`sum(batchAtomCounts) * 3` doubles) in CSR order matching the batch.
+ *   - The current device should be @p executingGpu (caller manages a WithDevice scope).
+ *   - @p batchSrcIndices and @p batchAtomCounts must have the same length.
+ */
+void broadcastDeviceInputBatch(const DeviceCoordResult&  deviceInput,
+                               const DeviceInputIndex&   index,
+                               const std::vector<int>&   batchSrcIndices,
+                               const std::vector<int>&   batchAtomCounts,
+                               int                       executingGpu,
+                               cudaStream_t              executingStream,
+                               AsyncDeviceVector<double>& positionsDevice);
+
 }  // namespace nvMolKit
 
 #endif  // NVMOLKIT_FF_DEVICE_COLLECT_H

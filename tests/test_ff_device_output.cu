@@ -164,6 +164,91 @@ TEST(MMFFDeviceOutput, EmptyInputProducesEmptyResult) {
   EXPECT_EQ(result.device->molIndices.size(), 0u);
 }
 
+TEST(MMFFDeviceInput, RoundTripMatchesNoInput) {
+  // First run MMFF DEVICE on a small mol to get a starting-point DeviceCoordResult, then run
+  // MMFF DEVICE again with that result as device_input. With identical starting coords the
+  // two results should produce identical positions (BFGS is deterministic for fixed input).
+  auto ethanol = embeddedMol("CCO", 17);
+  ASSERT_NE(ethanol, nullptr);
+
+  std::vector<RDKit::ROMol*>            mols = {ethanol.get()};
+  std::vector<nvMolKit::MMFFProperties> props(mols.size());
+
+  // Step 1: get a device result by running MMFF DEVICE.
+  auto first = nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(mols, 25, 1e-4, props, {}, singleThreadOptions(),
+                                                         nvMolKit::BfgsBackend::PER_MOLECULE,
+                                                         nvMolKit::CoordinateOutput::DEVICE, /*targetGpu=*/0);
+  ASSERT_TRUE(first.device.has_value());
+
+  // Step 2: feed that result back as device_input and confirm a no-op-ish second pass
+  // (running again from already-converged coords with the same iters cap should not change them).
+  auto second = nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(mols, 25, 1e-4, props, {}, singleThreadOptions(),
+                                                          nvMolKit::BfgsBackend::PER_MOLECULE,
+                                                          nvMolKit::CoordinateOutput::DEVICE, /*targetGpu=*/0,
+                                                          /*deviceInput=*/&(*first.device));
+  ASSERT_TRUE(second.device.has_value());
+
+  const auto firstPos  = downloadDeviceVector(first.device->positions);
+  const auto secondPos = downloadDeviceVector(second.device->positions);
+  ASSERT_EQ(firstPos.size(), secondPos.size());
+  // Re-running BFGS from already-converged coords still takes a small number of microsteps
+  // before the convergence check passes again, so we only require near-equality, not bit
+  // equality. The threshold matches the optimization gradient tolerance.
+  for (size_t i = 0; i < firstPos.size(); ++i) {
+    EXPECT_NEAR(firstPos[i], secondPos[i], 1e-4) << "atom-coord " << i;
+  }
+  // Also confirm energies are close - the real correctness signal that the broadcast worked.
+  const auto firstEn  = downloadDeviceVector(first.device->energies);
+  const auto secondEn = downloadDeviceVector(second.device->energies);
+  ASSERT_EQ(firstEn.size(), 1u);
+  ASSERT_EQ(secondEn.size(), 1u);
+  EXPECT_NEAR(firstEn[0], secondEn[0], 1e-6);
+}
+
+TEST(MMFFDeviceInput, MismatchedConformerCountThrows) {
+  auto methanol = embeddedMol("CO", 1);
+  auto propanol = embeddedMol("CCCO", 1);
+  ASSERT_NE(methanol, nullptr);
+  ASSERT_NE(propanol, nullptr);
+
+  // Get a 1-mol device result, then try to feed it to a 2-mol minimization.
+  std::vector<RDKit::ROMol*>            singleMol = {methanol.get()};
+  std::vector<nvMolKit::MMFFProperties> singleProps(singleMol.size());
+  auto                                  smallResult =
+    nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(singleMol, 5, 1e-4, singleProps, {}, singleThreadOptions(),
+                                               nvMolKit::BfgsBackend::PER_MOLECULE,
+                                               nvMolKit::CoordinateOutput::DEVICE, /*targetGpu=*/0);
+  ASSERT_TRUE(smallResult.device.has_value());
+
+  std::vector<RDKit::ROMol*>            twoMols = {methanol.get(), propanol.get()};
+  std::vector<nvMolKit::MMFFProperties> twoProps(twoMols.size());
+  EXPECT_THROW(nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(twoMols, 5, 1e-4, twoProps, {}, singleThreadOptions(),
+                                                          nvMolKit::BfgsBackend::PER_MOLECULE,
+                                                          nvMolKit::CoordinateOutput::DEVICE, /*targetGpu=*/0,
+                                                          /*deviceInput=*/&(*smallResult.device)),
+               std::invalid_argument);
+}
+
+TEST(MMFFDeviceInput, ConstraintsRejected) {
+  auto ethanol = embeddedMol("CCO", 1);
+  ASSERT_NE(ethanol, nullptr);
+
+  std::vector<RDKit::ROMol*>            mols = {ethanol.get()};
+  std::vector<nvMolKit::MMFFProperties> props(mols.size());
+  auto firstResult =
+    nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(mols, 5, 1e-4, props, {}, singleThreadOptions(),
+                                               nvMolKit::BfgsBackend::PER_MOLECULE,
+                                               nvMolKit::CoordinateOutput::DEVICE, /*targetGpu=*/0);
+  ASSERT_TRUE(firstResult.device.has_value());
+
+  std::vector<nvMolKit::ForceFieldConstraints::PerMolConstraints> constraints(mols.size());
+  EXPECT_THROW(nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(mols, 5, 1e-4, props, constraints, singleThreadOptions(),
+                                                          nvMolKit::BfgsBackend::PER_MOLECULE,
+                                                          nvMolKit::CoordinateOutput::DEVICE, /*targetGpu=*/0,
+                                                          /*deviceInput=*/&(*firstResult.device)),
+               std::invalid_argument);
+}
+
 TEST(UFFDeviceOutput, EthanolMatchesShape) {
   auto ethanol = embeddedMol("CCO", 99);
   ASSERT_NE(ethanol, nullptr);
