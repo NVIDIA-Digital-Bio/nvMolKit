@@ -50,15 +50,10 @@ if nvmolkit_build_against_pip:
     # driver is required to set.
     rdkit_version_str = os.getenv("RDKIT_VERSION")
     if not rdkit_version_str:
-        raise ValueError(
-            "RDKIT_VERSION must be set to a value of the form 'YYYY.M.P' when "
-            "building against pip rdkit"
-        )
+        raise ValueError("RDKIT_VERSION must be set to a value of the form 'YYYY.M.P' when building against pip rdkit")
     rdkit_parts = rdkit_version_str.split(".")
     if len(rdkit_parts) != 3 or not all(p.isdigit() for p in rdkit_parts):
-        raise ValueError(
-            f"RDKIT_VERSION must be 'YYYY.M.P' (got: {rdkit_version_str!r})"
-        )
+        raise ValueError(f"RDKIT_VERSION must be 'YYYY.M.P' (got: {rdkit_version_str!r})")
     cmake_extra_args.extend(
         [
             f"-DRDKit_VERSION_MAJOR={rdkit_parts[0]}",
