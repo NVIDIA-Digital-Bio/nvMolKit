@@ -63,10 +63,20 @@ from typing import Callable
 
 import nvtx
 import pandas as pd
+import torch
 from benchmark_timing import time_it as _time_it
+from nvmolkit import autotune as nv_autotune
+from nvmolkit.substructure import (
+    SubstructSearchConfig,
+    countSubstructMatches,
+    getSubstructMatches,
+    hasSubstructMatch,
+)
 from rdkit import Chem, RDLogger
 from rdkit.Chem import rdSubstructLibrary
 from tqdm.contrib.concurrent import process_map
+
+OPTUNA_AVAILABLE = nv_autotune.is_available()
 
 
 def time_it(func: Callable, runs: int = 1, gpu_sync: bool = False) -> tuple[float, float]:
@@ -330,8 +340,6 @@ def bench_nvmolkit(
     mols: list[Chem.Mol], queries: list[Chem.Mol], runs: int, mode: str, config
 ) -> tuple[float, float, object]:
     """Benchmark nvmolkit GPU substructure search."""
-    from nvmolkit.substructure import countSubstructMatches, getSubstructMatches, hasSubstructMatch
-
     results_data: object = None
 
     @nvtx.annotate("nvmolkit_run", color="orange")
@@ -584,15 +592,6 @@ def main():
 
         if not args.no_nvmolkit:
             try:
-                import torch
-
-                from nvmolkit.substructure import (
-                    SubstructSearchConfig,
-                    countSubstructMatches,
-                    getSubstructMatches,
-                    hasSubstructMatch,
-                )
-
                 api_for_mode = {
                     "hasSubstructMatch": hasSubstructMatch,
                     "countSubstructMatches": countSubstructMatches,
@@ -601,8 +600,6 @@ def main():
                 gpu_ids = list(range(config_row["num_gpus"]))
 
                 if args.autotune_load:
-                    from nvmolkit import autotune as nv_autotune
-
                     print(f"\nLoading tuned SubstructSearchConfig from {args.autotune_load}...")
                     loaded = nv_autotune.load(args.autotune_load)
                     if not isinstance(loaded, SubstructSearchConfig):
@@ -621,9 +618,7 @@ def main():
                         f"preprocessingThreads={config.preprocessingThreads}, gpuIds={list(config.gpuIds)}"
                     )
                 elif args.autotune:
-                    from nvmolkit import autotune as nv_autotune
-
-                    if not nv_autotune.is_available():
+                    if not OPTUNA_AVAILABLE:
                         print(
                             "Error: --autotune requires the optional 'optuna' dependency. "
                             "Install with `pip install nvmolkit[autotune]` or `conda install -c conda-forge optuna`."
@@ -692,8 +687,8 @@ def main():
                 results["nvmolkit"] = (nvmolkit_avg, nvmolkit_std, nvmolkit_results)
                 torch.cuda.cudart().cudaProfilerStop()
 
-            except ImportError as e:
-                print(f"  nvmolkit: SKIPPED (import error: {e})")
+            except ImportError as import_error:
+                print(f"  nvmolkit: SKIPPED (import error: {import_error})")
 
         if not args.no_rdkit:
             if args.rdkit_match_mode == "substructlib":

@@ -35,6 +35,7 @@ import pickle
 import sys
 
 import nvtx
+import pandas as pd
 import torch
 from rdkit import Chem
 from rdkit.Chem import AllChem
@@ -68,8 +69,6 @@ def prepare_molecules(smiles_file, num_mols, num_confs):
         return mols
 
     print(f"  No precomputed file found ({pkl_path}), generating from scratch...")
-    import pandas as pd
-
     df = pd.read_csv(smiles_file)
     smiles_list = df.iloc[:, 0].tolist()
 

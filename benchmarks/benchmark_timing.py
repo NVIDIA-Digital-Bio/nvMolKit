@@ -20,6 +20,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable
 
+import torch
+
 
 @dataclass
 class TimingResult:
@@ -64,8 +66,6 @@ def time_it(func: Callable, runs: int = 3, warmups: int = 1, gpu_sync: bool = Fa
         A TimingResult with per-iteration times in milliseconds.
     """
     if gpu_sync:
-        import torch
-
         sync = torch.cuda.synchronize
     else:
 

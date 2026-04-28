@@ -120,12 +120,10 @@ def _timed_run(runner: Callable[[CalibrationState], int], state: CalibrationStat
     The runner is expected to return the number of items it processed (used to
     compute throughput).
     """
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
+    torch.cuda.synchronize()
     start = time.perf_counter()
     items = runner(state)
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
+    torch.cuda.synchronize()
     elapsed = time.perf_counter() - start
     return TrialOutcome(elapsed_seconds=elapsed, items=int(items))
 

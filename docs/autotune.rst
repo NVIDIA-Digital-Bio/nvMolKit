@@ -25,7 +25,7 @@ Install optuna explicitly:
   .. code-block:: bash
 
       pip install nvMolKit[autotune]
-      # or, equivalently
+      # or
       pip install optuna
 
 - Conda-forge users:
