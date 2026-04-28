@@ -27,7 +27,8 @@ if TYPE_CHECKING:
 __all__ = ["EmbedMolecules"]
 
 from nvmolkit import _embedMolecules  # type: ignore
-from nvmolkit.types import HardwareOptions
+from nvmolkit._arrayHelpers import *  # noqa: F403  # registers PyArray + _NativeDeviceCoordResult
+from nvmolkit.types import CoordinateOutput, DeviceCoordResult, HardwareOptions
 
 
 def EmbedMolecules(
@@ -36,7 +37,9 @@ def EmbedMolecules(
     confsPerMolecule: int = 1,
     maxIterations: int = -1,
     hardwareOptions: Optional[HardwareOptions] = None,
-) -> None:
+    output: CoordinateOutput = CoordinateOutput.RDKIT_CONFORMERS,
+    target_gpu: Optional[int] = None,
+) -> Optional[DeviceCoordResult]:
     """Embed multiple molecules with multiple conformers on GPUs.
 
     This function performs GPU-accelerated ETKDG conformer generation on multiple molecules.
@@ -100,9 +103,8 @@ def EmbedMolecules(
         - params.useRandomCoords must be True for ETKDG algorithm
         - If gpuIds is empty, all available GPUs (0 to N-1) will be used automatically
     """
-    # Validate input
     if not molecules:
-        return
+        return None
 
     for i, mol in enumerate(molecules):
         if mol is None:
@@ -111,10 +113,17 @@ def EmbedMolecules(
     if not params.useRandomCoords:
         raise ValueError("ETKDG requires useRandomCoords=True in EmbedParameters")
 
-    # Use default hardware options if none provided
     if hardwareOptions is None:
         hardwareOptions = HardwareOptions()
     native_options = hardwareOptions._as_native()
-
-    # Call the C++ implementation
-    _embedMolecules.EmbedMolecules(molecules, params, confsPerMolecule, maxIterations, native_options)
+    output_mode = output.value if hasattr(output, "value") else int(output)
+    output_mode_int = 1 if output == CoordinateOutput.DEVICE else 0
+    return _embedMolecules.EmbedMolecules(
+        molecules,
+        params,
+        confsPerMolecule,
+        maxIterations,
+        native_options,
+        output_mode_int,
+        -1 if target_gpu is None else int(target_gpu),
+    )

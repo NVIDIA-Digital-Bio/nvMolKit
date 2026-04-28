@@ -35,10 +35,22 @@ target_link_libraries(
 target_include_directories(_Fingerprints PRIVATE ${Python_INCLUDE_DIRS})
 installpythontarget(_Fingerprints ./)
 
-add_library(_arrayHelpers MODULE array_helpers.cpp)
-target_link_libraries(_arrayHelpers PUBLIC ${Boost_LIBRARIES} device_vector)
+add_library(device_coord_python STATIC device_coord_python.cpp)
+target_link_libraries(device_coord_python PUBLIC ${Boost_LIBRARIES} device_vector)
 target_include_directories(
-  _arrayHelpers PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils ${Python_INCLUDE_DIRS})
+  device_coord_python PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils
+                             ${CMAKE_SOURCE_DIR}/src
+                             ${CMAKE_CURRENT_SOURCE_DIR}
+                             ${Python_INCLUDE_DIRS})
+target_include_directories(device_coord_python SYSTEM PUBLIC ${Boost_INCLUDE_DIRS})
+set_property(TARGET device_coord_python PROPERTY POSITION_INDEPENDENT_CODE ON)
+
+add_library(_arrayHelpers MODULE array_helpers.cpp)
+target_link_libraries(_arrayHelpers PUBLIC ${Boost_LIBRARIES} device_vector
+                                           device_coord_python)
+target_include_directories(
+  _arrayHelpers PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils ${Python_INCLUDE_DIRS}
+                       ${CMAKE_SOURCE_DIR}/src)
 target_include_directories(_arrayHelpers SYSTEM PUBLIC ${Boost_INCLUDE_DIRS})
 target_link_libraries(_arrayHelpers PRIVATE ${RDKit_LIBS})
 installpythontarget(_arrayHelpers ./)
@@ -47,7 +59,7 @@ add_library(_mmffOptimization MODULE mmffOptimization.cpp)
 target_link_libraries(_mmffOptimization PUBLIC ${Boost_LIBRARIES}
                                                ${PYTHON_LIBRARIES})
 target_link_libraries(_mmffOptimization PRIVATE ${RDKit_LIBS} bfgs_mmff
-                                                ff_utils)
+                                                device_coord_python ff_utils)
 target_include_directories(
   _mmffOptimization PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils
                            ${Python_INCLUDE_DIRS})
@@ -58,7 +70,8 @@ installpythontarget(_mmffOptimization ./)
 add_library(_uffOptimization MODULE uffOptimization.cpp)
 target_link_libraries(_uffOptimization PUBLIC ${Boost_LIBRARIES}
                                               ${PYTHON_LIBRARIES})
-target_link_libraries(_uffOptimization PRIVATE ${RDKit_LIBS} bfgs_uff ff_utils)
+target_link_libraries(_uffOptimization PRIVATE ${RDKit_LIBS} bfgs_uff
+                                               device_coord_python ff_utils)
 target_include_directories(
   _uffOptimization PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils
                           ${Python_INCLUDE_DIRS})
@@ -80,6 +93,7 @@ target_link_libraries(
           rdkit_uff_flattened
           coord_collect
           device
+          device_coord_python
           device_vector
           ff_utils)
 target_include_directories(
@@ -92,7 +106,8 @@ installpythontarget(_batchedForcefield ./)
 add_library(_embedMolecules MODULE embedMolecules.cpp)
 target_link_libraries(_embedMolecules PUBLIC ${Boost_LIBRARIES}
                                              ${PYTHON_LIBRARIES} device_vector)
-target_link_libraries(_embedMolecules PRIVATE ${RDKit_LIBS} dist_geom etkdg)
+target_link_libraries(_embedMolecules PRIVATE ${RDKit_LIBS} dist_geom etkdg
+                                              device_coord_python)
 target_include_directories(
   _embedMolecules PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils
                          ${Python_INCLUDE_DIRS})

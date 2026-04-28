@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include "array_helpers.h"
+#include "device_coord_python.h"
 
 namespace {
 using namespace boost::python;
@@ -21,6 +22,7 @@ using namespace boost::python;
 BOOST_PYTHON_MODULE(_arrayHelpers) {
   class_<nvMolKit::PyArray, boost::noncopyable>("_arrayHelpers")
     .def_readonly("__cuda_array_interface__", &nvMolKit::PyArray::__cuda_array_interface__);
+  nvMolKit::registerNativeDeviceCoordResult();
 }
 
 }  // namespace

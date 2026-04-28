@@ -17,6 +17,7 @@
 
 #include "bfgs_uff.h"
 #include "boost_python_utils.h"
+#include "device_coord_python.h"
 
 namespace bp = boost::python;
 
@@ -42,15 +43,46 @@ BOOST_PYTHON_MODULE(_uffOptimization) {
      bp::arg("vdwThresholds"),
      bp::arg("ignoreInterfragInteractions"),
      bp::arg("hardwareOptions") = nvMolKit::BatchHardwareOptions()),
-    "Optimize conformers for multiple molecules using UFF force field.\n"
-    "\n"
-    "Args:\n"
-    "    molecules: List of RDKit molecules to optimize\n"
-    "    maxIters: Maximum number of optimization iterations (default: 1000)\n"
-    "    vdwThresholds: Per-molecule van der Waals thresholds\n"
-    "    ignoreInterfragInteractions: Per-molecule interfragment interaction flags\n"
-    "    hardwareOptions: BatchHardwareOptions object with hardware settings\n"
-    "\n"
-    "Returns:\n"
-    "    List of lists of energies, where each inner list contains energies for conformers of one molecule");
+    "Optimize conformers for multiple molecules using UFF (host-output API).");
+
+  bp::def(
+    "UFFMinimizeDeviceOutput",
+    +[](const bp::list&                       molecules,
+        int                                   maxIters,
+        double                                gradTol,
+        const bp::list&                       vdwThresholds,
+        const bp::list&                       ignoreInterfragInteractions,
+        const nvMolKit::BatchHardwareOptions& hardwareOptions,
+        int                                   targetGpu,
+        const bp::object&                     deviceInput) -> bp::object {
+      auto       molsVec      = nvMolKit::extractMolecules(molecules);
+      const int  numMols      = static_cast<int>(molsVec.size());
+      const auto thresholdVec = nvMolKit::extractDoubleList(vdwThresholds, numMols, "vdwThreshold");
+      const auto ignoreVec =
+        nvMolKit::extractBoolList(ignoreInterfragInteractions, numMols, "ignoreInterfragInteractions");
+      const nvMolKit::DeviceCoordResult* devicePtr = nvMolKit::extractDeviceInputPtr(deviceInput);
+      auto                               result    = nvMolKit::UFF::UFFMinimizeMoleculesConfs(molsVec,
+                                                                 maxIters,
+                                                                 gradTol,
+                                                                 thresholdVec,
+                                                                 ignoreVec,
+                                                                 /*constraints=*/{},
+                                                                 hardwareOptions,
+                                                                 nvMolKit::CoordinateOutput::DEVICE,
+                                                                 targetGpu,
+                                                                 devicePtr);
+      if (!result.device.has_value()) {
+        throw std::runtime_error("UFFMinimizeMoleculesConfs(DEVICE) returned no device result");
+      }
+      return nvMolKit::pyDeviceCoordResultFromOwned(std::move(*result.device));
+    },
+    (bp::arg("molecules"),
+     bp::arg("maxIters") = 1000,
+     bp::arg("gradTol")  = 1e-4,
+     bp::arg("vdwThresholds"),
+     bp::arg("ignoreInterfragInteractions"),
+     bp::arg("hardwareOptions") = nvMolKit::BatchHardwareOptions(),
+     bp::arg("targetGpu")       = -1,
+     bp::arg("deviceInput")     = bp::object()),
+    "UFF minimize with on-device output. Always returns a nvmolkit.types.DeviceCoordResult.");
 }

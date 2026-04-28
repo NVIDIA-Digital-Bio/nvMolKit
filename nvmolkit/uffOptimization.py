@@ -24,7 +24,8 @@ if TYPE_CHECKING:
     from rdkit.Chem import Mol
 
 from nvmolkit import _uffOptimization
-from nvmolkit.types import HardwareOptions
+from nvmolkit._arrayHelpers import *  # noqa: F403  # registers PyArray + _NativeDeviceCoordResult
+from nvmolkit.types import CoordinateOutput, DeviceCoordResult, HardwareOptions
 
 
 def UFFOptimizeMoleculesConfs(
@@ -33,7 +34,10 @@ def UFFOptimizeMoleculesConfs(
     vdwThreshold: float | Sequence[float] = 10.0,
     ignoreInterfragInteractions: bool | Sequence[bool] = True,
     hardwareOptions: HardwareOptions | None = None,
-) -> list[list[float]]:
+    output: CoordinateOutput = CoordinateOutput.RDKIT_CONFORMERS,
+    target_gpu: int | None = None,
+    device_input: DeviceCoordResult | None = None,
+) -> "list[list[float]] | DeviceCoordResult":
     """Optimize conformers for multiple molecules using the UFF force field.
 
     Args:
@@ -91,6 +95,23 @@ def UFFOptimizeMoleculesConfs(
 
     if hardwareOptions is None:
         hardwareOptions = HardwareOptions()
+    if output == CoordinateOutput.DEVICE:
+        return _uffOptimization.UFFMinimizeDeviceOutput(
+            molecules,
+            int(maxIters),
+            1e-4,
+            thresholds,
+            interfrag_flags,
+            hardwareOptions._as_native(),
+            -1 if target_gpu is None else int(target_gpu),
+            device_input,
+        )
+    if device_input is not None:
+        raise ValueError(
+            "device_input is only supported with output=CoordinateOutput.DEVICE; "
+            "use output=CoordinateOutput.DEVICE to keep results on the GPU and to consume an "
+            "existing device-coord result."
+        )
     return _uffOptimization.UFFOptimizeMoleculesConfs(
         molecules,
         int(maxIters),

@@ -19,16 +19,18 @@
 #include <boost/python/stl_iterator.hpp>
 
 #include "boost_python_utils.h"
+#include "device_coord_python.h"
 #include "etkdg.h"
 
-static boost::python::list getGpuIdsPy(nvMolKit::BatchHardwareOptions& opts) {
+namespace bp = boost::python;
+
+static bp::list getGpuIdsPy(nvMolKit::BatchHardwareOptions& opts) {
   return nvMolKit::vectorToList(opts.gpuIds);
 }
 
-static void setGpuIds(nvMolKit::BatchHardwareOptions& opts, const boost::python::object& iterable) {
+static void setGpuIds(nvMolKit::BatchHardwareOptions& opts, const bp::object& iterable) {
   std::vector<int> converted;
   using namespace boost::python;
-  // Prefer fast sequence path
   if (PySequence_Check(iterable.ptr())) {
     Py_ssize_t n = PySequence_Size(iterable.ptr());
     converted.reserve(static_cast<size_t>(n));
@@ -37,7 +39,6 @@ static void setGpuIds(nvMolKit::BatchHardwareOptions& opts, const boost::python:
       converted.push_back(extract<int>(item));
     }
   } else {
-    // Fallback: try generic iterable
     stl_input_iterator<int> it(iterable), end;
     for (; it != end; ++it) {
       converted.push_back(*it);
@@ -47,46 +48,49 @@ static void setGpuIds(nvMolKit::BatchHardwareOptions& opts, const boost::python:
 }
 
 BOOST_PYTHON_MODULE(_embedMolecules) {
-  // Expose BatchHardwareOptions struct to Python
-  boost::python::class_<nvMolKit::BatchHardwareOptions>("BatchHardwareOptions")
-    .def(boost::python::init<>())
+  bp::class_<nvMolKit::BatchHardwareOptions>("BatchHardwareOptions")
+    .def(bp::init<>())
     .def_readwrite("preprocessingThreads", &nvMolKit::BatchHardwareOptions::preprocessingThreads)
     .def_readwrite("batchSize", &nvMolKit::BatchHardwareOptions::batchSize)
     .def_readwrite("batchesPerGpu", &nvMolKit::BatchHardwareOptions::batchesPerGpu)
     .add_property("gpuIds", &getGpuIdsPy, &setGpuIds);
 
-  boost::python::def(
+  bp::def(
     "EmbedMolecules",
-    +[](const boost::python::list&                  molecules,
+    +[](const bp::list&                             molecules,
         const RDKit::DGeomHelpers::EmbedParameters& params,
         int                                         confsPerMolecule,
         int                                         maxIterations,
-        const nvMolKit::BatchHardwareOptions&       hardwareOptions) {
-      auto molsVec = nvMolKit::extractMolecules(molecules);
-
-      // Call the C++ function with nullptr for failures
-      nvMolKit::embedMolecules(molsVec,
-                               params,
-                               confsPerMolecule,
-                               maxIterations,
-                               false,    // debugMode = false
-                               nullptr,  // failures = nullptr
-                               hardwareOptions);
+        const nvMolKit::BatchHardwareOptions&       hardwareOptions,
+        int                                         outputMode,
+        int                                         targetGpu) -> bp::object {
+      auto       molsVec = nvMolKit::extractMolecules(molecules);
+      const auto output  = static_cast<nvMolKit::CoordinateOutput>(outputMode);
+      auto       result  = nvMolKit::embedMolecules(molsVec,
+                                              params,
+                                              confsPerMolecule,
+                                              maxIterations,
+                                              false,
+                                              nullptr,
+                                              hardwareOptions,
+                                              nvMolKit::BfgsBackend::HYBRID,
+                                              output,
+                                              targetGpu);
+      if (!result.has_value()) {
+        return bp::object();
+      }
+      return nvMolKit::pyDeviceCoordResultFromOwned(std::move(*result));
     },
-    (boost::python::arg("molecules"),
-     boost::python::arg("params"),
-     boost::python::arg("confsPerMolecule") = 1,
-     boost::python::arg("maxIterations")    = -1,
-     boost::python::arg("hardwareOptions")  = nvMolKit::BatchHardwareOptions()),
+    (bp::arg("molecules"),
+     bp::arg("params"),
+     bp::arg("confsPerMolecule") = 1,
+     bp::arg("maxIterations")    = -1,
+     bp::arg("hardwareOptions")  = nvMolKit::BatchHardwareOptions(),
+     bp::arg("outputMode")       = static_cast<int>(nvMolKit::CoordinateOutput::RDKIT_CONFORMERS),
+     bp::arg("targetGpu")        = -1),
     "Embed multiple molecules with multiple conformers using ETKDG.\n"
     "\n"
-    "Args:\n"
-    "    molecules: List of RDKit molecules to embed\n"
-    "    params: RDKit EmbedParameters object with embedding settings\n"
-    "    confsPerMolecule: Number of conformers to generate per molecule (default: 1)\n"
-    "    maxIterations: Maximum iterations, -1 for auto (default: -1)\n"
-    "    hardwareOptions: BatchHardwareOptions object with hardware settings (default: default options)\n"
-    "\n"
-    "Returns:\n"
-    "    None (molecules are modified in-place with generated conformers)");
+    "When outputMode == 0 (RDKIT_CONFORMERS) molecules are modified in place and the function\n"
+    "returns None. When outputMode == 1 (DEVICE) the optimized coordinates stay on the GPU and\n"
+    "a nvmolkit.types.DeviceCoordResult is returned, collected onto targetGpu.");
 }

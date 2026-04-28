@@ -29,8 +29,9 @@ if TYPE_CHECKING:
     from rdkit.ForceField.rdForceField import MMFFMolProperties
 
 from nvmolkit import _mmffOptimization
+from nvmolkit._arrayHelpers import *  # noqa: F403  # registers PyArray + _NativeDeviceCoordResult
 from nvmolkit._mmff_bridge import default_rdkit_mmff_properties, make_internal_mmff_properties
-from nvmolkit.types import HardwareOptions
+from nvmolkit.types import CoordinateOutput, DeviceCoordResult, HardwareOptions
 
 
 def MMFFOptimizeMoleculesConfs(
@@ -40,7 +41,10 @@ def MMFFOptimizeMoleculesConfs(
     nonBondedThreshold: float | Sequence[float] = 100.0,
     ignoreInterfragInteractions: bool | Sequence[bool] = True,
     hardwareOptions: HardwareOptions | None = None,
-) -> list[list[float]]:
+    output: CoordinateOutput = CoordinateOutput.RDKIT_CONFORMERS,
+    target_gpu: int | None = None,
+    device_input: DeviceCoordResult | None = None,
+) -> "list[list[float]] | DeviceCoordResult":
     """Optimize conformers for multiple molecules using MMFF force field with BFGS minimization.
 
     This function performs GPU-accelerated MMFF optimization on multiple molecules with
@@ -145,7 +149,6 @@ def MMFFOptimizeMoleculesConfs(
             ]
         return [value for _ in molecules]
 
-    # Call the C++ implementation
     if hardwareOptions is None:
         hardwareOptions = HardwareOptions()
     native_options = hardwareOptions._as_native()
@@ -160,4 +163,20 @@ def MMFFOptimizeMoleculesConfs(
         )
         for props, threshold, ignore_interfrag in zip(properties_list, thresholds, interfrag_flags)
     ]
+    if output == CoordinateOutput.DEVICE:
+        return _mmffOptimization.MMFFMinimizeDeviceOutput(
+            molecules,
+            int(maxIters),
+            1e-4,
+            native_properties,
+            native_options,
+            -1 if target_gpu is None else int(target_gpu),
+            device_input,
+        )
+    if device_input is not None:
+        raise ValueError(
+            "device_input is only supported with output=CoordinateOutput.DEVICE; "
+            "use output=CoordinateOutput.DEVICE to keep results on the GPU and to consume an "
+            "existing device-coord result."
+        )
     return _mmffOptimization.MMFFOptimizeMoleculesConfs(molecules, maxIters, native_properties, native_options)

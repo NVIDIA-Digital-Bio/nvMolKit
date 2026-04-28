@@ -26,6 +26,7 @@
 #include "bfgs_uff.h"
 #include "boost_python_utils.h"
 #include "coord_collect.h"
+#include "device_coord_python.h"
 #include "device_coord_result.h"
 #include "device_vector.h"
 #include "ff_utils.h"
@@ -361,26 +362,7 @@ class NativeMMFFBatchedForcefield {
                       positionsDevice_.stream());
       cudaStreamSynchronize(positionsDevice_.stream());
     }
-    // Return a Python DeviceCoordResult that owns the device data via boost::python's normal
-    // PyArray ownership semantics. We construct the Python object directly here.
-    bp::object types_module = bp::import("nvmolkit.types");
-    bp::object dcr_cls      = types_module.attr("DeviceCoordResult");
-    bp::object async_cls    = types_module.attr("AsyncGpuResult");
-
-    const int  natoms       = static_cast<int>(dev.positions.size() / 3);
-    auto       posPy        = nvMolKit::makePyArray(dev.positions, "f8", bp::make_tuple(natoms, 3));
-    auto       atomStartsPy = nvMolKit::makePyArray(dev.atomStarts);
-    auto       molIdxPy     = nvMolKit::makePyArray(dev.molIndices);
-    auto       confIdxPy    = nvMolKit::makePyArray(dev.confIndices);
-    auto       energiesPy   = nvMolKit::makePyArray(dev.energies);
-    auto       convergedPy  = nvMolKit::makePyArray(dev.converged);
-    return dcr_cls(async_cls(bp::object(boost::python::ptr(posPy)), dev.gpuId),
-                   async_cls(bp::object(boost::python::ptr(atomStartsPy)), dev.gpuId),
-                   async_cls(bp::object(boost::python::ptr(molIdxPy)), dev.gpuId),
-                   async_cls(bp::object(boost::python::ptr(confIdxPy)), dev.gpuId),
-                   dev.gpuId,
-                   async_cls(bp::object(boost::python::ptr(energiesPy)), dev.gpuId),
-                   async_cls(bp::object(boost::python::ptr(convergedPy)), dev.gpuId));
+    return nvMolKit::pyDeviceCoordResultFromOwned(std::move(*result.device));
   }
 
   bp::object indexBuffers() {
@@ -532,24 +514,7 @@ class NativeUFFBatchedForcefield {
                       positionsDevice_.stream());
       cudaStreamSynchronize(positionsDevice_.stream());
     }
-    bp::object types_module = bp::import("nvmolkit.types");
-    bp::object dcr_cls      = types_module.attr("DeviceCoordResult");
-    bp::object async_cls    = types_module.attr("AsyncGpuResult");
-
-    const int  natoms       = static_cast<int>(dev.positions.size() / 3);
-    auto       posPy        = nvMolKit::makePyArray(dev.positions, "f8", bp::make_tuple(natoms, 3));
-    auto       atomStartsPy = nvMolKit::makePyArray(dev.atomStarts);
-    auto       molIdxPy     = nvMolKit::makePyArray(dev.molIndices);
-    auto       confIdxPy    = nvMolKit::makePyArray(dev.confIndices);
-    auto       energiesPy   = nvMolKit::makePyArray(dev.energies);
-    auto       convergedPy  = nvMolKit::makePyArray(dev.converged);
-    return dcr_cls(async_cls(bp::object(boost::python::ptr(posPy)), dev.gpuId),
-                   async_cls(bp::object(boost::python::ptr(atomStartsPy)), dev.gpuId),
-                   async_cls(bp::object(boost::python::ptr(molIdxPy)), dev.gpuId),
-                   async_cls(bp::object(boost::python::ptr(confIdxPy)), dev.gpuId),
-                   dev.gpuId,
-                   async_cls(bp::object(boost::python::ptr(energiesPy)), dev.gpuId),
-                   async_cls(bp::object(boost::python::ptr(convergedPy)), dev.gpuId));
+    return nvMolKit::pyDeviceCoordResultFromOwned(std::move(*result.device));
   }
 
   bp::object indexBuffers() {
