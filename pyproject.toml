@@ -32,6 +32,9 @@ docs = [
     "myst-parser",
     "jupyter-sphinx",
 ]
+autotune = [
+    "optuna",
+]
 
 [tool.pytest.ini_options]
 log_cli = true

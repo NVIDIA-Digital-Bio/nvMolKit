@@ -138,6 +138,33 @@ class SubstructSearchConfig:
         """Internal: return the underlying native config object."""
         return self._native
 
+    def to_dict(self) -> dict:
+        """Return a JSON-serializable dictionary of this object's fields."""
+        return {
+            "batchSize": self.batchSize,
+            "workerThreads": self.workerThreads,
+            "preprocessingThreads": self.preprocessingThreads,
+            "maxMatches": self.maxMatches,
+            "uniquify": self.uniquify,
+            "gpuIds": list(self.gpuIds),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SubstructSearchConfig":
+        """Create a :class:`SubstructSearchConfig` from a dictionary produced by :meth:`to_dict`."""
+        known = {"batchSize", "workerThreads", "preprocessingThreads", "maxMatches", "uniquify", "gpuIds"}
+        unknown = set(data) - known
+        if unknown:
+            raise KeyError(f"Unknown SubstructSearchConfig keys: {sorted(unknown)}")
+        return cls(
+            batchSize=data.get("batchSize", 1024),
+            workerThreads=data.get("workerThreads", -1),
+            preprocessingThreads=data.get("preprocessingThreads", -1),
+            maxMatches=data.get("maxMatches", 0),
+            uniquify=data.get("uniquify", False),
+            gpuIds=data.get("gpuIds"),
+        )
+
 
 @dataclass(frozen=True)
 class SubstructMatchResults:
