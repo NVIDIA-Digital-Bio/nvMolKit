@@ -24,7 +24,7 @@ target_include_directories(ff_utils PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 add_library(batched_forcefield batched_forcefield.cpp)
 target_link_libraries(batched_forcefield PUBLIC device_vector)
 target_include_directories(batched_forcefield PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
-                                                     ${CMAKE_SOURCE_DIR}/src)
+                                                     ${PROJECT_SOURCE_DIR}/src)
 
 add_library(forcefield_constraints forcefield_constraints.cpp)
 target_link_libraries(forcefield_constraints PUBLIC batched_forcefield)
@@ -60,7 +60,7 @@ target_link_libraries(
   PRIVATE device_vector)
 target_include_directories(
   mmff_batched_forcefield PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
-                                 ${CMAKE_SOURCE_DIR}/src)
+                                 ${PROJECT_SOURCE_DIR}/src)
 
 add_library(uff_batched_forcefield uff_batched_forcefield.cu)
 target_link_libraries(
@@ -69,7 +69,7 @@ target_link_libraries(
   PRIVATE device_vector)
 target_include_directories(
   uff_batched_forcefield PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
-                                ${CMAKE_SOURCE_DIR}/src)
+                                ${PROJECT_SOURCE_DIR}/src)
 
 add_library(dg_batched_forcefield dg_batched_forcefield.cu)
 target_link_libraries(
@@ -78,7 +78,7 @@ target_link_libraries(
   PRIVATE device_vector)
 target_include_directories(
   dg_batched_forcefield PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
-                               ${CMAKE_SOURCE_DIR}/src)
+                               ${PROJECT_SOURCE_DIR}/src)
 
 add_library(etk_batched_forcefield etk_batched_forcefield.cu)
 target_link_libraries(
@@ -87,4 +87,4 @@ target_link_libraries(
   PRIVATE device_vector)
 target_include_directories(
   etk_batched_forcefield PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
-                                ${CMAKE_SOURCE_DIR}/src)
+                                ${PROJECT_SOURCE_DIR}/src)

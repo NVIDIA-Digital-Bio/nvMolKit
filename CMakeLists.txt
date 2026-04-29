@@ -12,6 +12,9 @@
 
 cmake_minimum_required(VERSION 3.30)
 
+# Use the FindBoost replacement provided by the upstream Boost project.
+cmake_policy(SET CMP0167 NEW)
+
 project(
   nvmolkit
   VERSION 0.4.0
@@ -39,9 +42,21 @@ endif()
 
 set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH};${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-set(CMAKE_BUILD_TYPE
-    ${CMAKE_BUILD_TYPE}
-    CACHE STRING "Choose type of build, options are: Debug RelWithDebInfo Release asan tsan ubsan" FORCE)
+get_property(_nvmolkit_is_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(NOT _nvmolkit_is_multi_config AND NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE
+      "RelWithDebInfo"
+      CACHE STRING "Choose type of build, options are: Debug RelWithDebInfo Release asan tsan ubsan")
+  set_property(
+    CACHE CMAKE_BUILD_TYPE
+    PROPERTY STRINGS
+             Debug
+             RelWithDebInfo
+             Release
+             asan
+             tsan
+             ubsan)
+endif()
 
 # --------------------------------
 # Global compilation features
