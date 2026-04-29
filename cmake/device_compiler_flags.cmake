@@ -31,7 +31,7 @@ target_compile_options(
   nvmolkit_cuda_options
   INTERFACE
     $<$<COMPILE_LANGUAGE:CUDA>:-Wno-deprecated-gpu-targets;--default-stream=per-thread>
-    $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:Debug>>:-G>
+    $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:Debug>>:-g;-G>
     $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:Release>>:--use_fast_math>
     $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:RelWithDebInfo>>:--use_fast_math;-lineinfo>
 )
