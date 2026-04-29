@@ -58,6 +58,7 @@ find_included_files() {
         "${REPO_ROOT}/nvmolkit" \
         "${REPO_ROOT}/tests" \
         "${REPO_ROOT}/benchmarks" \
+        "${REPO_ROOT}/admin" \
         -type f "$@" -not -path "*/rdkit_extensions/*" -print0
 }
 
