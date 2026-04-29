@@ -15,9 +15,6 @@
 
 # cmake-lint: disable=C0103
 
-# Suppress deprecation warning using old find boost method
-cmake_policy(SET CMP0167 NEW)
-
 if(NVMOLKIT_BUILD_AGAINST_PIP_RDKIT)
   message(STATUS "Using boost libs from pip RDKit")
   # rdkit.cmake already enumerated every .so under rdkit.libs/ as an IMPORTED
