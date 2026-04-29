@@ -30,7 +30,7 @@ Execution can be tuned with :class:`SubstructSearchConfig`.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Any, Sequence
 
 import numpy as np
 from rdkit.Chem import Mol
@@ -138,7 +138,7 @@ class SubstructSearchConfig:
         """Internal: return the underlying native config object."""
         return self._native
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable dictionary of this object's fields."""
         return {
             "batchSize": self.batchSize,
@@ -150,20 +150,13 @@ class SubstructSearchConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "SubstructSearchConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "SubstructSearchConfig":
         """Create a :class:`SubstructSearchConfig` from a dictionary produced by :meth:`to_dict`."""
         known = {"batchSize", "workerThreads", "preprocessingThreads", "maxMatches", "uniquify", "gpuIds"}
         unknown = set(data) - known
         if unknown:
-            raise KeyError(f"Unknown SubstructSearchConfig keys: {sorted(unknown)}")
-        return cls(
-            batchSize=data.get("batchSize", 1024),
-            workerThreads=data.get("workerThreads", -1),
-            preprocessingThreads=data.get("preprocessingThreads", -1),
-            maxMatches=data.get("maxMatches", 0),
-            uniquify=data.get("uniquify", False),
-            gpuIds=data.get("gpuIds"),
-        )
+            raise ValueError(f"Unknown SubstructSearchConfig keys: {sorted(unknown)}")
+        return cls(**{key: data[key] for key in known if key in data})
 
 
 @dataclass(frozen=True)
