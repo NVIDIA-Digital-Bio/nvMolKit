@@ -33,8 +33,11 @@ if(NVMOLKIT_SANITIZER STREQUAL "none" AND CMAKE_BUILD_TYPE)
 endif()
 
 set(NVMOLKIT_CTEST_ASAN_ENV_VARS
-    "ASAN_OPTIONS=protect_shadow_gap=0:report_globals=1:check_initialization_order=true:detect_stack_use_after_return=true:strict_string_checks=true"
-) # cmake-lint: disable=C0301
+    "ASAN_OPTIONS=protect_shadow_gap=0" ":report_globals=1"
+    ":check_initialization_order=true" ":detect_stack_use_after_return=true"
+    ":strict_string_checks=true")
+string(REPLACE ";" "" NVMOLKIT_CTEST_ASAN_ENV_VARS
+               "${NVMOLKIT_CTEST_ASAN_ENV_VARS}")
 
 add_library(nvmolkit_sanitizers INTERFACE)
 if(NVMOLKIT_SANITIZER STREQUAL "asan")
