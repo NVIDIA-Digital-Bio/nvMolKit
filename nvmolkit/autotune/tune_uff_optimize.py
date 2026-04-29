@@ -33,9 +33,11 @@ from nvmolkit.autotune._core import (
     suggest_from_space,
 )
 from nvmolkit.autotune._ff_common import (
-    DEFAULT_FF_SEARCH_SPACE,
     clone_with_confs,
     coerce_gpu_ids,
+    default_ff_search_space,
+    resolve_cpu_budget,
+    resolve_num_gpus,
     total_conformers,
 )
 from nvmolkit.types import HardwareOptions
@@ -55,6 +57,7 @@ def tune_uff_optimize(
     target_seconds_per_trial: float = 10.0,
     n_trials: int = 30,
     search_space_overrides: Optional[dict[str, Any]] = None,
+    cpu_budget: Optional[int] = None,
     sampler: Any = None,
     seed: Optional[int] = None,
     verbose: bool = False,
@@ -77,6 +80,10 @@ def tune_uff_optimize(
         n_trials: Number of Optuna trials to run after warm-up.
         search_space_overrides: Optional overrides for ``batchSize`` /
             ``batchesPerGpu`` ranges.
+        cpu_budget: Optional explicit cap on total CPU threads. The default
+            (``None``) uses ``os.cpu_count()``. Set this when normalizing
+            tuning runs across machines with different core counts so the
+            search space stays comparable.
         sampler: Optional Optuna sampler.
         seed: Seed for the default sampler.
         verbose: Print warm-up and trial diagnostics.
@@ -96,8 +103,10 @@ def tune_uff_optimize(
         fraction=calibration_fraction,
         max_size=calibration_max_size,
     )
-    space = resolve_search_space(DEFAULT_FF_SEARCH_SPACE, search_space_overrides)
     fixed_gpu_ids = coerce_gpu_ids(gpuIds)
+    num_gpus = resolve_num_gpus(fixed_gpu_ids)
+    cpus = resolve_cpu_budget(cpu_budget)
+    space = resolve_search_space(default_ff_search_space(num_gpus, cpus), search_space_overrides)
 
     is_seq_vdw = isinstance(vdwThreshold, Sequence) and not isinstance(vdwThreshold, (str, bytes))
     is_seq_ifg = isinstance(ignoreInterfragInteractions, Sequence) and not isinstance(

@@ -17,7 +17,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING, Any, Iterable, Optional
 
 from rdkit.Chem import Mol
@@ -32,6 +31,7 @@ from nvmolkit.autotune._core import (
     run_study,
     suggest_from_space,
 )
+from nvmolkit.autotune._ff_common import resolve_cpu_budget, resolve_num_gpus
 from nvmolkit.embedMolecules import EmbedMolecules
 from nvmolkit.types import HardwareOptions
 
@@ -39,11 +39,22 @@ if TYPE_CHECKING:
     from rdkit.Chem.rdDistGeom import EmbedParameters
 
 
-_DEFAULT_SEARCH_SPACE = {
-    "batchSize": (64, 2000, "log"),
-    "batchesPerGpu": (1, 8),
-    "preprocessingThreads": (1, min(32, max(1, os.cpu_count() or 1))),
-}
+def _default_embed_search_space(num_gpus: int, cpus: int) -> dict:
+    """Build the embed search space scaled to the active hardware.
+
+    EmbedMolecules runs preprocessing and GPU-dispatch threads sequentially,
+    so each pool is capped independently:
+
+    * ``batchesPerGpu`` (per-GPU GPU-runner threads): max = ``cpus //
+      num_gpus``.
+    * ``preprocessingThreads`` (total CPU pool): max = ``cpus``.
+    """
+    per_gpu_max = max(1, cpus // max(1, num_gpus))
+    return {
+        "batchSize": (64, 2000, "log"),
+        "batchesPerGpu": (1, per_gpu_max),
+        "preprocessingThreads": (1, cpus),
+    }
 
 
 def _clone_mols(mols: list[Mol]) -> list[Mol]:
@@ -69,6 +80,7 @@ def tune_embed_molecules(
     target_seconds_per_trial: float = 10.0,
     n_trials: int = 30,
     search_space_overrides: Optional[dict[str, Any]] = None,
+    cpu_budget: Optional[int] = None,
     sampler: Any = None,
     seed: Optional[int] = None,
     verbose: bool = False,
@@ -99,6 +111,10 @@ def tune_embed_molecules(
         search_space_overrides: Optional mapping that overrides the default
             ranges. Recognized keys: ``batchSize``, ``batchesPerGpu``,
             ``preprocessingThreads``.
+        cpu_budget: Optional explicit cap on total CPU threads. The default
+            (``None``) uses ``os.cpu_count()``. Set this when normalizing
+            tuning runs across machines with different core counts so the
+            search space stays comparable.
         sampler: Optional Optuna sampler to use.
         seed: Seed for the default sampler when ``sampler`` is ``None``.
         verbose: Print warm-up and trial diagnostics.
@@ -118,8 +134,10 @@ def tune_embed_molecules(
         fraction=calibration_fraction,
         max_size=calibration_max_size,
     )
-    space = resolve_search_space(_DEFAULT_SEARCH_SPACE, search_space_overrides)
     fixed_gpu_ids = list(gpuIds) if gpuIds is not None else []
+    num_gpus = resolve_num_gpus(fixed_gpu_ids)
+    cpus = resolve_cpu_budget(cpu_budget)
+    space = resolve_search_space(_default_embed_search_space(num_gpus, cpus), search_space_overrides)
 
     def _make_options(values: dict[str, Any]) -> HardwareOptions:
         return HardwareOptions(
