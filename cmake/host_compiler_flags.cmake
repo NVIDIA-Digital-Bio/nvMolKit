@@ -31,8 +31,12 @@ if(NVMOLKIT_EXTRA_DEV_FLAGS)
   )
 endif()
 
-# -ffast-math is a project preference for Release builds and intentionally stays
-# off third-party targets compiled via FetchContent.
+# -ffast-math is a project preference for optimized builds and intentionally
+# stays off third-party targets compiled via FetchContent. Host-only; the CUDA
+# equivalent (--use_fast_math) is added by nvmolkit_cuda_options.
 add_library(nvmolkit_release_opts INTERFACE)
-target_compile_options(nvmolkit_release_opts
-                       INTERFACE $<$<CONFIG:Release>:-ffast-math>)
+target_compile_options(
+  nvmolkit_release_opts
+  INTERFACE
+    $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-ffast-math>
+)
