@@ -25,8 +25,8 @@ namespace nvMolKit {
 /**
  * @brief Selector for the coordinate output mode of conformer-producing APIs.
  *
- * RDKIT_CONFORMERS preserves the legacy behavior of writing optimized coordinates back into
- * each input molecule's RDKit conformer list and returning host-side energies (where applicable).
+ * RDKIT_CONFORMERS writes optimized coordinates back into each input molecule's RDKit conformer
+ * list and returns host-side energies (where applicable).
  *
  * DEVICE retains coordinates and (where applicable) energies on the GPU and returns them as a
  * DeviceCoordResult. Use this when chaining multiple GPU passes to avoid host round-trips.
@@ -49,6 +49,8 @@ enum class CoordinateOutput : int {
  *    index assigned to conformer i (stable ordering matching the host-side output).
  *  - @ref energies has length `n_conformers` for MMFF/UFF results, or 0 for ETKDG.
  *  - @ref converged has length `n_conformers` for MMFF/UFF results (1 = converged), or 0 for ETKDG.
+ *  - @ref nMols is the number of molecules in the original input batch, including those that
+ *    produced zero conformers. This is the authoritative outer-list size for per-molecule views.
  *
  * The streams of the contained AsyncDeviceVector members may differ during accumulation; callers
  * are responsible for synchronizing on the appropriate stream(s) before consuming the data.
@@ -61,6 +63,7 @@ struct DeviceCoordResult {
   AsyncDeviceVector<double>  energies;
   AsyncDeviceVector<int8_t>  converged;
   int                        gpuId = -1;
+  int                        nMols = 0;
 };
 
 }  // namespace nvMolKit

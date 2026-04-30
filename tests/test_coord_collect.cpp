@@ -36,8 +36,7 @@ template <typename T> AsyncDeviceVector<T> deviceVectorFromHost(const std::vecto
   return dev;
 }
 
-template <typename T>
-std::vector<T> hostVectorFromDevice(const AsyncDeviceVector<T>& dev, cudaStream_t stream) {
+template <typename T> std::vector<T> hostVectorFromDevice(const AsyncDeviceVector<T>& dev, cudaStream_t stream) {
   std::vector<T> host(dev.size());
   if (!host.empty()) {
     dev.copyToHost(host);
@@ -49,10 +48,10 @@ std::vector<T> hostVectorFromDevice(const AsyncDeviceVector<T>& dev, cudaStream_
 }  // namespace
 
 TEST(CoordCollect, CopyDeviceToDeviceSameGpu) {
-  ScopedStream                stream;
-  const std::vector<double>   src = {1.0, 2.0, 3.0, 4.0, 5.0};
-  AsyncDeviceVector<double>   srcDev = deviceVectorFromHost(src, stream.stream());
-  AsyncDeviceVector<double>   dstDev(src.size(), stream.stream());
+  ScopedStream              stream;
+  const std::vector<double> src    = {1.0, 2.0, 3.0, 4.0, 5.0};
+  AsyncDeviceVector<double> srcDev = deviceVectorFromHost(src, stream.stream());
+  AsyncDeviceVector<double> dstDev(src.size(), stream.stream());
 
   copyDeviceToDeviceAsync(dstDev.data(),
                           srcDev.data(),
@@ -75,7 +74,7 @@ TEST(CoordCollect, CopyDeviceToDeviceCrossGpu) {
 
   enablePeerAccess(0, 1);
 
-  ScopedStream srcStream;
+  ScopedStream              srcStream;
   AsyncDeviceVector<double> srcDev;
   std::vector<double>       src(128);
   std::iota(src.begin(), src.end(), 0.0);
@@ -107,11 +106,8 @@ TEST(CoordCollect, CopyDeviceToDeviceCrossGpu) {
   std::vector<double> result(src.size());
   {
     const WithDevice withDst(1);
-    cudaCheckError(cudaMemcpyAsync(result.data(),
-                                   dstDev.data(),
-                                   src.size() * sizeof(double),
-                                   cudaMemcpyDeviceToHost,
-                                   dstStream));
+    cudaCheckError(
+      cudaMemcpyAsync(result.data(), dstDev.data(), src.size() * sizeof(double), cudaMemcpyDeviceToHost, dstStream));
     cudaCheckError(cudaStreamSynchronize(dstStream));
     cudaCheckError(cudaStreamDestroy(dstStream));
   }
@@ -119,9 +115,9 @@ TEST(CoordCollect, CopyDeviceToDeviceCrossGpu) {
 }
 
 TEST(CoordCollect, CopyZeroBytesIsNoop) {
-  ScopedStream                stream;
-  AsyncDeviceVector<double>   srcDev(4, stream.stream());
-  AsyncDeviceVector<double>   dstDev(4, stream.stream());
+  ScopedStream              stream;
+  AsyncDeviceVector<double> srcDev(4, stream.stream());
+  AsyncDeviceVector<double> dstDev(4, stream.stream());
 
   copyDeviceToDeviceAsync(dstDev.data(),
                           srcDev.data(),
