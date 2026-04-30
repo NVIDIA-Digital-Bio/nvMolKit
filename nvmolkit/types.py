@@ -117,13 +117,8 @@ class HardwareOptions:
         known = {"preprocessingThreads", "batchSize", "batchesPerGpu", "gpuIds"}
         unknown = set(data) - known
         if unknown:
-            raise KeyError(f"Unknown HardwareOptions keys: {sorted(unknown)}")
-        return cls(
-            preprocessingThreads=data.get("preprocessingThreads", -1),
-            batchSize=data.get("batchSize", -1),
-            batchesPerGpu=data.get("batchesPerGpu", -1),
-            gpuIds=data.get("gpuIds"),
-        )
+            raise ValueError(f"Unknown HardwareOptions keys: {sorted(unknown)}")
+        return cls(**{key: data[key] for key in known if key in data})
 
 
 class AsyncGpuResult:
