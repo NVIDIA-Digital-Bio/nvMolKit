@@ -275,19 +275,25 @@ class DeviceCoordResult:
         Reading the index tensors synchronizes implicitly.
         """
         positions = self.positions.torch()
-        atom_starts = self.atom_starts.torch().tolist()
-        mol_indices = self.mol_indices.torch().tolist()
-        conf_indices = self.conf_indices.torch().tolist()
+        atom_starts = self.atom_starts.torch().to(torch.int64)
+        mol_indices = self.mol_indices.torch().to(torch.int64)
+        conf_indices = self.conf_indices.torch().to(torch.int64)
 
         device = positions.device
         dtype = positions.dtype
+        n_conformers = mol_indices.numel()
 
-        confs_per_mol = [0] * self.n_mols
-        for mol_idx in mol_indices:
-            confs_per_mol[mol_idx] += 1
-        max_confs = max(confs_per_mol) if confs_per_mol else 0
-        sizes = [int(atom_starts[i + 1]) - int(atom_starts[i]) for i in range(len(mol_indices))]
-        max_atoms = max(sizes) if sizes else 0
+        # No conformers case could be a complete conf gen failure, but error handling for that is not our responsibility.
+        if n_conformers == 0:
+            coords = torch.full((self.n_mols, 0, 0, 3), pad_value, dtype=dtype, device=device)
+            conf_mask = torch.zeros((self.n_mols, 0), dtype=torch.bool, device=device)
+            atom_mask = torch.zeros((self.n_mols, 0, 0), dtype=torch.bool, device=device)
+            return DenseCoordResult(coords=coords, conf_mask=conf_mask, atom_mask=atom_mask)
+
+        sizes = atom_starts[1:] - atom_starts[:-1]
+        confs_per_mol = torch.bincount(mol_indices, minlength=self.n_mols)
+        max_confs = int(confs_per_mol.max().item())
+        max_atoms = int(sizes.max().item())
 
         coords = torch.full(
             (self.n_mols, max_confs, max_atoms, 3),
@@ -298,11 +304,18 @@ class DeviceCoordResult:
         conf_mask = torch.zeros((self.n_mols, max_confs), dtype=torch.bool, device=device)
         atom_mask = torch.zeros((self.n_mols, max_confs, max_atoms), dtype=torch.bool, device=device)
 
-        for flat_idx, (mol_idx, conf_idx) in enumerate(zip(mol_indices, conf_indices)):
-            start = atom_starts[flat_idx]
-            n_atoms = sizes[flat_idx]
-            coords[mol_idx, conf_idx, :n_atoms, :] = positions[start : start + n_atoms]
-            conf_mask[mol_idx, conf_idx] = True
-            atom_mask[mol_idx, conf_idx, :n_atoms] = True
+        # Scatter conformer-level mask in one shot.
+        conf_mask[mol_indices, conf_indices] = True
+
+        # Build per-atom (mol, conf, atom-within-conf)
+        mol_idx_per_atom = mol_indices.repeat_interleave(sizes)
+        conf_idx_per_atom = conf_indices.repeat_interleave(sizes)
+        total_atoms = positions.shape[0]
+        atom_within_conf = torch.arange(total_atoms, device=device, dtype=torch.int64) - atom_starts[
+            :-1
+        ].repeat_interleave(sizes)
+
+        coords[mol_idx_per_atom, conf_idx_per_atom, atom_within_conf, :] = positions
+        atom_mask[mol_idx_per_atom, conf_idx_per_atom, atom_within_conf] = True
 
         return DenseCoordResult(coords=coords, conf_mask=conf_mask, atom_mask=atom_mask)
