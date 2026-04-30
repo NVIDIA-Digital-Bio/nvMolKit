@@ -15,9 +15,9 @@
 
 """Shared molecule and pattern loaders for nvMolKit benchmarks.
 
-All loaders accept ``max_count`` to cap the workload, with a uniform random
-sample drawn (via reservoir sampling for streaming inputs) when the source
-contains more entries than requested.
+Molecule loaders accept ``max_count`` to cap the workload, with a uniform
+random sample drawn (via reservoir sampling for streaming inputs) when the
+source contains more entries than requested.
 """
 
 import pickle
@@ -97,9 +97,9 @@ def load_smiles(
     the result is trimmed back to ``max_count``.
     """
     read_limit = int(max_count * 1.1) if max_count > 0 else 0
+    rng = random.Random(seed)
 
     if read_limit > 0:
-        rng = random.Random(seed)
         reservoir: list[str] = []
         for index, smi in enumerate(_iter_smiles_tokens(filepath, sanitize)):
             if index < read_limit:
@@ -126,14 +126,14 @@ def load_smiles(
             print(f"    ({parse_failures} parse failures)")
 
     if max_count > 0 and len(mols) > max_count:
-        mols = mols[:max_count]
+        mols = rng.sample(mols, max_count)
 
     print(f"  Loaded {len(mols)} molecules from {filepath}")
     return mols
 
 
-def load_smarts(filepath: str, max_count: int = 0) -> tuple[list[Chem.Mol], list[str]]:
-    """Load and parse query patterns from a SMARTS file.
+def load_smarts(filepath: str) -> tuple[list[Chem.Mol], list[str]]:
+    """Load and parse every query pattern from a SMARTS file.
 
     Returns:
         ``(queries, smarts_strings)`` parallel lists.
@@ -144,8 +144,6 @@ def load_smarts(filepath: str, max_count: int = 0) -> tuple[list[Chem.Mol], list
 
     with open(filepath, "r") as fh:
         for line in fh:
-            if max_count > 0 and len(queries) >= max_count:
-                break
             stripped = line.strip()
             if not stripped or stripped.startswith("#"):
                 continue
@@ -173,10 +171,10 @@ def load_sdf(
     """Load molecules from an SDF file with optional reservoir sampling."""
     supplier = Chem.SDMolSupplier(filepath, removeHs=removeHs, sanitize=sanitize)
     read_limit = int(max_count * 1.1) if max_count > 0 else 0
+    rng = random.Random(seed)
 
     parse_failures = 0
     if read_limit > 0:
-        rng = random.Random(seed)
         reservoir: list[Chem.Mol] = []
         index = 0
         for mol in supplier:
@@ -200,7 +198,7 @@ def load_sdf(
             mols.append(mol)
 
     if max_count > 0 and len(mols) > max_count:
-        mols = mols[:max_count]
+        mols = rng.sample(mols, max_count)
 
     if parse_failures > 0:
         print(f"    ({parse_failures} parse failures)")
