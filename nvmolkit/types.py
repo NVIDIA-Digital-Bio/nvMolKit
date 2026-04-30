@@ -16,7 +16,7 @@
 """Types facilitating GPU-accelerated operations."""
 
 from enum import Enum
-from typing import Any, Iterable, List, Optional
+from typing import Any, Iterable, List, NamedTuple, Optional
 
 import torch
 
@@ -176,6 +176,24 @@ class CoordinateOutput(Enum):
     DEVICE = "device"
 
 
+class DenseCoordResult(NamedTuple):
+    """Dense padded view of a :class:`DeviceCoordResult`.
+
+    All three tensors share the same ``(n_mols, max_confs, max_atoms[, 3])`` batch shape.
+
+    - ``coords``: float64, shape ``(n_mols, max_confs, max_atoms, 3)``. Padded entries hold
+      the ``pad_value`` passed to :meth:`DeviceCoordResult.dense` (default NaN).
+    - ``conf_mask``: bool, shape ``(n_mols, max_confs)``. ``True`` where a real conformer
+      exists; ``False`` for pad slots (molecules with fewer conformers than ``max_confs``).
+    - ``atom_mask``: bool, shape ``(n_mols, max_confs, max_atoms)``. ``True`` where a real
+      atom position exists; ``False`` where the atom or conformer slot is padded.
+    """
+
+    coords: "torch.Tensor"
+    conf_mask: "torch.Tensor"
+    atom_mask: "torch.Tensor"
+
+
 class DeviceCoordResult:
     """On-device, flat CSR-style result of a conformer-producing GPU pipeline.
 
@@ -241,28 +259,50 @@ class DeviceCoordResult:
             result[mol_idx].append(positions[start:stop])
         return result
 
-    def dense(self, pad_value: float = float("nan")) -> "torch.Tensor":
-        """Materialize a padded dense ``(n_conformers, max_atoms, 3)`` tensor (float64).
+    def dense(self, pad_value: float = float("nan")) -> "DenseCoordResult":
+        """Materialize a padded dense ``(n_mols, max_confs, max_atoms, 3)`` tensor.
 
-        Conformers smaller than ``max_atoms`` are padded with ``pad_value`` along the atom axis.
-        This always allocates a fresh tensor on the same GPU as :attr:`positions`. The size
-        computation reads the small index tensors back to host and therefore synchronizes.
+        Axes are padded as follows:
+
+        - **conformer axis**: molecules with fewer than ``max_confs`` conformers (including
+          complete failures) receive ``pad_value``-filled conformer slices.
+        - **atom axis**: conformers with fewer than ``max_atoms`` atoms are padded with
+          ``pad_value``.
+
+        Returns a :class:`DenseCoordResult` with ``coords``, ``conf_mask``
+        ``(n_mols, max_confs)`` and ``atom_mask`` ``(n_mols, max_confs, max_atoms)``.
+        Both masks are ``True`` where the data is real, ``False`` where padded.
+        Reading the index tensors synchronizes implicitly.
         """
         positions = self.positions.torch()
-        atom_starts = self.atom_starts.torch()
-        n_conformers = atom_starts.numel() - 1
-        if n_conformers == 0:
-            return torch.empty((0, 0, 3), dtype=positions.dtype, device=positions.device)
-        sizes = (atom_starts[1:] - atom_starts[:-1]).tolist()
+        atom_starts = self.atom_starts.torch().tolist()
+        mol_indices = self.mol_indices.torch().tolist()
+        conf_indices = self.conf_indices.torch().tolist()
+
+        device = positions.device
+        dtype = positions.dtype
+
+        confs_per_mol = [0] * self.n_mols
+        for mol_idx in mol_indices:
+            confs_per_mol[mol_idx] += 1
+        max_confs = max(confs_per_mol) if confs_per_mol else 0
+        sizes = [int(atom_starts[i + 1]) - int(atom_starts[i]) for i in range(len(mol_indices))]
         max_atoms = max(sizes) if sizes else 0
-        out = torch.full(
-            (n_conformers, max_atoms, 3),
+
+        coords = torch.full(
+            (self.n_mols, max_confs, max_atoms, 3),
             pad_value,
-            dtype=positions.dtype,
-            device=positions.device,
+            dtype=dtype,
+            device=device,
         )
-        starts = atom_starts.tolist()
-        for conf_idx, conf_size in enumerate(sizes):
-            start = starts[conf_idx]
-            out[conf_idx, :conf_size, :] = positions[start : start + conf_size]
-        return out
+        conf_mask = torch.zeros((self.n_mols, max_confs), dtype=torch.bool, device=device)
+        atom_mask = torch.zeros((self.n_mols, max_confs, max_atoms), dtype=torch.bool, device=device)
+
+        for flat_idx, (mol_idx, conf_idx) in enumerate(zip(mol_indices, conf_indices)):
+            start = atom_starts[flat_idx]
+            n_atoms = sizes[flat_idx]
+            coords[mol_idx, conf_idx, :n_atoms, :] = positions[start : start + n_atoms]
+            conf_mask[mol_idx, conf_idx] = True
+            atom_mask[mol_idx, conf_idx, :n_atoms] = True
+
+        return DenseCoordResult(coords=coords, conf_mask=conf_mask, atom_mask=atom_mask)

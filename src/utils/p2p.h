@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef NVMOLKIT_COORD_COLLECT_H
-#define NVMOLKIT_COORD_COLLECT_H
+#ifndef NVMOLKIT_P2P_H
+#define NVMOLKIT_P2P_H
 
 #include <cuda_runtime.h>
 
@@ -61,17 +61,17 @@ void copyDeviceToDeviceAsync(void*        dstDevice,
                              cudaStream_t dstStream);
 
 /**
- * @brief Best-effort enable of bidirectional P2P access between two GPUs.
+ * @brief Enable bidirectional P2P access between two GPUs.
  *
- * Calls `cudaDeviceEnablePeerAccess` in both directions if and only if the corresponding
- * `cudaDeviceCanAccessPeer` query returns true. Already-enabled links are not re-enabled
- * (the duplicate-error case is silently absorbed).
+ * Calls `cudaDeviceEnablePeerAccess` in both directions. The
+ * `cudaErrorPeerAccessAlreadyEnabled` status is treated as success so this function is
+ * idempotent. Any other CUDA failure (including the link not being supported per
+ * `cudaDeviceCanAccessPeer`) is reported as a thrown exception.
  *
- * @return true if both directions are usable after the call (either previously enabled or
- *         freshly enabled), false otherwise.
+ * @throws std::runtime_error If either direction cannot be enabled.
  */
-bool enablePeerAccess(int gpuA, int gpuB);
+void enablePeerAccess(int gpuA, int gpuB);
 
 }  // namespace nvMolKit
 
-#endif  // NVMOLKIT_COORD_COLLECT_H
+#endif  // NVMOLKIT_P2P_H

@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import gc
+import math
 
 import pytest
 import torch
@@ -21,7 +22,13 @@ import torch
 from rdkit.Chem import MolFromSmiles
 
 from nvmolkit.fingerprints import MorganFingerprintGenerator
-from nvmolkit.types import HardwareOptions
+from nvmolkit.types import (
+    AsyncGpuResult,
+    CoordinateOutput,
+    DenseCoordResult,
+    DeviceCoordResult,
+    HardwareOptions,
+)
 
 
 def _get_fps(num_mols):
@@ -67,3 +74,266 @@ def test_hardware_options_invalid_batches_per_gpu(invalid_value):
     hw = HardwareOptions()
     with pytest.raises(ValueError, match="batchesPerGpu must be greater than 0 or -1"):
         hw.batchesPerGpu = invalid_value
+
+
+def _wrap(tensor):
+    """Wrap a CUDA tensor as an AsyncGpuResult."""
+    return AsyncGpuResult(tensor, gpu_id=tensor.device.index)
+
+
+def _make_device_coord_result(
+    atom_counts_per_conformer,
+    mol_indices,
+    n_mols,
+    *,
+    conf_indices=None,
+    energies=None,
+    converged=None,
+):
+    """Build a DeviceCoordResult from a list of per-conformer atom counts.
+
+    Position values encode (conformer, atom, axis) so views can be checked
+    without needing to run any GPU computation: the value is
+    ``conformer * 1000 + atom * 10 + axis``.
+    """
+    assert len(atom_counts_per_conformer) == len(mol_indices)
+    starts = [0]
+    for atom_count in atom_counts_per_conformer:
+        starts.append(starts[-1] + atom_count)
+    total_atoms = starts[-1]
+
+    positions = torch.empty((total_atoms, 3), dtype=torch.float64, device="cuda")
+    for conf_idx, atom_count in enumerate(atom_counts_per_conformer):
+        for atom_idx in range(atom_count):
+            row = starts[conf_idx] + atom_idx
+            for axis in range(3):
+                positions[row, axis] = conf_idx * 1000 + atom_idx * 10 + axis
+
+    atom_starts = torch.tensor(starts, dtype=torch.int32, device="cuda")
+    mol_indices_t = torch.tensor(mol_indices, dtype=torch.int32, device="cuda")
+    if conf_indices is None:
+        per_mol_counter = {}
+        conf_indices = []
+        for mol_idx in mol_indices:
+            slot = per_mol_counter.get(mol_idx, 0)
+            conf_indices.append(slot)
+            per_mol_counter[mol_idx] = slot + 1
+    assert len(conf_indices) == len(mol_indices)
+    conf_indices_t = torch.tensor(conf_indices, dtype=torch.int32, device="cuda")
+
+    energies_wrapped = _wrap(energies) if energies is not None else None
+    converged_wrapped = _wrap(converged) if converged is not None else None
+
+    return DeviceCoordResult(
+        positions=_wrap(positions),
+        atom_starts=_wrap(atom_starts),
+        mol_indices=_wrap(mol_indices_t),
+        conf_indices=_wrap(conf_indices_t),
+        gpu_id=positions.device.index,
+        n_mols=n_mols,
+        energies=energies_wrapped,
+        converged=converged_wrapped,
+    )
+
+
+def test_coordinate_output_enum_values():
+    assert CoordinateOutput.RDKIT_CONFORMERS.value == "rdkit"
+    assert CoordinateOutput.DEVICE.value == "device"
+
+
+def test_device_coord_result_num_conformers_matches_atom_starts():
+    result = _make_device_coord_result(
+        atom_counts_per_conformer=[3, 5, 2],
+        mol_indices=[0, 0, 1],
+        n_mols=2,
+    )
+    assert result.num_conformers == 3
+
+
+def test_device_coord_result_per_molecule_groups_by_mol_index():
+    """per_molecule routes each conformer slice to its mol_indices bucket."""
+    result = _make_device_coord_result(
+        atom_counts_per_conformer=[2, 3, 4],
+        mol_indices=[1, 0, 1],
+        n_mols=2,
+    )
+    nested = result.per_molecule()
+    assert len(nested) == 2
+    assert len(nested[0]) == 1
+    assert len(nested[1]) == 2
+
+    torch.cuda.synchronize()
+    assert nested[0][0].shape == (3, 3)
+    assert nested[1][0].shape == (2, 3)
+    assert nested[1][1].shape == (4, 3)
+
+    # Conformer 0 (mol 1) atom 0 axis 0 -> 0*1000+0*10+0 = 0
+    # Conformer 1 (mol 0) atom 0 axis 0 -> 1*1000+0*10+0 = 1000
+    # Conformer 2 (mol 1) atom 0 axis 0 -> 2*1000+0*10+0 = 2000
+    assert nested[1][0][0, 0].item() == 0
+    assert nested[0][0][0, 0].item() == 1000
+    assert nested[1][1][0, 0].item() == 2000
+
+    # Final atom of conformer 1 (mol 0): atom 2, axis 2 -> 1000+20+2 = 1022
+    assert nested[0][0][2, 2].item() == 1022
+
+
+def test_device_coord_result_per_molecule_handles_empty_molecules():
+    """n_mols larger than max(mol_indices)+1 leaves trailing empty buckets."""
+    result = _make_device_coord_result(
+        atom_counts_per_conformer=[2],
+        mol_indices=[0],
+        n_mols=4,
+    )
+    nested = result.per_molecule()
+    assert len(nested) == 4
+    assert len(nested[0]) == 1
+    assert nested[1] == []
+    assert nested[2] == []
+    assert nested[3] == []
+
+
+def test_device_coord_result_per_molecule_views_share_storage():
+    """per_molecule returns views, not copies; mutating the view mutates positions."""
+    result = _make_device_coord_result(
+        atom_counts_per_conformer=[3],
+        mol_indices=[0],
+        n_mols=1,
+    )
+    nested = result.per_molecule()
+    nested[0][0][0, 0] = -7.0
+    torch.cuda.synchronize()
+    assert result.positions.torch()[0, 0].item() == -7.0
+
+
+def test_device_coord_result_dense_returns_dense_coord_result():
+    """dense() returns a DenseCoordResult NamedTuple with coords and both masks."""
+    result = _make_device_coord_result(
+        atom_counts_per_conformer=[2, 4, 3],
+        mol_indices=[0, 1, 2],
+        n_mols=3,
+    )
+    out = result.dense()
+    assert isinstance(out, DenseCoordResult)
+    assert out.coords.shape == (3, 1, 4, 3)
+    assert out.conf_mask.shape == (3, 1)
+    assert out.atom_mask.shape == (3, 1, 4)
+    assert out.coords.dtype == torch.float64
+    assert out.conf_mask.dtype == torch.bool
+    assert out.atom_mask.dtype == torch.bool
+
+
+def test_device_coord_result_dense_distinguishes_per_mol_conformer_counts():
+    """5/3/2 conformers across three molecules round-trip through dense() shape and masks."""
+    counts = [5, 3, 2]
+    n_mols = len(counts)
+    atom_counts = []
+    mol_indices = []
+    conf_indices = []
+    for mol_idx, conf_count in enumerate(counts):
+        for conf_slot in range(conf_count):
+            # Vary atom count per conformer so atom_mask must do real work.
+            atom_counts.append(2 + (conf_slot % 3))
+            mol_indices.append(mol_idx)
+            conf_indices.append(conf_slot)
+
+    result = _make_device_coord_result(
+        atom_counts_per_conformer=atom_counts,
+        mol_indices=mol_indices,
+        n_mols=n_mols,
+        conf_indices=conf_indices,
+    )
+    out = result.dense()
+    torch.cuda.synchronize()
+
+    max_confs = max(counts)
+    max_atoms = max(atom_counts)
+    assert out.coords.shape == (n_mols, max_confs, max_atoms, 3)
+    assert out.conf_mask.shape == (n_mols, max_confs)
+    assert out.atom_mask.shape == (n_mols, max_confs, max_atoms)
+
+    # conf_mask reproduces the exact per-mol conformer counts.
+    assert out.conf_mask.sum(dim=1).tolist() == counts
+
+    # atom_mask gates exactly the real (atom, conformer) cells per molecule.
+    expected_atoms_per_mol = [0, 0, 0]
+    cursor = 0
+    for mol_idx, conf_count in enumerate(counts):
+        expected_atoms_per_mol[mol_idx] = sum(atom_counts[cursor : cursor + conf_count])
+        cursor += conf_count
+    assert out.atom_mask.sum(dim=(1, 2)).tolist() == expected_atoms_per_mol
+
+    # Verify a few specific real and padded entries.
+    # mol 0 conf 4 atom 0 axis 0: this is flat conformer 4, encoded value = 4*1000 + 0*10 + 0 = 4000.
+    assert out.coords[0, 4, 0, 0].item() == 4000
+    # mol 1 conf 2 atom 0 axis 0: flat conformer 5+2 = 7, encoded 7000.
+    assert out.coords[1, 2, 0, 0].item() == 7000
+    # mol 2 conf 1 atom 0 axis 0: flat conformer 5+3+1 = 9, encoded 9000.
+    assert out.coords[2, 1, 0, 0].item() == 9000
+    # mol 1 has only 3 confs, so slot 3,4 are padded NaN at every atom.
+    assert math.isnan(out.coords[1, 4, 0, 0].item())
+    # mol 2 has only 2 confs, so slot 2,3,4 padded.
+    assert math.isnan(out.coords[2, 2, 0, 0].item())
+
+
+def test_device_coord_result_dense_conf_mask_marks_failed_molecules():
+    """A molecule with zero conformers gets a fully-False conf_mask row."""
+    result = _make_device_coord_result(
+        atom_counts_per_conformer=[3, 2],
+        mol_indices=[0, 2],
+        n_mols=3,
+    )
+    out = result.dense()
+    torch.cuda.synchronize()
+    assert out.conf_mask[0].any().item()
+    assert not out.conf_mask[1].any().item()
+    assert out.conf_mask[2].any().item()
+    # Coords for the failed molecule are entirely NaN.
+    assert torch.isnan(out.coords[1]).all().item()
+    assert not out.atom_mask[1].any().item()
+
+
+def test_device_coord_result_dense_atom_mask_marks_short_conformers():
+    """atom_mask has False past each conformer's true atom count, even when conf_mask is True."""
+    result = _make_device_coord_result(
+        atom_counts_per_conformer=[2, 4],
+        mol_indices=[0, 0],
+        n_mols=1,
+    )
+    out = result.dense()
+    torch.cuda.synchronize()
+    assert out.coords.shape == (1, 2, 4, 3)
+    assert out.conf_mask[0].tolist() == [True, True]
+    # Conformer 0 has 2 atoms; conformer 1 has 4.
+    assert out.atom_mask[0, 0].tolist() == [True, True, False, False]
+    assert out.atom_mask[0, 1].tolist() == [True, True, True, True]
+    # Padded atom slots in conformer 0 are NaN; real ones aren't.
+    assert math.isnan(out.coords[0, 0, 2, 0].item())
+    assert not math.isnan(out.coords[0, 0, 1, 0].item())
+
+
+def test_device_coord_result_dense_custom_pad_value():
+    result = _make_device_coord_result(
+        atom_counts_per_conformer=[1, 3],
+        mol_indices=[0, 1],
+        n_mols=2,
+    )
+    out = result.dense(pad_value=-1.0)
+    torch.cuda.synchronize()
+    assert out.coords.shape == (2, 1, 3, 3)
+    assert out.coords[0, 0, 1, 0].item() == -1.0
+    assert out.coords[0, 0, 2, 2].item() == -1.0
+    assert out.coords[1, 0, 2, 2].item() == 1000 + 20 + 2
+
+
+def test_device_coord_result_dense_empty_returns_zero_shape():
+    result = _make_device_coord_result(
+        atom_counts_per_conformer=[],
+        mol_indices=[],
+        n_mols=3,
+    )
+    out = result.dense()
+    assert out.coords.shape == (3, 0, 0, 3)
+    assert out.conf_mask.shape == (3, 0)
+    assert out.atom_mask.shape == (3, 0, 0)
+    assert out.coords.dtype == torch.float64

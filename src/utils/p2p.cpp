@@ -13,9 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "coord_collect.h"
+#include "p2p.h"
 
 #include <cuda_runtime.h>
+
+#include <stdexcept>
+#include <string>
 
 #include "cuda_error_check.h"
 #include "device.h"
@@ -23,31 +26,26 @@
 namespace nvMolKit {
 namespace {
 
-bool tryEnablePeerOneWay(int fromGpu, int toGpu) {
-  int canAccess = 0;
-  cudaCheckError(cudaDeviceCanAccessPeer(&canAccess, fromGpu, toGpu));
-  if (canAccess == 0) {
-    return false;
-  }
+void enablePeerOneWay(int fromGpu, int toGpu) {
   const WithDevice  withDevice(fromGpu);
   const cudaError_t err = cudaDeviceEnablePeerAccess(toGpu, /*flags=*/0);
   if (err == cudaSuccess || err == cudaErrorPeerAccessAlreadyEnabled) {
     cudaGetLastError();
-    return true;
+    return;
   }
   cudaGetLastError();
-  return false;
+  throw std::runtime_error("Failed to enable P2P access from GPU " + std::to_string(fromGpu) + " to GPU " +
+                           std::to_string(toGpu) + ": " + cudaGetErrorString(err));
 }
 
 }  // namespace
 
-bool enablePeerAccess(int gpuA, int gpuB) {
+void enablePeerAccess(int gpuA, int gpuB) {
   if (gpuA == gpuB) {
-    return true;
+    return;
   }
-  const bool aToB = tryEnablePeerOneWay(gpuA, gpuB);
-  const bool bToA = tryEnablePeerOneWay(gpuB, gpuA);
-  return aToB && bToA;
+  enablePeerOneWay(gpuA, gpuB);
+  enablePeerOneWay(gpuB, gpuA);
 }
 
 void copyDeviceToDeviceAsync(void*        dstDevice,

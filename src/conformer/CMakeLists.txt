@@ -13,14 +13,6 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-# Header-only interface library: exposes src/conformer/ so consumers can reach
-# device_coord_result.h, conformer_info.h, coord_collect.h, etc. via unqualified
-# includes. Link against this (PUBLIC) when those types appear in your API
-# surface.
 add_library(conformer_types INTERFACE)
 target_include_directories(conformer_types
                            INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
-
-add_library(coord_collect coord_collect.cpp)
-target_link_libraries(coord_collect PUBLIC CUDA::cudart cuda_error_check device
-                                           conformer_types)

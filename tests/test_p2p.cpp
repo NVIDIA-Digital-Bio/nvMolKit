@@ -19,10 +19,10 @@
 #include <numeric>
 #include <vector>
 
-#include "coord_collect.h"
 #include "cuda_error_check.h"
 #include "device.h"
 #include "device_vector.h"
+#include "p2p.h"
 
 using namespace nvMolKit;
 
@@ -47,7 +47,7 @@ template <typename T> std::vector<T> hostVectorFromDevice(const AsyncDeviceVecto
 
 }  // namespace
 
-TEST(CoordCollect, CopyDeviceToDeviceSameGpu) {
+TEST(P2P, CopyDeviceToDeviceSameGpu) {
   ScopedStream              stream;
   const std::vector<double> src    = {1.0, 2.0, 3.0, 4.0, 5.0};
   AsyncDeviceVector<double> srcDev = deviceVectorFromHost(src, stream.stream());
@@ -65,11 +65,17 @@ TEST(CoordCollect, CopyDeviceToDeviceSameGpu) {
   EXPECT_EQ(result, src);
 }
 
-TEST(CoordCollect, CopyDeviceToDeviceCrossGpu) {
+TEST(P2P, CopyDeviceToDeviceCrossGpu) {
   int nDevices = 0;
   cudaCheckError(cudaGetDeviceCount(&nDevices));
   if (nDevices < 2) {
     GTEST_SKIP() << "Test requires at least 2 GPUs";
+  }
+
+  int canAccess = 0;
+  cudaCheckError(cudaDeviceCanAccessPeer(&canAccess, 0, 1));
+  if (canAccess == 0) {
+    GTEST_SKIP() << "GPUs 0 and 1 cannot peer-access each other";
   }
 
   enablePeerAccess(0, 1);
@@ -114,7 +120,7 @@ TEST(CoordCollect, CopyDeviceToDeviceCrossGpu) {
   EXPECT_EQ(result, src);
 }
 
-TEST(CoordCollect, CopyZeroBytesIsNoop) {
+TEST(P2P, CopyZeroBytesIsNoop) {
   ScopedStream              stream;
   AsyncDeviceVector<double> srcDev(4, stream.stream());
   AsyncDeviceVector<double> dstDev(4, stream.stream());
@@ -129,6 +135,21 @@ TEST(CoordCollect, CopyZeroBytesIsNoop) {
   cudaCheckError(cudaStreamSynchronize(stream.stream()));
 }
 
-TEST(CoordCollect, EnablePeerSelfReturnsTrue) {
-  EXPECT_TRUE(enablePeerAccess(0, 0));
+TEST(P2P, EnablePeerSelfIsNoop) {
+  EXPECT_NO_THROW(enablePeerAccess(0, 0));
+}
+
+TEST(P2P, EnablePeerIdempotent) {
+  int nDevices = 0;
+  cudaCheckError(cudaGetDeviceCount(&nDevices));
+  if (nDevices < 2) {
+    GTEST_SKIP() << "Test requires at least 2 GPUs";
+  }
+  int canAccess = 0;
+  cudaCheckError(cudaDeviceCanAccessPeer(&canAccess, 0, 1));
+  if (canAccess == 0) {
+    GTEST_SKIP() << "GPUs 0 and 1 cannot peer-access each other";
+  }
+  EXPECT_NO_THROW(enablePeerAccess(0, 1));
+  EXPECT_NO_THROW(enablePeerAccess(0, 1));
 }
