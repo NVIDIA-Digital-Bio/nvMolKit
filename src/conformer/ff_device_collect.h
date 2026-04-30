@@ -79,7 +79,7 @@ void appendBatch(const std::vector<ConformerInfo>&   batchConformers,
  * @p targetGpu and are bound to the default stream of that GPU before returning, after a
  * `cudaStreamSynchronize` on the local target stream.
  */
-DeviceCoordResult finalizeOnTarget(std::vector<FFDeviceCoordCollector>& collectors, int targetGpu);
+DeviceCoordResult finalizeOnTarget(std::vector<FFDeviceCoordCollector>& collectors, int targetGpu, int nMols);
 
 /**
  * @brief Host-side index over a DeviceCoordResult used as starting coordinates.

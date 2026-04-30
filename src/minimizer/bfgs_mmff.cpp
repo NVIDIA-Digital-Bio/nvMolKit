@@ -111,7 +111,7 @@ MMFFMinimizeResult MMFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>&       
   if (totalConformers == 0) {
     if (deviceOutput) {
       std::vector<FFDeviceCoordCollector> emptyCollectors;
-      return {{}, {}, finalizeOnTarget(emptyCollectors, targetGpu)};
+      return {{}, {}, finalizeOnTarget(emptyCollectors, targetGpu, static_cast<int>(mols.size()))};
     }
     return {moleculeEnergies, moleculeConverged, std::nullopt};
   }
@@ -297,7 +297,7 @@ MMFFMinimizeResult MMFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>&       
   }
   exceptionHandler.rethrow();
   if (deviceOutput) {
-    return {{}, {}, finalizeOnTarget(deviceCollectors, targetGpu)};
+    return {{}, {}, finalizeOnTarget(deviceCollectors, targetGpu, static_cast<int>(mols.size()))};
   }
   return {moleculeEnergies, moleculeConverged, std::nullopt};
 }

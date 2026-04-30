@@ -98,7 +98,7 @@ void appendBatch(const std::vector<ConformerInfo>& batchConformers,
   cudaCheckError(cudaStreamSynchronize(collector.stream));
 }
 
-DeviceCoordResult finalizeOnTarget(std::vector<FFDeviceCoordCollector>& collectors, const int targetGpu) {
+DeviceCoordResult finalizeOnTarget(std::vector<FFDeviceCoordCollector>& collectors, const int targetGpu, const int nMols) {
   for (const auto& collector : collectors) {
     if (collector.gpuId != targetGpu && !collector.atomCounts.empty()) {
       enablePeerAccess(targetGpu, collector.gpuId);
@@ -118,6 +118,7 @@ DeviceCoordResult finalizeOnTarget(std::vector<FFDeviceCoordCollector>& collecto
   ScopedStream      targetStream("FF DeviceCoord Finalize");
   DeviceCoordResult result;
   result.gpuId       = targetGpu;
+  result.nMols       = nMols;
   result.positions   = AsyncDeviceVector<double>(static_cast<size_t>(totalAtoms) * 3, targetStream.stream());
   result.atomStarts  = AsyncDeviceVector<int32_t>(static_cast<size_t>(totalConformers + 1), targetStream.stream());
   result.molIndices  = AsyncDeviceVector<int32_t>(static_cast<size_t>(totalConformers), targetStream.stream());
