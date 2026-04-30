@@ -165,9 +165,8 @@ class AsyncGpuResult:
 class CoordinateOutput(Enum):
     """Selects how conformer-producing APIs return optimized coordinates.
 
-    - ``RDKIT_CONFORMERS``: legacy behavior. Optimized coordinates are written back into each
-      input molecule's RDKit conformer list and energies (where applicable) are returned as
-      Python lists.
+    - ``RDKIT_CONFORMERS``: Optimized coordinates are written back into each input molecule's
+      RDKit conformer list and energies (where applicable) are returned as Python lists.
     - ``DEVICE``: coordinates and (where applicable) energies stay on the GPU and are returned
       as a :class:`DeviceCoordResult`. Use this to chain GPU-accelerated workflows (e.g. ETKDG
       followed by MMFF) without host round-trips.
@@ -191,6 +190,8 @@ class DeviceCoordResult:
       per-molecule conformer index.
     - :attr:`energies` (MMFF/UFF only) has shape ``(n_conformers,)`` (float64).
     - :attr:`converged` (MMFF/UFF only) has shape ``(n_conformers,)`` (int8; 1 = converged).
+    - :attr:`n_mols` is the number of molecules in the original input batch, including those that
+      produced zero conformers. This is the authoritative outer-list length for per-molecule views.
 
     Buffers are exposed as :class:`AsyncGpuResult` to enable zero-copy interoperability with
     PyTorch / CuPy. Synchronize before consuming on the host (e.g. ``torch.cuda.synchronize()``).
@@ -203,6 +204,7 @@ class DeviceCoordResult:
         mol_indices: AsyncGpuResult,
         conf_indices: AsyncGpuResult,
         gpu_id: int,
+        n_mols: int,
         energies: Optional[AsyncGpuResult] = None,
         converged: Optional[AsyncGpuResult] = None,
     ) -> None:
@@ -213,6 +215,7 @@ class DeviceCoordResult:
         self.energies = energies
         self.converged = converged
         self.gpu_id = int(gpu_id)
+        self.n_mols = int(n_mols)
 
     @property
     def num_conformers(self) -> int:
@@ -222,18 +225,16 @@ class DeviceCoordResult:
     def per_molecule(self) -> List[List["torch.Tensor"]]:
         """Return a nested list of per-molecule, per-conformer position views.
 
-        The outer list is indexed by input molecule index; the inner list contains one
-        ``(n_atoms, 3)`` torch view per conformer for that molecule. Views share storage with
+        The outer list has length :attr:`n_mols` and is indexed by input molecule index.
+        Molecules that produced zero conformers have an empty inner list. The inner list
+        contains one ``(n_atoms, 3)`` torch view per conformer. Views share storage with
         :attr:`positions` (no copy). Reading the index tensors via ``.tolist()`` implicitly
-        synchronizes; reading position values still requires the caller to synchronize as needed.
+        synchronizes; reading position values still requires the caller to synchronize.
         """
         positions = self.positions.torch()
         atom_starts = self.atom_starts.torch().tolist()
         mol_indices = self.mol_indices.torch().tolist()
-        if not mol_indices:
-            return []
-        max_mol = max(mol_indices)
-        result: List[List[torch.Tensor]] = [[] for _ in range(max_mol + 1)]
+        result: List[List[torch.Tensor]] = [[] for _ in range(self.n_mols)]
         for conf_idx, mol_idx in enumerate(mol_indices):
             start = atom_starts[conf_idx]
             stop = atom_starts[conf_idx + 1]
