@@ -106,6 +106,9 @@ endif()
 # ------------------------
 # Subdirectory includes
 # ------------------------
+
+# Apply project-wide compile options to every first-party target created in the subdirectories below.
+link_libraries(nvmolkit_warnings nvmolkit_release_opts nvmolkit_cuda_options nvmolkit_sanitizers nvmolkit_cuda_caps)
 add_subdirectory(rdkit_extensions)
 add_subdirectory(src)
 if(NVMOLKIT_BUILD_PYTHON_BINDINGS)

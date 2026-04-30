@@ -39,6 +39,9 @@ docs = [
     "myst-parser",
     "jupyter-sphinx",
 ]
+autotune = [
+    "optuna",
+]
 
 # cibuildwheel orchestration for the pip wheel pipeline. The CI workflow sets
 # RDKIT_VERSION to a value present in admin/distribute/rdkit_build_matrix.yaml.
