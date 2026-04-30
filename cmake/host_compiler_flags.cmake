@@ -13,7 +13,6 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-
 # Per-target host compile options. The CUDA half of nvmolkit_warnings is added
 # in cmake/device_compiler_flags.cmake.
 add_library(nvmolkit_warnings INTERFACE)
