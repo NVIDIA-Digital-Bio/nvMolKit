@@ -27,50 +27,42 @@ Usage:
 """
 
 import argparse
-import gc
-import random
 import statistics
 import sys
-from typing import Callable
 
 import nvtx
 from bench_utils import (
+    TimingResult,
     clone_mols_with_conformers,
     load_pickle,
     load_sdf,
     load_smiles,
     prep_mols,
-    time_it as _time_it,
+    time_it,
 )
 from rdkit import Chem
 from rdkit.Chem import AllChem, rdDistGeom
-
-
-def time_it(func: Callable, runs: int = 1, warmups: int = 0, gpu_sync: bool = False) -> tuple[float, float]:
-    """Time ``func`` and return ``(mean_ms, std_ms)``."""
-    result = _time_it(func, runs=runs, warmups=warmups, gpu_sync=gpu_sync)
-    return result.mean_ms, result.std_ms
 
 
 def _conformer_count(mols: list[Chem.Mol]) -> int:
     return sum(m.GetNumConformers() for m in mols)
 
 
-def _mmff_energies(mol: Chem.Mol) -> list[float]:
-    """Return MMFF94 energies for each conformer in ``mol``; failures contribute 0.0."""
-    energies: list[float] = []
+def _mmff_energies(mol: Chem.Mol) -> list[float | None]:
+    """Return MMFF94 energies for each conformer in ``mol``; failures contribute ``None``."""
+    energies: list[float | None] = []
     try:
         props = AllChem.MMFFGetMoleculeProperties(mol, mmffVariant="MMFF94")
     except Exception:
-        return [0.0] * mol.GetNumConformers()
+        return [None] * mol.GetNumConformers()
     if props is None:
-        return [0.0] * mol.GetNumConformers()
+        return [None] * mol.GetNumConformers()
     for conf in mol.GetConformers():
         try:
             ff = AllChem.MMFFGetMoleculeForceField(mol, props, confId=conf.GetId())
-            energies.append(float(ff.CalcEnergy()) if ff is not None else 0.0)
+            energies.append(float(ff.CalcEnergy()) if ff is not None else None)
         except Exception:
-            energies.append(0.0)
+            energies.append(None)
     return energies
 
 
@@ -80,7 +72,7 @@ def _energy_diff_summary(
 ) -> tuple[float, float, int]:
     """Mean / median energy difference (RDKit - nvmolkit) and the number of paired conformers.
 
-    Conformers where either side has zero energy (failed/missing) are skipped.
+    Conformers where either side failed to evaluate (``None``) are skipped.
     """
     deltas: list[float] = []
     for rd_mol, nv_mol in zip(rdkit_mols, nvmolkit_mols):
@@ -88,9 +80,11 @@ def _energy_diff_summary(
         nv_energies = _mmff_energies(nv_mol)
         paired = min(len(rd_energies), len(nv_energies))
         for i in range(paired):
-            if rd_energies[i] == 0.0 or nv_energies[i] == 0.0:
+            rd_energy = rd_energies[i]
+            nv_energy = nv_energies[i]
+            if rd_energy is None or nv_energy is None:
                 continue
-            deltas.append(rd_energies[i] - nv_energies[i])
+            deltas.append(rd_energy - nv_energy)
     if not deltas:
         return float("nan"), float("nan"), 0
     return statistics.mean(deltas), statistics.median(deltas), len(deltas)
@@ -105,8 +99,8 @@ def bench_nvmolkit(
     hardware_options,
     runs: int,
     warmup: bool,
-) -> tuple[float, float, list[Chem.Mol]]:
-    """Benchmark nvmolkit ``EmbedMolecules``; return ``(mean_ms, std_ms, last_run_mols)``."""
+) -> tuple[TimingResult, list[Chem.Mol]]:
+    """Benchmark nvmolkit ``EmbedMolecules``; return ``(timing, last_run_mols)``."""
     from nvmolkit.embedMolecules import EmbedMolecules
 
     last_run_mols: list[list[Chem.Mol]] = [[]]
@@ -122,8 +116,8 @@ def bench_nvmolkit(
         with nvtx.annotate("etkdg_nvmolkit_warmup", color="purple"):
             EmbedMolecules(warmup_mols, params, 1, max_iters, hardware_options)
 
-    avg_ms, std_ms = time_it(run, runs=runs, warmups=0, gpu_sync=True)
-    return avg_ms, std_ms, last_run_mols[0]
+    timing = time_it(run, runs=runs, warmups=0, gpu_sync=True)
+    return timing, last_run_mols[0]
 
 
 @nvtx.annotate("bench_rdkit_etkdg", color="green")
@@ -133,8 +127,8 @@ def bench_rdkit(
     confs_per_mol: int,
     runs: int,
     warmup: bool,
-) -> tuple[float, float, list[Chem.Mol]]:
-    """Benchmark RDKit ``EmbedMultipleConfs``; return ``(mean_ms, std_ms, last_run_mols)``."""
+) -> tuple[TimingResult, list[Chem.Mol]]:
+    """Benchmark RDKit ``EmbedMultipleConfs``; return ``(timing, last_run_mols)``."""
     last_run_mols: list[list[Chem.Mol]] = [[]]
 
     @nvtx.annotate("etkdg_rdkit_run", color="yellow")
@@ -148,8 +142,8 @@ def bench_rdkit(
         warmup_mol = Chem.RWMol(mols[0])
         rdDistGeom.EmbedMultipleConfs(warmup_mol, numConfs=1, params=params)
 
-    avg_ms, std_ms = time_it(run, runs=runs, warmups=0, gpu_sync=False)
-    return avg_ms, std_ms, last_run_mols[0]
+    timing = time_it(run, runs=runs, warmups=0, gpu_sync=False)
+    return timing, last_run_mols[0]
 
 
 def _build_etkdg_params(max_iterations: int, num_threads: int, seed: int) -> rdDistGeom.EmbedParameters:
@@ -302,26 +296,32 @@ def main() -> None:
 
     params = _build_etkdg_params(args.max_iterations, args.rdkit_threads, args.seed)
 
-    results: dict[str, tuple[float, float, list[Chem.Mol]]] = {}
+    results: dict[str, tuple[TimingResult, list[Chem.Mol]]] = {}
 
-    torch_module = None
     config_source = "cli"
+    applied_batch_size: int | str = args.batch_size
+    applied_batches_per_gpu: int | str = args.batches_per_gpu
+    applied_prep_threads: int | str = args.prep_threads
+    applied_num_gpus: int | str = args.num_gpus
     if not args.no_nvmolkit:
         try:
             import torch
 
             from nvmolkit.types import HardwareOptions
 
-            torch_module = torch
             gpu_ids = list(range(args.num_gpus))
 
             hardware_options = _build_hardware_options(
                 args.batch_size, args.batches_per_gpu, args.prep_threads, args.num_gpus
             )
+            applied_batch_size = int(hardware_options.batchSize)
+            applied_batches_per_gpu = int(hardware_options.batchesPerGpu)
+            applied_prep_threads = int(hardware_options.preprocessingThreads)
+            applied_num_gpus = len(list(hardware_options.gpuIds)) if hardware_options.gpuIds else args.num_gpus
 
             torch.cuda.cudart().cudaProfilerStart()
             print("\nRunning nvmolkit ETKDG benchmark...")
-            nv_avg, nv_std, nv_mols = bench_nvmolkit(
+            nv_timing, nv_mols = bench_nvmolkit(
                 mols,
                 params,
                 args.confs_per_mol,
@@ -330,17 +330,17 @@ def main() -> None:
                 args.runs,
                 args.warmup,
             )
-            print(f"  nvmolkit:        {nv_avg:10.2f} ms (+/- {nv_std:.2f} ms)")
-            results["nvmolkit"] = (nv_avg, nv_std, nv_mols)
+            print(f"  nvmolkit:        {nv_timing.mean_ms:10.2f} ms (+/- {nv_timing.std_ms:.2f} ms)")
+            results["nvmolkit"] = (nv_timing, nv_mols)
             torch.cuda.cudart().cudaProfilerStop()
         except ImportError as exc:
             print(f"  nvmolkit: SKIPPED (import error: {exc})")
 
     if not args.no_rdkit:
         print("\nRunning RDKit ETKDG benchmark...")
-        rd_avg, rd_std, rd_mols = bench_rdkit(mols, params, args.confs_per_mol, args.runs, args.warmup)
-        print(f"  RDKit:           {rd_avg:10.2f} ms (+/- {rd_std:.2f} ms)")
-        results["rdkit"] = (rd_avg, rd_std, rd_mols)
+        rd_timing, rd_mols = bench_rdkit(mols, params, args.confs_per_mol, args.runs, args.warmup)
+        print(f"  RDKit:           {rd_timing.mean_ms:10.2f} ms (+/- {rd_timing.std_ms:.2f} ms)")
+        results["rdkit"] = (rd_timing, rd_mols)
 
     if not results:
         print("Error: No benchmarks were run")
@@ -348,20 +348,22 @@ def main() -> None:
 
     print("\n" + "=" * 70)
     print("Summary:")
-    baseline_ms = results.get("rdkit", (None, None, None))[0]
-    for name, (avg_ms, std_ms, _) in results.items():
+    baseline_ms = results["rdkit"][0].mean_ms if "rdkit" in results else None
+    for name, (timing, _) in results.items():
         speedup = ""
-        if baseline_ms is not None and name != "rdkit" and avg_ms > 0:
-            speedup = f", {baseline_ms / avg_ms:.1f}x vs RDKit"
-        print(f"  {name:20s}: {avg_ms:10.2f} ms (+/- {std_ms:.2f} ms){speedup}")
+        if baseline_ms is not None and name != "rdkit" and timing.mean_ms > 0:
+            speedup = f", {baseline_ms / timing.mean_ms:.1f}x vs RDKit"
+        print(f"  {name:20s}: {timing.mean_ms:10.2f} ms (+/- {timing.std_ms:.2f} ms){speedup}")
 
     energy_mean = float("nan")
     energy_median = float("nan")
     energy_pairs = 0
+    diff_computed = False
     if args.validate and "nvmolkit" in results and "rdkit" in results:
         print("\nValidation (MMFF94 energies)...")
-        energy_mean, energy_median, energy_pairs = _energy_diff_summary(results["rdkit"][2], results["nvmolkit"][2])
-        if energy_pairs > 0:
+        energy_mean, energy_median, energy_pairs = _energy_diff_summary(results["rdkit"][1], results["nvmolkit"][1])
+        diff_computed = energy_pairs > 0
+        if diff_computed:
             print(
                 f"  RDKit - nvmolkit: mean={energy_mean:.3f}, median={energy_median:.3f} "
                 f"kcal/mol over {energy_pairs} paired conformers"
@@ -369,19 +371,8 @@ def main() -> None:
         else:
             print("  No paired conformers with valid energies on both sides")
 
-    if "nvmolkit" in results:
-        applied_batch_size = int(hardware_options.batchSize)
-        applied_batches_per_gpu = int(hardware_options.batchesPerGpu)
-        applied_prep_threads = int(hardware_options.preprocessingThreads)
-        applied_num_gpus = len(list(hardware_options.gpuIds)) if hardware_options.gpuIds else args.num_gpus
-    else:
-        applied_batch_size = args.batch_size
-        applied_batches_per_gpu = args.batches_per_gpu
-        applied_prep_threads = args.prep_threads
-        applied_num_gpus = args.num_gpus
-
     csv_rows: list[str] = []
-    for name, (avg_ms, std_ms, run_mols) in results.items():
+    for name, (timing, run_mols) in results.items():
         is_nv = name == "nvmolkit"
         batch_size = applied_batch_size if is_nv else "N/A"
         batches_per_gpu = applied_batches_per_gpu if is_nv else "N/A"
@@ -390,13 +381,13 @@ def main() -> None:
         nvmolkit_config_source = config_source if is_nv else "N/A"
         rdkit_threads = args.rdkit_threads if name == "rdkit" else "N/A"
         confs_generated = _conformer_count(run_mols)
-        mean_diff = energy_mean if (args.validate and is_nv) else "N/A"
-        median_diff = energy_median if (args.validate and is_nv) else "N/A"
-        pairs = energy_pairs if (args.validate and is_nv) else "N/A"
+        mean_diff = energy_mean if (diff_computed and is_nv) else "N/A"
+        median_diff = energy_median if (diff_computed and is_nv) else "N/A"
+        pairs = energy_pairs if (diff_computed and is_nv) else "N/A"
         csv_rows.append(
             f"{name},{input_file},{input_type},{len(mols)},{args.confs_per_mol},"
             f"{args.max_iterations},{batch_size},{batches_per_gpu},{prep_threads},{num_gpus},"
-            f"{nvmolkit_config_source},{rdkit_threads},{avg_ms:.2f},{std_ms:.2f},"
+            f"{nvmolkit_config_source},{rdkit_threads},{timing.mean_ms:.2f},{timing.std_ms:.2f},"
             f"{confs_generated},{mean_diff},{median_diff},{pairs}"
         )
 
@@ -411,12 +402,6 @@ def main() -> None:
             for row in csv_rows:
                 fh.write(row + "\n")
         print(f"\nWrote results to {args.output}")
-
-    if torch_module is not None:
-        torch_module.cuda.synchronize()
-        torch_module.cuda.empty_cache()
-        torch_module.cuda.ipc_collect()
-    gc.collect()
 
 
 if __name__ == "__main__":
