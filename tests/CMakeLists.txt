@@ -174,6 +174,17 @@ target_link_libraries(
           embedder_utils
           conformer_pruning)
 
+add_executable(test_etkdg_device_output test_etkdg_device_output.cu)
+target_link_libraries(
+  test_etkdg_device_output
+  PRIVATE etkdg
+          etkdg_stages
+          dist_geom
+          device
+          device_vector
+          cuda_error_check
+          ${RDKit_LIBS})
+
 add_executable(test_etkdg_coordgen test_etkdg_coordgen.cu)
 target_link_libraries(
   test_etkdg_coordgen
@@ -318,6 +329,7 @@ set(TEST_LIST
     test_device_vector
     test_distgeom_kernels
     test_etkdg
+    test_etkdg_device_output
     test_etkdg_coordgen
     test_etkdg_etk_minimize
     test_etkdg_stereochem_checks

@@ -22,3 +22,9 @@ target_include_directories(conformer_types INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}
 add_library(coord_collect coord_collect.cpp)
 target_link_libraries(coord_collect PUBLIC CUDA::cudart cuda_error_check device
                                            conformer_types)
+
+add_library(etkdg_device_collect etkdg_device_collect.cu)
+target_link_libraries(
+  etkdg_device_collect
+  PUBLIC conformer_types device_vector
+  PRIVATE coord_collect device cuda_error_check)
