@@ -201,7 +201,7 @@ done < <(find_included_files \( -name "CMakeLists.txt" -o -name "*.cmake" \))
 
 while IFS= read -r -d '' file; do
     process_file "${file}" "#" "Dockerfile" false
-done < <(find_included_files \( -name "Dockerfile" -o -name "Dockerfile.*" \))
+done < <(find_included_files \( -name "Dockerfile" -o -name "Dockerfile.*" -o -name "*.Dockerfile" \))
 
 while IFS= read -r -d '' file; do
     process_file "${file}" "#" "YAML" false
