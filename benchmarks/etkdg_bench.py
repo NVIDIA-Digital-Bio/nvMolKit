@@ -235,9 +235,7 @@ def main() -> None:
     parser.add_argument(
         "--validate", action="store_true", dest="validate", help="Compute MMFF energy diffs vs RDKit (default)"
     )
-    parser.add_argument(
-        "--no_validate", action="store_false", dest="validate", help="Skip energy validation"
-    )
+    parser.add_argument("--no_validate", action="store_false", dest="validate", help="Skip energy validation")
     parser.set_defaults(validate=True)
 
     parser.add_argument("--output", "-o", default=None, help="Optional path to write the CSV results")
@@ -362,9 +360,7 @@ def main() -> None:
     energy_pairs = 0
     if args.validate and "nvmolkit" in results and "rdkit" in results:
         print("\nValidation (MMFF94 energies)...")
-        energy_mean, energy_median, energy_pairs = _energy_diff_summary(
-            results["rdkit"][2], results["nvmolkit"][2]
-        )
+        energy_mean, energy_median, energy_pairs = _energy_diff_summary(results["rdkit"][2], results["nvmolkit"][2])
         if energy_pairs > 0:
             print(
                 f"  RDKit - nvmolkit: mean={energy_mean:.3f}, median={energy_median:.3f} "

@@ -15,6 +15,7 @@
 
 import os
 
+from setuptools import find_packages
 from skbuild import setup
 
 pyroot = os.getenv("CONDA_PREFIX")
@@ -58,7 +59,7 @@ if __name__ == "__main__":
             # "-DBoost_NO_BOOST_CMAKE=TRUE"
         ]
         + cmake_extra_args,
-        packages=["nvmolkit"],
+        packages=find_packages(include=["nvmolkit", "nvmolkit.*"], exclude=["nvmolkit.tests*"]),
         exclude_package_data={"nvmolkit": ["tests/*", "*.cpp"]},
         package_data={"nvmolkit": ["**/*.csv"]},
         cmake_install_dir="nvmolkit",

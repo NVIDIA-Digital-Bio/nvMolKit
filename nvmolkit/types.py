@@ -16,7 +16,7 @@
 """Types facilitating GPU-accelerated operations."""
 
 import torch
-from typing import Iterable, List
+from typing import Any, Iterable, List
 
 
 from nvmolkit import _embedMolecules  # type: ignore
@@ -93,6 +93,32 @@ class HardwareOptions:
     def _as_native(self):
         """Internal: return the underlying BatchHardwareOptions object."""
         return self._native
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable dictionary of this object's fields.
+
+        The returned dictionary can be persisted with :func:`json.dump` and
+        round-tripped through :meth:`from_dict`.
+        """
+        return {
+            "preprocessingThreads": self.preprocessingThreads,
+            "batchSize": self.batchSize,
+            "batchesPerGpu": self.batchesPerGpu,
+            "gpuIds": list(self.gpuIds),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "HardwareOptions":
+        """Create a :class:`HardwareOptions` from a dictionary produced by :meth:`to_dict`.
+
+        Unknown keys are rejected so callers catch typos early. Missing keys
+        fall back to the constructor defaults.
+        """
+        known = {"preprocessingThreads", "batchSize", "batchesPerGpu", "gpuIds"}
+        unknown = set(data) - known
+        if unknown:
+            raise ValueError(f"Unknown HardwareOptions keys: {sorted(unknown)}")
+        return cls(**{key: data[key] for key in known if key in data})
 
 
 class AsyncGpuResult:
