@@ -17,10 +17,12 @@
 #define NVMOLKIT_BFGS_UFF_H
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "../hardware_options.h"
 #include "bfgs_minimize.h"
+#include "device_coord_result.h"
 #include "forcefield_constraints.h"
 
 namespace RDKit {
@@ -36,20 +38,30 @@ std::vector<std::vector<double>> UFFOptimizeMoleculesConfsBfgs(std::vector<RDKit
                                                                const BatchHardwareOptions& perfOptions = {});
 
 //! \brief Result from constraint-aware UFF minimization.
+//!
+//! In CoordinateOutput::RDKIT_CONFORMERS mode, @ref energies and @ref converged are populated and
+//! @ref device is empty; coordinates are written back into each input molecule's RDKit conformer
+//! list. In CoordinateOutput::DEVICE mode, @ref device holds the on-GPU coordinates / energies /
+//! convergence flags collected onto the chosen target GPU and the host-side vectors are empty.
 struct UFFMinimizeResult {
-  std::vector<std::vector<double>> energies;   //!< Per-molecule, per-conformer final energies.
-  std::vector<std::vector<int8_t>> converged;  //!< Per-molecule, per-conformer convergence flags (1 = converged).
+  std::vector<std::vector<double>>  energies;   //!< Per-molecule, per-conformer final energies (RDKIT mode only).
+  std::vector<std::vector<int8_t>>  converged;  //!< Per-molecule, per-conformer convergence flags (RDKIT mode only).
+  std::optional<DeviceCoordResult>  device;     //!< Populated when output==DEVICE.
 };
 
 //! \brief Optimize with per-molecule constraints and return convergence status.
-//! \param mols The molecules to optimize (positions written back in-place).
+//! \param mols The molecules to optimize (positions written back in-place in RDKIT_CONFORMERS mode).
 //! \param maxIters Maximum BFGS iterations.
 //! \param gradTol Gradient convergence tolerance.
 //! \param vdwThresholds Per-molecule VDW cutoff distances.
 //! \param ignoreInterfragInteractions Per-molecule interfragment interaction flags.
 //! \param constraints Per-molecule constraint specifications (empty = no constraints).
 //! \param perfOptions Hardware and batching configuration.
-//! \return Energies and per-system convergence flags.
+//! \param output Whether to write coordinates back into RDKit conformers (default) or return
+//!               them on-device as a DeviceCoordResult.
+//! \param targetGpu In DEVICE mode, the GPU to consolidate the result onto. -1 selects the first
+//!                  configured execution GPU (or device 0).
+//! \return Either host-side energies/convergence (RDKIT mode) or a populated `device` field (DEVICE mode).
 UFFMinimizeResult UFFMinimizeMoleculesConfs(
   std::vector<RDKit::ROMol*>&                                  mols,
   int                                                          maxIters                    = 200,
@@ -57,7 +69,9 @@ UFFMinimizeResult UFFMinimizeMoleculesConfs(
   const std::vector<double>&                                   vdwThresholds               = {},
   const std::vector<bool>&                                     ignoreInterfragInteractions = {},
   const std::vector<ForceFieldConstraints::PerMolConstraints>& constraints                 = {},
-  const BatchHardwareOptions&                                  perfOptions                 = {});
+  const BatchHardwareOptions&                                  perfOptions                 = {},
+  CoordinateOutput                                             output = CoordinateOutput::RDKIT_CONFORMERS,
+  int                                                          targetGpu                   = -1);
 
 }  // namespace nvMolKit::UFF
 

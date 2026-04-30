@@ -28,3 +28,9 @@ target_link_libraries(
   etkdg_device_collect
   PUBLIC conformer_types device_vector
   PRIVATE coord_collect device cuda_error_check)
+
+add_library(ff_device_collect ff_device_collect.cpp)
+target_link_libraries(
+  ff_device_collect
+  PUBLIC conformer_types bfgs_common device_vector
+  PRIVATE coord_collect device cuda_error_check ${RDKit_LIBS})
