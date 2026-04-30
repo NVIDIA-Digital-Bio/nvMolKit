@@ -465,7 +465,7 @@ std::optional<DeviceCoordResult> embedMolecules(const std::vector<RDKit::ROMol*>
   }
 
   if (deviceOutput) {
-    return detail::finalizeOnTarget(collectorsPerThread, targetGpu);
+    return detail::finalizeOnTarget(collectorsPerThread, targetGpu, static_cast<int>(mols.size()));
   }
 
   detail::OpenMPExceptionRegistry updateExceptionRegistry;

@@ -153,7 +153,7 @@ void appendActive(const AsyncDeviceVector<double>&  srcPositions,
   cudaCheckError(cudaStreamSynchronize(collector.stream));
 }
 
-DeviceCoordResult finalizeOnTarget(std::vector<DeviceCoordCollector>& collectors, const int targetGpu) {
+DeviceCoordResult finalizeOnTarget(std::vector<DeviceCoordCollector>& collectors, const int targetGpu, const int nMols) {
   // Pre-enable peer access from target to every contributing GPU once.
   for (const auto& collector : collectors) {
     if (collector.gpuId != targetGpu && !collector.atomCounts.empty()) {
@@ -174,6 +174,7 @@ DeviceCoordResult finalizeOnTarget(std::vector<DeviceCoordCollector>& collectors
   ScopedStream      targetStream("ETKDG DeviceCoord Finalize");
   DeviceCoordResult result;
   result.gpuId       = targetGpu;
+  result.nMols       = nMols;
   result.positions   = AsyncDeviceVector<double>(static_cast<size_t>(totalAtoms) * 3, targetStream.stream());
   result.atomStarts  = AsyncDeviceVector<int32_t>(static_cast<size_t>(totalConformers + 1), targetStream.stream());
   result.molIndices  = AsyncDeviceVector<int32_t>(static_cast<size_t>(totalConformers), targetStream.stream());

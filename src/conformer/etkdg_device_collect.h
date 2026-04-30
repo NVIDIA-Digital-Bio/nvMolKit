@@ -107,7 +107,7 @@ void appendActive(const AsyncDeviceVector<double>&  srcPositions,
  *       `cudaStreamSynchronize` ensures the result is visible. ETKDG has no energies/converged
  *       fields, so those members of the returned result are left empty.
  */
-DeviceCoordResult finalizeOnTarget(std::vector<DeviceCoordCollector>& collectors, int targetGpu);
+DeviceCoordResult finalizeOnTarget(std::vector<DeviceCoordCollector>& collectors, int targetGpu, int nMols);
 
 }  // namespace detail
 }  // namespace nvMolKit
