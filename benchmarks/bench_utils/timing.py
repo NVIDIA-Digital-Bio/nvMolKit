@@ -63,6 +63,9 @@ def time_it(func: Callable, runs: int = 3, warmups: int = 1, gpu_sync: bool = Fa
     Returns:
         A TimingResult with per-iteration times in milliseconds.
     """
+    if runs <= 0:
+        raise ValueError(f"runs must be positive, got {runs}")
+
     if gpu_sync:
         import torch
 
@@ -75,9 +78,6 @@ def time_it(func: Callable, runs: int = 3, warmups: int = 1, gpu_sync: bool = Fa
     for _ in range(warmups):
         func()
         sync()
-
-    if runs <= 0:
-        raise ValueError(f"runs must be positive, got {runs}")
 
     times_ms = []
     for _ in range(runs):
