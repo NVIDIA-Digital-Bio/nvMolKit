@@ -309,8 +309,6 @@ def main() -> None:
 
             from nvmolkit.types import HardwareOptions
 
-            gpu_ids = list(range(args.num_gpus))
-
             hardware_options = _build_hardware_options(
                 args.batch_size, args.batches_per_gpu, args.prep_threads, args.num_gpus
             )
