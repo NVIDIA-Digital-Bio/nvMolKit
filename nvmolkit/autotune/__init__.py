@@ -13,13 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Optuna-backed autotuning for nvMolKit hardware options.
+"""Autotuning support utilities for nvMolKit hardware options.
 
-This subpackage is **opt-in**: it depends on the optional ``optuna`` package.
-Importing :mod:`nvmolkit.autotune` itself never fails, even when ``optuna`` is
-not installed — only calling the ``tune_*`` functions raises an
-:class:`ImportError` with installation instructions. Users on conda-forge can
-still load tuned configurations through :func:`load` without ``optuna``.
+This subpackage exposes the persistence helpers (:func:`load`, :func:`save`)
+and shared building blocks used by tuning workflows. The optional ``optuna``
+dependency is only required by callers that drive a study directly via
+:mod:`nvmolkit.autotune._core`; importing this package never requires it, and
+:func:`is_available` reports whether ``optuna`` is importable.
 
 """
 

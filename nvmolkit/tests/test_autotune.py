@@ -18,70 +18,13 @@
 import importlib
 import importlib.util
 import json
-import os
-import sys
 
 import pytest
-from rdkit import Chem
-from rdkit.Chem.AllChem import ETKDGv3
 
 import nvmolkit.autotune as autotune
-from nvmolkit.autotune import _calibration, _core, _ff_common, tune_substructure as tune_substructure_mod
-from nvmolkit.autotune.tune_embed_molecules import _default_embed_search_space
-from nvmolkit.autotune.tune_substructure import (
-    _default_substruct_search_space,
-    _suggest_preprocessing_threads,
-)
-from nvmolkit.substructure import SubstructSearchConfig, hasSubstructMatch
+from nvmolkit.autotune import _calibration, _core, _ff_common
+from nvmolkit.substructure import SubstructSearchConfig
 from nvmolkit.types import HardwareOptions
-
-
-SDF_PATH = os.path.join(
-    os.path.dirname(__file__),
-    "..",
-    "..",
-    "tests",
-    "test_data",
-    "MMFF94_dative.sdf",
-)
-
-
-def _load_test_mols(num_mols: int) -> list:
-    """Load a small batch of MMFF molecules from the project's test data."""
-    if not os.path.exists(SDF_PATH):
-        pytest.skip(f"Test data file not found: {SDF_PATH}")
-    supplier = Chem.SDMolSupplier(SDF_PATH, removeHs=False, sanitize=True)
-    molecules = []
-    for mol in supplier:
-        if mol is None:
-            continue
-        molecules.append(mol)
-        if len(molecules) >= num_mols:
-            break
-    if len(molecules) < num_mols:
-        pytest.skip(f"Expected {num_mols} molecules, found {len(molecules)}")
-    return molecules
-
-
-def _embed_mols_for_optimize(num_mols: int, num_confs: int = 2) -> list:
-    """Return molecules with conformers attached, suitable for FF tests."""
-    base = _load_test_mols(num_mols)
-    embedded = []
-    params = ETKDGv3()
-    params.useRandomCoords = True
-    from nvmolkit.embedMolecules import EmbedMolecules
-
-    fresh = []
-    for mol in base:
-        copy = Chem.Mol(mol)
-        copy.RemoveAllConformers()
-        fresh.append(copy)
-    EmbedMolecules(fresh, params, confsPerMolecule=num_confs)
-    for mol in fresh:
-        if mol.GetNumConformers() == 0:
-            pytest.skip("Failed to embed conformers for autotune test")
-        embedded.append(mol)
-    return embedded
 
 
 # =============================================================================
@@ -93,7 +36,6 @@ def test_import_without_optuna_succeeds():
     """Importing the autotune package must never depend on optuna."""
     importlib.reload(autotune)
     assert hasattr(autotune, "is_available")
-    assert hasattr(autotune, "tune_embed_molecules")
 
 
 def test_is_available_matches_find_spec():
@@ -109,20 +51,6 @@ def test_install_hint_mentions_optuna_and_conda_forge():
     assert "optuna" in hint
     assert "pip install" in hint
     assert "conda" in hint
-
-
-def test_tune_raises_clear_error_when_optuna_missing(monkeypatch):
-    """Calling a tune wrapper without optuna raises a helpful ImportError."""
-    monkeypatch.setitem(sys.modules, "optuna", None)
-    monkeypatch.setattr(_core, "is_optuna_available", lambda: False)
-    mols = [Chem.MolFromSmiles("CCO")]
-    params = ETKDGv3()
-    params.useRandomCoords = True
-    with pytest.raises(ImportError) as exc_info:
-        autotune.tune_embed_molecules(mols, params, n_trials=1)
-    message = str(exc_info.value)
-    assert "optuna" in message
-    assert "conda" in message
 
 
 def test_hardware_options_to_from_dict_roundtrip():
@@ -259,20 +187,6 @@ def test_default_ff_search_space_caps_batches_per_gpu_by_cpu_count():
     assert space_64gpu["batchesPerGpu"] == (1, 1)
 
 
-def test_default_embed_search_space_caps_per_pool():
-    """Embed: per-GPU pool capped at cpus/numGpus, total pool capped at cpus."""
-    space = _default_embed_search_space(num_gpus=4, cpus=16)
-    assert space["batchesPerGpu"] == (1, 4)
-    assert space["preprocessingThreads"] == (1, 16)
-
-
-def test_default_substruct_search_space_caps_per_pool():
-    """Substruct: workerThreads.max = cpus/numGpus; preprocessing.max = cpus."""
-    space = _default_substruct_search_space(num_gpus=4, cpus=16)
-    assert space["workerThreads"] == (1, 4)
-    assert space["preprocessingThreads"] == (1, 16)
-
-
 def test_resolve_num_gpus_prefers_explicit_list():
     """Explicit gpuIds override CUDA-reported count."""
     assert _ff_common.resolve_num_gpus([0, 1, 2]) == 3
@@ -295,105 +209,6 @@ def test_resolve_cpu_budget_rejects_non_positive():
         _ff_common.resolve_cpu_budget(0)
     with pytest.raises(ValueError):
         _ff_common.resolve_cpu_budget(-1)
-
-
-class _FakeTrial:
-    """Minimal optuna trial stand-in capturing ``suggest_int`` arguments."""
-
-    def __init__(self):
-        self.calls: list[tuple[str, int, int, bool]] = []
-
-    def suggest_int(self, name: str, low: int, high: int, log: bool = False) -> int:
-        self.calls.append((name, int(low), int(high), bool(log)))
-        return int(high)
-
-
-def test_suggest_preprocessing_threads_clamps_to_remaining_cpu_budget():
-    """Joint CPU constraint: preprocessing high = cpus - numGpus*workerThreads."""
-    trial = _FakeTrial()
-    spec = (1, 32)
-    value = _suggest_preprocessing_threads(trial, spec, worker_threads=4, num_gpus=2, cpus=20)
-    assert trial.calls == [("preprocessingThreads", 1, 12, False)]
-    assert value == 12
-
-
-def test_suggest_preprocessing_threads_floors_at_one_when_workers_saturate_cpu():
-    """When workers consume every core, preprocessing collapses to its low bound."""
-    trial = _FakeTrial()
-    spec = (1, 32)
-    value = _suggest_preprocessing_threads(trial, spec, worker_threads=11, num_gpus=2, cpus=20)
-    assert trial.calls == [("preprocessingThreads", 1, 1, False)]
-    assert value == 1
-
-
-def test_suggest_preprocessing_threads_respects_user_low_bound():
-    """User-provided low bound is preserved even when remaining budget is smaller."""
-    trial = _FakeTrial()
-    spec = (4, 32)
-    value = _suggest_preprocessing_threads(trial, spec, worker_threads=10, num_gpus=2, cpus=20)
-    assert trial.calls == [("preprocessingThreads", 4, 4, False)]
-    assert value == 4
-
-
-def test_substructure_trial_runner_honors_joint_constraint(monkeypatch):
-    """End-to-end: substructure trial runner samples preprocessing within budget."""
-    pytest.importorskip("optuna")
-    import optuna
-
-    cpu_budget = 16
-    num_gpus = 2
-
-    targets = [Chem.MolFromSmiles(s) for s in ["CCO", "CC", "c1ccccc1", "CCN"]]
-    queries = [Chem.MolFromSmarts("C")]
-
-    def fake_api(target_slice, _queries, _config):
-        return [[False] * len(_queries) for _ in target_slice]
-
-    monkeypatch.setattr(tune_substructure_mod, "_API_FUNCTIONS", {fake_api})
-
-    sampled: list[dict] = []
-
-    def fake_run_study(*, default_runner, trial_runner, build_config, initial_state, **_kwargs):
-        study = optuna.create_study(direction="maximize", sampler=optuna.samplers.RandomSampler(seed=0))
-
-        def objective(trial):
-            trial_runner(trial, initial_state)
-            sampled.append(dict(trial.params))
-            return 1.0
-
-        study.optimize(objective, n_trials=20)
-        return _core.TuneResult(
-            best_config=build_config(dict(study.best_trial.params)),
-            best_throughput=1.0,
-            best_params=dict(study.best_trial.params),
-            calibration_size=len(initial_state.indices),
-            n_trials_run=len(study.trials),
-            study=study,
-        )
-
-    monkeypatch.setattr(tune_substructure_mod, "run_study", fake_run_study)
-
-    autotune.tune_substructure(
-        targets,
-        queries,
-        api=fake_api,
-        gpuIds=[0, 1],
-        cpu_budget=cpu_budget,
-        n_trials=20,
-        target_seconds_per_trial=1.0,
-        calibration_fraction=1.0,
-        calibration_max_size=len(targets),
-        seed=0,
-    )
-
-    assert sampled, "Trial runner must have produced at least one sample"
-    for params in sampled:
-        worker = int(params["workerThreads"])
-        prep = int(params["preprocessingThreads"])
-        assert num_gpus * worker + prep <= cpu_budget, (
-            f"Joint CPU budget violated: numGpus*worker + prep = {num_gpus}*{worker} + {prep} > {cpu_budget}"
-        )
-        assert worker <= cpu_budget // num_gpus, f"workerThreads {worker} exceeds per-GPU cap {cpu_budget // num_gpus}"
 
 
 # =============================================================================
@@ -485,159 +300,3 @@ def test_run_study_returns_completed_result(monkeypatch):
     assert result.calibration_size == 10
     assert isinstance(result.study, optuna.Study)
     assert result.best_throughput > 0
-
-
-# =============================================================================
-# End-to-end smoke tests for each tune_* wrapper.
-# =============================================================================
-
-
-@pytest.fixture
-def small_mols():
-    return _load_test_mols(num_mols=4)
-
-
-@pytest.fixture
-def small_optimized_mols():
-    return _embed_mols_for_optimize(num_mols=3, num_confs=2)
-
-
-def test_tune_embed_molecules_smoke(small_mols):
-    pytest.importorskip("optuna")
-    params = ETKDGv3()
-    params.useRandomCoords = True
-
-    result = autotune.tune_embed_molecules(
-        small_mols,
-        params,
-        confsPerMolecule=1,
-        n_trials=2,
-        target_seconds_per_trial=30.0,
-        calibration_fraction=1.0,
-        calibration_max_size=len(small_mols),
-        seed=0,
-    )
-
-    assert isinstance(result.best_config, HardwareOptions)
-    assert result.best_throughput > 0
-    assert result.n_trials_run == 2
-    assert result.best_config.batchSize >= 1
-    assert result.best_config.batchesPerGpu >= 1
-    assert result.best_config.preprocessingThreads >= 1
-
-    fresh = [Chem.Mol(mol) for mol in small_mols]
-    for mol in fresh:
-        mol.RemoveAllConformers()
-    from nvmolkit.embedMolecules import EmbedMolecules
-
-    EmbedMolecules(fresh, params, confsPerMolecule=1, hardwareOptions=result.best_config)
-    assert all(mol.GetNumConformers() == 1 for mol in fresh)
-
-
-def test_tune_mmff_optimize_smoke(small_optimized_mols):
-    pytest.importorskip("optuna")
-    from rdkit.Chem import AllChem
-
-    if not all(AllChem.MMFFHasAllMoleculeParams(mol) for mol in small_optimized_mols):
-        pytest.skip("MMFF parameters unavailable for one or more molecules")
-
-    result = autotune.tune_mmff_optimize(
-        small_optimized_mols,
-        maxIters=20,
-        n_trials=2,
-        target_seconds_per_trial=30.0,
-        calibration_fraction=1.0,
-        calibration_max_size=len(small_optimized_mols),
-        seed=0,
-    )
-    assert isinstance(result.best_config, HardwareOptions)
-    assert result.best_throughput > 0
-    assert result.n_trials_run == 2
-
-    from nvmolkit.mmffOptimization import MMFFOptimizeMoleculesConfs
-
-    fresh = [Chem.Mol(mol) for mol in small_optimized_mols]
-    energies = MMFFOptimizeMoleculesConfs(fresh, maxIters=10, hardwareOptions=result.best_config)
-    assert len(energies) == len(fresh)
-
-
-def test_tune_uff_optimize_smoke(small_optimized_mols):
-    pytest.importorskip("optuna")
-    from rdkit.Chem import rdForceFieldHelpers
-
-    if not all(rdForceFieldHelpers.UFFHasAllMoleculeParams(mol) for mol in small_optimized_mols):
-        pytest.skip("UFF parameters unavailable for one or more molecules")
-
-    result = autotune.tune_uff_optimize(
-        small_optimized_mols,
-        maxIters=20,
-        n_trials=2,
-        target_seconds_per_trial=30.0,
-        calibration_fraction=1.0,
-        calibration_max_size=len(small_optimized_mols),
-        seed=0,
-    )
-    assert isinstance(result.best_config, HardwareOptions)
-    assert result.best_throughput > 0
-    assert result.n_trials_run == 2
-
-    from nvmolkit.uffOptimization import UFFOptimizeMoleculesConfs
-
-    fresh = [Chem.Mol(mol) for mol in small_optimized_mols]
-    energies = UFFOptimizeMoleculesConfs(fresh, maxIters=10, hardwareOptions=result.best_config)
-    assert len(energies) == len(fresh)
-
-
-def test_tune_batched_forcefield_smoke(small_optimized_mols):
-    pytest.importorskip("optuna")
-    from rdkit.Chem import AllChem
-
-    if not all(AllChem.MMFFHasAllMoleculeParams(mol) for mol in small_optimized_mols):
-        pytest.skip("MMFF parameters unavailable for one or more molecules")
-
-    from nvmolkit.batchedForcefield import MMFFBatchedForcefield
-
-    def factory(mols, hw_options):
-        return MMFFBatchedForcefield(mols, hardwareOptions=hw_options)
-
-    result = autotune.tune_batched_forcefield(
-        small_optimized_mols,
-        factory,
-        maxIters=20,
-        n_trials=2,
-        target_seconds_per_trial=30.0,
-        calibration_fraction=1.0,
-        calibration_max_size=len(small_optimized_mols),
-        seed=0,
-    )
-    assert isinstance(result.best_config, HardwareOptions)
-    assert result.best_throughput > 0
-    assert result.n_trials_run == 2
-
-    fresh = [Chem.Mol(mol) for mol in small_optimized_mols]
-    ff = MMFFBatchedForcefield(fresh, hardwareOptions=result.best_config)
-    energies, _ = ff.minimize(maxIters=10)
-    assert len(energies) == len(fresh)
-
-
-def test_tune_substructure_smoke():
-    pytest.importorskip("optuna")
-    targets = [Chem.MolFromSmiles(s) for s in ["CCO", "CCCC", "c1ccccc1", "CCN", "CCCO", "C1CCCCC1"]]
-    queries = [Chem.MolFromSmarts("C"), Chem.MolFromSmarts("CC")]
-
-    result = autotune.tune_substructure(
-        targets,
-        queries,
-        api=hasSubstructMatch,
-        n_trials=2,
-        target_seconds_per_trial=30.0,
-        calibration_fraction=1.0,
-        calibration_max_size=len(targets),
-        seed=0,
-    )
-    assert isinstance(result.best_config, SubstructSearchConfig)
-    assert result.best_throughput > 0
-    assert result.n_trials_run == 2
-
-    matches = hasSubstructMatch(targets, queries, result.best_config)
-    assert matches.shape == (len(targets), len(queries))
