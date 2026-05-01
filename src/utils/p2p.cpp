@@ -17,6 +17,7 @@
 
 #include <cuda_runtime.h>
 
+#include <optional>
 #include <stdexcept>
 #include <string>
 
@@ -70,18 +71,18 @@ void copyDeviceToDeviceAsync(void*        dstDevice,
 
   // If per-call event create/destroy shows up meaningfully in profiles, promote this helper
   // to a stateful class that owns a reusable event (or a small pool) per (srcGpu, dstGpu) pair.
-  cudaEvent_t srcReady = nullptr;
+  // The event must be created with srcGpu current so it binds to the source device.
+  std::optional<ScopedCudaEvent> srcReady;
   {
     const WithDevice withSrc(srcGpu);
-    cudaCheckError(cudaEventCreateWithFlags(&srcReady, cudaEventDisableTiming));
-    cudaCheckError(cudaEventRecord(srcReady, srcStream));
+    srcReady.emplace();
+    cudaCheckError(cudaEventRecord(srcReady->event(), srcStream));
   }
   {
     const WithDevice withDst(dstGpu);
-    cudaCheckError(cudaStreamWaitEvent(dstStream, srcReady, 0));
+    cudaCheckError(cudaStreamWaitEvent(dstStream, srcReady->event(), 0));
     cudaCheckError(cudaMemcpyPeerAsync(dstDevice, dstGpu, srcDevice, srcGpu, byteCount, dstStream));
   }
-  cudaCheckError(cudaEventDestroy(srcReady));
 }
 
 }  // namespace nvMolKit
