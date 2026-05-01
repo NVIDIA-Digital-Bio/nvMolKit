@@ -90,16 +90,12 @@ TEST(P2P, CopyDeviceToDeviceCrossGpu) {
     srcDev = deviceVectorFromHost(src, srcStream.stream());
   }
 
-  AsyncDeviceVector<double> dstDev;
-  {
-    const WithDevice withDst(1);
-    dstDev = AsyncDeviceVector<double>(src.size());
-  }
-
   std::optional<ScopedStream> dstStream;
+  AsyncDeviceVector<double>   dstDev;
   {
     const WithDevice withDst(1);
     dstStream.emplace();
+    dstDev = AsyncDeviceVector<double>(src.size(), dstStream->stream());
   }
 
   copyDeviceToDeviceAsync(dstDev.data(),
