@@ -52,12 +52,12 @@ def _load_test_mols(num_mols: int) -> list:
         pytest.skip(f"Test data file not found: {SDF_PATH}")
     supplier = Chem.SDMolSupplier(SDF_PATH, removeHs=False, sanitize=True)
     molecules = []
-    for i, mol in enumerate(supplier):
+    for mol in supplier:
         if mol is None:
             continue
-        if i >= num_mols:
-            break
         molecules.append(mol)
+        if len(molecules) >= num_mols:
+            break
     if len(molecules) < num_mols:
         pytest.skip(f"Expected {num_mols} molecules, found {len(molecules)}")
     return molecules
