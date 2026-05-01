@@ -226,15 +226,15 @@ def main() -> None:
     parser.add_argument("--no_sanitize", action="store_false", dest="sanitize", help="Skip sanitization at parse time")
     parser.set_defaults(sanitize=True)
 
+    parser.add_argument("--ff", choices=["mmff", "uff"], required=True, help="Force field to optimize: mmff or uff")
     parser.add_argument(
-        "--ff", choices=["mmff", "uff"], required=True, help="Force field to optimize: mmff or uff"
+        "--confs_per_mol",
+        "-c",
+        type=int,
+        default=10,
+        help="Conformers per molecule to embed before timing (default: 10)",
     )
-    parser.add_argument(
-        "--confs_per_mol", "-c", type=int, default=10, help="Conformers per molecule to embed before timing (default: 10)"
-    )
-    parser.add_argument(
-        "--max_iters", type=int, default=200, help="Maximum FF optimization iterations (default: 200)"
-    )
+    parser.add_argument("--max_iters", type=int, default=200, help="Maximum FF optimization iterations (default: 200)")
 
     parser.add_argument("--runs", "-r", type=int, default=1, help="Number of timing runs (default: 1)")
     parser.add_argument("--warmup", action="store_true", dest="warmup", help="Perform a warmup run (default)")
@@ -262,9 +262,7 @@ def main() -> None:
     parser.add_argument(
         "--validate", action="store_true", dest="validate", help="Compute absolute energy diffs vs RDKit (default)"
     )
-    parser.add_argument(
-        "--no_validate", action="store_false", dest="validate", help="Skip energy validation"
-    )
+    parser.add_argument("--no_validate", action="store_false", dest="validate", help="Skip energy validation")
     parser.set_defaults(validate=True)
 
     parser.add_argument("--output", "-o", default=None, help="Optional path to write the CSV results")
@@ -393,9 +391,7 @@ def main() -> None:
     energy_pairs = 0
     if args.validate and "nvmolkit" in results and "rdkit" in results:
         print(f"\nValidation ({args.ff.upper()} energies)...")
-        energy_mean, energy_max, energy_pairs = _energy_diff_summary(
-            results["rdkit"][2], results["nvmolkit"][2]
-        )
+        energy_mean, energy_max, energy_pairs = _energy_diff_summary(results["rdkit"][2], results["nvmolkit"][2])
         if energy_pairs > 0:
             print(
                 f"  |RDKit - nvmolkit|: mean={energy_mean:.4f}, max={energy_max:.4f} "
