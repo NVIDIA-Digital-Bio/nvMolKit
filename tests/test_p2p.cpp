@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 
 #include <numeric>
+#include <optional>
 #include <vector>
 
 #include "cuda_error_check.h"
@@ -95,10 +96,10 @@ TEST(P2P, CopyDeviceToDeviceCrossGpu) {
     dstDev = AsyncDeviceVector<double>(src.size());
   }
 
-  cudaStream_t dstStream = nullptr;
+  std::optional<ScopedStream> dstStream;
   {
     const WithDevice withDst(1);
-    cudaCheckError(cudaStreamCreateWithFlags(&dstStream, cudaStreamNonBlocking));
+    dstStream.emplace();
   }
 
   copyDeviceToDeviceAsync(dstDev.data(),
@@ -107,15 +108,17 @@ TEST(P2P, CopyDeviceToDeviceCrossGpu) {
                           /*srcGpu=*/0,
                           srcStream.stream(),
                           /*dstGpu=*/1,
-                          dstStream);
+                          dstStream->stream());
 
   std::vector<double> result(src.size());
   {
     const WithDevice withDst(1);
-    cudaCheckError(
-      cudaMemcpyAsync(result.data(), dstDev.data(), src.size() * sizeof(double), cudaMemcpyDeviceToHost, dstStream));
-    cudaCheckError(cudaStreamSynchronize(dstStream));
-    cudaCheckError(cudaStreamDestroy(dstStream));
+    cudaCheckError(cudaMemcpyAsync(result.data(),
+                                   dstDev.data(),
+                                   src.size() * sizeof(double),
+                                   cudaMemcpyDeviceToHost,
+                                   dstStream->stream()));
+    cudaCheckError(cudaStreamSynchronize(dstStream->stream()));
   }
   EXPECT_EQ(result, src);
 }

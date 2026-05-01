@@ -29,11 +29,15 @@ namespace {
 void enablePeerOneWay(int fromGpu, int toGpu) {
   const WithDevice  withDevice(fromGpu);
   const cudaError_t err = cudaDeviceEnablePeerAccess(toGpu, /*flags=*/0);
-  if (err == cudaSuccess || err == cudaErrorPeerAccessAlreadyEnabled) {
-    cudaGetLastError();
+  if (err == cudaSuccess) {
     return;
   }
-  cudaGetLastError();
+  if (err == cudaErrorPeerAccessAlreadyEnabled) {
+    // Clear only the benign sticky error from the idempotent case; leave any unrelated
+    // prior error in place so it surfaces at the next cudaCheckError.
+    (void)cudaGetLastError();
+    return;
+  }
   throw std::runtime_error("Failed to enable P2P access from GPU " + std::to_string(fromGpu) + " to GPU " +
                            std::to_string(toGpu) + ": " + cudaGetErrorString(err));
 }
@@ -64,6 +68,8 @@ void copyDeviceToDeviceAsync(void*        dstDevice,
     return;
   }
 
+  // If per-call event create/destroy shows up meaningfully in profiles, promote this helper
+  // to a stateful class that owns a reusable event (or a small pool) per (srcGpu, dstGpu) pair.
   cudaEvent_t srcReady = nullptr;
   {
     const WithDevice withSrc(srcGpu);
