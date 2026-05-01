@@ -21,19 +21,6 @@ not installed — only calling the ``tune_*`` functions raises an
 :class:`ImportError` with installation instructions. Users on conda-forge can
 still load tuned configurations through :func:`load` without ``optuna``.
 
-Use :func:`is_available` to check whether autotuning is supported in the
-current environment::
-
-    from nvmolkit import autotune
-
-    if autotune.is_available():
-        result = autotune.tune_embed_molecules(mols, params)
-        autotune.save(result.best_config, "etkdg_options.json")
-
-The ``tune_*`` functions return a :class:`TuneResult` whose ``best_config`` is
-a fully-populated :class:`~nvmolkit.types.HardwareOptions` (or
-:class:`~nvmolkit.substructure.SubstructSearchConfig`) suitable for passing
-directly into the corresponding API on the full workload.
 """
 
 from nvmolkit.autotune._core import (
@@ -43,11 +30,6 @@ from nvmolkit.autotune._core import (
     is_optuna_available,
 )
 from nvmolkit.autotune._persistence import load, save
-from nvmolkit.autotune.tune_batched_forcefield import tune_batched_forcefield
-from nvmolkit.autotune.tune_embed_molecules import tune_embed_molecules
-from nvmolkit.autotune.tune_mmff_optimize import tune_mmff_optimize
-from nvmolkit.autotune.tune_substructure import tune_substructure
-from nvmolkit.autotune.tune_uff_optimize import tune_uff_optimize
 
 
 def is_available() -> bool:
