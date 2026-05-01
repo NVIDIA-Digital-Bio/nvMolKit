@@ -31,28 +31,22 @@ Usage:
 import argparse
 import gc
 import math
-import random
 import statistics
 import sys
-from typing import Callable
 
 import nvtx
+import torch
 from bench_utils import (
     clone_mols_with_conformers,
     load_pickle,
     load_sdf,
     load_smiles,
     prep_mols,
-    time_it as _time_it,
+    time_it,
 )
+from nvmolkit.types import HardwareOptions
 from rdkit import Chem
 from rdkit.Chem import AllChem, rdDistGeom
-
-
-def time_it(func: Callable, runs: int = 1, warmups: int = 0, gpu_sync: bool = False) -> tuple[float, float]:
-    """Time ``func`` and return ``(mean_ms, std_ms)``."""
-    result = _time_it(func, runs=runs, warmups=warmups, gpu_sync=gpu_sync)
-    return result.mean_ms, result.std_ms
 
 
 def _embed_conformers(mols: list[Chem.Mol], confs_per_mol: int, seed: int) -> list[Chem.Mol]:
@@ -89,13 +83,20 @@ def _flatten_energies(per_mol: list[list[float]]) -> list[float]:
     return flat
 
 
-def _flatten_rdkit_energies(per_mol: list[list[tuple[int, float]]]) -> list[float]:
-    """Flatten ``[[(status, energy), ...], ...]`` returned by RDKit FF APIs."""
+def _flatten_rdkit_energies(per_mol: list[list[tuple[int, float]]]) -> tuple[list[float], int]:
+    """Flatten ``[[(status, energy), ...], ...]`` returned by RDKit FF APIs.
+
+    Returns ``(energies, not_converged_count)`` where ``not_converged_count`` is
+    the number of conformers RDKit reported with a non-zero status flag.
+    """
     flat: list[float] = []
+    not_converged = 0
     for entries in per_mol:
-        for _, energy in entries:
+        for status, energy in entries:
+            if status != 0:
+                not_converged += 1
             flat.append(float(energy))
-    return flat
+    return flat, not_converged
 
 
 def _energy_diff_summary(
@@ -147,9 +148,10 @@ def bench_nvmolkit(
         warmup_mols = clone_mols_with_conformers(mols[: min(4, len(mols))])
         with nvtx.annotate("ff_nvmolkit_warmup", color="purple"):
             _OptimizeConfs(warmup_mols, maxIters=max_iters, hardwareOptions=hardware_options)
+        torch.cuda.synchronize()
 
-    avg_ms, std_ms = time_it(run, runs=runs, warmups=0, gpu_sync=True)
-    return avg_ms, std_ms, _flatten_energies(last_energies[0])
+    result = time_it(run, runs=runs, warmups=0, gpu_sync=True)
+    return result.mean_ms, result.std_ms, _flatten_energies(last_energies[0])
 
 
 @nvtx.annotate("bench_rdkit_ff", color="green")
@@ -181,11 +183,15 @@ def bench_rdkit(
         last_results[0] = [rdkit_optimize(mol) for mol in cloned]
 
     if warmup:
-        warmup_mol = Chem.RWMol(mols[0])
-        rdkit_optimize(warmup_mol)
+        warmup_mols = clone_mols_with_conformers(mols[: min(4, len(mols))])
+        for warmup_mol in warmup_mols:
+            rdkit_optimize(warmup_mol)
 
-    avg_ms, std_ms = time_it(run, runs=runs, warmups=0, gpu_sync=False)
-    return avg_ms, std_ms, _flatten_rdkit_energies(last_results[0])
+    result = time_it(run, runs=runs, warmups=0, gpu_sync=False)
+    energies, not_converged = _flatten_rdkit_energies(last_results[0])
+    if not_converged > 0:
+        print(f"  RDKit: {not_converged} conformer(s) reported non-zero status (not converged)")
+    return result.mean_ms, result.std_ms, energies
 
 
 def _build_hardware_options(
@@ -193,9 +199,7 @@ def _build_hardware_options(
     batches_per_gpu: int,
     prep_threads: int,
     num_gpus: int,
-):
-    from nvmolkit.types import HardwareOptions
-
+) -> HardwareOptions:
     return HardwareOptions(
         preprocessingThreads=prep_threads,
         batchSize=batch_size,
@@ -206,7 +210,7 @@ def _build_hardware_options(
 
 CSV_HEADER = (
     "method,ff,input_file,input_type,num_mols,confs_per_mol,max_iters,"
-    "batch_size,batches_per_gpu,prep_threads,num_gpus,nvmolkit_config_source,"
+    "batch_size,batches_per_gpu,prep_threads,num_gpus,"
     "rdkit_threads,time_ms,std_ms,energies_compared,mean_abs_energy_diff,max_abs_energy_diff"
 )
 
@@ -304,7 +308,7 @@ def main() -> None:
     if not args.no_rdkit:
         print(f"  RDKit threads: {args.rdkit_threads}")
     if not args.no_nvmolkit:
-        print(f"  nvmolkit hardware:")
+        print("  nvmolkit hardware:")
         print(f"    batch_size: {args.batch_size}")
         print(f"    batches_per_gpu: {args.batches_per_gpu if args.batches_per_gpu > 0 else 'auto'}")
         print(f"    prep_threads: {args.prep_threads if args.prep_threads > 0 else 'auto'}")
@@ -338,32 +342,20 @@ def main() -> None:
 
     results: dict[str, tuple[float, float, list[float]]] = {}
 
-    torch_module = None
-    config_source = "cli"
     hardware_options = None
     if not args.no_nvmolkit:
-        try:
-            import torch
+        hardware_options = _build_hardware_options(
+            args.batch_size, args.batches_per_gpu, args.prep_threads, args.num_gpus
+        )
 
-            from nvmolkit.types import HardwareOptions
-
-            torch_module = torch
-            gpu_ids = list(range(args.num_gpus))
-
-            hardware_options = _build_hardware_options(
-                args.batch_size, args.batches_per_gpu, args.prep_threads, args.num_gpus
-            )
-
-            torch.cuda.cudart().cudaProfilerStart()
-            print(f"\nRunning nvmolkit {args.ff.upper()} optimize benchmark...")
-            nv_avg, nv_std, nv_energies = bench_nvmolkit(
-                mols, args.ff, args.max_iters, hardware_options, args.runs, args.warmup
-            )
-            print(f"  nvmolkit:        {nv_avg:10.2f} ms (+/- {nv_std:.2f} ms)")
-            results["nvmolkit"] = (nv_avg, nv_std, nv_energies)
-            torch.cuda.cudart().cudaProfilerStop()
-        except ImportError as exc:
-            print(f"  nvmolkit: SKIPPED (import error: {exc})")
+        torch.cuda.cudart().cudaProfilerStart()
+        print(f"\nRunning nvmolkit {args.ff.upper()} optimize benchmark...")
+        nv_avg, nv_std, nv_energies = bench_nvmolkit(
+            mols, args.ff, args.max_iters, hardware_options, args.runs, args.warmup
+        )
+        print(f"  nvmolkit:        {nv_avg:10.2f} ms (+/- {nv_std:.2f} ms)")
+        results["nvmolkit"] = (nv_avg, nv_std, nv_energies)
+        torch.cuda.cudart().cudaProfilerStop()
 
     if not args.no_rdkit:
         print(f"\nRunning RDKit {args.ff.upper()} optimize benchmark...")
@@ -418,7 +410,6 @@ def main() -> None:
         batches_per_gpu = applied_batches_per_gpu if is_nv else "N/A"
         prep_threads = applied_prep_threads if is_nv else "N/A"
         num_gpus = applied_num_gpus if is_nv else "N/A"
-        nvmolkit_config_source = config_source if is_nv else "N/A"
         rdkit_threads = args.rdkit_threads if name == "rdkit" else "N/A"
         mean_diff = energy_mean if (args.validate and is_nv) else "N/A"
         max_diff = energy_max if (args.validate and is_nv) else "N/A"
@@ -426,7 +417,7 @@ def main() -> None:
         csv_rows.append(
             f"{name},{args.ff},{input_file},{input_type},{len(mols)},{args.confs_per_mol},"
             f"{args.max_iters},{batch_size},{batches_per_gpu},{prep_threads},{num_gpus},"
-            f"{nvmolkit_config_source},{rdkit_threads},{avg_ms:.2f},{std_ms:.2f},"
+            f"{rdkit_threads},{avg_ms:.2f},{std_ms:.2f},"
             f"{pairs},{mean_diff},{max_diff}"
         )
 
@@ -442,10 +433,10 @@ def main() -> None:
                 fh.write(row + "\n")
         print(f"\nWrote results to {args.output}")
 
-    if torch_module is not None:
-        torch_module.cuda.synchronize()
-        torch_module.cuda.empty_cache()
-        torch_module.cuda.ipc_collect()
+    if not args.no_nvmolkit:
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
     gc.collect()
 
 
