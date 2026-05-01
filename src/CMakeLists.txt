@@ -65,9 +65,8 @@ target_link_libraries(
 target_include_directories(morganFingerprint PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(symmetricEigenSolver symmetric_eigensolver.cu)
-target_link_libraries(
-  symmetricEigenSolver PRIVATE CUDA::cudart CUDA::cusolver CUDA::cublas
-                               cuda_error_check device)
+target_link_libraries(symmetricEigenSolver PRIVATE CUDA::cudart
+                                                   cuda_error_check device)
 target_include_directories(symmetricEigenSolver
                            PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
