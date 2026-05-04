@@ -18,13 +18,52 @@
 import importlib
 import importlib.util
 import json
+import os
 
 import pytest
 
+from rdkit import Chem
+
 import nvmolkit.autotune as autotune
 from nvmolkit.autotune import _calibration, _core, _ff_common
-from nvmolkit.substructure import SubstructSearchConfig
+from nvmolkit.autotune.tune_substructure import (
+    _default_substruct_search_space,
+    _suggest_preprocessing_threads,
+)
+from nvmolkit.substructure import (
+    SubstructSearchConfig,
+    countSubstructMatches,
+    getSubstructMatches,
+    hasSubstructMatch,
+)
 from nvmolkit.types import HardwareOptions
+
+
+SDF_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    "..",
+    "tests",
+    "test_data",
+    "MMFF94_dative.sdf",
+)
+
+
+def _load_test_mols(num_mols: int) -> list:
+    """Load a small batch of MMFF molecules from the project's test data."""
+    if not os.path.exists(SDF_PATH):
+        pytest.skip(f"Test data file not found: {SDF_PATH}")
+    supplier = Chem.SDMolSupplier(SDF_PATH, removeHs=False, sanitize=True)
+    molecules = []
+    for i, mol in enumerate(supplier):
+        if mol is None:
+            continue
+        if i >= num_mols:
+            break
+        molecules.append(mol)
+    if len(molecules) < num_mols:
+        pytest.skip(f"Expected {num_mols} molecules, found {len(molecules)}")
+    return molecules
 
 
 # =============================================================================
@@ -36,6 +75,7 @@ def test_import_without_optuna_succeeds():
     """Importing the autotune package must never depend on optuna."""
     importlib.reload(autotune)
     assert hasattr(autotune, "is_available")
+    assert hasattr(autotune, "tune_substructure")
 
 
 def test_is_available_matches_find_spec():
@@ -187,6 +227,70 @@ def test_default_ff_search_space_caps_batches_per_gpu_by_cpu_count():
     assert space_64gpu["batchesPerGpu"] == (1, 1)
 
 
+def test_default_substruct_search_space_caps_per_pool():
+    """Substruct: workerThreads capped per-GPU, preprocessingThreads capped at cpus."""
+    space_1gpu = _default_substruct_search_space(num_gpus=1, cpus=16)
+    space_4gpu = _default_substruct_search_space(num_gpus=4, cpus=16)
+    space_64gpu = _default_substruct_search_space(num_gpus=64, cpus=16)
+
+    assert space_1gpu["workerThreads"] == (1, 16)
+    assert space_4gpu["workerThreads"] == (1, 4)
+    assert space_64gpu["workerThreads"] == (1, 1)
+
+    assert space_1gpu["preprocessingThreads"] == (1, 16)
+    assert space_4gpu["preprocessingThreads"] == (1, 16)
+    assert space_64gpu["preprocessingThreads"] == (1, 16)
+
+    assert space_1gpu["batchSize"] == (128, 8192, "log")
+
+
+class _RecordingTrial:
+    """Stub Optuna trial that records the bounds passed to ``suggest_int``."""
+
+    def __init__(self, picker=lambda low, high: low):
+        self.calls: list[dict] = []
+        self.picker = picker
+
+    def suggest_int(self, name: str, low: int, high: int, log: bool = False) -> int:
+        self.calls.append({"name": name, "low": low, "high": high, "log": log})
+        return int(self.picker(low, high))
+
+
+def test_suggest_preprocessing_threads_clamps_to_remaining_cpu_budget():
+    """``preprocessingThreads`` is clamped by ``cpus - num_gpus * workerThreads``."""
+    trial = _RecordingTrial()
+    spec = (1, 32)
+    value = _suggest_preprocessing_threads(trial, spec, worker_threads=6, num_gpus=2, cpus=16)
+    assert trial.calls == [{"name": "preprocessingThreads", "low": 1, "high": 4, "log": False}]
+    assert value == 1
+
+
+def test_suggest_preprocessing_threads_respects_low_floor_when_budget_exhausted():
+    """When the joint CPU budget is exhausted, the low bound is preserved."""
+    trial = _RecordingTrial(picker=lambda low, high: high)
+    spec = (4, 32)
+    value = _suggest_preprocessing_threads(trial, spec, worker_threads=8, num_gpus=2, cpus=16)
+    assert trial.calls == [{"name": "preprocessingThreads", "low": 4, "high": 4, "log": False}]
+    assert value == 4
+
+
+def test_suggest_preprocessing_threads_does_not_clamp_when_budget_available():
+    """``high`` remains the user-specified upper bound when CPU budget allows."""
+    trial = _RecordingTrial(picker=lambda low, high: high)
+    spec = (1, 8)
+    value = _suggest_preprocessing_threads(trial, spec, worker_threads=2, num_gpus=2, cpus=32)
+    assert trial.calls == [{"name": "preprocessingThreads", "low": 1, "high": 8, "log": False}]
+    assert value == 8
+
+
+def test_suggest_preprocessing_threads_propagates_log_flag():
+    """A ``"log"`` spec is forwarded through clamping as a log-uniform suggestion."""
+    trial = _RecordingTrial()
+    spec = (1, 32, "log")
+    _suggest_preprocessing_threads(trial, spec, worker_threads=2, num_gpus=1, cpus=8)
+    assert trial.calls == [{"name": "preprocessingThreads", "low": 1, "high": 6, "log": True}]
+
+
 def test_resolve_num_gpus_prefers_explicit_list():
     """Explicit gpuIds override CUDA-reported count."""
     assert _ff_common.resolve_num_gpus([0, 1, 2]) == 3
@@ -300,3 +404,62 @@ def test_run_study_returns_completed_result(monkeypatch):
     assert result.calibration_size == 10
     assert isinstance(result.study, optuna.Study)
     assert result.best_throughput > 0
+
+
+# =============================================================================
+# End-to-end smoke tests for tune_substructure.
+# =============================================================================
+
+
+@pytest.fixture
+def small_mols():
+    return _load_test_mols(num_mols=4)
+
+
+def test_tune_substructure_rejects_unknown_api():
+    """``api`` must be one of the three supported substructure entry points."""
+    pytest.importorskip("optuna")
+    targets = [Chem.MolFromSmiles("CCO")]
+    queries = [Chem.MolFromSmarts("C")]
+    with pytest.raises(ValueError, match="hasSubstructMatch"):
+        autotune.tune_substructure(targets, queries, api=lambda *args, **kwargs: None, n_trials=1)
+
+
+def test_tune_substructure_rejects_empty_targets():
+    pytest.importorskip("optuna")
+    queries = [Chem.MolFromSmarts("C")]
+    with pytest.raises(ValueError, match="targets"):
+        autotune.tune_substructure([], queries, n_trials=1)
+
+
+def test_tune_substructure_rejects_empty_queries():
+    pytest.importorskip("optuna")
+    targets = [Chem.MolFromSmiles("CCO")]
+    with pytest.raises(ValueError, match="queries"):
+        autotune.tune_substructure(targets, [], n_trials=1)
+
+
+@pytest.mark.parametrize("api", [hasSubstructMatch, countSubstructMatches, getSubstructMatches])
+def test_tune_substructure_smoke(small_mols, api):
+    pytest.importorskip("optuna")
+    queries = [Chem.MolFromSmarts("C"), Chem.MolFromSmarts("CO")]
+
+    result = autotune.tune_substructure(
+        small_mols,
+        queries,
+        api=api,
+        n_trials=2,
+        target_seconds_per_trial=30.0,
+        calibration_fraction=1.0,
+        calibration_max_size=len(small_mols),
+        seed=0,
+    )
+
+    assert isinstance(result.best_config, SubstructSearchConfig)
+    assert result.best_throughput > 0
+    assert result.n_trials_run == 2
+    assert result.best_config.batchSize >= 1
+    assert result.best_config.workerThreads >= 1
+    assert result.best_config.preprocessingThreads >= 1
+
+    api(small_mols, queries, result.best_config)

@@ -30,6 +30,7 @@ from nvmolkit.autotune._core import (
     is_optuna_available,
 )
 from nvmolkit.autotune._persistence import load, save
+from nvmolkit.autotune.tune_substructure import tune_substructure
 
 
 def is_available() -> bool:
@@ -45,4 +46,5 @@ __all__ = [
     "is_optuna_available",
     "load",
     "save",
+    "tune_substructure",
 ]
