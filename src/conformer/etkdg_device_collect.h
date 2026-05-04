@@ -16,55 +16,17 @@
 #ifndef NVMOLKIT_ETKDG_DEVICE_COLLECT_H
 #define NVMOLKIT_ETKDG_DEVICE_COLLECT_H
 
-#include <cuda_runtime.h>
-
 #include <cstdint>
-#include <mutex>
-#include <unordered_map>
 #include <vector>
 
-#include "device_coord_result.h"
+#include "device_coord_collector.h"
 #include "device_vector.h"
 
 namespace nvMolKit {
 namespace detail {
 
 /**
- * @brief Thread-local accumulator of ETKDG batch outputs in device-output mode.
- *
- * Each OpenMP worker writes into its own DeviceCoordCollector. Successful conformers from a
- * batch are appended to @ref positions in packed 3D layout (x,y,z per atom, conformer-major)
- * by @ref appendActive. Per-conformer metadata is held on the host (cheap) for later
- * stitching in @ref finalizeOnTarget.
- *
- * The accumulator and its buffers live on the GPU identified by @ref gpuId. All device
- * operations execute on @ref stream.
- */
-struct DeviceCoordCollector {
-  int                       gpuId  = -1;
-  cudaStream_t              stream = nullptr;
-  AsyncDeviceVector<double> positions;   //!< Packed 3D, length = sum(atomCounts)*3
-  std::vector<int>          atomCounts;  //!< One per accumulated conformer
-  std::vector<int>          molIds;      //!< Global molecule index per accumulated conformer
-};
-
-/**
- * @brief Shared cap-tracking state across DeviceCoordCollectors.
- *
- * ETKDG's scheduler can dispatch many parallel attempts for a single molecule and they may all
- * succeed in the same iteration; only @c maxConformersPerMol of them should appear in the final
- * output. This struct provides shared bookkeeping so that worker threads collectively keep at
- * most that many conformers per molecule. The mutex guards reads/writes to @ref keptPerMol; an
- * @c -1 value of @ref maxConformersPerMol disables the cap.
- */
-struct DeviceCoordCollectorCap {
-  std::mutex                   mutex;
-  std::unordered_map<int, int> keptPerMol;
-  int                          maxConformersPerMol = -1;
-};
-
-/**
- * @brief Append the active subset of a batch's positions to @p collector.
+ * @brief Append the active subset of an ETKDG batch's positions to @p collector.
  *
  * Reads the per-conformer @p active flags from device, compacts the surviving conformers'
  * positions in 4D->3D layout up to the per-molecule cap encoded in @p cap, and appends them
@@ -93,21 +55,6 @@ void appendActive(const AsyncDeviceVector<double>&  srcPositions,
                   const std::vector<int>&           batchGlobalMolIds,
                   DeviceCoordCollectorCap&          cap,
                   DeviceCoordCollector&             collector);
-
-/**
- * @brief Stitch all per-thread DeviceCoordCollectors into a single DeviceCoordResult on @p targetGpu.
- *
- * Concatenates per-thread positions onto @p targetGpu using @ref copyDeviceToDeviceAsync,
- * computes CSR `atomStarts`, and assigns per-molecule `confIndices` deterministically by walking
- * partials in the supplied order and counting per molecule. All resulting buffers are allocated
- * and live on @p targetGpu.
- *
- * @note This call is synchronous on the target stream by the time it returns: every contributing
- *       partial stream has been waited on via cross-stream events, and a final
- *       `cudaStreamSynchronize` ensures the result is visible. ETKDG has no energies/converged
- *       fields, so those members of the returned result are left empty.
- */
-DeviceCoordResult finalizeOnTarget(std::vector<DeviceCoordCollector>& collectors, int targetGpu, int nMols);
 
 }  // namespace detail
 }  // namespace nvMolKit

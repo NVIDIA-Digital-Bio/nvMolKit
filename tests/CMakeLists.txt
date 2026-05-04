@@ -178,6 +178,7 @@ add_executable(test_etkdg_device_output test_etkdg_device_output.cu)
 target_link_libraries(
   test_etkdg_device_output
   PRIVATE etkdg
+          device_coord_collector
           etkdg_stages
           dist_geom
           device

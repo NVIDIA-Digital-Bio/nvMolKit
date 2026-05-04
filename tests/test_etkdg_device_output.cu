@@ -24,6 +24,7 @@
 
 #include "cuda_error_check.h"
 #include "device.h"
+#include "device_coord_collector.h"
 #include "device_coord_result.h"
 #include "etkdg.h"
 
@@ -99,6 +100,27 @@ TEST(EmbedMoleculesDeviceOutput, EthanolDeviceModeShape) {
     }
   }
   EXPECT_TRUE(anyNonZero);
+}
+
+TEST(EmbedMoleculesDeviceOutput, EmptyDeviceResultInitializesAtomStarts) {
+  const WithDevice withDevice(0);
+  ScopedStream     stream;
+
+  std::vector<detail::DeviceCoordCollector> collectors(1);
+  collectors[0].gpuId  = 0;
+  collectors[0].stream = stream.stream();
+  collectors[0].positions.setStream(stream.stream());
+
+  const auto result     = detail::finalizeOnTarget(collectors, /*targetGpu=*/0, /*nMols=*/2);
+  const auto atomStarts = downloadDeviceVector(result.atomStarts);
+
+  EXPECT_EQ(result.gpuId, 0);
+  EXPECT_EQ(result.nMols, 2);
+  EXPECT_EQ(result.positions.size(), 0u);
+  EXPECT_EQ(result.molIndices.size(), 0u);
+  EXPECT_EQ(result.confIndices.size(), 0u);
+  ASSERT_EQ(atomStarts.size(), 1u);
+  EXPECT_EQ(atomStarts[0], 0);
 }
 
 TEST(EmbedMoleculesDeviceOutput, MultipleMoleculesProduceCorrectIndexing) {
