@@ -66,3 +66,7 @@ target_include_directories(device_timings INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 add_library(thread_safe_queue INTERFACE)
 target_include_directories(thread_safe_queue
                            INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_library(p2p p2p.cpp)
+target_link_libraries(p2p PUBLIC CUDA::cudart cuda_error_check device)
+target_include_directories(p2p PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
