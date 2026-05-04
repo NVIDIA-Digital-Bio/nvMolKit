@@ -31,8 +31,7 @@ current environment::
         autotune.save(result.best_config, "etkdg_options.json")
 
 The ``tune_*`` functions return a :class:`TuneResult` whose ``best_config`` is
-a fully-populated :class:`~nvmolkit.types.HardwareOptions` (or
-:class:`~nvmolkit.substructure.SubstructSearchConfig`) suitable for passing
+a fully-populated :class:`~nvmolkit.types.HardwareOptions` suitable for passing
 directly into the corresponding API on the full workload.
 """
 
@@ -46,7 +45,6 @@ from nvmolkit.autotune._persistence import load, save
 from nvmolkit.autotune.tune_batched_forcefield import tune_batched_forcefield
 from nvmolkit.autotune.tune_embed_molecules import tune_embed_molecules
 from nvmolkit.autotune.tune_mmff_optimize import tune_mmff_optimize
-from nvmolkit.autotune.tune_substructure import tune_substructure
 from nvmolkit.autotune.tune_uff_optimize import tune_uff_optimize
 
 
@@ -66,6 +64,5 @@ __all__ = [
     "tune_batched_forcefield",
     "tune_embed_molecules",
     "tune_mmff_optimize",
-    "tune_substructure",
     "tune_uff_optimize",
 ]

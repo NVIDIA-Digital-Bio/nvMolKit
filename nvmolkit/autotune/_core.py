@@ -26,6 +26,7 @@ an Optuna study with that fixed calibration slice.
 from __future__ import annotations
 
 import importlib.util
+import math
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
@@ -316,9 +317,26 @@ def suggest_from_space(trial, name: str, spec: Any) -> Any:
 
 
 def collect_int_from_space(spec: Any) -> int:
-    """Return a representative integer from ``spec`` (used for default trials)."""
-    if isinstance(spec, tuple) and len(spec) >= 2:
-        return int(spec[0])
+    """Return a representative integer from ``spec`` (used for default trials).
+
+    For a uniform integer range ``(low, high)`` the arithmetic midpoint is
+    returned. For a log-uniform range ``(low, high, "log")`` the geometric
+    midpoint is returned (rounded to the nearest int, clamped to ``[low,
+    high]``). For a categorical list the first listed choice is returned, on
+    the convention that callers list their preferred default first. A bare
+    scalar is returned unchanged.
+    """
+    if isinstance(spec, tuple) and len(spec) == 3 and spec[2] == "log":
+        low, high, _ = spec
+        low_int = int(low)
+        high_int = int(high)
+        if low_int <= 0 or high_int <= 0:
+            raise ValueError(f"Log-uniform range {spec!r} requires strictly positive bounds.")
+        midpoint = int(round(math.sqrt(low_int * high_int)))
+        return max(low_int, min(high_int, midpoint))
+    if isinstance(spec, tuple) and len(spec) == 2:
+        low, high = spec
+        return (int(low) + int(high)) // 2
     if isinstance(spec, (list, tuple)) and spec:
         return int(spec[0])
     return int(spec)

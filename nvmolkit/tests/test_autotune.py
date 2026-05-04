@@ -22,17 +22,14 @@ import os
 import sys
 
 import pytest
+
 from rdkit import Chem
 from rdkit.Chem.AllChem import ETKDGv3
 
 import nvmolkit.autotune as autotune
-from nvmolkit.autotune import _calibration, _core, _ff_common, tune_substructure as tune_substructure_mod
+from nvmolkit.autotune import _calibration, _core, _ff_common
 from nvmolkit.autotune.tune_embed_molecules import _default_embed_search_space
-from nvmolkit.autotune.tune_substructure import (
-    _default_substruct_search_space,
-    _suggest_preprocessing_threads,
-)
-from nvmolkit.substructure import SubstructSearchConfig, hasSubstructMatch
+from nvmolkit.substructure import SubstructSearchConfig
 from nvmolkit.types import HardwareOptions
 
 
@@ -96,6 +93,20 @@ def test_import_without_optuna_succeeds():
     assert hasattr(autotune, "tune_embed_molecules")
 
 
+def test_tune_raises_clear_error_when_optuna_missing(monkeypatch):
+    """Calling a tune wrapper without optuna raises a helpful ImportError."""
+    monkeypatch.setitem(sys.modules, "optuna", None)
+    monkeypatch.setattr(_core, "is_optuna_available", lambda: False)
+    mols = [Chem.MolFromSmiles("CCO")]
+    params = ETKDGv3()
+    params.useRandomCoords = True
+    with pytest.raises(ImportError) as exc_info:
+        autotune.tune_embed_molecules(mols, params, n_trials=1)
+    message = str(exc_info.value)
+    assert "optuna" in message
+    assert "conda" in message
+
+
 def test_is_available_matches_find_spec():
     """``is_available`` reflects optuna's importability without importing it."""
     expected = importlib.util.find_spec("optuna") is not None
@@ -109,20 +120,6 @@ def test_install_hint_mentions_optuna_and_conda_forge():
     assert "optuna" in hint
     assert "pip install" in hint
     assert "conda" in hint
-
-
-def test_tune_raises_clear_error_when_optuna_missing(monkeypatch):
-    """Calling a tune wrapper without optuna raises a helpful ImportError."""
-    monkeypatch.setitem(sys.modules, "optuna", None)
-    monkeypatch.setattr(_core, "is_optuna_available", lambda: False)
-    mols = [Chem.MolFromSmiles("CCO")]
-    params = ETKDGv3()
-    params.useRandomCoords = True
-    with pytest.raises(ImportError) as exc_info:
-        autotune.tune_embed_molecules(mols, params, n_trials=1)
-    message = str(exc_info.value)
-    assert "optuna" in message
-    assert "conda" in message
 
 
 def test_hardware_options_to_from_dict_roundtrip():
@@ -266,13 +263,6 @@ def test_default_embed_search_space_caps_per_pool():
     assert space["preprocessingThreads"] == (1, 16)
 
 
-def test_default_substruct_search_space_caps_per_pool():
-    """Substruct: workerThreads.max = cpus/numGpus; preprocessing.max = cpus."""
-    space = _default_substruct_search_space(num_gpus=4, cpus=16)
-    assert space["workerThreads"] == (1, 4)
-    assert space["preprocessingThreads"] == (1, 16)
-
-
 def test_resolve_num_gpus_prefers_explicit_list():
     """Explicit gpuIds override CUDA-reported count."""
     assert _ff_common.resolve_num_gpus([0, 1, 2]) == 3
@@ -295,105 +285,6 @@ def test_resolve_cpu_budget_rejects_non_positive():
         _ff_common.resolve_cpu_budget(0)
     with pytest.raises(ValueError):
         _ff_common.resolve_cpu_budget(-1)
-
-
-class _FakeTrial:
-    """Minimal optuna trial stand-in capturing ``suggest_int`` arguments."""
-
-    def __init__(self):
-        self.calls: list[tuple[str, int, int, bool]] = []
-
-    def suggest_int(self, name: str, low: int, high: int, log: bool = False) -> int:
-        self.calls.append((name, int(low), int(high), bool(log)))
-        return int(high)
-
-
-def test_suggest_preprocessing_threads_clamps_to_remaining_cpu_budget():
-    """Joint CPU constraint: preprocessing high = cpus - numGpus*workerThreads."""
-    trial = _FakeTrial()
-    spec = (1, 32)
-    value = _suggest_preprocessing_threads(trial, spec, worker_threads=4, num_gpus=2, cpus=20)
-    assert trial.calls == [("preprocessingThreads", 1, 12, False)]
-    assert value == 12
-
-
-def test_suggest_preprocessing_threads_floors_at_one_when_workers_saturate_cpu():
-    """When workers consume every core, preprocessing collapses to its low bound."""
-    trial = _FakeTrial()
-    spec = (1, 32)
-    value = _suggest_preprocessing_threads(trial, spec, worker_threads=11, num_gpus=2, cpus=20)
-    assert trial.calls == [("preprocessingThreads", 1, 1, False)]
-    assert value == 1
-
-
-def test_suggest_preprocessing_threads_respects_user_low_bound():
-    """User-provided low bound is preserved even when remaining budget is smaller."""
-    trial = _FakeTrial()
-    spec = (4, 32)
-    value = _suggest_preprocessing_threads(trial, spec, worker_threads=10, num_gpus=2, cpus=20)
-    assert trial.calls == [("preprocessingThreads", 4, 4, False)]
-    assert value == 4
-
-
-def test_substructure_trial_runner_honors_joint_constraint(monkeypatch):
-    """End-to-end: substructure trial runner samples preprocessing within budget."""
-    pytest.importorskip("optuna")
-    import optuna
-
-    cpu_budget = 16
-    num_gpus = 2
-
-    targets = [Chem.MolFromSmiles(s) for s in ["CCO", "CC", "c1ccccc1", "CCN"]]
-    queries = [Chem.MolFromSmarts("C")]
-
-    def fake_api(target_slice, _queries, _config):
-        return [[False] * len(_queries) for _ in target_slice]
-
-    monkeypatch.setattr(tune_substructure_mod, "_API_FUNCTIONS", {fake_api})
-
-    sampled: list[dict] = []
-
-    def fake_run_study(*, default_runner, trial_runner, build_config, initial_state, **_kwargs):
-        study = optuna.create_study(direction="maximize", sampler=optuna.samplers.RandomSampler(seed=0))
-
-        def objective(trial):
-            trial_runner(trial, initial_state)
-            sampled.append(dict(trial.params))
-            return 1.0
-
-        study.optimize(objective, n_trials=20)
-        return _core.TuneResult(
-            best_config=build_config(dict(study.best_trial.params)),
-            best_throughput=1.0,
-            best_params=dict(study.best_trial.params),
-            calibration_size=len(initial_state.indices),
-            n_trials_run=len(study.trials),
-            study=study,
-        )
-
-    monkeypatch.setattr(tune_substructure_mod, "run_study", fake_run_study)
-
-    autotune.tune_substructure(
-        targets,
-        queries,
-        api=fake_api,
-        gpuIds=[0, 1],
-        cpu_budget=cpu_budget,
-        n_trials=20,
-        target_seconds_per_trial=1.0,
-        calibration_fraction=1.0,
-        calibration_max_size=len(targets),
-        seed=0,
-    )
-
-    assert sampled, "Trial runner must have produced at least one sample"
-    for params in sampled:
-        worker = int(params["workerThreads"])
-        prep = int(params["preprocessingThreads"])
-        assert num_gpus * worker + prep <= cpu_budget, (
-            f"Joint CPU budget violated: numGpus*worker + prep = {num_gpus}*{worker} + {prep} > {cpu_budget}"
-        )
-        assert worker <= cpu_budget // num_gpus, f"workerThreads {worker} exceeds per-GPU cap {cpu_budget // num_gpus}"
 
 
 # =============================================================================
@@ -618,26 +509,3 @@ def test_tune_batched_forcefield_smoke(small_optimized_mols):
     ff = MMFFBatchedForcefield(fresh, hardwareOptions=result.best_config)
     energies, _ = ff.minimize(maxIters=10)
     assert len(energies) == len(fresh)
-
-
-def test_tune_substructure_smoke():
-    pytest.importorskip("optuna")
-    targets = [Chem.MolFromSmiles(s) for s in ["CCO", "CCCC", "c1ccccc1", "CCN", "CCCO", "C1CCCCC1"]]
-    queries = [Chem.MolFromSmarts("C"), Chem.MolFromSmarts("CC")]
-
-    result = autotune.tune_substructure(
-        targets,
-        queries,
-        api=hasSubstructMatch,
-        n_trials=2,
-        target_seconds_per_trial=30.0,
-        calibration_fraction=1.0,
-        calibration_max_size=len(targets),
-        seed=0,
-    )
-    assert isinstance(result.best_config, SubstructSearchConfig)
-    assert result.best_throughput > 0
-    assert result.n_trials_run == 2
-
-    matches = hasSubstructMatch(targets, queries, result.best_config)
-    assert matches.shape == (len(targets), len(queries))
