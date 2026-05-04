@@ -20,10 +20,10 @@
 #include <stdexcept>
 #include <unordered_map>
 
-#include "coord_collect.h"
 #include "cuda_error_check.h"
 #include "device.h"
 #include "etkdg_device_collect.h"
+#include "p2p.h"
 
 namespace nvMolKit {
 namespace detail {

@@ -114,7 +114,7 @@ target_link_libraries(
   PUBLIC bfgs conformer_types
   PRIVATE ${RDKit_LIBS}
           conformer_pruning
-          coord_collect
+          p2p
           device
           device_vector
           dist_geom

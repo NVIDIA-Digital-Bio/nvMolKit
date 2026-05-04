@@ -34,11 +34,6 @@ target_link_libraries(test_cuda_error_check PRIVATE cuda_error_check)
 add_executable(test_device test_device.cpp)
 target_link_libraries(test_device PRIVATE device cuda_error_check CUDA::cudart)
 
-add_executable(test_coord_collect test_coord_collect.cpp)
-target_link_libraries(
-  test_coord_collect PRIVATE coord_collect device device_vector
-                             cuda_error_check CUDA::cudart)
-
 add_executable(test_p2p test_p2p.cpp)
 target_link_libraries(test_p2p PRIVATE p2p device device_vector
                                        cuda_error_check CUDA::cudart)
@@ -327,7 +322,6 @@ set(TEST_LIST
     test_openmp_helpers
     test_conformer_checkers
     test_coordgen
-    test_coord_collect
     test_p2p
     test_cuda_error_check
     test_device
