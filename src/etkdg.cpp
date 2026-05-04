@@ -40,10 +40,10 @@ namespace {
 
 class ETKDGCollectDeviceCoordsStage final : public detail::ETKDGStage {
  public:
-  ETKDGCollectDeviceCoordsStage(std::vector<int>                    batchGlobalMolIds,
-                                int                                 dim,
-                                detail::DeviceCoordCollectorCap&    cap,
-                                detail::DeviceCoordCollector&       collector)
+  ETKDGCollectDeviceCoordsStage(std::vector<int>                 batchGlobalMolIds,
+                                int                              dim,
+                                detail::DeviceCoordCollectorCap& cap,
+                                detail::DeviceCoordCollector&    collector)
       : batchGlobalMolIds_(std::move(batchGlobalMolIds)),
         dim_(dim),
         cap_(cap),
@@ -405,10 +405,8 @@ std::optional<DeviceCoordResult> embedMolecules(const std::vector<RDKit::ROMol*>
           for (size_t i = 0; i < molIds.size(); ++i) {
             originalMolIds[i] = sortedToOriginal[static_cast<size_t>(molIds[i])];
           }
-          stages.push_back(std::make_unique<ETKDGCollectDeviceCoordsStage>(std::move(originalMolIds),
-                                                                                   dim,
-                                                                                   collectorsCap,
-                                                                                   collector));
+          stages.push_back(
+            std::make_unique<ETKDGCollectDeviceCoordsStage>(std::move(originalMolIds), dim, collectorsCap, collector));
         } else {
           stages.push_back(std::make_unique<detail::ETKDGUpdateConformersStage>(batchMolsWithConfs,
                                                                                 batchEargs,

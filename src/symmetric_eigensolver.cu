@@ -15,7 +15,6 @@
 
 #include <cuda_runtime.h>
 #include <curand_kernel.h>
-#include <cusolverDn.h>
 
 #include <cub/cub.cuh>
 #include <stdexcept>

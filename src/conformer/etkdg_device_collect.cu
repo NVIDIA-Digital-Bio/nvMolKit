@@ -66,12 +66,12 @@ __global__ void packKernel4DTo3D(const double* __restrict__ srcPositions,
 }  // namespace
 
 void appendActive(const AsyncDeviceVector<double>&  srcPositions,
-                  const std::vector<int>&            srcAtomStarts,
-                  const AsyncDeviceVector<uint8_t>&  active,
-                  const int                          dim,
-                  const std::vector<int>&            batchGlobalMolIds,
-                  DeviceCoordCollectorCap&           cap,
-                  DeviceCoordCollector&              collector) {
+                  const std::vector<int>&           srcAtomStarts,
+                  const AsyncDeviceVector<uint8_t>& active,
+                  const int                         dim,
+                  const std::vector<int>&           batchGlobalMolIds,
+                  DeviceCoordCollectorCap&          cap,
+                  DeviceCoordCollector&             collector) {
   const int batchSize = static_cast<int>(srcAtomStarts.size()) - 1;
   if (batchSize <= 0) {
     return;
@@ -153,7 +153,9 @@ void appendActive(const AsyncDeviceVector<double>&  srcPositions,
   cudaCheckError(cudaStreamSynchronize(collector.stream));
 }
 
-DeviceCoordResult finalizeOnTarget(std::vector<DeviceCoordCollector>& collectors, const int targetGpu, const int nMols) {
+DeviceCoordResult finalizeOnTarget(std::vector<DeviceCoordCollector>& collectors,
+                                   const int                          targetGpu,
+                                   const int                          nMols) {
   // Pre-enable peer access from target to every contributing GPU once.
   for (const auto& collector : collectors) {
     if (collector.gpuId != targetGpu && !collector.atomCounts.empty()) {

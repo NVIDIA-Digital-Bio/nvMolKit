@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES.
 # All rights reserved. SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not
@@ -15,9 +15,11 @@
 
 # Header-only interface library: exposes src/conformer/ so consumers can reach
 # device_coord_result.h, conformer_info.h, coord_collect.h, etc. via unqualified
-# includes. Link against this (PUBLIC) when those types appear in your API surface.
+# includes. Link against this (PUBLIC) when those types appear in your API
+# surface.
 add_library(conformer_types INTERFACE)
-target_include_directories(conformer_types INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(conformer_types
+                           INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(coord_collect coord_collect.cpp)
 target_link_libraries(coord_collect PUBLIC CUDA::cudart cuda_error_check device

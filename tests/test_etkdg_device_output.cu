@@ -62,10 +62,16 @@ TEST(EmbedMoleculesDeviceOutput, EthanolDeviceModeShape) {
   params.pruneRmsThresh                       = -1.0;
 
   std::vector<RDKit::ROMol*> mols   = {ethanol.get()};
-  const auto                 result = nvMolKit::embedMolecules(mols, params, /*confsPerMolecule=*/1, -1, false, nullptr,
-                                                               singleThreadOptions(),
-                                                               nvMolKit::BfgsBackend::PER_MOLECULE,
-                                                               nvMolKit::CoordinateOutput::DEVICE, /*targetGpu=*/0);
+  const auto                 result = nvMolKit::embedMolecules(mols,
+                                               params,
+                                               /*confsPerMolecule=*/1,
+                                               -1,
+                                               false,
+                                               nullptr,
+                                               singleThreadOptions(),
+                                               nvMolKit::BfgsBackend::PER_MOLECULE,
+                                               nvMolKit::CoordinateOutput::DEVICE,
+                                               /*targetGpu=*/0);
   ASSERT_TRUE(result.has_value());
   EXPECT_EQ(result->gpuId, 0);
   EXPECT_EQ(ethanol->getNumConformers(), 0u) << "DEVICE mode must not modify the host RDKit conformer list.";
@@ -110,9 +116,16 @@ TEST(EmbedMoleculesDeviceOutput, MultipleMoleculesProduceCorrectIndexing) {
   params.pruneRmsThresh                       = -1.0;
 
   std::vector<RDKit::ROMol*> mols   = {methanol.get(), propanol.get()};
-  const auto                 result =
-    nvMolKit::embedMolecules(mols, params, /*confsPerMolecule=*/2, -1, false, nullptr, singleThreadOptions(),
-                             nvMolKit::BfgsBackend::PER_MOLECULE, nvMolKit::CoordinateOutput::DEVICE, /*targetGpu=*/0);
+  const auto                 result = nvMolKit::embedMolecules(mols,
+                                               params,
+                                               /*confsPerMolecule=*/2,
+                                               -1,
+                                               false,
+                                               nullptr,
+                                               singleThreadOptions(),
+                                               nvMolKit::BfgsBackend::PER_MOLECULE,
+                                               nvMolKit::CoordinateOutput::DEVICE,
+                                               /*targetGpu=*/0);
   ASSERT_TRUE(result.has_value());
 
   const auto molIndices = downloadDeviceVector(result->molIndices);
@@ -137,8 +150,7 @@ TEST(EmbedMoleculesDeviceOutput, MultipleMoleculesProduceCorrectIndexing) {
   }
   EXPECT_EQ(seenPerMol[0], 2);
   EXPECT_EQ(seenPerMol[1], 2);
-  ASSERT_EQ(positions.size(),
-            static_cast<size_t>(2u * methanol->getNumAtoms() + 2u * propanol->getNumAtoms()) * 3u);
+  ASSERT_EQ(positions.size(), static_cast<size_t>(2u * methanol->getNumAtoms() + 2u * propanol->getNumAtoms()) * 3u);
   for (const double pos : positions) {
     EXPECT_TRUE(std::isfinite(pos));
   }
@@ -153,7 +165,13 @@ TEST(EmbedMoleculesDeviceOutput, RejectsPruningInDeviceMode) {
   params.pruneRmsThresh                       = 0.5;
 
   std::vector<RDKit::ROMol*> mols = {ethanol.get()};
-  EXPECT_THROW(nvMolKit::embedMolecules(mols, params, 1, -1, false, nullptr, singleThreadOptions(),
+  EXPECT_THROW(nvMolKit::embedMolecules(mols,
+                                        params,
+                                        1,
+                                        -1,
+                                        false,
+                                        nullptr,
+                                        singleThreadOptions(),
                                         nvMolKit::BfgsBackend::PER_MOLECULE,
                                         nvMolKit::CoordinateOutput::DEVICE),
                std::invalid_argument);
@@ -168,11 +186,17 @@ TEST(EmbedMoleculesDeviceOutput, MultipleConformersMatchPerMolIndices) {
   params.randomSeed                           = 42;
   params.pruneRmsThresh                       = -1.0;
 
-  std::vector<RDKit::ROMol*> mols = {propane.get()};
-  const auto                 result =
-    nvMolKit::embedMolecules(mols, params, /*confsPerMolecule=*/3, -1, false, nullptr, singleThreadOptions(),
-                             nvMolKit::BfgsBackend::PER_MOLECULE, nvMolKit::CoordinateOutput::DEVICE,
-                             /*targetGpu=*/0);
+  std::vector<RDKit::ROMol*> mols   = {propane.get()};
+  const auto                 result = nvMolKit::embedMolecules(mols,
+                                               params,
+                                               /*confsPerMolecule=*/3,
+                                               -1,
+                                               false,
+                                               nullptr,
+                                               singleThreadOptions(),
+                                               nvMolKit::BfgsBackend::PER_MOLECULE,
+                                               nvMolKit::CoordinateOutput::DEVICE,
+                                               /*targetGpu=*/0);
   ASSERT_TRUE(result.has_value());
   const auto molIndices = downloadDeviceVector(result->molIndices);
   const auto confIdx    = downloadDeviceVector(result->confIndices);

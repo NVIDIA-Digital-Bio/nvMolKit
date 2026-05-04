@@ -87,12 +87,12 @@ struct DeviceCoordCollectorCap {
  * @p collector.stream.
  */
 void appendActive(const AsyncDeviceVector<double>&  srcPositions,
-                  const std::vector<int>&            srcAtomStarts,
-                  const AsyncDeviceVector<uint8_t>&  active,
-                  int                                dim,
-                  const std::vector<int>&            batchGlobalMolIds,
-                  DeviceCoordCollectorCap&           cap,
-                  DeviceCoordCollector&              collector);
+                  const std::vector<int>&           srcAtomStarts,
+                  const AsyncDeviceVector<uint8_t>& active,
+                  int                               dim,
+                  const std::vector<int>&           batchGlobalMolIds,
+                  DeviceCoordCollectorCap&          cap,
+                  DeviceCoordCollector&             collector);
 
 /**
  * @brief Stitch all per-thread DeviceCoordCollectors into a single DeviceCoordResult on @p targetGpu.
