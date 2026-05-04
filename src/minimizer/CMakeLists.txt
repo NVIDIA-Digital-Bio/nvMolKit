@@ -25,7 +25,7 @@ target_include_directories(bfgs PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 add_library(bfgs_common bfgs_common.cpp)
 target_link_libraries(
   bfgs_common
-  PUBLIC host_vector device
+  PUBLIC host_vector device conformer_types
   PRIVATE ${RDKit_LIBS} OpenMP::OpenMP_CXX)
 target_include_directories(bfgs_common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 

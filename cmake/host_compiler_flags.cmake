@@ -13,13 +13,6 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-# Pre-cxx11 ABI must apply to every translation unit (including third-party
-# headers used at build time), so it stays as a global compile definition.
-if(NVMOLKIT_BUILD_AGAINST_PIP_RDKIT)
-  message(STATUS "Using pre-cxx11 ABI")
-  add_compile_definitions(_GLIBCXX_USE_CXX11_ABI=0)
-endif()
-
 # Per-target host compile options. The CUDA half of nvmolkit_warnings is added
 # in cmake/device_compiler_flags.cmake.
 add_library(nvmolkit_warnings INTERFACE)
