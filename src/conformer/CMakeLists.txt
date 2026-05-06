@@ -16,3 +16,15 @@
 add_library(conformer_types INTERFACE)
 target_include_directories(conformer_types
                            INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_library(device_coord_collector device_coord_collector.cpp)
+target_link_libraries(
+  device_coord_collector
+  PUBLIC conformer_types device_vector
+  PRIVATE p2p device cuda_error_check)
+
+add_library(etkdg_device_collect etkdg_device_collect.cu)
+target_link_libraries(
+  etkdg_device_collect
+  PUBLIC conformer_types device_coord_collector device_vector
+  PRIVATE device cuda_error_check)

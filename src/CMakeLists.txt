@@ -97,7 +97,8 @@ add_library(
 target_link_libraries(
   etkdg_stages
   PUBLIC bfgs
-  PRIVATE device_vector
+  PRIVATE device
+          device_vector
           ${RDKit_LIBS}
           dg_batched_forcefield
           etk_batched_forcefield
@@ -110,12 +111,15 @@ target_include_directories(etkdg_stages PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 add_library(etkdg etkdg.cpp)
 target_link_libraries(
   etkdg
-  PUBLIC bfgs
+  PUBLIC bfgs conformer_types
   PRIVATE ${RDKit_LIBS}
           conformer_pruning
+          device
+          device_coord_collector
           device_vector
           dist_geom
           embedder_utils
+          etkdg_device_collect
           rdkit_dist_geom_flattened
           etkdg_impl
           etkdg_stages
