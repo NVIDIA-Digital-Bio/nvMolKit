@@ -118,7 +118,7 @@ class HardwareOptions:
         known = {"preprocessingThreads", "batchSize", "batchesPerGpu", "gpuIds"}
         unknown = set(data) - known
         if unknown:
-            raise ValueError(f"Unknown HardwareOptions keys: {sorted(unknown)}")
+            raise KeyError(f"Unknown HardwareOptions keys: {sorted(unknown)}")
         return cls(**{key: data[key] for key in known if key in data})
 
 
