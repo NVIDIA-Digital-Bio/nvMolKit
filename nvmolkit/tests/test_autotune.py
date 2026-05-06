@@ -19,13 +19,16 @@ import importlib
 import importlib.util
 import json
 import os
+import sys
 
 import pytest
 
 from rdkit import Chem
+from rdkit.Chem.AllChem import ETKDGv3
 
 import nvmolkit.autotune as autotune
 from nvmolkit.autotune import _calibration, _core, _ff_common
+from nvmolkit.autotune.tune_embed_molecules import _default_embed_search_space
 from nvmolkit.autotune.tune_substructure import (
     _default_substruct_search_space,
     _suggest_preprocessing_threads,
@@ -36,6 +39,7 @@ from nvmolkit.substructure import (
     getSubstructMatches,
     hasSubstructMatch,
 )
+
 from nvmolkit.types import HardwareOptions
 
 
@@ -66,6 +70,27 @@ def _load_test_mols(num_mols: int) -> list:
     return molecules
 
 
+def _embed_mols_for_optimize(num_mols: int, num_confs: int = 2) -> list:
+    """Return molecules with conformers attached, suitable for FF tests."""
+    base = _load_test_mols(num_mols)
+    embedded = []
+    params = ETKDGv3()
+    params.useRandomCoords = True
+    from nvmolkit.embedMolecules import EmbedMolecules
+
+    fresh = []
+    for mol in base:
+        copy = Chem.Mol(mol)
+        copy.RemoveAllConformers()
+        fresh.append(copy)
+    EmbedMolecules(fresh, params, confsPerMolecule=num_confs)
+    for mol in fresh:
+        if mol.GetNumConformers() == 0:
+            pytest.skip("Failed to embed conformers for autotune test")
+        embedded.append(mol)
+    return embedded
+
+
 # =============================================================================
 # Always-on tests: must pass with or without optuna installed.
 # =============================================================================
@@ -75,7 +100,21 @@ def test_import_without_optuna_succeeds():
     """Importing the autotune package must never depend on optuna."""
     importlib.reload(autotune)
     assert hasattr(autotune, "is_available")
-    assert hasattr(autotune, "tune_substructure")
+    assert hasattr(autotune, "tune_embed_molecules")
+
+
+def test_tune_raises_clear_error_when_optuna_missing(monkeypatch):
+    """Calling a tune wrapper without optuna raises a helpful ImportError."""
+    monkeypatch.setitem(sys.modules, "optuna", None)
+    monkeypatch.setattr(_core, "is_optuna_available", lambda: False)
+    mols = [Chem.MolFromSmiles("CCO")]
+    params = ETKDGv3()
+    params.useRandomCoords = True
+    with pytest.raises(ImportError) as exc_info:
+        autotune.tune_embed_molecules(mols, params, n_trials=1)
+    message = str(exc_info.value)
+    assert "optuna" in message
+    assert "conda" in message
 
 
 def test_is_available_matches_find_spec():
@@ -291,6 +330,13 @@ def test_suggest_preprocessing_threads_propagates_log_flag():
     assert trial.calls == [{"name": "preprocessingThreads", "low": 1, "high": 6, "log": True}]
 
 
+def test_default_embed_search_space_caps_per_pool():
+    """Embed: per-GPU pool capped at cpus/numGpus, total pool capped at cpus."""
+    space = _default_embed_search_space(num_gpus=4, cpus=16)
+    assert space["batchesPerGpu"] == (1, 4)
+    assert space["preprocessingThreads"] == (1, 16)
+
+
 def test_resolve_num_gpus_prefers_explicit_list():
     """Explicit gpuIds override CUDA-reported count."""
     assert _ff_common.resolve_num_gpus([0, 1, 2]) == 3
@@ -407,7 +453,7 @@ def test_run_study_returns_completed_result(monkeypatch):
 
 
 # =============================================================================
-# End-to-end smoke tests for tune_substructure.
+# End-to-end smoke tests for each tune_* wrapper.
 # =============================================================================
 
 
@@ -454,7 +500,6 @@ def test_tune_substructure_smoke(small_mols, api):
         calibration_max_size=len(small_mols),
         seed=0,
     )
-
     assert isinstance(result.best_config, SubstructSearchConfig)
     assert result.best_throughput > 0
     assert result.n_trials_run == 2
@@ -463,3 +508,126 @@ def test_tune_substructure_smoke(small_mols, api):
     assert result.best_config.preprocessingThreads >= 1
 
     api(small_mols, queries, result.best_config)
+
+
+@pytest.fixture
+def small_optimized_mols():
+    return _embed_mols_for_optimize(num_mols=3, num_confs=2)
+
+
+def test_tune_embed_molecules_smoke(small_mols):
+    pytest.importorskip("optuna")
+    params = ETKDGv3()
+    params.useRandomCoords = True
+
+    result = autotune.tune_embed_molecules(
+        small_mols,
+        params,
+        confsPerMolecule=1,
+        n_trials=2,
+        target_seconds_per_trial=30.0,
+        calibration_fraction=1.0,
+        calibration_max_size=len(small_mols),
+        seed=0,
+    )
+
+    assert isinstance(result.best_config, HardwareOptions)
+    assert result.best_throughput > 0
+    assert result.n_trials_run == 2
+    assert result.best_config.batchSize >= 1
+    assert result.best_config.batchesPerGpu >= 1
+    assert result.best_config.preprocessingThreads >= 1
+
+    fresh = [Chem.Mol(mol) for mol in small_mols]
+    for mol in fresh:
+        mol.RemoveAllConformers()
+    from nvmolkit.embedMolecules import EmbedMolecules
+
+    EmbedMolecules(fresh, params, confsPerMolecule=1, hardwareOptions=result.best_config)
+    assert all(mol.GetNumConformers() == 1 for mol in fresh)
+
+
+def test_tune_mmff_optimize_smoke(small_optimized_mols):
+    pytest.importorskip("optuna")
+    from rdkit.Chem import AllChem
+
+    if not all(AllChem.MMFFHasAllMoleculeParams(mol) for mol in small_optimized_mols):
+        pytest.skip("MMFF parameters unavailable for one or more molecules")
+
+    result = autotune.tune_mmff_optimize(
+        small_optimized_mols,
+        maxIters=20,
+        n_trials=2,
+        target_seconds_per_trial=30.0,
+        calibration_fraction=1.0,
+        calibration_max_size=len(small_optimized_mols),
+        seed=0,
+    )
+    assert isinstance(result.best_config, HardwareOptions)
+    assert result.best_throughput > 0
+    assert result.n_trials_run == 2
+
+    from nvmolkit.mmffOptimization import MMFFOptimizeMoleculesConfs
+
+    fresh = [Chem.Mol(mol) for mol in small_optimized_mols]
+    energies = MMFFOptimizeMoleculesConfs(fresh, maxIters=10, hardwareOptions=result.best_config)
+    assert len(energies) == len(fresh)
+
+
+def test_tune_uff_optimize_smoke(small_optimized_mols):
+    pytest.importorskip("optuna")
+    from rdkit.Chem import rdForceFieldHelpers
+
+    if not all(rdForceFieldHelpers.UFFHasAllMoleculeParams(mol) for mol in small_optimized_mols):
+        pytest.skip("UFF parameters unavailable for one or more molecules")
+
+    result = autotune.tune_uff_optimize(
+        small_optimized_mols,
+        maxIters=20,
+        n_trials=2,
+        target_seconds_per_trial=30.0,
+        calibration_fraction=1.0,
+        calibration_max_size=len(small_optimized_mols),
+        seed=0,
+    )
+    assert isinstance(result.best_config, HardwareOptions)
+    assert result.best_throughput > 0
+    assert result.n_trials_run == 2
+
+    from nvmolkit.uffOptimization import UFFOptimizeMoleculesConfs
+
+    fresh = [Chem.Mol(mol) for mol in small_optimized_mols]
+    energies = UFFOptimizeMoleculesConfs(fresh, maxIters=10, hardwareOptions=result.best_config)
+    assert len(energies) == len(fresh)
+
+
+def test_tune_batched_forcefield_smoke(small_optimized_mols):
+    pytest.importorskip("optuna")
+    from rdkit.Chem import AllChem
+
+    if not all(AllChem.MMFFHasAllMoleculeParams(mol) for mol in small_optimized_mols):
+        pytest.skip("MMFF parameters unavailable for one or more molecules")
+
+    from nvmolkit.batchedForcefield import MMFFBatchedForcefield
+
+    def factory(mols, hw_options):
+        return MMFFBatchedForcefield(mols, hardwareOptions=hw_options)
+
+    result = autotune.tune_batched_forcefield(
+        small_optimized_mols,
+        factory,
+        maxIters=20,
+        n_trials=2,
+        target_seconds_per_trial=30.0,
+        calibration_fraction=1.0,
+        calibration_max_size=len(small_optimized_mols),
+        seed=0,
+    )
+    assert isinstance(result.best_config, HardwareOptions)
+    assert result.best_throughput > 0
+    assert result.n_trials_run == 2
+
+    fresh = [Chem.Mol(mol) for mol in small_optimized_mols]
+    ff = MMFFBatchedForcefield(fresh, hardwareOptions=result.best_config)
+    energies, _ = ff.minimize(maxIters=10)
+    assert len(energies) == len(fresh)
