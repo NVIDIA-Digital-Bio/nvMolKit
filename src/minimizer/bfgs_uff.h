@@ -59,8 +59,12 @@ struct UFFMinimizeResult {
 //! \param gradTol Gradient convergence tolerance.
 //! \param vdwThresholds Per-molecule VDW cutoff distances.
 //! \param ignoreInterfragInteractions Per-molecule interfragment interaction flags.
-//! \param constraints Per-molecule constraint specifications (empty = no constraints). Must be
-//!                    empty when @p deviceInput is provided.
+//! \param constraints Per-molecule constraint specifications (empty = no constraints).
+//!                    Constraints read anchor positions from each mol's RDKit conformer at
+//!                    force-field construction time, so they are incompatible with @p deviceInput
+//!                    (whose positions never reach the host before contribs are built). To apply
+//!                    constraints, use the RDKit Mol + Conformer path (omit @p deviceInput) so
+//!                    anchor positions match the optimizer's starting coordinates.
 //! \param perfOptions Hardware and batching configuration.
 //! \param output Whether to write coordinates back into RDKit conformers (default) or return
 //!               them on-device as a DeviceCoordResult.

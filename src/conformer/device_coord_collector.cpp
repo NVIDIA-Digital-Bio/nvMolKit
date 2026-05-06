@@ -37,17 +37,25 @@ DeviceCoordResult finalizeOnTarget(std::vector<DeviceCoordCollector>& collectors
     }
   }
 
-  int totalConformers = 0;
-  int totalAtoms      = 0;
+  int  totalConformers = 0;
+  int  totalAtoms      = 0;
+  bool hasEnergies     = false;
+  bool hasConverged    = false;
   for (const auto& collector : collectors) {
     totalConformers += static_cast<int>(collector.atomCounts.size());
     for (const int natoms : collector.atomCounts) {
       totalAtoms += natoms;
     }
+    if (!collector.energies.empty()) {
+      hasEnergies = true;
+    }
+    if (!collector.converged.empty()) {
+      hasConverged = true;
+    }
   }
 
   const WithDevice  withTarget(targetGpu);
-  ScopedStream      targetStream("ETKDG DeviceCoord Finalize");
+  ScopedStream      targetStream("DeviceCoord Finalize");
   DeviceCoordResult result;
   result.gpuId       = targetGpu;
   result.nMols       = nMols;
@@ -55,6 +63,12 @@ DeviceCoordResult finalizeOnTarget(std::vector<DeviceCoordCollector>& collectors
   result.atomStarts  = AsyncDeviceVector<int32_t>(static_cast<size_t>(totalConformers + 1), targetStream.stream());
   result.molIndices  = AsyncDeviceVector<int32_t>(static_cast<size_t>(totalConformers), targetStream.stream());
   result.confIndices = AsyncDeviceVector<int32_t>(static_cast<size_t>(totalConformers), targetStream.stream());
+  if (hasEnergies) {
+    result.energies = AsyncDeviceVector<double>(static_cast<size_t>(totalConformers), targetStream.stream());
+  }
+  if (hasConverged) {
+    result.converged = AsyncDeviceVector<int8_t>(static_cast<size_t>(totalConformers), targetStream.stream());
+  }
 
   std::vector<int32_t> atomStartsHost(static_cast<size_t>(totalConformers + 1), 0);
   std::vector<int32_t> molIndicesHost(static_cast<size_t>(totalConformers), 0);
@@ -69,20 +83,39 @@ DeviceCoordResult finalizeOnTarget(std::vector<DeviceCoordCollector>& collectors
       continue;
     }
 
-    const size_t bytes = collector.positions.size() * sizeof(double);
     copyDeviceToDeviceAsync(result.positions.data() + static_cast<size_t>(atomCursor) * 3,
                             collector.positions.data(),
-                            bytes,
+                            collector.positions.size() * sizeof(double),
                             collector.gpuId,
                             collector.stream,
                             targetGpu,
                             targetStream.stream());
+    if (hasEnergies && !collector.energies.empty()) {
+      copyDeviceToDeviceAsync(result.energies.data() + confCursor,
+                              collector.energies.data(),
+                              collector.energies.size() * sizeof(double),
+                              collector.gpuId,
+                              collector.stream,
+                              targetGpu,
+                              targetStream.stream());
+    }
+    if (hasConverged && !collector.converged.empty()) {
+      copyDeviceToDeviceAsync(result.converged.data() + confCursor,
+                              collector.converged.data(),
+                              collector.converged.size() * sizeof(int8_t),
+                              collector.gpuId,
+                              collector.stream,
+                              targetGpu,
+                              targetStream.stream());
+    }
 
+    const bool useExplicitConfIds = !collector.confIds.empty();
     for (int conformerIdx = 0; conformerIdx < numConfs; ++conformerIdx) {
-      atomStartsHost[static_cast<size_t>(confCursor)]  = atomCursor;
-      const int molId                                  = collector.molIds[conformerIdx];
-      molIndicesHost[static_cast<size_t>(confCursor)]  = molId;
-      confIndicesHost[static_cast<size_t>(confCursor)] = perMolCounter[molId]++;
+      atomStartsHost[static_cast<size_t>(confCursor)] = atomCursor;
+      const int molId                                 = collector.molIds[conformerIdx];
+      molIndicesHost[static_cast<size_t>(confCursor)] = molId;
+      confIndicesHost[static_cast<size_t>(confCursor)] =
+        useExplicitConfIds ? collector.confIds[conformerIdx] : perMolCounter[molId]++;
       atomCursor += collector.atomCounts[conformerIdx];
       ++confCursor;
     }
@@ -102,6 +135,12 @@ DeviceCoordResult finalizeOnTarget(std::vector<DeviceCoordCollector>& collectors
   result.atomStarts.setStream(nullptr);
   result.molIndices.setStream(nullptr);
   result.confIndices.setStream(nullptr);
+  if (hasEnergies) {
+    result.energies.setStream(nullptr);
+  }
+  if (hasConverged) {
+    result.converged.setStream(nullptr);
+  }
   return result;
 }
 

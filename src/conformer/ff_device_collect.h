@@ -22,35 +22,20 @@
 #include <vector>
 
 #include "conformer_info.h"
+#include "device_coord_collector.h"
 #include "device_coord_result.h"
 #include "device_vector.h"
 
 namespace nvMolKit {
+namespace detail {
 
 /**
- * @brief Thread-local accumulator for MMFF/UFF batch outputs in device-output mode.
+ * @brief Append the results of one MMFF/UFF batch to a thread-local DeviceCoordCollector.
  *
- * Each OMP worker writes into its own FFDeviceCoordCollector. After a batch's BFGS minimization
- * completes, @ref appendBatch concatenates the batch's positions, energies, and convergence flags
- * onto the collector. Per-conformer atom counts and (molIdx, confIdx) labels are kept on the
- * host for later stitching by @ref finalizeOnTarget.
- *
- * All device buffers live on the GPU identified by @ref gpuId. All device operations execute on
- * @ref stream.
- */
-struct FFDeviceCoordCollector {
-  int                       gpuId  = -1;
-  cudaStream_t              stream = nullptr;
-  AsyncDeviceVector<double> positions;   //!< 3D, length = sum(atomCounts) * 3
-  AsyncDeviceVector<double> energies;    //!< length = atomCounts.size()
-  AsyncDeviceVector<int8_t> converged;   //!< length = atomCounts.size()
-  std::vector<int>          atomCounts;  //!< One entry per accumulated conformer
-  std::vector<int>          molIds;      //!< Original-input molecule index per conformer
-  std::vector<int>          confIds;     //!< Per-molecule conformer index per conformer
-};
-
-/**
- * @brief Append the results of one MMFF/UFF batch to a thread-local collector.
+ * Concatenates the batch's positions, energies, and converged flags onto @p collector and
+ * records per-conformer @c atomCounts, @c molIds, and @c confIds for later stitching by
+ * @ref finalizeOnTarget. The collector's @c energies / @c converged buffers grow on first
+ * call so a single collector can mix multiple batches.
  *
  * @param batchConformers   Per-conformer metadata (molIdx, confIdx) for this batch in batch order.
  * @param positionsDevice   Device buffer holding the optimized 3D positions in CSR layout
@@ -68,18 +53,7 @@ void appendBatch(const std::vector<ConformerInfo>& batchConformers,
                  const AsyncDeviceVector<double>&  positionsDevice,
                  const AsyncDeviceVector<double>&  energiesDevice,
                  const AsyncDeviceVector<int16_t>& statusesDevice,
-                 FFDeviceCoordCollector&           collector);
-
-/**
- * @brief Stitch all per-thread FFDeviceCoordCollectors into a single DeviceCoordResult on @p targetGpu.
- *
- * Concatenates per-thread positions, energies, and convergence flags onto @p targetGpu using
- * @ref copyDeviceToDeviceAsync, computes CSR `atomStarts`, and copies the per-conformer
- * (molIndices, confIndices) host labels up to the target. All resulting buffers live on
- * @p targetGpu and are bound to the default stream of that GPU before returning, after a
- * `cudaStreamSynchronize` on the local target stream.
- */
-DeviceCoordResult finalizeOnTarget(std::vector<FFDeviceCoordCollector>& collectors, int targetGpu, int nMols);
+                 DeviceCoordCollector&             collector);
 
 /**
  * @brief Host-side index over a DeviceCoordResult used as starting coordinates.
@@ -128,6 +102,7 @@ void broadcastDeviceInputBatch(const DeviceCoordResult&   deviceInput,
                                cudaStream_t               executingStream,
                                AsyncDeviceVector<double>& positionsDevice);
 
+}  // namespace detail
 }  // namespace nvMolKit
 
 #endif  // NVMOLKIT_FF_DEVICE_COLLECT_H

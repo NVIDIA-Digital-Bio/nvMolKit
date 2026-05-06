@@ -288,6 +288,7 @@ TEST(MMFFDeviceInput, ConstraintsRejected) {
   ASSERT_TRUE(firstResult.device.has_value());
 
   std::vector<nvMolKit::ForceFieldConstraints::PerMolConstraints> constraints(mols.size());
+  constraints[0].position.push_back({/*idx=*/0, /*maxDispl=*/0.1, /*forceConstant=*/50.0});
   EXPECT_THROW(nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(mols,
                                                           5,
                                                           1e-4,

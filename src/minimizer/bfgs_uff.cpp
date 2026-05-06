@@ -54,8 +54,16 @@ UFFMinimizeResult UFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>& mols,
   if (!constraints.empty() && constraints.size() != mols.size()) {
     throw std::invalid_argument("Expected one PerMolConstraints entry per molecule");
   }
-  if (deviceInput != nullptr && !constraints.empty()) {
-    throw std::invalid_argument("Combining device_input with constraints is not supported in this release.");
+  if (deviceInput != nullptr) {
+    const bool anyConstraint =
+      std::any_of(constraints.begin(), constraints.end(), [](const auto& perMol) { return !perMol.empty(); });
+    if (anyConstraint) {
+      throw std::invalid_argument(
+        "Device input coordinates not supported with custom constraints. "
+        "Use the RDKit Mol + Conformer path to apply constraints "
+        "(call UFFMinimizeMoleculesConfs without deviceInput; the constraints anchor positions are "
+        "read from each mol's RDKit conformer at force-field construction time).");
+    }
   }
 
   const bool deviceOutput = output == CoordinateOutput::DEVICE;
@@ -81,9 +89,9 @@ UFFMinimizeResult UFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>& mols,
     moleculeConverged[i].resize(moleculeEnergies[i].size(), 0);
   }
 
-  DeviceInputIndex deviceInputIndex;
+  detail::DeviceInputIndex deviceInputIndex;
   if (deviceInput != nullptr) {
-    deviceInputIndex = buildDeviceInputIndex(*deviceInput, allConformers);
+    deviceInputIndex = detail::buildDeviceInputIndex(*deviceInput, allConformers);
   }
   const bool useDeviceInput = deviceInput != nullptr;
 
@@ -91,14 +99,14 @@ UFFMinimizeResult UFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>& mols,
   const size_t effectiveBatchSize = ctx.batchSize == 0 ? totalConformers : ctx.batchSize;
   if (totalConformers == 0) {
     if (deviceOutput) {
-      std::vector<FFDeviceCoordCollector> emptyCollectors;
-      return {{}, {}, finalizeOnTarget(emptyCollectors, targetGpu, static_cast<int>(mols.size()))};
+      std::vector<detail::DeviceCoordCollector> emptyCollectors;
+      return {{}, {}, detail::finalizeOnTarget(emptyCollectors, targetGpu, static_cast<int>(mols.size()))};
     }
     return {moleculeEnergies, moleculeConverged, std::nullopt};
   }
 
-  std::vector<ThreadLocalBuffers>     threadBuffers(ctx.numThreads);
-  std::vector<FFDeviceCoordCollector> deviceCollectors(deviceOutput ? ctx.numThreads : 0);
+  std::vector<ThreadLocalBuffers>           threadBuffers(ctx.numThreads);
+  std::vector<detail::DeviceCoordCollector> deviceCollectors(deviceOutput ? ctx.numThreads : 0);
   if (deviceOutput) {
     for (int threadId = 0; threadId < ctx.numThreads; ++threadId) {
       auto& collector  = deviceCollectors[threadId];
@@ -190,13 +198,13 @@ UFFMinimizeResult UFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>& mols,
       positionsDevice.resize(systemHost.positions.size());
       positionsDevice.copyFromHost(buffers.initialPositions.data(), systemHost.positions.size());
       if (useDeviceInput) {
-        broadcastDeviceInputBatch(*deviceInput,
-                                  deviceInputIndex,
-                                  batchSrcIndices,
-                                  batchAtomCounts,
-                                  executingGpu,
-                                  streamPtr,
-                                  positionsDevice);
+        detail::broadcastDeviceInputBatch(*deviceInput,
+                                          deviceInputIndex,
+                                          batchSrcIndices,
+                                          batchAtomCounts,
+                                          executingGpu,
+                                          streamPtr,
+                                          positionsDevice);
       }
       gradDevice.resize(systemHost.positions.size());
       gradDevice.zero();
@@ -213,11 +221,11 @@ UFFMinimizeResult UFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>& mols,
       bfgsMinimizer.minimize(maxIters, gradTol, forcefield, positionsDevice, gradDevice, energyOutsDevice);
 
       if (deviceOutput) {
-        appendBatch(batchConformers,
-                    positionsDevice,
-                    energyOutsDevice,
-                    bfgsMinimizer.statuses_,
-                    deviceCollectors[threadId]);
+        detail::appendBatch(batchConformers,
+                            positionsDevice,
+                            energyOutsDevice,
+                            bfgsMinimizer.statuses_,
+                            deviceCollectors[threadId]);
       } else {
         ScopedNvtxRange finalizeBatchRange("OpenMP loop finalizing batch");
         positionsDevice.copyToHost(buffers.positions.data(), positionsDevice.size());
@@ -240,7 +248,7 @@ UFFMinimizeResult UFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>& mols,
   }
   exceptionHandler.rethrow();
   if (deviceOutput) {
-    return {{}, {}, finalizeOnTarget(deviceCollectors, targetGpu, static_cast<int>(mols.size()))};
+    return {{}, {}, detail::finalizeOnTarget(deviceCollectors, targetGpu, static_cast<int>(mols.size()))};
   }
   return {moleculeEnergies, moleculeConverged, std::nullopt};
 }

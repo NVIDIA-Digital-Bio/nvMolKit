@@ -32,5 +32,5 @@ target_link_libraries(
 add_library(ff_device_collect ff_device_collect.cpp)
 target_link_libraries(
   ff_device_collect
-  PUBLIC conformer_types bfgs_common device_vector
-  PRIVATE device_coord_collector p2p device cuda_error_check ${RDKit_LIBS})
+  PUBLIC conformer_types device_coord_collector device_vector
+  PRIVATE p2p device cuda_error_check ${RDKit_LIBS})

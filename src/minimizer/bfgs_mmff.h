@@ -71,8 +71,12 @@ struct MMFFMinimizeResult {
 //! \param maxIters Maximum BFGS iterations.
 //! \param gradTol Gradient convergence tolerance.
 //! \param properties Per-molecule MMFF settings.
-//! \param constraints Per-molecule constraint specifications. Must be empty when @p deviceInput
-//!                    is provided (combining constraints with device input is not yet supported).
+//! \param constraints Per-molecule constraint specifications. Constraints read anchor positions
+//!                    from each mol's RDKit conformer at force-field construction time, so they
+//!                    are incompatible with @p deviceInput (whose positions never reach the host
+//!                    before contribs are built). To apply constraints, use the RDKit Mol +
+//!                    Conformer path (omit @p deviceInput) so anchor positions match the optimizer's
+//!                    starting coordinates.
 //! \param perfOptions Hardware and batching configuration.
 //! \param backend BFGS backend selection.
 //! \param output Whether to write coordinates back into RDKit conformers (default) or return them

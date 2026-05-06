@@ -18,21 +18,24 @@
 #include <cuda_runtime.h>
 #include <GraphMol/ROMol.h>
 
-#include <algorithm>
+#include <cstdint>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "cuda_error_check.h"
 #include "device.h"
 #include "p2p.h"
 
 namespace nvMolKit {
+namespace detail {
 
 void appendBatch(const std::vector<ConformerInfo>& batchConformers,
                  const AsyncDeviceVector<double>&  positionsDevice,
                  const AsyncDeviceVector<double>&  energiesDevice,
                  const AsyncDeviceVector<int16_t>& statusesDevice,
-                 FFDeviceCoordCollector&           collector) {
+                 DeviceCoordCollector&             collector) {
   const int numConformers = static_cast<int>(batchConformers.size());
   if (numConformers == 0) {
     return;
@@ -98,98 +101,6 @@ void appendBatch(const std::vector<ConformerInfo>& batchConformers,
   cudaCheckError(cudaStreamSynchronize(collector.stream));
 }
 
-DeviceCoordResult finalizeOnTarget(std::vector<FFDeviceCoordCollector>& collectors,
-                                   const int                            targetGpu,
-                                   const int                            nMols) {
-  for (const auto& collector : collectors) {
-    if (collector.gpuId != targetGpu && !collector.atomCounts.empty()) {
-      enablePeerAccess(targetGpu, collector.gpuId);
-    }
-  }
-
-  int totalConformers = 0;
-  int totalAtoms      = 0;
-  for (const auto& collector : collectors) {
-    totalConformers += static_cast<int>(collector.atomCounts.size());
-    for (const int natoms : collector.atomCounts) {
-      totalAtoms += natoms;
-    }
-  }
-
-  const WithDevice  withTarget(targetGpu);
-  ScopedStream      targetStream("FF DeviceCoord Finalize");
-  DeviceCoordResult result;
-  result.gpuId       = targetGpu;
-  result.nMols       = nMols;
-  result.positions   = AsyncDeviceVector<double>(static_cast<size_t>(totalAtoms) * 3, targetStream.stream());
-  result.atomStarts  = AsyncDeviceVector<int32_t>(static_cast<size_t>(totalConformers + 1), targetStream.stream());
-  result.molIndices  = AsyncDeviceVector<int32_t>(static_cast<size_t>(totalConformers), targetStream.stream());
-  result.confIndices = AsyncDeviceVector<int32_t>(static_cast<size_t>(totalConformers), targetStream.stream());
-  result.energies    = AsyncDeviceVector<double>(static_cast<size_t>(totalConformers), targetStream.stream());
-  result.converged   = AsyncDeviceVector<int8_t>(static_cast<size_t>(totalConformers), targetStream.stream());
-
-  std::vector<int32_t> atomStartsHost(static_cast<size_t>(totalConformers + 1), 0);
-  std::vector<int32_t> molIndicesHost(static_cast<size_t>(totalConformers), 0);
-  std::vector<int32_t> confIndicesHost(static_cast<size_t>(totalConformers), 0);
-
-  int confCursor = 0;
-  int atomCursor = 0;
-  for (auto& collector : collectors) {
-    const int numConfs = static_cast<int>(collector.atomCounts.size());
-    if (numConfs == 0) {
-      continue;
-    }
-
-    copyDeviceToDeviceAsync(result.positions.data() + static_cast<size_t>(atomCursor) * 3,
-                            collector.positions.data(),
-                            collector.positions.size() * sizeof(double),
-                            collector.gpuId,
-                            collector.stream,
-                            targetGpu,
-                            targetStream.stream());
-    copyDeviceToDeviceAsync(result.energies.data() + confCursor,
-                            collector.energies.data(),
-                            collector.energies.size() * sizeof(double),
-                            collector.gpuId,
-                            collector.stream,
-                            targetGpu,
-                            targetStream.stream());
-    copyDeviceToDeviceAsync(result.converged.data() + confCursor,
-                            collector.converged.data(),
-                            collector.converged.size() * sizeof(int8_t),
-                            collector.gpuId,
-                            collector.stream,
-                            targetGpu,
-                            targetStream.stream());
-
-    for (int conformerIdx = 0; conformerIdx < numConfs; ++conformerIdx) {
-      atomStartsHost[static_cast<size_t>(confCursor)]  = atomCursor;
-      molIndicesHost[static_cast<size_t>(confCursor)]  = collector.molIds[conformerIdx];
-      confIndicesHost[static_cast<size_t>(confCursor)] = collector.confIds[conformerIdx];
-      atomCursor += collector.atomCounts[conformerIdx];
-      ++confCursor;
-    }
-  }
-  atomStartsHost[static_cast<size_t>(totalConformers)] = atomCursor;
-
-  if (totalConformers > 0) {
-    result.atomStarts.copyFromHost(atomStartsHost);
-    result.molIndices.copyFromHost(molIndicesHost);
-    result.confIndices.copyFromHost(confIndicesHost);
-  }
-  cudaCheckError(cudaStreamSynchronize(targetStream.stream()));
-
-  // The local ScopedStream will be destroyed - rebind every result buffer to the default stream
-  // so subsequent operations on the result don't dereference a freed cudaStream_t.
-  result.positions.setStream(nullptr);
-  result.atomStarts.setStream(nullptr);
-  result.molIndices.setStream(nullptr);
-  result.confIndices.setStream(nullptr);
-  result.energies.setStream(nullptr);
-  result.converged.setStream(nullptr);
-  return result;
-}
-
 namespace {
 
 template <typename T> std::vector<T> downloadToHost(const AsyncDeviceVector<T>& vec) {
@@ -242,7 +153,6 @@ DeviceInputIndex buildDeviceInputIndex(const DeviceCoordResult&          deviceI
     index.conformerIndexBy[i] = it->second;
   }
 
-  // Verify per-conformer atom counts match.
   for (size_t i = 0; i < allConformers.size(); ++i) {
     const int srcIdx        = index.conformerIndexBy[i];
     const int srcAtomCount  = index.atomStartsHost[srcIdx + 1] - index.atomStartsHost[srcIdx];
@@ -286,4 +196,5 @@ void broadcastDeviceInputBatch(const DeviceCoordResult&   deviceInput,
   }
 }
 
+}  // namespace detail
 }  // namespace nvMolKit
