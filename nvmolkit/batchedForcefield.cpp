@@ -18,14 +18,11 @@
 #include <boost/python.hpp>
 #include <cstdint>
 #include <memory>
-#include <numeric>
 #include <vector>
 
-#include "array_helpers.h"
 #include "bfgs_mmff.h"
 #include "bfgs_uff.h"
 #include "boost_python_utils.h"
-#include "device_coord_result.h"
 #include "device_vector.h"
 #include "ff_utils.h"
 #include "forcefield_constraints.h"
@@ -240,38 +237,6 @@ static std::vector<FC::PerMolConstraints> extractAllConstraints(const bp::list& 
   return result;
 }
 
-// Helpers for the persistent index arrays exposed alongside DEVICE-mode outputs of the batched
-// forcefield wrappers. atom_starts/mol_indices/conf_indices match the host-flattened layout one
-// to one (molecule-major, conformer-major within each molecule).
-struct PersistentIndexBuffers {
-  nvMolKit::AsyncDeviceVector<int32_t> atomStarts;
-  nvMolKit::AsyncDeviceVector<int32_t> molIndices;
-  nvMolKit::AsyncDeviceVector<int32_t> confIndices;
-};
-
-void buildPersistentIndexBuffers(const std::vector<RDKit::ROMol*>& mols,
-                                 const std::vector<int>&           numConformersPerMol,
-                                 PersistentIndexBuffers&           buffers) {
-  std::vector<int32_t> atomStartsHost = {0};
-  std::vector<int32_t> molIndicesHost;
-  std::vector<int32_t> confIndicesHost;
-  int                  cursor = 0;
-  for (size_t molIdx = 0; molIdx < mols.size(); ++molIdx) {
-    const int natoms = static_cast<int>(mols[molIdx]->getNumAtoms());
-    const int nconfs = numConformersPerMol[molIdx];
-    for (int confIdx = 0; confIdx < nconfs; ++confIdx) {
-      cursor += natoms;
-      atomStartsHost.push_back(cursor);
-      molIndicesHost.push_back(static_cast<int32_t>(molIdx));
-      confIndicesHost.push_back(static_cast<int32_t>(confIdx));
-    }
-  }
-  buffers.atomStarts.setFromVector(atomStartsHost);
-  buffers.molIndices.setFromVector(molIndicesHost);
-  buffers.confIndices.setFromVector(confIndicesHost);
-  cudaStreamSynchronize(buffers.atomStarts.stream());
-}
-
 class NativeMMFFBatchedForcefield {
  public:
   NativeMMFFBatchedForcefield(const bp::list&                       molecules,
@@ -282,7 +247,6 @@ class NativeMMFFBatchedForcefield {
                               const bp::list&                       torsionConstraints,
                               const nvMolKit::BatchHardwareOptions& hwOpts)
       : hwOpts_(hwOpts) {
-    cudaGetDevice(&gpuId_);
     mols_             = nvMolKit::extractMolecules(molecules);
     const int numMols = static_cast<int>(mols_.size());
     properties_       = nvMolKit::extractMMFFPropertiesList(properties, numMols);
@@ -309,89 +273,6 @@ class NativeMMFFBatchedForcefield {
     return bp::make_tuple(nestedToList(result.energies, [](double v) { return v; }),
                           nestedToList(result.converged, [](int8_t v) { return v != 0; }));
   }
-
-  // -- DEVICE-mode accessors. All buffers borrow from the wrapper's persistent allocations and
-  // -- remain valid only for the lifetime of this NativeMMFFBatchedForcefield instance. --
-
-  nvMolKit::PyArray* computeEnergyDevice() {
-    energyOutsDevice_.zero();
-    throwIfCudaError(forcefield_->computeEnergy(energyOutsDevice_.data(), positionsDevice_.data()), "computeEnergy");
-    return nvMolKit::makePyArrayBorrowed(energyOutsDevice_);
-  }
-
-  nvMolKit::PyArray* computeGradientsDevice() {
-    gradDevice_.zero();
-    throwIfCudaError(forcefield_->computeGradients(gradDevice_.data(), positionsDevice_.data()), "computeGradients");
-    return nvMolKit::makePyArrayBorrowed(gradDevice_);
-  }
-
-  nvMolKit::PyArray* positionsDevicePy() {
-    const int natoms = static_cast<int>(positionsDevice_.size() / 3);
-    return nvMolKit::makePyArrayBorrowed(positionsDevice_, "f8", bp::make_tuple(natoms, 3));
-  }
-
-  bp::object minimizeDevice(int maxIters, double gradTol, int targetGpu) {
-    if (targetGpu < 0) {
-      targetGpu = gpuId_;
-    }
-    auto result = nvMolKit::MMFF::MMFFMinimizeMoleculesConfs(mols_,
-                                                             maxIters,
-                                                             gradTol,
-                                                             properties_,
-                                                             constraints_,
-                                                             hwOpts_,
-                                                             nvMolKit::BfgsBackend::HYBRID,
-                                                             nvMolKit::CoordinateOutput::DEVICE,
-                                                             targetGpu);
-    if (!result.device.has_value()) {
-      throw std::runtime_error("MMFFMinimizeMoleculesConfs(DEVICE) returned no device result");
-    }
-    auto& dev = *result.device;
-    // Refresh the persistent positions buffer in-place so subsequent compute_energy /
-    // compute_gradients calls see the optimized coords without a host roundtrip. The result's
-    // GPU and the wrapper's GPU are the same when the user defaults targetGpu.
-    if (dev.gpuId == gpuId_ && dev.positions.size() == positionsDevice_.size()) {
-      cudaMemcpyAsync(positionsDevice_.data(),
-                      dev.positions.data(),
-                      positionsDevice_.size() * sizeof(double),
-                      cudaMemcpyDeviceToDevice,
-                      positionsDevice_.stream());
-      cudaStreamSynchronize(positionsDevice_.stream());
-    }
-    // Return a Python DeviceCoordResult that owns the device data via boost::python's normal
-    // PyArray ownership semantics. We construct the Python object directly here.
-    bp::object types_module = bp::import("nvmolkit.types");
-    bp::object dcr_cls      = types_module.attr("DeviceCoordResult");
-    bp::object async_cls    = types_module.attr("AsyncGpuResult");
-
-    const int natoms       = static_cast<int>(dev.positions.size() / 3);
-    auto      posPy        = nvMolKit::makePyArray(dev.positions, "f8", bp::make_tuple(natoms, 3));
-    auto      atomStartsPy = nvMolKit::makePyArray(dev.atomStarts);
-    auto      molIdxPy     = nvMolKit::makePyArray(dev.molIndices);
-    auto      confIdxPy    = nvMolKit::makePyArray(dev.confIndices);
-    auto      energiesPy   = nvMolKit::makePyArray(dev.energies);
-    auto      convergedPy  = nvMolKit::makePyArray(dev.converged);
-    return dcr_cls(async_cls(bp::object(boost::python::ptr(posPy)), dev.gpuId),
-                   async_cls(bp::object(boost::python::ptr(atomStartsPy)), dev.gpuId),
-                   async_cls(bp::object(boost::python::ptr(molIdxPy)), dev.gpuId),
-                   async_cls(bp::object(boost::python::ptr(confIdxPy)), dev.gpuId),
-                   dev.gpuId,
-                   async_cls(bp::object(boost::python::ptr(energiesPy)), dev.gpuId),
-                   async_cls(bp::object(boost::python::ptr(convergedPy)), dev.gpuId));
-  }
-
-  bp::object indexBuffers() {
-    bp::object types_module = bp::import("nvmolkit.types");
-    bp::object async_cls    = types_module.attr("AsyncGpuResult");
-    auto       atomStartsPy = nvMolKit::makePyArrayBorrowed(persistentIndexBuffers_.atomStarts);
-    auto       molIdxPy     = nvMolKit::makePyArrayBorrowed(persistentIndexBuffers_.molIndices);
-    auto       confIdxPy    = nvMolKit::makePyArrayBorrowed(persistentIndexBuffers_.confIndices);
-    return bp::make_tuple(async_cls(bp::object(boost::python::ptr(atomStartsPy)), gpuId_),
-                          async_cls(bp::object(boost::python::ptr(molIdxPy)), gpuId_),
-                          async_cls(bp::object(boost::python::ptr(confIdxPy)), gpuId_));
-  }
-
-  int gpuId() const { return gpuId_; }
 
  private:
   void buildForcefield() {
@@ -422,7 +303,6 @@ class NativeMMFFBatchedForcefield {
     positionsDevice_.setFromVector(systemHost.positions);
     gradDevice_.resize(forcefield_->totalPositions());
     energyOutsDevice_.resize(forcefield_->numMolecules());
-    buildPersistentIndexBuffers(mols_, numConformersPerMol_, persistentIndexBuffers_);
   }
 
   std::vector<RDKit::ROMol*>            mols_;
@@ -435,8 +315,6 @@ class NativeMMFFBatchedForcefield {
   nvMolKit::AsyncDeviceVector<double>              gradDevice_;
   nvMolKit::AsyncDeviceVector<double>              energyOutsDevice_;
   std::vector<int>                                 numConformersPerMol_;
-  PersistentIndexBuffers                           persistentIndexBuffers_;
-  int                                              gpuId_ = 0;
 };
 
 class NativeUFFBatchedForcefield {
@@ -450,7 +328,6 @@ class NativeUFFBatchedForcefield {
                              const bp::list&                       torsionConstraints,
                              const nvMolKit::BatchHardwareOptions& hwOpts)
       : hwOpts_(hwOpts) {
-    cudaGetDevice(&gpuId_);
     mols_             = nvMolKit::extractMolecules(molecules);
     const int numMols = static_cast<int>(mols_.size());
     vdwThresholds_    = nvMolKit::extractDoubleList(vdwThresholds, numMols, "vdwThreshold");
@@ -485,81 +362,6 @@ class NativeUFFBatchedForcefield {
                           nestedToList(result.converged, [](int8_t v) { return v != 0; }));
   }
 
-  nvMolKit::PyArray* computeEnergyDevice() {
-    energyOutsDevice_.zero();
-    throwIfCudaError(forcefield_->computeEnergy(energyOutsDevice_.data(), positionsDevice_.data()), "computeEnergy");
-    return nvMolKit::makePyArrayBorrowed(energyOutsDevice_);
-  }
-
-  nvMolKit::PyArray* computeGradientsDevice() {
-    gradDevice_.zero();
-    throwIfCudaError(forcefield_->computeGradients(gradDevice_.data(), positionsDevice_.data()), "computeGradients");
-    return nvMolKit::makePyArrayBorrowed(gradDevice_);
-  }
-
-  nvMolKit::PyArray* positionsDevicePy() {
-    const int natoms = static_cast<int>(positionsDevice_.size() / 3);
-    return nvMolKit::makePyArrayBorrowed(positionsDevice_, "f8", bp::make_tuple(natoms, 3));
-  }
-
-  bp::object minimizeDevice(int maxIters, double gradTol, int targetGpu) {
-    if (targetGpu < 0) {
-      targetGpu = gpuId_;
-    }
-    auto result = nvMolKit::UFF::UFFMinimizeMoleculesConfs(mols_,
-                                                           maxIters,
-                                                           gradTol,
-                                                           vdwThresholds_,
-                                                           ignoreInterfragInteractions_,
-                                                           constraints_,
-                                                           hwOpts_,
-                                                           nvMolKit::CoordinateOutput::DEVICE,
-                                                           targetGpu);
-    if (!result.device.has_value()) {
-      throw std::runtime_error("UFFMinimizeMoleculesConfs(DEVICE) returned no device result");
-    }
-    auto& dev = *result.device;
-    if (dev.gpuId == gpuId_ && dev.positions.size() == positionsDevice_.size()) {
-      cudaMemcpyAsync(positionsDevice_.data(),
-                      dev.positions.data(),
-                      positionsDevice_.size() * sizeof(double),
-                      cudaMemcpyDeviceToDevice,
-                      positionsDevice_.stream());
-      cudaStreamSynchronize(positionsDevice_.stream());
-    }
-    bp::object types_module = bp::import("nvmolkit.types");
-    bp::object dcr_cls      = types_module.attr("DeviceCoordResult");
-    bp::object async_cls    = types_module.attr("AsyncGpuResult");
-
-    const int natoms       = static_cast<int>(dev.positions.size() / 3);
-    auto      posPy        = nvMolKit::makePyArray(dev.positions, "f8", bp::make_tuple(natoms, 3));
-    auto      atomStartsPy = nvMolKit::makePyArray(dev.atomStarts);
-    auto      molIdxPy     = nvMolKit::makePyArray(dev.molIndices);
-    auto      confIdxPy    = nvMolKit::makePyArray(dev.confIndices);
-    auto      energiesPy   = nvMolKit::makePyArray(dev.energies);
-    auto      convergedPy  = nvMolKit::makePyArray(dev.converged);
-    return dcr_cls(async_cls(bp::object(boost::python::ptr(posPy)), dev.gpuId),
-                   async_cls(bp::object(boost::python::ptr(atomStartsPy)), dev.gpuId),
-                   async_cls(bp::object(boost::python::ptr(molIdxPy)), dev.gpuId),
-                   async_cls(bp::object(boost::python::ptr(confIdxPy)), dev.gpuId),
-                   dev.gpuId,
-                   async_cls(bp::object(boost::python::ptr(energiesPy)), dev.gpuId),
-                   async_cls(bp::object(boost::python::ptr(convergedPy)), dev.gpuId));
-  }
-
-  bp::object indexBuffers() {
-    bp::object types_module = bp::import("nvmolkit.types");
-    bp::object async_cls    = types_module.attr("AsyncGpuResult");
-    auto       atomStartsPy = nvMolKit::makePyArrayBorrowed(persistentIndexBuffers_.atomStarts);
-    auto       molIdxPy     = nvMolKit::makePyArrayBorrowed(persistentIndexBuffers_.molIndices);
-    auto       confIdxPy    = nvMolKit::makePyArrayBorrowed(persistentIndexBuffers_.confIndices);
-    return bp::make_tuple(async_cls(bp::object(boost::python::ptr(atomStartsPy)), gpuId_),
-                          async_cls(bp::object(boost::python::ptr(molIdxPy)), gpuId_),
-                          async_cls(bp::object(boost::python::ptr(confIdxPy)), gpuId_));
-  }
-
-  int gpuId() const { return gpuId_; }
-
  private:
   void buildForcefield() {
     const int                                 numMols = static_cast<int>(mols_.size());
@@ -590,7 +392,6 @@ class NativeUFFBatchedForcefield {
     positionsDevice_.setFromVector(systemHost.positions);
     gradDevice_.resize(forcefield_->totalPositions());
     energyOutsDevice_.resize(forcefield_->numMolecules());
-    buildPersistentIndexBuffers(mols_, numConformersPerMol_, persistentIndexBuffers_);
   }
 
   std::vector<RDKit::ROMol*>         mols_;
@@ -604,8 +405,6 @@ class NativeUFFBatchedForcefield {
   nvMolKit::AsyncDeviceVector<double>             gradDevice_;
   nvMolKit::AsyncDeviceVector<double>             energyOutsDevice_;
   std::vector<int>                                numConformersPerMol_;
-  PersistentIndexBuffers                          persistentIndexBuffers_;
-  int                                             gpuId_ = 0;
 };
 
 BOOST_PYTHON_MODULE(_batchedForcefield) {
@@ -638,19 +437,7 @@ BOOST_PYTHON_MODULE(_batchedForcefield) {
                                                                        const nvMolKit::BatchHardwareOptions&>())
     .def("computeEnergy", &NativeMMFFBatchedForcefield::computeEnergy)
     .def("computeGradients", &NativeMMFFBatchedForcefield::computeGradients)
-    .def("minimize", &NativeMMFFBatchedForcefield::minimize)
-    .def("computeEnergyDevice",
-         &NativeMMFFBatchedForcefield::computeEnergyDevice,
-         bp::return_value_policy<bp::manage_new_object>())
-    .def("computeGradientsDevice",
-         &NativeMMFFBatchedForcefield::computeGradientsDevice,
-         bp::return_value_policy<bp::manage_new_object>())
-    .def("positionsDevice",
-         &NativeMMFFBatchedForcefield::positionsDevicePy,
-         bp::return_value_policy<bp::manage_new_object>())
-    .def("minimizeDevice", &NativeMMFFBatchedForcefield::minimizeDevice)
-    .def("indexBuffers", &NativeMMFFBatchedForcefield::indexBuffers)
-    .def("gpuId", &NativeMMFFBatchedForcefield::gpuId);
+    .def("minimize", &NativeMMFFBatchedForcefield::minimize);
 
   bp::class_<NativeUFFBatchedForcefield, boost::noncopyable>("NativeUFFBatchedForcefield",
                                                              bp::init<const bp::list&,
@@ -663,17 +450,5 @@ BOOST_PYTHON_MODULE(_batchedForcefield) {
                                                                       const nvMolKit::BatchHardwareOptions&>())
     .def("computeEnergy", &NativeUFFBatchedForcefield::computeEnergy)
     .def("computeGradients", &NativeUFFBatchedForcefield::computeGradients)
-    .def("minimize", &NativeUFFBatchedForcefield::minimize)
-    .def("computeEnergyDevice",
-         &NativeUFFBatchedForcefield::computeEnergyDevice,
-         bp::return_value_policy<bp::manage_new_object>())
-    .def("computeGradientsDevice",
-         &NativeUFFBatchedForcefield::computeGradientsDevice,
-         bp::return_value_policy<bp::manage_new_object>())
-    .def("positionsDevice",
-         &NativeUFFBatchedForcefield::positionsDevicePy,
-         bp::return_value_policy<bp::manage_new_object>())
-    .def("minimizeDevice", &NativeUFFBatchedForcefield::minimizeDevice)
-    .def("indexBuffers", &NativeUFFBatchedForcefield::indexBuffers)
-    .def("gpuId", &NativeUFFBatchedForcefield::gpuId);
+    .def("minimize", &NativeUFFBatchedForcefield::minimize);
 }
