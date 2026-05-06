@@ -74,14 +74,13 @@ MMFFMinimizeResult MMFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>&       
 
   const bool deviceOutput = output == CoordinateOutput::DEVICE;
 
-  auto                             ctx = setupBatchExecution(perfOptions);
+  auto ctx = setupBatchExecution(perfOptions);
 
   if (deviceOutput) {
     if (targetGpu < 0) {
       targetGpu = ctx.devicesPerThread.empty() ? 0 : ctx.devicesPerThread.front();
     }
-    if (std::find(ctx.devicesPerThread.begin(), ctx.devicesPerThread.end(), targetGpu) ==
-        ctx.devicesPerThread.end()) {
+    if (std::find(ctx.devicesPerThread.begin(), ctx.devicesPerThread.end(), targetGpu) == ctx.devicesPerThread.end()) {
       throw std::invalid_argument(
         "targetGpu " + std::to_string(targetGpu) +
         " is not in the configured set of execution GPUs; pass it via perfOptions.gpuIds first.");
@@ -152,7 +151,7 @@ MMFFMinimizeResult MMFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>&       
       std::unordered_map<RDKit::ROMol*, CachedMoleculeData> moleculeCache;
       ScopedNvtxRange                                       singleBatchRange("OpenMP loop thread");
       ScopedNvtxRange                                       setupBatchRange("OpenMP loop preprocessing");
-      const int                                             threadId = omp_get_thread_num();
+      const int                                             threadId     = omp_get_thread_num();
       const int                                             executingGpu = ctx.devicesPerThread[threadId];
       const WithDevice                                      dev(executingGpu);
       const size_t batchEnd = std::min(batchStart + effectiveBatchSize, totalConformers);
@@ -228,8 +227,13 @@ MMFFMinimizeResult MMFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>&       
         positionsDevice.resize(systemHost.positions.size());
         positionsDevice.copyFromHost(buffers.initialPositions.data(), systemHost.positions.size());
         if (useDeviceInput) {
-          broadcastDeviceInputBatch(*deviceInput, deviceInputIndex, batchSrcIndices, batchAtomCounts, executingGpu,
-                                    streamPtr, positionsDevice);
+          broadcastDeviceInputBatch(*deviceInput,
+                                    deviceInputIndex,
+                                    batchSrcIndices,
+                                    batchAtomCounts,
+                                    executingGpu,
+                                    streamPtr,
+                                    positionsDevice);
         }
         gradDevice.resize(systemHost.positions.size());
         gradDevice.zero();
@@ -254,8 +258,13 @@ MMFFMinimizeResult MMFFMinimizeMoleculesConfs(std::vector<RDKit::ROMol*>&       
         systemDevice.positions.resize(systemHost.positions.size());
         systemDevice.positions.copyFromHost(buffers.initialPositions.data(), systemHost.positions.size());
         if (useDeviceInput) {
-          broadcastDeviceInputBatch(*deviceInput, deviceInputIndex, batchSrcIndices, batchAtomCounts, executingGpu,
-                                    streamPtr, systemDevice.positions);
+          broadcastDeviceInputBatch(*deviceInput,
+                                    deviceInputIndex,
+                                    batchSrcIndices,
+                                    batchAtomCounts,
+                                    executingGpu,
+                                    streamPtr,
+                                    systemDevice.positions);
         }
         systemDevice.grad.resize(systemHost.positions.size());
         systemDevice.grad.zero();

@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES.
 # All rights reserved. SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not
@@ -13,24 +13,24 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-# Header-only interface library: exposes src/conformer/ so consumers can reach
-# device_coord_result.h, conformer_info.h, coord_collect.h, etc. via unqualified
-# includes. Link against this (PUBLIC) when those types appear in your API surface.
 add_library(conformer_types INTERFACE)
-target_include_directories(conformer_types INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(conformer_types
+                           INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 
-add_library(coord_collect coord_collect.cpp)
-target_link_libraries(coord_collect PUBLIC CUDA::cudart cuda_error_check device
-                                           conformer_types)
+add_library(device_coord_collector device_coord_collector.cpp)
+target_link_libraries(
+  device_coord_collector
+  PUBLIC conformer_types device_vector
+  PRIVATE p2p device cuda_error_check)
 
 add_library(etkdg_device_collect etkdg_device_collect.cu)
 target_link_libraries(
   etkdg_device_collect
-  PUBLIC conformer_types device_vector
-  PRIVATE coord_collect device cuda_error_check)
+  PUBLIC conformer_types device_coord_collector device_vector
+  PRIVATE device cuda_error_check)
 
 add_library(ff_device_collect ff_device_collect.cpp)
 target_link_libraries(
   ff_device_collect
   PUBLIC conformer_types bfgs_common device_vector
-  PRIVATE coord_collect device cuda_error_check ${RDKit_LIBS})
+  PRIVATE device_coord_collector p2p device cuda_error_check ${RDKit_LIBS})

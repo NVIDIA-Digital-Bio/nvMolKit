@@ -109,9 +109,9 @@ PyArray* makePyArray(AsyncDeviceVector<T>& deviceVector, std::optional<boost::py
  * long-lived wrapper classes (e.g. MMFFBatchedForcefield) where each compute call hands out a view.
  */
 template <typename T>
-PyArray* makePyArrayBorrowed(const AsyncDeviceVector<T>& deviceVector,
-                             const std::string&          dTypeStr,
-                             boost::python::tuple        shape) {
+PyArray* makePyArrayBorrowed(AsyncDeviceVector<T>& deviceVector,
+                             const std::string&    dTypeStr,
+                             boost::python::tuple  shape) {
   auto thisPyArray                      = new PyArray();
   thisPyArray->__cuda_array_interface__ = boost::python::dict();
   auto& dict                            = thisPyArray->__cuda_array_interface__;
@@ -122,15 +122,15 @@ PyArray* makePyArrayBorrowed(const AsyncDeviceVector<T>& deviceVector,
 
   dict["shape"]   = shape;
   dict["typestr"] = boost::python::str("|" + dTypeStr);
-  dict["data"] = boost::python::make_tuple(reinterpret_cast<std::size_t>(deviceVector.data()), /*readOnly=*/false);
+  dict["data"]    = boost::python::make_tuple(reinterpret_cast<std::size_t>(deviceVector.data()), /*readOnly=*/false);
   dict["version"] = 2;
 
   return thisPyArray;
 }
 
 template <typename T, typename = std::enable_if_t<std::is_integral_v<T> || std::is_floating_point_v<T>>>
-PyArray* makePyArrayBorrowed(const AsyncDeviceVector<T>&          deviceVector,
-                             std::optional<boost::python::tuple>  shape = std::nullopt) {
+PyArray* makePyArrayBorrowed(AsyncDeviceVector<T>&               deviceVector,
+                             std::optional<boost::python::tuple> shape = std::nullopt) {
   return makePyArrayBorrowed(deviceVector,
                              getNumpyType<T>(),
                              shape.value_or(boost::python::make_tuple(deviceVector.size())));

@@ -13,8 +13,21 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
+# cmake-lint: disable=C0103
+
 if(NVMOLKIT_BUILD_AGAINST_PIP_RDKIT)
   message(STATUS "Using boost libs from pip RDKit")
+  # rdkit.cmake already enumerated every .so under rdkit.libs/ as an IMPORTED
+  # target and appended each to RDKit_LIBS. Filter out the boost ones so targets
+  # that link against ${Boost_LIBRARIES} (rather than ${RDKit_LIBS}) still pull
+  # in libboost_python312, libboost_serialization, etc.
+  set(BOOST_LIBRARIES_FROM_PIP "")
+  foreach(lib IN LISTS RDKit_LIBS)
+    if(lib MATCHES "^libboost_")
+      list(APPEND BOOST_LIBRARIES_FROM_PIP ${lib})
+    endif()
+  endforeach()
+  set(Boost_LIBRARIES ${BOOST_LIBRARIES_FROM_PIP})
 else()
   set(BOOST_TARGET_LIBS system serialization iostreams)
   if(NVMOLKIT_BUILD_PYTHON_BINDINGS)

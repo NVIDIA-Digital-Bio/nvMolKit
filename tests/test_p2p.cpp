@@ -17,12 +17,13 @@
 #include <gtest/gtest.h>
 
 #include <numeric>
+#include <optional>
 #include <vector>
 
-#include "coord_collect.h"
 #include "cuda_error_check.h"
 #include "device.h"
 #include "device_vector.h"
+#include "p2p.h"
 
 using namespace nvMolKit;
 
@@ -36,8 +37,7 @@ template <typename T> AsyncDeviceVector<T> deviceVectorFromHost(const std::vecto
   return dev;
 }
 
-template <typename T>
-std::vector<T> hostVectorFromDevice(const AsyncDeviceVector<T>& dev, cudaStream_t stream) {
+template <typename T> std::vector<T> hostVectorFromDevice(const AsyncDeviceVector<T>& dev, cudaStream_t stream) {
   std::vector<T> host(dev.size());
   if (!host.empty()) {
     dev.copyToHost(host);
@@ -48,11 +48,11 @@ std::vector<T> hostVectorFromDevice(const AsyncDeviceVector<T>& dev, cudaStream_
 
 }  // namespace
 
-TEST(CoordCollect, CopyDeviceToDeviceSameGpu) {
-  ScopedStream                stream;
-  const std::vector<double>   src = {1.0, 2.0, 3.0, 4.0, 5.0};
-  AsyncDeviceVector<double>   srcDev = deviceVectorFromHost(src, stream.stream());
-  AsyncDeviceVector<double>   dstDev(src.size(), stream.stream());
+TEST(P2P, CopyDeviceToDeviceSameGpu) {
+  ScopedStream              stream;
+  const std::vector<double> src    = {1.0, 2.0, 3.0, 4.0, 5.0};
+  AsyncDeviceVector<double> srcDev = deviceVectorFromHost(src, stream.stream());
+  AsyncDeviceVector<double> dstDev(src.size(), stream.stream());
 
   copyDeviceToDeviceAsync(dstDev.data(),
                           srcDev.data(),
@@ -66,16 +66,22 @@ TEST(CoordCollect, CopyDeviceToDeviceSameGpu) {
   EXPECT_EQ(result, src);
 }
 
-TEST(CoordCollect, CopyDeviceToDeviceCrossGpu) {
+TEST(P2P, CopyDeviceToDeviceCrossGpu) {
   int nDevices = 0;
   cudaCheckError(cudaGetDeviceCount(&nDevices));
   if (nDevices < 2) {
     GTEST_SKIP() << "Test requires at least 2 GPUs";
   }
 
+  int canAccess = 0;
+  cudaCheckError(cudaDeviceCanAccessPeer(&canAccess, 0, 1));
+  if (canAccess == 0) {
+    GTEST_SKIP() << "GPUs 0 and 1 cannot peer-access each other";
+  }
+
   enablePeerAccess(0, 1);
 
-  ScopedStream srcStream;
+  ScopedStream              srcStream;
   AsyncDeviceVector<double> srcDev;
   std::vector<double>       src(128);
   std::iota(src.begin(), src.end(), 0.0);
@@ -84,16 +90,12 @@ TEST(CoordCollect, CopyDeviceToDeviceCrossGpu) {
     srcDev = deviceVectorFromHost(src, srcStream.stream());
   }
 
-  AsyncDeviceVector<double> dstDev;
+  std::optional<ScopedStream> dstStream;
+  AsyncDeviceVector<double>   dstDev;
   {
     const WithDevice withDst(1);
-    dstDev = AsyncDeviceVector<double>(src.size());
-  }
-
-  cudaStream_t dstStream = nullptr;
-  {
-    const WithDevice withDst(1);
-    cudaCheckError(cudaStreamCreateWithFlags(&dstStream, cudaStreamNonBlocking));
+    dstStream.emplace();
+    dstDev = AsyncDeviceVector<double>(src.size(), dstStream->stream());
   }
 
   copyDeviceToDeviceAsync(dstDev.data(),
@@ -102,7 +104,7 @@ TEST(CoordCollect, CopyDeviceToDeviceCrossGpu) {
                           /*srcGpu=*/0,
                           srcStream.stream(),
                           /*dstGpu=*/1,
-                          dstStream);
+                          dstStream->stream());
 
   std::vector<double> result(src.size());
   {
@@ -111,17 +113,16 @@ TEST(CoordCollect, CopyDeviceToDeviceCrossGpu) {
                                    dstDev.data(),
                                    src.size() * sizeof(double),
                                    cudaMemcpyDeviceToHost,
-                                   dstStream));
-    cudaCheckError(cudaStreamSynchronize(dstStream));
-    cudaCheckError(cudaStreamDestroy(dstStream));
+                                   dstStream->stream()));
+    cudaCheckError(cudaStreamSynchronize(dstStream->stream()));
   }
   EXPECT_EQ(result, src);
 }
 
-TEST(CoordCollect, CopyZeroBytesIsNoop) {
-  ScopedStream                stream;
-  AsyncDeviceVector<double>   srcDev(4, stream.stream());
-  AsyncDeviceVector<double>   dstDev(4, stream.stream());
+TEST(P2P, CopyZeroBytesIsNoop) {
+  ScopedStream              stream;
+  AsyncDeviceVector<double> srcDev(4, stream.stream());
+  AsyncDeviceVector<double> dstDev(4, stream.stream());
 
   copyDeviceToDeviceAsync(dstDev.data(),
                           srcDev.data(),
@@ -133,6 +134,21 @@ TEST(CoordCollect, CopyZeroBytesIsNoop) {
   cudaCheckError(cudaStreamSynchronize(stream.stream()));
 }
 
-TEST(CoordCollect, EnablePeerSelfReturnsTrue) {
-  EXPECT_TRUE(enablePeerAccess(0, 0));
+TEST(P2P, EnablePeerSelfIsNoop) {
+  EXPECT_NO_THROW(enablePeerAccess(0, 0));
+}
+
+TEST(P2P, EnablePeerIdempotent) {
+  int nDevices = 0;
+  cudaCheckError(cudaGetDeviceCount(&nDevices));
+  if (nDevices < 2) {
+    GTEST_SKIP() << "Test requires at least 2 GPUs";
+  }
+  int canAccess = 0;
+  cudaCheckError(cudaDeviceCanAccessPeer(&canAccess, 0, 1));
+  if (canAccess == 0) {
+    GTEST_SKIP() << "GPUs 0 and 1 cannot peer-access each other";
+  }
+  EXPECT_NO_THROW(enablePeerAccess(0, 1));
+  EXPECT_NO_THROW(enablePeerAccess(0, 1));
 }

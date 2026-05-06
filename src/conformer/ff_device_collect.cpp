@@ -15,16 +15,16 @@
 
 #include "ff_device_collect.h"
 
-#include <GraphMol/ROMol.h>
 #include <cuda_runtime.h>
+#include <GraphMol/ROMol.h>
 
 #include <algorithm>
 #include <stdexcept>
 #include <unordered_map>
 
-#include "coord_collect.h"
 #include "cuda_error_check.h"
 #include "device.h"
+#include "p2p.h"
 
 namespace nvMolKit {
 
@@ -98,7 +98,9 @@ void appendBatch(const std::vector<ConformerInfo>& batchConformers,
   cudaCheckError(cudaStreamSynchronize(collector.stream));
 }
 
-DeviceCoordResult finalizeOnTarget(std::vector<FFDeviceCoordCollector>& collectors, const int targetGpu, const int nMols) {
+DeviceCoordResult finalizeOnTarget(std::vector<FFDeviceCoordCollector>& collectors,
+                                   const int                            targetGpu,
+                                   const int                            nMols) {
   for (const auto& collector : collectors) {
     if (collector.gpuId != targetGpu && !collector.atomCounts.empty()) {
       enablePeerAccess(targetGpu, collector.gpuId);
@@ -207,7 +209,7 @@ DeviceInputIndex buildDeviceInputIndex(const DeviceCoordResult&          deviceI
   index.sourceGpu = deviceInput.gpuId;
 
   const WithDevice withSrc(deviceInput.gpuId);
-  index.atomStartsHost                = downloadToHost(deviceInput.atomStarts);
+  index.atomStartsHost                   = downloadToHost(deviceInput.atomStarts);
   const std::vector<int32_t> molIdxHost  = downloadToHost(deviceInput.molIndices);
   const std::vector<int32_t> confIdxHost = downloadToHost(deviceInput.confIndices);
 
@@ -234,9 +236,8 @@ DeviceInputIndex buildDeviceInputIndex(const DeviceCoordResult&          deviceI
     const long long key = (static_cast<long long>(confInfo.molIdx) << 32) | static_cast<uint32_t>(confInfo.confIdx);
     auto            it  = srcLookup.find(key);
     if (it == srcLookup.end()) {
-      throw std::invalid_argument("device_input is missing an entry for (molIdx=" +
-                                  std::to_string(confInfo.molIdx) + ", confIdx=" +
-                                  std::to_string(confInfo.confIdx) + ")");
+      throw std::invalid_argument("device_input is missing an entry for (molIdx=" + std::to_string(confInfo.molIdx) +
+                                  ", confIdx=" + std::to_string(confInfo.confIdx) + ")");
     }
     index.conformerIndexBy[i] = it->second;
   }
@@ -271,8 +272,8 @@ void broadcastDeviceInputBatch(const DeviceCoordResult&   deviceInput,
 
   size_t dstAtomOffset = 0;
   for (size_t i = 0; i < batchSrcIndices.size(); ++i) {
-    const int srcIdx       = batchSrcIndices[i];
-    const int natoms       = batchAtomCounts[i];
+    const int    srcIdx       = batchSrcIndices[i];
+    const int    natoms       = batchAtomCounts[i];
     const size_t srcAtomStart = static_cast<size_t>(index.atomStartsHost[srcIdx]);
     copyDeviceToDeviceAsync(positionsDevice.data() + dstAtomOffset * 3,
                             deviceInput.positions.data() + srcAtomStart * 3,

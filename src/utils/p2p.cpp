@@ -13,9 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "coord_collect.h"
+#include "p2p.h"
 
 #include <cuda_runtime.h>
+
+#include <optional>
+#include <stdexcept>
+#include <string>
 
 #include "cuda_error_check.h"
 #include "device.h"
@@ -23,31 +27,30 @@
 namespace nvMolKit {
 namespace {
 
-bool tryEnablePeerOneWay(int fromGpu, int toGpu) {
-  int canAccess = 0;
-  cudaCheckError(cudaDeviceCanAccessPeer(&canAccess, fromGpu, toGpu));
-  if (canAccess == 0) {
-    return false;
-  }
+void enablePeerOneWay(int fromGpu, int toGpu) {
   const WithDevice  withDevice(fromGpu);
   const cudaError_t err = cudaDeviceEnablePeerAccess(toGpu, /*flags=*/0);
-  if (err == cudaSuccess || err == cudaErrorPeerAccessAlreadyEnabled) {
-    cudaGetLastError();
-    return true;
+  if (err == cudaSuccess) {
+    return;
   }
-  cudaGetLastError();
-  return false;
+  if (err == cudaErrorPeerAccessAlreadyEnabled) {
+    // Clear only the benign sticky error from the idempotent case; leave any unrelated
+    // prior error in place so it surfaces at the next cudaCheckError.
+    (void)cudaGetLastError();
+    return;
+  }
+  throw std::runtime_error("Failed to enable P2P access from GPU " + std::to_string(fromGpu) + " to GPU " +
+                           std::to_string(toGpu) + ": " + cudaGetErrorString(err));
 }
 
 }  // namespace
 
-bool enablePeerAccess(int gpuA, int gpuB) {
+void enablePeerAccess(int gpuA, int gpuB) {
   if (gpuA == gpuB) {
-    return true;
+    return;
   }
-  const bool aToB = tryEnablePeerOneWay(gpuA, gpuB);
-  const bool bToA = tryEnablePeerOneWay(gpuB, gpuA);
-  return aToB && bToA;
+  enablePeerOneWay(gpuA, gpuB);
+  enablePeerOneWay(gpuB, gpuA);
 }
 
 void copyDeviceToDeviceAsync(void*        dstDevice,
@@ -66,18 +69,20 @@ void copyDeviceToDeviceAsync(void*        dstDevice,
     return;
   }
 
-  cudaEvent_t srcReady = nullptr;
+  // If per-call event create/destroy shows up meaningfully in profiles, promote this helper
+  // to a stateful class that owns a reusable event (or a small pool) per (srcGpu, dstGpu) pair.
+  // The event must be created with srcGpu current so it binds to the source device.
+  std::optional<ScopedCudaEvent> srcReady;
   {
     const WithDevice withSrc(srcGpu);
-    cudaCheckError(cudaEventCreateWithFlags(&srcReady, cudaEventDisableTiming));
-    cudaCheckError(cudaEventRecord(srcReady, srcStream));
+    srcReady.emplace();
+    cudaCheckError(cudaEventRecord(srcReady->event(), srcStream));
   }
   {
     const WithDevice withDst(dstGpu);
-    cudaCheckError(cudaStreamWaitEvent(dstStream, srcReady, 0));
+    cudaCheckError(cudaStreamWaitEvent(dstStream, srcReady->event(), 0));
     cudaCheckError(cudaMemcpyPeerAsync(dstDevice, dstGpu, srcDevice, srcGpu, byteCount, dstStream));
   }
-  cudaCheckError(cudaEventDestroy(srcReady));
 }
 
 }  // namespace nvMolKit

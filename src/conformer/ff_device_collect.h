@@ -64,11 +64,11 @@ struct FFDeviceCoordCollector {
  * The function syncs @p collector.stream once at the end so the small host-side metadata (read
  * via the statuses copy) reflects the just-completed minimization.
  */
-void appendBatch(const std::vector<ConformerInfo>&   batchConformers,
-                 const AsyncDeviceVector<double>&    positionsDevice,
-                 const AsyncDeviceVector<double>&    energiesDevice,
-                 const AsyncDeviceVector<int16_t>&   statusesDevice,
-                 FFDeviceCoordCollector&             collector);
+void appendBatch(const std::vector<ConformerInfo>& batchConformers,
+                 const AsyncDeviceVector<double>&  positionsDevice,
+                 const AsyncDeviceVector<double>&  energiesDevice,
+                 const AsyncDeviceVector<int16_t>& statusesDevice,
+                 FFDeviceCoordCollector&           collector);
 
 /**
  * @brief Stitch all per-thread FFDeviceCoordCollectors into a single DeviceCoordResult on @p targetGpu.
@@ -91,8 +91,8 @@ DeviceCoordResult finalizeOnTarget(std::vector<FFDeviceCoordCollector>& collecto
  */
 struct DeviceInputIndex {
   int                  sourceGpu = -1;
-  std::vector<int32_t> atomStartsHost;   //!< length n + 1
-  std::vector<int32_t> conformerIndexBy; //!< maps allConformers index -> source conformer index
+  std::vector<int32_t> atomStartsHost;    //!< length n + 1
+  std::vector<int32_t> conformerIndexBy;  //!< maps allConformers index -> source conformer index
 };
 
 /**
@@ -120,12 +120,12 @@ DeviceInputIndex buildDeviceInputIndex(const DeviceCoordResult&          deviceI
  *   - The current device should be @p executingGpu (caller manages a WithDevice scope).
  *   - @p batchSrcIndices and @p batchAtomCounts must have the same length.
  */
-void broadcastDeviceInputBatch(const DeviceCoordResult&  deviceInput,
-                               const DeviceInputIndex&   index,
-                               const std::vector<int>&   batchSrcIndices,
-                               const std::vector<int>&   batchAtomCounts,
-                               int                       executingGpu,
-                               cudaStream_t              executingStream,
+void broadcastDeviceInputBatch(const DeviceCoordResult&   deviceInput,
+                               const DeviceInputIndex&    index,
+                               const std::vector<int>&    batchSrcIndices,
+                               const std::vector<int>&    batchAtomCounts,
+                               int                        executingGpu,
+                               cudaStream_t               executingStream,
                                AsyncDeviceVector<double>& positionsDevice);
 
 }  // namespace nvMolKit

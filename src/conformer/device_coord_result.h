@@ -62,8 +62,8 @@ struct DeviceCoordResult {
   AsyncDeviceVector<int32_t> confIndices;
   AsyncDeviceVector<double>  energies;
   AsyncDeviceVector<int8_t>  converged;
-  int                        gpuId  = -1;
-  int                        nMols  = 0;
+  int                        gpuId = -1;
+  int                        nMols = 0;
 };
 
 }  // namespace nvMolKit

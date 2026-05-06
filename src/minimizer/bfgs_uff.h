@@ -44,9 +44,9 @@ std::vector<std::vector<double>> UFFOptimizeMoleculesConfsBfgs(std::vector<RDKit
 //! list. In CoordinateOutput::DEVICE mode, @ref device holds the on-GPU coordinates / energies /
 //! convergence flags collected onto the chosen target GPU and the host-side vectors are empty.
 struct UFFMinimizeResult {
-  std::vector<std::vector<double>>  energies;   //!< Per-molecule, per-conformer final energies (RDKIT mode only).
-  std::vector<std::vector<int8_t>>  converged;  //!< Per-molecule, per-conformer convergence flags (RDKIT mode only).
-  std::optional<DeviceCoordResult>  device;     //!< Populated when output==DEVICE.
+  std::vector<std::vector<double>> energies;   //!< Per-molecule, per-conformer final energies (RDKIT mode only).
+  std::vector<std::vector<int8_t>> converged;  //!< Per-molecule, per-conformer convergence flags (RDKIT mode only).
+  std::optional<DeviceCoordResult> device;     //!< Populated when output==DEVICE.
 };
 
 //! \brief Optimize with per-molecule constraints and return convergence status.
@@ -79,8 +79,8 @@ UFFMinimizeResult UFFMinimizeMoleculesConfs(
   const std::vector<bool>&                                     ignoreInterfragInteractions = {},
   const std::vector<ForceFieldConstraints::PerMolConstraints>& constraints                 = {},
   const BatchHardwareOptions&                                  perfOptions                 = {},
-  CoordinateOutput                                             output    = CoordinateOutput::RDKIT_CONFORMERS,
-  int                                                          targetGpu = -1,
+  CoordinateOutput                                             output      = CoordinateOutput::RDKIT_CONFORMERS,
+  int                                                          targetGpu   = -1,
   const DeviceCoordResult*                                     deviceInput = nullptr);
 
 }  // namespace nvMolKit::UFF

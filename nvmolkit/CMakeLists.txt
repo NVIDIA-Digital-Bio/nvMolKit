@@ -78,7 +78,6 @@ target_link_libraries(
           batched_forcefield
           rdkit_mmff_flattened
           rdkit_uff_flattened
-          coord_collect
           device
           device_vector
           ff_utils)
