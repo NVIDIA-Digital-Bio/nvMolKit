@@ -18,6 +18,7 @@
 
 #include <cuda_runtime.h>
 
+#include <cstdint>
 #include <mutex>
 #include <unordered_map>
 #include <vector>
@@ -37,13 +38,24 @@ namespace detail {
  *
  * The accumulator and its buffers live on the GPU identified by @ref gpuId. All device operations
  * execute on @ref stream.
+ *
+ * Optional per-conformer fields:
+ * - @ref confIds: when populated by the producer (e.g. FF, which receives explicit (molIdx, confIdx)
+ *   pairs from the host), @ref finalizeOnTarget uses these directly. When left empty (e.g. ETKDG),
+ *   @ref finalizeOnTarget assigns per-molecule conformer indices deterministically by walking
+ *   partials in the supplied order and counting per molecule.
+ * - @ref energies and @ref converged: populated by FF; left empty by ETKDG. @ref finalizeOnTarget
+ *   only allocates the matching result fields when at least one collector populates them.
  */
 struct DeviceCoordCollector {
   int                       gpuId  = -1;
   cudaStream_t              stream = nullptr;
   AsyncDeviceVector<double> positions;   //!< Packed 3D, length = sum(atomCounts)*3
+  AsyncDeviceVector<double> energies;    //!< Optional; length = atomCounts.size() when populated
+  AsyncDeviceVector<int8_t> converged;   //!< Optional; length = atomCounts.size() when populated
   std::vector<int>          atomCounts;  //!< One per accumulated conformer
   std::vector<int>          molIds;      //!< Global molecule index per accumulated conformer
+  std::vector<int>          confIds;     //!< Optional; length = atomCounts.size() when populated
 };
 
 /**
@@ -64,16 +76,16 @@ struct DeviceCoordCollectorCap {
 /**
  * @brief Stitch all per-thread DeviceCoordCollectors into a single DeviceCoordResult on @p targetGpu.
  *
- * Concatenates per-thread positions onto @p targetGpu using @ref copyDeviceToDeviceAsync,
- * computes CSR `atomStarts`, and assigns per-molecule `confIndices` deterministically by walking
- * partials in the supplied order and counting per molecule. All resulting buffers are allocated
- * and live on @p targetGpu.
+ * Concatenates per-thread positions onto @p targetGpu using @ref copyDeviceToDeviceAsync and
+ * computes CSR `atomStarts`. Per-molecule `confIndices` are taken from @ref DeviceCoordCollector::confIds
+ * when populated and otherwise assigned deterministically by walking partials in the supplied order
+ * and counting per molecule. The result's `energies` / `converged` buffers are allocated and
+ * concatenated only when at least one collector populates them. All resulting buffers are
+ * allocated on @p targetGpu and bound to the default stream of that GPU before returning.
  *
  * @note This call is synchronous on the target stream by the time it returns: every contributing
  *       partial stream has been waited on via cross-stream events, and a final
- *       `cudaStreamSynchronize` ensures the result is visible. The returned result's `energies`
- *       and `converged` members are left empty; producers that have those values (e.g. FF)
- *       populate them on the result after this call.
+ *       `cudaStreamSynchronize` ensures the result is visible.
  */
 DeviceCoordResult finalizeOnTarget(std::vector<DeviceCoordCollector>& collectors, int targetGpu, int nMols);
 

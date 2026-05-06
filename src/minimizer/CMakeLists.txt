@@ -32,9 +32,10 @@ target_include_directories(bfgs_common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 add_library(bfgs_mmff bfgs_mmff.cpp)
 target_link_libraries(
   bfgs_mmff
-  PUBLIC bfgs
+  PUBLIC bfgs conformer_types
   PRIVATE ${RDKit_LIBS}
           bfgs_common
+          ff_device_collect
           mmff_batched_forcefield
           rdkit_mmff_flattened
           forcefield_constraints
@@ -42,14 +43,16 @@ target_link_libraries(
           OpenMP::OpenMP_CXX
           openmp_helpers
           cccl_interface)
-target_include_directories(bfgs_mmff PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(bfgs_mmff PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
+                                            ${CMAKE_SOURCE_DIR}/src/forcefields)
 
 add_library(bfgs_uff bfgs_uff.cpp)
 target_link_libraries(
   bfgs_uff
-  PUBLIC bfgs
+  PUBLIC bfgs conformer_types
   PRIVATE ${RDKit_LIBS}
           bfgs_common
+          ff_device_collect
           uff_batched_forcefield
           rdkit_uff_flattened
           forcefield_constraints
@@ -57,4 +60,5 @@ target_link_libraries(
           OpenMP::OpenMP_CXX
           openmp_helpers
           cccl_interface)
-target_include_directories(bfgs_uff PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(bfgs_uff PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
+                                           ${CMAKE_SOURCE_DIR}/src/forcefields)
