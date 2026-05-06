@@ -46,10 +46,10 @@ DeviceCoordResult finalizeOnTarget(std::vector<DeviceCoordCollector>& collectors
     for (const int natoms : collector.atomCounts) {
       totalAtoms += natoms;
     }
-    if (!collector.energies.empty()) {
+    if (collector.energies.size() > 0) {
       hasEnergies = true;
     }
-    if (!collector.converged.empty()) {
+    if (collector.converged.size() > 0) {
       hasConverged = true;
     }
   }
@@ -90,7 +90,7 @@ DeviceCoordResult finalizeOnTarget(std::vector<DeviceCoordCollector>& collectors
                             collector.stream,
                             targetGpu,
                             targetStream.stream());
-    if (hasEnergies && !collector.energies.empty()) {
+    if (hasEnergies && collector.energies.size() > 0) {
       copyDeviceToDeviceAsync(result.energies.data() + confCursor,
                               collector.energies.data(),
                               collector.energies.size() * sizeof(double),
@@ -99,7 +99,7 @@ DeviceCoordResult finalizeOnTarget(std::vector<DeviceCoordCollector>& collectors
                               targetGpu,
                               targetStream.stream());
     }
-    if (hasConverged && !collector.converged.empty()) {
+    if (hasConverged && collector.converged.size() > 0) {
       copyDeviceToDeviceAsync(result.converged.data() + confCursor,
                               collector.converged.data(),
                               collector.converged.size() * sizeof(int8_t),
