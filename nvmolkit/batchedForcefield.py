@@ -411,11 +411,7 @@ class _BatchedForcefieldBase:
         Args:
             output: ``RDKIT_CONFORMERS`` (default) returns a nested list with
                 one float per conformer. ``DEVICE`` returns a
-                :class:`DevicePerConfResult` whose ``energies`` borrows the
-                on-device energy buffer (length ``n_total_conformers``)
-                from the wrapper. The borrowed view is valid for the
-                lifetime of this forcefield instance and until the next
-                ``compute_energy(output=DEVICE)`` call.
+                :class:`DevicePerConfResult`.
 
         Returns:
             For RDKit mode: ``result[mol_idx][conf_idx]`` -- one energy per
@@ -444,10 +440,7 @@ class _BatchedForcefieldBase:
         Args:
             output: ``RDKIT_CONFORMERS`` (default) returns a nested list per
                 conformer. ``DEVICE`` returns a :class:`Device3DResult` whose
-                ``values`` field is a ``(total_atoms, 3)`` view of the
-                gradient (per-atom 3-vector layout). The accompanying
-                ``atom_starts``, ``mol_indices``, and ``conf_indices`` describe
-                how each conformer's atoms are laid out.
+                ``values`` field is the ``(total_atoms, 3)`` gradient.
 
         Returns:
             For RDKit mode: ``result[mol_idx][conf_idx]`` -- one flattened
@@ -623,8 +616,13 @@ class MMFFBatchedForcefield(_BatchedForcefieldBase):
             maxIters: Maximum number of BFGS iterations.
             forceTol: Gradient convergence tolerance.
             output: ``RDKIT_CONFORMERS`` (default) or ``DEVICE``.
-            target_gpu: In DEVICE mode, the GPU to consolidate the result
-                onto. ``None`` selects the wrapper's own GPU.
+            target_gpu: In DEVICE mode, the GPU to consolidate the result on.
+                ``None`` (the default) selects the wrapper's own GPU. The
+                wrapper is single-GPU - the only supported value is the
+                wrapper's GPU id; passing a different GPU raises
+                ``invalid_argument``. For cross-GPU consolidation use the
+                standalone ``MMFFOptimizeMoleculesConfs(output=DEVICE,
+                targetGpu=...)`` API.
 
         Returns:
             For RDKit mode: ``(energies, converged)`` nested host lists.
@@ -734,8 +732,13 @@ class UFFBatchedForcefield(_BatchedForcefieldBase):
             maxIters: Maximum number of BFGS iterations.
             forceTol: Gradient convergence tolerance.
             output: ``RDKIT_CONFORMERS`` (default) or ``DEVICE``.
-            target_gpu: In DEVICE mode, the GPU to consolidate the result
-                onto. ``None`` selects the wrapper's own GPU.
+            target_gpu: In DEVICE mode, the GPU to consolidate the result on.
+                ``None`` (the default) selects the wrapper's own GPU. The
+                wrapper is single-GPU - the only supported value is the
+                wrapper's GPU id; passing a different GPU raises
+                ``invalid_argument``. For cross-GPU consolidation use the
+                standalone ``UFFOptimizeMoleculesConfs(output=DEVICE,
+                targetGpu=...)`` API.
 
         Returns:
             For RDKit mode: ``(energies, converged)`` nested host lists.

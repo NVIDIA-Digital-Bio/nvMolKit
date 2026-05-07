@@ -30,50 +30,39 @@ inline boost::python::object wrapAsync(PyArray* arr, const int gpuId, const boos
 }
 
 /**
- * @brief Build a Python @c Device3DResult that owns the device buffers held by a C++
- * @ref DeviceCoordResult (e.g. returned from MMFF/UFFMinimizeMoleculesConfs(DEVICE) or
- * embedMolecules(DEVICE)). On the Python side the @c values field receives the @c positions buffer.
+ * @brief Build a Python @c Device3DResult that takes ownership of all device buffers.
+ *
+ * Each @ref AsyncDeviceVector argument is consumed (via @c release() inside @ref makePyArray),
+ * so callers must pass freshly-built buffers, not references into longer-lived state.
  */
-inline boost::python::object buildOwningDevice3DResult(DeviceCoordResult& dev) {
-  boost::python::object types_module = boost::python::import("nvmolkit.types");
-  boost::python::object d3d_cls      = types_module.attr("Device3DResult");
-  boost::python::object async_cls    = types_module.attr("AsyncGpuResult");
-  const int             natoms       = static_cast<int>(dev.positions.size() / 3);
-  PyArray*              valuesPy     = makePyArray(dev.positions, "f8", boost::python::make_tuple(natoms, 3));
-  PyArray*              atomStartsPy = makePyArray(dev.atomStarts);
-  PyArray*              molIdxPy     = makePyArray(dev.molIndices);
-  PyArray*              confIdxPy    = makePyArray(dev.confIndices);
-  PyArray*              energiesPy   = makePyArray(dev.energies);
-  PyArray*              convergedPy  = makePyArray(dev.converged);
-  return d3d_cls(wrapAsync(valuesPy, dev.gpuId, async_cls),
-                 wrapAsync(atomStartsPy, dev.gpuId, async_cls),
-                 wrapAsync(molIdxPy, dev.gpuId, async_cls),
-                 wrapAsync(confIdxPy, dev.gpuId, async_cls),
-                 dev.gpuId,
-                 dev.nMols,
-                 wrapAsync(energiesPy, dev.gpuId, async_cls),
-                 wrapAsync(convergedPy, dev.gpuId, async_cls));
-}
-
-/**
- * @brief Build a Python @c Device3DResult whose buffers borrow from caller-owned device-resident
- * state. Caller guarantees the underlying @ref AsyncDeviceVector instances outlive any Python
- * consumer of the returned object.
- */
-inline boost::python::object buildBorrowedDevice3DResult(AsyncDeviceVector<double>&  values,
-                                                         AsyncDeviceVector<int32_t>& atomStarts,
-                                                         AsyncDeviceVector<int32_t>& molIndices,
-                                                         AsyncDeviceVector<int32_t>& confIndices,
-                                                         const int                   gpuId,
-                                                         const int                   nMols) {
+inline boost::python::object buildOwningDevice3DResult(AsyncDeviceVector<double>&  values,
+                                                       AsyncDeviceVector<int32_t>& atomStarts,
+                                                       AsyncDeviceVector<int32_t>& molIndices,
+                                                       AsyncDeviceVector<int32_t>& confIndices,
+                                                       const int                   gpuId,
+                                                       const int                   nMols,
+                                                       AsyncDeviceVector<double>*  energies  = nullptr,
+                                                       AsyncDeviceVector<int8_t>*  converged = nullptr) {
   boost::python::object types_module = boost::python::import("nvmolkit.types");
   boost::python::object d3d_cls      = types_module.attr("Device3DResult");
   boost::python::object async_cls    = types_module.attr("AsyncGpuResult");
   const int             natoms       = static_cast<int>(values.size() / 3);
-  PyArray*              valuesPy     = makePyArrayBorrowed(values, "f8", boost::python::make_tuple(natoms, 3));
-  PyArray*              atomStartsPy = makePyArrayBorrowed(atomStarts);
-  PyArray*              molIdxPy     = makePyArrayBorrowed(molIndices);
-  PyArray*              confIdxPy    = makePyArrayBorrowed(confIndices);
+  PyArray*              valuesPy     = makePyArray(values, "f8", boost::python::make_tuple(natoms, 3));
+  PyArray*              atomStartsPy = makePyArray(atomStarts);
+  PyArray*              molIdxPy     = makePyArray(molIndices);
+  PyArray*              confIdxPy    = makePyArray(confIndices);
+  if (energies != nullptr && converged != nullptr) {
+    PyArray* energiesPy  = makePyArray(*energies);
+    PyArray* convergedPy = makePyArray(*converged);
+    return d3d_cls(wrapAsync(valuesPy, gpuId, async_cls),
+                   wrapAsync(atomStartsPy, gpuId, async_cls),
+                   wrapAsync(molIdxPy, gpuId, async_cls),
+                   wrapAsync(confIdxPy, gpuId, async_cls),
+                   gpuId,
+                   nMols,
+                   wrapAsync(energiesPy, gpuId, async_cls),
+                   wrapAsync(convergedPy, gpuId, async_cls));
+  }
   return d3d_cls(wrapAsync(valuesPy, gpuId, async_cls),
                  wrapAsync(atomStartsPy, gpuId, async_cls),
                  wrapAsync(molIdxPy, gpuId, async_cls),
@@ -83,20 +72,35 @@ inline boost::python::object buildBorrowedDevice3DResult(AsyncDeviceVector<doubl
 }
 
 /**
- * @brief Build a Python @c DevicePerConfResult whose buffers borrow from caller-owned
- * device-resident state.
+ * @brief Convenience overload that pulls all fields from a C++ @ref DeviceCoordResult.
+ *
+ * The @c DeviceCoordResult's buffers are moved into the Python result via @c release().
  */
-inline boost::python::object buildBorrowedDevicePerConfResult(AsyncDeviceVector<double>&  energies,
-                                                              AsyncDeviceVector<int32_t>& molIndices,
-                                                              AsyncDeviceVector<int32_t>& confIndices,
-                                                              const int                   gpuId,
-                                                              const int                   nMols) {
+inline boost::python::object buildOwningDevice3DResult(DeviceCoordResult& dev) {
+  return buildOwningDevice3DResult(dev.positions,
+                                   dev.atomStarts,
+                                   dev.molIndices,
+                                   dev.confIndices,
+                                   dev.gpuId,
+                                   dev.nMols,
+                                   &dev.energies,
+                                   &dev.converged);
+}
+
+/**
+ * @brief Build a Python @c DevicePerConfResult that takes ownership of all device buffers.
+ */
+inline boost::python::object buildOwningDevicePerConfResult(AsyncDeviceVector<double>&  energies,
+                                                            AsyncDeviceVector<int32_t>& molIndices,
+                                                            AsyncDeviceVector<int32_t>& confIndices,
+                                                            const int                   gpuId,
+                                                            const int                   nMols) {
   boost::python::object types_module = boost::python::import("nvmolkit.types");
   boost::python::object dpc_cls      = types_module.attr("DevicePerConfResult");
   boost::python::object async_cls    = types_module.attr("AsyncGpuResult");
-  PyArray*              energiesPy   = makePyArrayBorrowed(energies);
-  PyArray*              molIdxPy     = makePyArrayBorrowed(molIndices);
-  PyArray*              confIdxPy    = makePyArrayBorrowed(confIndices);
+  PyArray*              energiesPy   = makePyArray(energies);
+  PyArray*              molIdxPy     = makePyArray(molIndices);
+  PyArray*              confIdxPy    = makePyArray(confIndices);
   return dpc_cls(wrapAsync(energiesPy, gpuId, async_cls),
                  wrapAsync(molIdxPy, gpuId, async_cls),
                  wrapAsync(confIdxPy, gpuId, async_cls),

@@ -167,3 +167,48 @@ def test_minimize_device_energies_match_host(ff_cls, two_mols):
     assert len(energies_device) == len(energies_host)
     for h, d in zip(energies_host, energies_device):
         assert abs(h - d) < 1e-3, f"host {h} vs device {d}"
+
+
+@pytest.mark.parametrize("ff_cls", [MMFFBatchedForcefield, UFFBatchedForcefield])
+def test_compute_energy_device_two_consecutive_results_independent(ff_cls, two_mols):
+    """Holding a DEVICE energy result across a second compute_energy(DEVICE) must not corrupt it.
+
+    Regression test for the scratch-buffer aliasing bug where the wrapper's persistent buffer
+    was returned borrowed and then zeroed on the next call.
+    """
+    ff = ff_cls(two_mols)
+    first = ff.compute_energy(output=CoordinateOutput.DEVICE)
+    torch.cuda.synchronize()
+    first_snapshot = first.energies.torch().clone()
+
+    second = ff.compute_energy(output=CoordinateOutput.DEVICE)
+    torch.cuda.synchronize()
+    # The first result's energies must not have been clobbered by the second call.
+    assert torch.equal(first.energies.torch(), first_snapshot)
+    # Sanity: both results have the same numerical content (input positions unchanged).
+    assert torch.allclose(first.energies.torch(), second.energies.torch())
+
+
+@pytest.mark.parametrize("ff_cls", [MMFFBatchedForcefield, UFFBatchedForcefield])
+def test_compute_gradients_device_two_consecutive_results_independent(ff_cls, two_mols):
+    """Holding a DEVICE gradient result across a second compute_gradients(DEVICE) must not corrupt it."""
+    ff = ff_cls(two_mols)
+    first = ff.compute_gradients(output=CoordinateOutput.DEVICE)
+    torch.cuda.synchronize()
+    first_snapshot = first.values.torch().clone()
+
+    second = ff.compute_gradients(output=CoordinateOutput.DEVICE)
+    torch.cuda.synchronize()
+    assert torch.equal(first.values.torch(), first_snapshot)
+    assert torch.allclose(first.values.torch(), second.values.torch())
+
+
+@pytest.mark.parametrize("ff_cls", [MMFFBatchedForcefield, UFFBatchedForcefield])
+def test_minimize_device_rejects_cross_gpu_target(ff_cls, two_mols):
+    """The wrapper is single-GPU; minimize(output=DEVICE, target_gpu=other) must raise."""
+    if torch.cuda.device_count() < 2:
+        pytest.skip("Requires >= 2 GPUs to exercise cross-GPU rejection")
+    with torch.cuda.device(0):
+        ff = ff_cls(two_mols)
+        with pytest.raises(Exception, match="does not support target_gpu"):
+            ff.minimize(maxIters=5, output=CoordinateOutput.DEVICE, target_gpu=1)
