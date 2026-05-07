@@ -81,12 +81,12 @@ Constraint terms are added through per-molecule element views:
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, overload
 
 from nvmolkit import _batchedForcefield  # type: ignore
 from nvmolkit._arrayHelpers import *  # noqa: F403  # registers PyArray for DEVICE-mode returns
 from nvmolkit._mmff_bridge import default_rdkit_mmff_properties, make_internal_mmff_properties
-from nvmolkit.types import AsyncGpuResult, CoordinateOutput, DeviceCoordResult, HardwareOptions
+from nvmolkit.types import CoordinateOutput, Device3DResult, DevicePerConfResult, HardwareOptions
 
 if TYPE_CHECKING:
     from rdkit.Chem import Mol
@@ -399,22 +399,29 @@ class _BatchedForcefieldBase:
         """Rebuild the forcefield after changing constraints or settings."""
         self._build()
 
+    @overload
+    def compute_energy(
+        self, output: Literal[CoordinateOutput.RDKIT_CONFORMERS] = CoordinateOutput.RDKIT_CONFORMERS
+    ) -> list[list[float]]: ...
+    @overload
+    def compute_energy(self, output: Literal[CoordinateOutput.DEVICE]) -> DevicePerConfResult: ...
     def compute_energy(self, output: CoordinateOutput = CoordinateOutput.RDKIT_CONFORMERS):
         """Return forcefield energies for all conformers of all molecules.
 
         Args:
             output: ``RDKIT_CONFORMERS`` (default) returns a nested list with
-                one float per conformer. ``DEVICE`` returns an
-                :class:`AsyncGpuResult` view of the on-device energy buffer
-                (length ``n_total_conformers``) borrowed from the wrapper. The
-                view is valid for the lifetime of this forcefield instance and
-                until the next ``compute_energy(output=DEVICE)`` call.
+                one float per conformer. ``DEVICE`` returns a
+                :class:`DevicePerConfResult` whose ``energies`` borrows the
+                on-device energy buffer (length ``n_total_conformers``)
+                from the wrapper. The borrowed view is valid for the
+                lifetime of this forcefield instance and until the next
+                ``compute_energy(output=DEVICE)`` call.
 
         Returns:
             For RDKit mode: ``result[mol_idx][conf_idx]`` -- one energy per
             conformer.
-            For DEVICE mode: an :class:`AsyncGpuResult` of length
-            ``n_total_conformers`` (flat, in input-mol then conformer order).
+            For DEVICE mode: a :class:`DevicePerConfResult` carrying the
+            energies, ``mol_indices``, and ``conf_indices`` describing layout.
         """
         if not self._molecules:
             if output == CoordinateOutput.DEVICE:
@@ -422,25 +429,31 @@ class _BatchedForcefieldBase:
             return []
         self._ensure_built()
         if output == CoordinateOutput.DEVICE:
-            return AsyncGpuResult(self._native_ff.computeEnergyDevice(), gpu_id=self._native_ff.gpuId())
+            return self._native_ff.computeEnergyDevice()
         return self._native_ff.computeEnergy()
 
+    @overload
+    def compute_gradients(
+        self, output: Literal[CoordinateOutput.RDKIT_CONFORMERS] = CoordinateOutput.RDKIT_CONFORMERS
+    ) -> list[list[list[float]]]: ...
+    @overload
+    def compute_gradients(self, output: Literal[CoordinateOutput.DEVICE]) -> Device3DResult: ...
     def compute_gradients(self, output: CoordinateOutput = CoordinateOutput.RDKIT_CONFORMERS):
         """Return forcefield gradients for all conformers of all molecules.
 
         Args:
             output: ``RDKIT_CONFORMERS`` (default) returns a nested list per
-                conformer. ``DEVICE`` returns a flat
-                :class:`AsyncGpuResult` of shape ``(total_positions,)`` (one
-                contiguous ``[x, y, z, ...]`` block per conformer in batch
-                order). Index information is available via :meth:`positions`
-                and :meth:`indices`.
+                conformer. ``DEVICE`` returns a :class:`Device3DResult` whose
+                ``values`` field is a ``(total_atoms, 3)`` view of the
+                gradient (per-atom 3-vector layout). The accompanying
+                ``atom_starts``, ``mol_indices``, and ``conf_indices`` describe
+                how each conformer's atoms are laid out.
 
         Returns:
             For RDKit mode: ``result[mol_idx][conf_idx]`` -- one flattened
             ``[x0, y0, z0, ...]`` gradient vector per conformer.
-            For DEVICE mode: a flat :class:`AsyncGpuResult` of length
-            ``sum(n_atoms_i) * 3``.
+            For DEVICE mode: a :class:`Device3DResult` whose ``values`` is the
+            ``(total_atoms, 3)`` gradient tensor.
         """
         if not self._molecules:
             if output == CoordinateOutput.DEVICE:
@@ -448,34 +461,8 @@ class _BatchedForcefieldBase:
             return []
         self._ensure_built()
         if output == CoordinateOutput.DEVICE:
-            return AsyncGpuResult(self._native_ff.computeGradientsDevice(), gpu_id=self._native_ff.gpuId())
+            return self._native_ff.computeGradientsDevice()
         return self._native_ff.computeGradients()
-
-    def positions(self) -> AsyncGpuResult:
-        """Return a borrowed device view of the wrapper's persistent positions buffer.
-
-        The returned :class:`AsyncGpuResult` shares storage with the
-        wrapper's internal positions and is invalidated when this object is
-        destroyed. It is updated in-place after each :meth:`minimize` call
-        so the buffer always reflects the most recently optimized
-        coordinates.
-        """
-        if not self._molecules:
-            raise ValueError("positions() requires at least one molecule")
-        self._ensure_built()
-        return AsyncGpuResult(self._native_ff.positionsDevice(), gpu_id=self._native_ff.gpuId())
-
-    def indices(self) -> tuple[AsyncGpuResult, AsyncGpuResult, AsyncGpuResult]:
-        """Return ``(atom_starts, mol_indices, conf_indices)`` matching the device layout.
-
-        These are persistent borrowed device buffers that describe how
-        :meth:`positions` and the DEVICE-mode results from :meth:`compute_energy`
-        / :meth:`compute_gradients` are organized.
-        """
-        if not self._molecules:
-            raise ValueError("indices() requires at least one molecule")
-        self._ensure_built()
-        return self._native_ff.indexBuffers()
 
     def _minimize(
         self,
@@ -600,6 +587,23 @@ class MMFFBatchedForcefield(_BatchedForcefieldBase):
             self._hardware_options._as_native(),
         )
 
+    @overload
+    def minimize(
+        self,
+        maxIters: int = 200,
+        forceTol: float = 1e-4,
+        output: Literal[CoordinateOutput.RDKIT_CONFORMERS] = CoordinateOutput.RDKIT_CONFORMERS,
+        target_gpu: int | None = None,
+    ) -> tuple[list[list[float]], list[list[bool]]]: ...
+    @overload
+    def minimize(
+        self,
+        maxIters: int = 200,
+        forceTol: float = 1e-4,
+        *,
+        output: Literal[CoordinateOutput.DEVICE],
+        target_gpu: int | None = None,
+    ) -> Device3DResult: ...
     def minimize(
         self,
         maxIters: int = 200,
@@ -613,7 +617,7 @@ class MMFFBatchedForcefield(_BatchedForcefieldBase):
         into the RDKit conformers in-place. In ``DEVICE`` mode, optimized
         coordinates and energies stay on the GPU, the wrapper's persistent
         on-device positions buffer is updated in-place (no host roundtrip),
-        and a :class:`DeviceCoordResult` is returned.
+        and a :class:`Device3DResult` is returned.
 
         Args:
             maxIters: Maximum number of BFGS iterations.
@@ -624,7 +628,9 @@ class MMFFBatchedForcefield(_BatchedForcefieldBase):
 
         Returns:
             For RDKit mode: ``(energies, converged)`` nested host lists.
-            For DEVICE mode: a :class:`DeviceCoordResult`.
+            For DEVICE mode: a :class:`Device3DResult` whose ``values`` field
+            holds the optimized coordinates, ``energies`` holds final energies,
+            and ``converged`` holds per-conformer convergence flags.
         """
         return self._minimize(maxIters, forceTol, output=output, target_gpu=target_gpu)
 
@@ -692,6 +698,23 @@ class UFFBatchedForcefield(_BatchedForcefieldBase):
             self._hardware_options._as_native(),
         )
 
+    @overload
+    def minimize(
+        self,
+        maxIters: int = 1000,
+        forceTol: float = 1e-4,
+        output: Literal[CoordinateOutput.RDKIT_CONFORMERS] = CoordinateOutput.RDKIT_CONFORMERS,
+        target_gpu: int | None = None,
+    ) -> tuple[list[list[float]], list[list[bool]]]: ...
+    @overload
+    def minimize(
+        self,
+        maxIters: int = 1000,
+        forceTol: float = 1e-4,
+        *,
+        output: Literal[CoordinateOutput.DEVICE],
+        target_gpu: int | None = None,
+    ) -> Device3DResult: ...
     def minimize(
         self,
         maxIters: int = 1000,
@@ -705,7 +728,7 @@ class UFFBatchedForcefield(_BatchedForcefieldBase):
         into the RDKit conformers in-place. In ``DEVICE`` mode, optimized
         coordinates and energies stay on the GPU, the wrapper's persistent
         on-device positions buffer is updated in-place (no host roundtrip),
-        and a :class:`DeviceCoordResult` is returned.
+        and a :class:`Device3DResult` is returned.
 
         Args:
             maxIters: Maximum number of BFGS iterations.
@@ -716,6 +739,8 @@ class UFFBatchedForcefield(_BatchedForcefieldBase):
 
         Returns:
             For RDKit mode: ``(energies, converged)`` nested host lists.
-            For DEVICE mode: a :class:`DeviceCoordResult`.
+            For DEVICE mode: a :class:`Device3DResult` whose ``values`` field
+            holds the optimized coordinates, ``energies`` holds final energies,
+            and ``converged`` holds per-conformer convergence flags.
         """
         return self._minimize(maxIters, forceTol, output=output, target_gpu=target_gpu)

@@ -16,8 +16,7 @@
 """DEVICE-mode tests for the batched forcefield wrappers (issue #140).
 
 These tests exercise the on-device output path: ``compute_energy(output=DEVICE)``,
-``compute_gradients(output=DEVICE)``, ``minimize(output=DEVICE)``, and the
-``positions()`` / ``indices()`` accessors on both
+``compute_gradients(output=DEVICE)``, and ``minimize(output=DEVICE)`` on both
 :class:`MMFFBatchedForcefield` and :class:`UFFBatchedForcefield`.
 
 Each test compares the DEVICE-mode result against the host-mode result on
@@ -30,7 +29,7 @@ from rdkit import Chem
 from rdkit.Chem import rdDistGeom
 
 from nvmolkit.batchedForcefield import MMFFBatchedForcefield, UFFBatchedForcefield
-from nvmolkit.types import CoordinateOutput
+from nvmolkit.types import CoordinateOutput, Device3DResult, DevicePerConfResult
 
 
 def make_embedded_mol(smiles: str, num_confs: int = 1, seed: int = 0xC0FFEE):
@@ -58,30 +57,52 @@ def two_mols():
 def test_compute_energy_device_matches_host(ff_cls, two_mols):
     ff = ff_cls(two_mols)
     host_nested = ff.compute_energy()
-    host_flat = _flatten(host_nested)
 
-    device_handle = ff.compute_energy(output=CoordinateOutput.DEVICE)
+    device_result = ff.compute_energy(output=CoordinateOutput.DEVICE)
+    assert isinstance(device_result, DevicePerConfResult)
     torch.cuda.synchronize()
-    device_flat = device_handle.numpy().tolist()
+    device_nested = device_result.per_molecule()
 
-    assert len(device_flat) == len(host_flat)
-    for h, d in zip(host_flat, device_flat):
-        assert abs(h - d) < 1e-9
+    assert len(device_nested) == len(host_nested)
+    for h_inner, d_inner in zip(host_nested, device_nested):
+        assert len(h_inner) == len(d_inner)
+        for h, d in zip(h_inner, d_inner):
+            assert abs(h - d) < 1e-9
+
+
+@pytest.mark.parametrize("ff_cls", [MMFFBatchedForcefield, UFFBatchedForcefield])
+def test_compute_energy_device_indices_match_layout(ff_cls, two_mols):
+    """DevicePerConfResult.mol_indices/conf_indices match the host conformer flattening."""
+    ff = ff_cls(two_mols)
+    device_result = ff.compute_energy(output=CoordinateOutput.DEVICE)
+    torch.cuda.synchronize()
+    mol_indices = device_result.mol_indices.torch().tolist()
+    conf_indices = device_result.conf_indices.torch().tolist()
+
+    expected_mol_indices = []
+    expected_conf_indices = []
+    for mol_idx, mol in enumerate(two_mols):
+        for conf_idx in range(mol.GetNumConformers()):
+            expected_mol_indices.append(mol_idx)
+            expected_conf_indices.append(conf_idx)
+    assert mol_indices == expected_mol_indices
+    assert conf_indices == expected_conf_indices
+    assert device_result.n_mols == len(two_mols)
 
 
 @pytest.mark.parametrize("ff_cls", [MMFFBatchedForcefield, UFFBatchedForcefield])
 def test_compute_gradients_device_matches_host(ff_cls, two_mols):
     ff = ff_cls(two_mols)
     host_nested = ff.compute_gradients()
-    # host_nested[mol][conf] is a flat [x0,y0,z0, ...] vector
     host_flat = []
     for per_mol in host_nested:
         for per_conf in per_mol:
             host_flat.extend(per_conf)
 
-    device_handle = ff.compute_gradients(output=CoordinateOutput.DEVICE)
+    device_result = ff.compute_gradients(output=CoordinateOutput.DEVICE)
+    assert isinstance(device_result, Device3DResult)
     torch.cuda.synchronize()
-    device_flat = device_handle.numpy().tolist()
+    device_flat = device_result.values.torch().reshape(-1).tolist()
 
     assert len(device_flat) == len(host_flat)
     for h, d in zip(host_flat, device_flat):
@@ -89,54 +110,48 @@ def test_compute_gradients_device_matches_host(ff_cls, two_mols):
 
 
 @pytest.mark.parametrize("ff_cls", [MMFFBatchedForcefield, UFFBatchedForcefield])
-def test_indices_match_layout(ff_cls, two_mols):
+def test_compute_gradients_device_indices_match_layout(ff_cls, two_mols):
+    """Device3DResult.atom_starts / mol_indices / conf_indices match the host layout."""
     ff = ff_cls(two_mols)
-    ff._ensure_built()  # force build
-    atom_starts, mol_indices, conf_indices = ff.indices()
+    result = ff.compute_gradients(output=CoordinateOutput.DEVICE)
     torch.cuda.synchronize()
-    atom_starts_np = atom_starts.numpy()
-    mol_indices_np = mol_indices.numpy()
-    conf_indices_np = conf_indices.numpy()
+    atom_starts = result.atom_starts.torch().tolist()
+    mol_indices = result.mol_indices.torch().tolist()
+    conf_indices = result.conf_indices.torch().tolist()
 
     expected_n_conformers = sum(m.GetNumConformers() for m in two_mols)
-    assert len(mol_indices_np) == expected_n_conformers
-    assert len(conf_indices_np) == expected_n_conformers
-    assert len(atom_starts_np) == expected_n_conformers + 1
-    assert atom_starts_np[0] == 0
+    assert len(mol_indices) == expected_n_conformers
+    assert len(conf_indices) == expected_n_conformers
+    assert len(atom_starts) == expected_n_conformers + 1
+    assert atom_starts[0] == 0
 
     cursor = 0
     idx = 0
     for mol_idx, mol in enumerate(two_mols):
         natoms = mol.GetNumAtoms()
         for conf_idx in range(mol.GetNumConformers()):
-            assert mol_indices_np[idx] == mol_idx
-            assert conf_indices_np[idx] == conf_idx
+            assert mol_indices[idx] == mol_idx
+            assert conf_indices[idx] == conf_idx
             cursor += natoms
-            assert atom_starts_np[idx + 1] == cursor
+            assert atom_starts[idx + 1] == cursor
             idx += 1
 
 
 @pytest.mark.parametrize("ff_cls", [MMFFBatchedForcefield, UFFBatchedForcefield])
-def test_positions_accessor_reflects_minimize(ff_cls, two_mols):
+def test_minimize_device_returns_device3d_with_optimized_positions(ff_cls, two_mols):
+    """minimize(output=DEVICE) returns Device3DResult; values reflect updated coords."""
     ff = ff_cls(two_mols)
-    pos_before = ff.positions().numpy().copy()
-
-    # Run device minimize - should refresh the wrapper's persistent positions
-    # buffer in place without touching the RDKit conformers.
+    pos_initial = ff.compute_gradients(output=CoordinateOutput.DEVICE).values.torch().clone()
     result = ff.minimize(maxIters=15, output=CoordinateOutput.DEVICE)
-    pos_after = ff.positions().numpy()
-
-    assert pos_before.shape == pos_after.shape
-    assert pos_after.shape == result.positions.numpy().shape
-    # After a real minimize step the positions should change for at least one
-    # coord; assert the persistent buffer is in sync with the device result.
-    assert (pos_after == result.positions.numpy()).all()
+    assert isinstance(result, Device3DResult)
+    torch.cuda.synchronize()
+    pos_after = result.values.torch()
+    assert pos_after.shape == pos_initial.shape
+    assert (pos_after != pos_initial).any().item()
 
 
 @pytest.mark.parametrize("ff_cls", [MMFFBatchedForcefield, UFFBatchedForcefield])
 def test_minimize_device_energies_match_host(ff_cls, two_mols):
-    # Run host-mode minimize on a separate copy; energies should match the
-    # device-mode minimize energies within BFGS tolerance.
     mols_host = [Chem.Mol(m) for m in two_mols]
     mols_device = [Chem.Mol(m) for m in two_mols]
 
@@ -147,7 +162,7 @@ def test_minimize_device_energies_match_host(ff_cls, two_mols):
     ff_device = ff_cls(mols_device)
     result = ff_device.minimize(maxIters=20, output=CoordinateOutput.DEVICE)
     torch.cuda.synchronize()
-    energies_device = result.energies.numpy().tolist()
+    energies_device = result.energies.torch().tolist()
 
     assert len(energies_device) == len(energies_host)
     for h, d in zip(energies_host, energies_device):
