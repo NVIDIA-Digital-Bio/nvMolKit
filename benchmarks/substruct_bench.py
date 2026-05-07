@@ -524,6 +524,12 @@ def main():
     if args.autotune and args.config:
         print("Error: --autotune is only supported in single-config mode (use --smarts, not --config)")
         sys.exit(1)
+    if args.autotune_load and args.config:
+        print(
+            "Error: --autotune_load is only supported in single-config mode "
+            "(it would override batch_size/workers/prep_threads/gpuIds on every row)"
+        )
+        sys.exit(1)
     if args.autotune and args.no_nvmolkit:
         print("Error: --autotune requires nvmolkit; remove --no_nvmolkit")
         sys.exit(1)
