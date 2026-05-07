@@ -42,11 +42,9 @@ jobs:
       matrix:
         include:
           # Latest python + rdkit pair from the conda-build matrix that targets
-          # CUDA 12.x AND has pip torch wheels covering sm_70 (the colossus
-          # runner is a V100). Python 3.13 needs torch >=2.5, which dropped
-          # sm_70 from its default arch list, so we stay on 3.12 for now.
-          - python: "3.12"
-            rdkit: "2025.3.6"
+          # CUDA 12.x. Bump these together when conda-build.yml's matrix moves.
+          - python: "3.13"
+            rdkit: "2025.9.2"
 
     steps:
       - name: Verify GPU access
@@ -68,33 +66,23 @@ jobs:
           set -xeuo pipefail
           . /usr/local/anaconda/etc/profile.d/conda.sh && conda activate base
           python -m pip install --upgrade pip
-          # torch is pinned <2.5 because 2.5+ dropped sm_70 from its default
-          # arch list and the colossus runner is a V100. Bumping the python
-          # matrix entry past 3.12 will require a torch source on this runner
-          # (e.g. conda-forge) since 3.13 wheels start at 2.5.
+          # Torch must come from the cu126 channel: the default PyPI wheel
+          # bundles a libcudart from an older CUDA minor that predates
+          # cudaGraphAddNode (added in CUDA 12.4) and gets picked up by the
+          # dynamic linker ahead of the container's libcudart, breaking
+          # nvmolkit's clustering module. cu126 also keeps sm_70 in the wheel,
+          # which the cu128 / cu129 channels have dropped — required for the
+          # V100 colossus runner.
+          python -m pip install \
+            --index-url https://download.pytorch.org/whl/cu126 \
+            torch
           python -m pip install \
             "scikit-build>=0.18" \
             "numpy>=1.23" \
-            "torch>=2.1,<2.5" \
             triton \
             pandas \
             psutil \
             optuna
-
-      - name: Report torch CUDA arch coverage
-        shell: bash
-        run: |
-          set -xeuo pipefail
-          . /usr/local/anaconda/etc/profile.d/conda.sh && conda activate base
-          python - <<'PY'
-          import torch
-          print("torch", torch.__version__)
-          print("torch.version.cuda", torch.version.cuda)
-          print("torch.cuda.get_arch_list()", torch.cuda.get_arch_list())
-          for i in range(torch.cuda.device_count()):
-              props = torch.cuda.get_device_properties(i)
-              print(f"device[{i}]", props.name, f"sm_{props.major}{props.minor}")
-          PY
 
       - name: Build & install nvmolkit
         shell: bash
