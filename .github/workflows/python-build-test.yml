@@ -66,14 +66,33 @@ jobs:
           set -xeuo pipefail
           . /usr/local/anaconda/etc/profile.d/conda.sh && conda activate base
           python -m pip install --upgrade pip
+          # The colossus runner is a V100 (sm_70). PyPI torch wheels from 2.5+
+          # dropped sm_70 from their default arch list, so anything newer hits
+          # cudaErrorNoKernelImageForDevice on this runner. Pin to the last
+          # 2.4.x release that still ships sm_70.
           python -m pip install \
             "scikit-build>=0.18" \
             "numpy>=1.23" \
-            "torch>=2.1" \
+            "torch>=2.1,<2.5" \
             triton \
             pandas \
             psutil \
             optuna
+
+      - name: Report torch CUDA arch coverage
+        shell: bash
+        run: |
+          set -xeuo pipefail
+          . /usr/local/anaconda/etc/profile.d/conda.sh && conda activate base
+          python - <<'PY'
+          import torch
+          print("torch", torch.__version__)
+          print("torch.version.cuda", torch.version.cuda)
+          print("torch.cuda.get_arch_list()", torch.cuda.get_arch_list())
+          for i in range(torch.cuda.device_count()):
+              props = torch.cuda.get_device_properties(i)
+              print(f"device[{i}]", props.name, f"sm_{props.major}{props.minor}")
+          PY
 
       - name: Build & install nvmolkit
         shell: bash
