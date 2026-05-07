@@ -161,6 +161,8 @@ def test_minimize_device_energies_match_host(ff_cls, two_mols):
 
     ff_device = ff_cls(mols_device)
     result = ff_device.minimize(maxIters=20, output=CoordinateOutput.DEVICE)
+    assert result.energies is not None
+    assert result.converged is not None
     torch.cuda.synchronize()
     energies_device = result.energies.torch().tolist()
 

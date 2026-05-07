@@ -466,6 +466,11 @@ def test_embed_molecules_device_output_returns_device3d_no_writeback():
         # for this molecule's last conformer.
     assert atom_starts[-1] == cursor
 
+    # ETKDG does not produce energies / convergence flags - those Optional fields must be None,
+    # not AsyncGpuResults wrapping empty tensors.
+    assert result.energies is None
+    assert result.converged is None
+
 
 def test_embed_molecules_device_output_empty_input_raises():
     params = EmbedParameters()

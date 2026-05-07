@@ -51,40 +51,42 @@ inline boost::python::object buildOwningDevice3DResult(AsyncDeviceVector<double>
   PyArray*              atomStartsPy = makePyArray(atomStarts);
   PyArray*              molIdxPy     = makePyArray(molIndices);
   PyArray*              confIdxPy    = makePyArray(confIndices);
-  if (energies != nullptr && converged != nullptr) {
-    PyArray* energiesPy  = makePyArray(*energies);
-    PyArray* convergedPy = makePyArray(*converged);
-    return d3d_cls(wrapAsync(valuesPy, gpuId, async_cls),
-                   wrapAsync(atomStartsPy, gpuId, async_cls),
-                   wrapAsync(molIdxPy, gpuId, async_cls),
-                   wrapAsync(confIdxPy, gpuId, async_cls),
-                   gpuId,
-                   nMols,
-                   wrapAsync(energiesPy, gpuId, async_cls),
-                   wrapAsync(convergedPy, gpuId, async_cls));
+  boost::python::object energiesObj  = boost::python::object();
+  boost::python::object convergedObj = boost::python::object();
+  if (energies != nullptr) {
+    energiesObj = wrapAsync(makePyArray(*energies), gpuId, async_cls);
+  }
+  if (converged != nullptr) {
+    convergedObj = wrapAsync(makePyArray(*converged), gpuId, async_cls);
   }
   return d3d_cls(wrapAsync(valuesPy, gpuId, async_cls),
                  wrapAsync(atomStartsPy, gpuId, async_cls),
                  wrapAsync(molIdxPy, gpuId, async_cls),
                  wrapAsync(confIdxPy, gpuId, async_cls),
                  gpuId,
-                 nMols);
+                 nMols,
+                 energiesObj,
+                 convergedObj);
 }
 
 /**
  * @brief Convenience overload that pulls all fields from a C++ @ref DeviceCoordResult.
  *
- * The @c DeviceCoordResult's buffers are moved into the Python result via @c release().
+ * The @c DeviceCoordResult's buffers are moved into the Python result via @c release(). When
+ * @c energies / @c converged are size 0 (e.g. ETKDG output) they are forwarded as @c nullptr so
+ * the Python result's corresponding fields are @c None rather than empty tensors.
  */
 inline boost::python::object buildOwningDevice3DResult(DeviceCoordResult& dev) {
+  AsyncDeviceVector<double>* energiesPtr  = dev.energies.size() > 0 ? &dev.energies : nullptr;
+  AsyncDeviceVector<int8_t>* convergedPtr = dev.converged.size() > 0 ? &dev.converged : nullptr;
   return buildOwningDevice3DResult(dev.positions,
                                    dev.atomStarts,
                                    dev.molIndices,
                                    dev.confIndices,
                                    dev.gpuId,
                                    dev.nMols,
-                                   &dev.energies,
-                                   &dev.converged);
+                                   energiesPtr,
+                                   convergedPtr);
 }
 
 /**
