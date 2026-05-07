@@ -122,8 +122,8 @@ void uploadConformerPositions(const std::vector<RDKit::ROMol*>&    mols,
 
 bp::list computeBatchedEnergy(nvMolKit::BatchedForcefield&         forcefield,
                               nvMolKit::AsyncDeviceVector<double>& positionsDevice,
+                              nvMolKit::AsyncDeviceVector<double>& energyOutsDevice,
                               const std::vector<int>&              numConformersPerMol) {
-  nvMolKit::AsyncDeviceVector<double> energyOutsDevice(forcefield.numMolecules());
   energyOutsDevice.zero();
   throwIfCudaError(forcefield.computeEnergy(energyOutsDevice.data(), positionsDevice.data()), "computeEnergy");
   return reshapeToNested(copyDeviceVector(energyOutsDevice), numConformersPerMol);
@@ -131,8 +131,8 @@ bp::list computeBatchedEnergy(nvMolKit::BatchedForcefield&         forcefield,
 
 bp::list computeBatchedGradients(nvMolKit::BatchedForcefield&         forcefield,
                                  nvMolKit::AsyncDeviceVector<double>& positionsDevice,
+                                 nvMolKit::AsyncDeviceVector<double>& gradDevice,
                                  const std::vector<int>&              numConformersPerMol) {
-  nvMolKit::AsyncDeviceVector<double> gradDevice(forcefield.totalPositions());
   gradDevice.zero();
   throwIfCudaError(forcefield.computeGradients(gradDevice.data(), positionsDevice.data()), "computeGradients");
   auto perSystem = splitGradients(copyDeviceVector(gradDevice), forcefield.atomStartsHost(), 3);
@@ -239,36 +239,6 @@ static std::vector<FC::PerMolConstraints> extractAllConstraints(const bp::list& 
   return result;
 }
 
-// CSR indices over the wrapper's positions buffer, uploaded fresh on each device-mode call.
-struct DeviceIndexBuffers {
-  nvMolKit::AsyncDeviceVector<int32_t> atomStarts;
-  nvMolKit::AsyncDeviceVector<int32_t> molIndices;
-  nvMolKit::AsyncDeviceVector<int32_t> confIndices;
-};
-
-DeviceIndexBuffers buildDeviceIndexBuffers(const std::vector<RDKit::ROMol*>& mols,
-                                           const std::vector<int>&           numConformersPerMol) {
-  std::vector<int32_t> atomStartsHost = {0};
-  std::vector<int32_t> molIndicesHost;
-  std::vector<int32_t> confIndicesHost;
-  int                  cursor = 0;
-  for (size_t molIdx = 0; molIdx < mols.size(); ++molIdx) {
-    const int natoms = static_cast<int>(mols[molIdx]->getNumAtoms());
-    const int nconfs = numConformersPerMol[molIdx];
-    for (int confIdx = 0; confIdx < nconfs; ++confIdx) {
-      cursor += natoms;
-      atomStartsHost.push_back(cursor);
-      molIndicesHost.push_back(static_cast<int32_t>(molIdx));
-      confIndicesHost.push_back(static_cast<int32_t>(confIdx));
-    }
-  }
-  DeviceIndexBuffers out;
-  out.atomStarts.setFromVector(atomStartsHost);
-  out.molIndices.setFromVector(molIndicesHost);
-  out.confIndices.setFromVector(confIndicesHost);
-  return out;
-}
-
 class NativeMMFFBatchedForcefield {
  public:
   NativeMMFFBatchedForcefield(const bp::list&                       molecules,
@@ -289,9 +259,13 @@ class NativeMMFFBatchedForcefield {
     buildForcefield();
   }
 
-  bp::list computeEnergy() { return computeBatchedEnergy(*forcefield_, positionsDevice_, numConformersPerMol_); }
+  bp::list computeEnergy() {
+    return computeBatchedEnergy(*forcefield_, positionsDevice_, energyOutsDevice_, numConformersPerMol_);
+  }
 
-  bp::list computeGradients() { return computeBatchedGradients(*forcefield_, positionsDevice_, numConformersPerMol_); }
+  bp::list computeGradients() {
+    return computeBatchedGradients(*forcefield_, positionsDevice_, gradDevice_, numConformersPerMol_);
+  }
 
   bp::tuple minimize(int maxIters, double gradTol) {
     auto result =
@@ -301,31 +275,6 @@ class NativeMMFFBatchedForcefield {
 
     return bp::make_tuple(nestedToList(result.energies, [](double v) { return v; }),
                           nestedToList(result.converged, [](int8_t v) { return v != 0; }));
-  }
-
-  bp::object computeEnergyDevice() {
-    nvMolKit::AsyncDeviceVector<double> energiesOut(forcefield_->numMolecules());
-    energiesOut.zero();
-    throwIfCudaError(forcefield_->computeEnergy(energiesOut.data(), positionsDevice_.data()), "computeEnergy");
-    auto idx = buildDeviceIndexBuffers(mols_, numConformersPerMol_);
-    return nvMolKit::buildOwningDevicePerConfResult(energiesOut,
-                                                    idx.molIndices,
-                                                    idx.confIndices,
-                                                    gpuId_,
-                                                    static_cast<int>(numConformersPerMol_.size()));
-  }
-
-  bp::object computeGradientsDevice() {
-    nvMolKit::AsyncDeviceVector<double> gradOut(forcefield_->totalPositions());
-    gradOut.zero();
-    throwIfCudaError(forcefield_->computeGradients(gradOut.data(), positionsDevice_.data()), "computeGradients");
-    auto idx = buildDeviceIndexBuffers(mols_, numConformersPerMol_);
-    return nvMolKit::buildOwningDevice3DResult(gradOut,
-                                               idx.atomStarts,
-                                               idx.molIndices,
-                                               idx.confIndices,
-                                               gpuId_,
-                                               static_cast<int>(numConformersPerMol_.size()));
   }
 
   bp::object minimizeDevice(int maxIters, double gradTol, int targetGpu) {
@@ -396,6 +345,8 @@ class NativeMMFFBatchedForcefield {
 
     forcefield_ = std::make_unique<nvMolKit::MMFFBatchedForcefield>(systemHost, metadata);
     positionsDevice_.setFromVector(systemHost.positions);
+    gradDevice_.resize(forcefield_->totalPositions());
+    energyOutsDevice_.resize(forcefield_->numMolecules());
   }
 
   std::vector<RDKit::ROMol*>            mols_;
@@ -405,6 +356,8 @@ class NativeMMFFBatchedForcefield {
 
   std::unique_ptr<nvMolKit::MMFFBatchedForcefield> forcefield_;
   nvMolKit::AsyncDeviceVector<double>              positionsDevice_;
+  nvMolKit::AsyncDeviceVector<double>              gradDevice_;
+  nvMolKit::AsyncDeviceVector<double>              energyOutsDevice_;
   std::vector<int>                                 numConformersPerMol_;
   int                                              gpuId_ = 0;
 };
@@ -432,9 +385,13 @@ class NativeUFFBatchedForcefield {
     buildForcefield();
   }
 
-  bp::list computeEnergy() { return computeBatchedEnergy(*forcefield_, positionsDevice_, numConformersPerMol_); }
+  bp::list computeEnergy() {
+    return computeBatchedEnergy(*forcefield_, positionsDevice_, energyOutsDevice_, numConformersPerMol_);
+  }
 
-  bp::list computeGradients() { return computeBatchedGradients(*forcefield_, positionsDevice_, numConformersPerMol_); }
+  bp::list computeGradients() {
+    return computeBatchedGradients(*forcefield_, positionsDevice_, gradDevice_, numConformersPerMol_);
+  }
 
   bp::tuple minimize(int maxIters, double gradTol) {
     auto result = nvMolKit::UFF::UFFMinimizeMoleculesConfs(mols_,
@@ -449,31 +406,6 @@ class NativeUFFBatchedForcefield {
 
     return bp::make_tuple(nestedToList(result.energies, [](double v) { return v; }),
                           nestedToList(result.converged, [](int8_t v) { return v != 0; }));
-  }
-
-  bp::object computeEnergyDevice() {
-    nvMolKit::AsyncDeviceVector<double> energiesOut(forcefield_->numMolecules());
-    energiesOut.zero();
-    throwIfCudaError(forcefield_->computeEnergy(energiesOut.data(), positionsDevice_.data()), "computeEnergy");
-    auto idx = buildDeviceIndexBuffers(mols_, numConformersPerMol_);
-    return nvMolKit::buildOwningDevicePerConfResult(energiesOut,
-                                                    idx.molIndices,
-                                                    idx.confIndices,
-                                                    gpuId_,
-                                                    static_cast<int>(numConformersPerMol_.size()));
-  }
-
-  bp::object computeGradientsDevice() {
-    nvMolKit::AsyncDeviceVector<double> gradOut(forcefield_->totalPositions());
-    gradOut.zero();
-    throwIfCudaError(forcefield_->computeGradients(gradOut.data(), positionsDevice_.data()), "computeGradients");
-    auto idx = buildDeviceIndexBuffers(mols_, numConformersPerMol_);
-    return nvMolKit::buildOwningDevice3DResult(gradOut,
-                                               idx.atomStarts,
-                                               idx.molIndices,
-                                               idx.confIndices,
-                                               gpuId_,
-                                               static_cast<int>(numConformersPerMol_.size()));
   }
 
   bp::object minimizeDevice(int maxIters, double gradTol, int targetGpu) {
@@ -543,6 +475,8 @@ class NativeUFFBatchedForcefield {
 
     forcefield_ = std::make_unique<nvMolKit::UFFBatchedForcefield>(systemHost, metadata);
     positionsDevice_.setFromVector(systemHost.positions);
+    gradDevice_.resize(forcefield_->totalPositions());
+    energyOutsDevice_.resize(forcefield_->numMolecules());
   }
 
   std::vector<RDKit::ROMol*>         mols_;
@@ -553,6 +487,8 @@ class NativeUFFBatchedForcefield {
 
   std::unique_ptr<nvMolKit::UFFBatchedForcefield> forcefield_;
   nvMolKit::AsyncDeviceVector<double>             positionsDevice_;
+  nvMolKit::AsyncDeviceVector<double>             gradDevice_;
+  nvMolKit::AsyncDeviceVector<double>             energyOutsDevice_;
   std::vector<int>                                numConformersPerMol_;
   int                                             gpuId_ = 0;
 };
@@ -588,8 +524,6 @@ BOOST_PYTHON_MODULE(_batchedForcefield) {
     .def("computeEnergy", &NativeMMFFBatchedForcefield::computeEnergy)
     .def("computeGradients", &NativeMMFFBatchedForcefield::computeGradients)
     .def("minimize", &NativeMMFFBatchedForcefield::minimize)
-    .def("computeEnergyDevice", &NativeMMFFBatchedForcefield::computeEnergyDevice)
-    .def("computeGradientsDevice", &NativeMMFFBatchedForcefield::computeGradientsDevice)
     .def("minimizeDevice", &NativeMMFFBatchedForcefield::minimizeDevice)
     .def("gpuId", &NativeMMFFBatchedForcefield::gpuId);
 
@@ -605,8 +539,6 @@ BOOST_PYTHON_MODULE(_batchedForcefield) {
     .def("computeEnergy", &NativeUFFBatchedForcefield::computeEnergy)
     .def("computeGradients", &NativeUFFBatchedForcefield::computeGradients)
     .def("minimize", &NativeUFFBatchedForcefield::minimize)
-    .def("computeEnergyDevice", &NativeUFFBatchedForcefield::computeEnergyDevice)
-    .def("computeGradientsDevice", &NativeUFFBatchedForcefield::computeGradientsDevice)
     .def("minimizeDevice", &NativeUFFBatchedForcefield::minimizeDevice)
     .def("gpuId", &NativeUFFBatchedForcefield::gpuId);
 }

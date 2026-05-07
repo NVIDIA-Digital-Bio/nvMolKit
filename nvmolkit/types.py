@@ -168,8 +168,8 @@ class CoordinateOutput(Enum):
     - ``RDKIT_CONFORMERS``: Optimized coordinates are written back into each input molecule's
       RDKit conformer list and energies (where applicable) are returned as Python lists.
     - ``DEVICE``: coordinates and (where applicable) energies stay on the GPU and are returned
-      as a :class:`Device3DResult` (positions/gradients) or :class:`DevicePerConfResult`
-      (energies). Use this to chain GPU-accelerated workflows without host round-trips.
+      as a :class:`Device3DResult`. Use this to chain GPU-accelerated workflows without host
+      round-trips.
     """
 
     RDKIT_CONFORMERS = "rdkit"
@@ -194,34 +194,13 @@ class Dense3DResult(NamedTuple):
     atom_mask: "torch.Tensor"
 
 
-class DensePerConfResult(NamedTuple):
-    """Dense padded view of a :class:`DevicePerConfResult`.
-
-    Tensors share the same ``(n_mols, max_confs)`` batch shape.
-
-    - ``energies``: float64, shape ``(n_mols, max_confs)``. Padded entries hold the
-      ``pad_value`` passed to :meth:`DevicePerConfResult.dense` (default NaN).
-    - ``converged``: int8 or ``None``. Shape ``(n_mols, max_confs)``; ``1`` where the
-      corresponding system converged, ``0`` otherwise. Padded entries hold ``0``. ``None``
-      when the source result has no convergence flags.
-    - ``conf_mask``: bool, shape ``(n_mols, max_confs)``. ``True`` where a real conformer
-      exists; ``False`` for pad slots.
-    """
-
-    energies: "torch.Tensor"
-    converged: Optional["torch.Tensor"]
-    conf_mask: "torch.Tensor"
-
-
 class Device3DResult:
     """On-device, flat CSR-style result of a per-atom 3-vector pipeline.
 
-    Used for positions (e.g. from ETKDG, MMFF/UFF minimization) and gradients (from
-    ``compute_gradients(output=DEVICE)``). All buffers live on a single GPU identified by
-    :attr:`gpu_id`. Sizes are linked as follows:
+    Used for conformer coordinates produced by ETKDG and MMFF/UFF minimization. All buffers
+    live on a single GPU identified by :attr:`gpu_id`. Sizes are linked as follows:
 
-    - :attr:`values` has shape ``(total_atoms, 3)`` (float64). Holds positions when produced
-      by a coordinate-producing API, gradients when produced by ``compute_gradients``.
+    - :attr:`values` has shape ``(total_atoms, 3)`` (float64). Holds conformer positions.
     - :attr:`atom_starts` has shape ``(n_conformers + 1,)`` (int32). The slice
       ``values[atom_starts[i]:atom_starts[i+1]]`` holds conformer ``i``'s atoms.
     - :attr:`mol_indices` has shape ``(n_conformers,)`` (int32) and maps each conformer to its
@@ -338,92 +317,3 @@ class Device3DResult:
         atom_mask[mol_idx_per_atom, conf_idx_per_atom, atom_within_conf] = True
 
         return Dense3DResult(values=dense_vals, conf_mask=conf_mask, atom_mask=atom_mask)
-
-
-class DevicePerConfResult:
-    """On-device, flat per-conformer result with optional convergence flags.
-
-    Used for ``compute_energy(output=DEVICE)``. All buffers live on a single GPU identified by
-    :attr:`gpu_id`. Sizes are linked as follows:
-
-    - :attr:`energies` has shape ``(n_conformers,)`` (float64).
-    - :attr:`converged`, when present, has shape ``(n_conformers,)`` (int8; ``1`` = converged).
-    - :attr:`mol_indices` has shape ``(n_conformers,)`` (int32) and maps each conformer to its
-      input molecule index.
-    - :attr:`conf_indices` has shape ``(n_conformers,)`` (int32) and gives each conformer's
-      per-molecule conformer index.
-    - :attr:`n_mols` is the authoritative outer-list size for per-molecule views; molecules
-      that produced zero conformers still count.
-    """
-
-    def __init__(
-        self,
-        energies: AsyncGpuResult,
-        mol_indices: AsyncGpuResult,
-        conf_indices: AsyncGpuResult,
-        gpu_id: int,
-        n_mols: int,
-        converged: Optional[AsyncGpuResult] = None,
-    ) -> None:
-        self.energies = energies
-        self.mol_indices = mol_indices
-        self.conf_indices = conf_indices
-        self.converged = converged
-        self.gpu_id = int(gpu_id)
-        self.n_mols = int(n_mols)
-
-    @property
-    def num_conformers(self) -> int:
-        """Total number of conformers represented in this result."""
-        return int(self.mol_indices.torch().numel())
-
-    def per_molecule(self) -> List[List[float]]:
-        """Return ``[mol_idx][conf_idx]`` nested list of energies. Synchronizes on read."""
-        torch.cuda.synchronize()
-        energies = self.energies.torch().tolist()
-        mol_indices = self.mol_indices.torch().tolist()
-        result: List[List[float]] = [[] for _ in range(self.n_mols)]
-        for conf_idx, mol_idx in enumerate(mol_indices):
-            result[mol_idx].append(energies[conf_idx])
-        return result
-
-    def dense(self, pad_value: float = float("nan")) -> "DensePerConfResult":
-        """Materialize padded ``(n_mols, max_confs)`` dense tensors.
-
-        Returns a :class:`DensePerConfResult` with ``energies``, optional ``converged``, and
-        a ``conf_mask``. Padded conformer slots in ``energies`` hold ``pad_value`` and in
-        ``converged`` hold ``0``. ``conf_mask`` is ``True`` where a real conformer exists.
-        Reading the index tensors synchronizes implicitly.
-        """
-        energies = self.energies.torch()
-        mol_indices = self.mol_indices.torch().to(torch.int64)
-        conf_indices = self.conf_indices.torch().to(torch.int64)
-
-        device = energies.device
-        dtype = energies.dtype
-        n_conformers = mol_indices.numel()
-
-        if n_conformers == 0:
-            dense_energies = torch.full((self.n_mols, 0), pad_value, dtype=dtype, device=device)
-            conf_mask = torch.zeros((self.n_mols, 0), dtype=torch.bool, device=device)
-            dense_converged = (
-                torch.zeros((self.n_mols, 0), dtype=torch.int8, device=device) if self.converged is not None else None
-            )
-            return DensePerConfResult(energies=dense_energies, converged=dense_converged, conf_mask=conf_mask)
-
-        confs_per_mol = torch.bincount(mol_indices, minlength=self.n_mols)
-        max_confs = int(confs_per_mol.max().item())
-
-        dense_energies = torch.full((self.n_mols, max_confs), pad_value, dtype=dtype, device=device)
-        conf_mask = torch.zeros((self.n_mols, max_confs), dtype=torch.bool, device=device)
-
-        dense_energies[mol_indices, conf_indices] = energies
-        conf_mask[mol_indices, conf_indices] = True
-
-        dense_converged: Optional[torch.Tensor] = None
-        if self.converged is not None:
-            converged = self.converged.torch()
-            dense_converged = torch.zeros((self.n_mols, max_confs), dtype=converged.dtype, device=device)
-            dense_converged[mol_indices, conf_indices] = converged
-
-        return DensePerConfResult(energies=dense_energies, converged=dense_converged, conf_mask=conf_mask)

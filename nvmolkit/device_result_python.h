@@ -89,27 +89,6 @@ inline boost::python::object buildOwningDevice3DResult(DeviceCoordResult& dev) {
                                    convergedPtr);
 }
 
-/**
- * @brief Build a Python @c DevicePerConfResult that takes ownership of all device buffers.
- */
-inline boost::python::object buildOwningDevicePerConfResult(AsyncDeviceVector<double>&  energies,
-                                                            AsyncDeviceVector<int32_t>& molIndices,
-                                                            AsyncDeviceVector<int32_t>& confIndices,
-                                                            const int                   gpuId,
-                                                            const int                   nMols) {
-  boost::python::object types_module = boost::python::import("nvmolkit.types");
-  boost::python::object dpc_cls      = types_module.attr("DevicePerConfResult");
-  boost::python::object async_cls    = types_module.attr("AsyncGpuResult");
-  PyArray*              energiesPy   = makePyArray(energies);
-  PyArray*              molIdxPy     = makePyArray(molIndices);
-  PyArray*              confIdxPy    = makePyArray(confIndices);
-  return dpc_cls(wrapAsync(energiesPy, gpuId, async_cls),
-                 wrapAsync(molIdxPy, gpuId, async_cls),
-                 wrapAsync(confIdxPy, gpuId, async_cls),
-                 gpuId,
-                 nMols);
-}
-
 }  // namespace nvMolKit
 
 #endif  // NVMOLKIT_DEVICE_RESULT_PYTHON_H

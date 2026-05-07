@@ -86,7 +86,7 @@ from typing import TYPE_CHECKING, Literal, overload
 from nvmolkit import _batchedForcefield  # type: ignore
 from nvmolkit._arrayHelpers import *  # noqa: F403  # registers PyArray for DEVICE-mode returns
 from nvmolkit._mmff_bridge import default_rdkit_mmff_properties, make_internal_mmff_properties
-from nvmolkit.types import CoordinateOutput, Device3DResult, DevicePerConfResult, HardwareOptions
+from nvmolkit.types import CoordinateOutput, Device3DResult, HardwareOptions
 
 if TYPE_CHECKING:
     from rdkit.Chem import Mol
@@ -399,62 +399,27 @@ class _BatchedForcefieldBase:
         """Rebuild the forcefield after changing constraints or settings."""
         self._build()
 
-    @overload
-    def compute_energy(
-        self, output: Literal[CoordinateOutput.RDKIT_CONFORMERS] = CoordinateOutput.RDKIT_CONFORMERS
-    ) -> list[list[float]]: ...
-    @overload
-    def compute_energy(self, output: Literal[CoordinateOutput.DEVICE]) -> DevicePerConfResult: ...
-    def compute_energy(self, output: CoordinateOutput = CoordinateOutput.RDKIT_CONFORMERS):
+    def compute_energy(self) -> list[list[float]]:
         """Return forcefield energies for all conformers of all molecules.
 
-        Args:
-            output: ``RDKIT_CONFORMERS`` (default) returns a nested list with
-                one float per conformer. ``DEVICE`` returns a
-                :class:`DevicePerConfResult`.
-
         Returns:
-            For RDKit mode: ``result[mol_idx][conf_idx]`` -- one energy per
-            conformer.
-            For DEVICE mode: a :class:`DevicePerConfResult` carrying the
-            energies, ``mol_indices``, and ``conf_indices`` describing layout.
+            ``result[mol_idx][conf_idx]`` -- one energy per conformer.
         """
         if not self._molecules:
-            if output == CoordinateOutput.DEVICE:
-                raise ValueError("compute_energy(output=DEVICE) requires at least one molecule")
             return []
         self._ensure_built()
-        if output == CoordinateOutput.DEVICE:
-            return self._native_ff.computeEnergyDevice()
         return self._native_ff.computeEnergy()
 
-    @overload
-    def compute_gradients(
-        self, output: Literal[CoordinateOutput.RDKIT_CONFORMERS] = CoordinateOutput.RDKIT_CONFORMERS
-    ) -> list[list[list[float]]]: ...
-    @overload
-    def compute_gradients(self, output: Literal[CoordinateOutput.DEVICE]) -> Device3DResult: ...
-    def compute_gradients(self, output: CoordinateOutput = CoordinateOutput.RDKIT_CONFORMERS):
+    def compute_gradients(self) -> list[list[list[float]]]:
         """Return forcefield gradients for all conformers of all molecules.
 
-        Args:
-            output: ``RDKIT_CONFORMERS`` (default) returns a nested list per
-                conformer. ``DEVICE`` returns a :class:`Device3DResult` whose
-                ``values`` field is the ``(total_atoms, 3)`` gradient.
-
         Returns:
-            For RDKit mode: ``result[mol_idx][conf_idx]`` -- one flattened
-            ``[x0, y0, z0, ...]`` gradient vector per conformer.
-            For DEVICE mode: a :class:`Device3DResult` whose ``values`` is the
-            ``(total_atoms, 3)`` gradient tensor.
+            ``result[mol_idx][conf_idx]`` -- one flattened ``[x0, y0, z0, ...]``
+            gradient vector per conformer.
         """
         if not self._molecules:
-            if output == CoordinateOutput.DEVICE:
-                raise ValueError("compute_gradients(output=DEVICE) requires at least one molecule")
             return []
         self._ensure_built()
-        if output == CoordinateOutput.DEVICE:
-            return self._native_ff.computeGradientsDevice()
         return self._native_ff.computeGradients()
 
     def _minimize(

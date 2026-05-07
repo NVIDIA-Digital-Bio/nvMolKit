@@ -26,9 +26,7 @@ from nvmolkit.types import (
     AsyncGpuResult,
     CoordinateOutput,
     Dense3DResult,
-    DensePerConfResult,
     Device3DResult,
-    DevicePerConfResult,
     HardwareOptions,
 )
 
@@ -133,39 +131,6 @@ def _make_device_3d_result(
         gpu_id=values.device.index,
         n_mols=n_mols,
         energies=energies_wrapped,
-        converged=converged_wrapped,
-    )
-
-
-def _make_device_per_conf_result(mol_indices, n_mols, *, conf_indices=None, with_converged=False):
-    """Build a DevicePerConfResult with energies = conf_idx * 100 + 1 for distinct values."""
-    n_conformers = len(mol_indices)
-    energies = torch.tensor(
-        [conf_idx * 100 + 1 for conf_idx in range(n_conformers)],
-        dtype=torch.float64,
-        device="cuda",
-    )
-    mol_indices_t = torch.tensor(mol_indices, dtype=torch.int32, device="cuda")
-    if conf_indices is None:
-        per_mol_counter = {}
-        conf_indices = []
-        for mol_idx in mol_indices:
-            slot = per_mol_counter.get(mol_idx, 0)
-            conf_indices.append(slot)
-            per_mol_counter[mol_idx] = slot + 1
-    conf_indices_t = torch.tensor(conf_indices, dtype=torch.int32, device="cuda")
-
-    converged_wrapped = None
-    if with_converged:
-        converged = torch.ones(n_conformers, dtype=torch.int8, device="cuda")
-        converged_wrapped = _wrap(converged)
-
-    return DevicePerConfResult(
-        energies=_wrap(energies),
-        mol_indices=_wrap(mol_indices_t),
-        conf_indices=_wrap(conf_indices_t),
-        gpu_id=energies.device.index,
-        n_mols=n_mols,
         converged=converged_wrapped,
     )
 
@@ -364,37 +329,3 @@ def test_device_3d_result_dense_empty_returns_zero_shape():
     assert out.conf_mask.shape == (3, 0)
     assert out.atom_mask.shape == (3, 0, 0)
     assert out.values.dtype == torch.float64
-
-
-def test_device_per_conf_result_per_molecule_groups_by_mol_index():
-    """per_molecule on DevicePerConfResult routes each scalar to its mol bucket."""
-    result = _make_device_per_conf_result(mol_indices=[1, 0, 1], n_mols=2)
-    nested = result.per_molecule()
-    assert nested == [[101], [1, 201]]
-
-
-def test_device_per_conf_result_dense_pads_to_max_confs():
-    """dense() returns (n_mols, max_confs) tensors with conf_mask describing padding."""
-    result = _make_device_per_conf_result(mol_indices=[0, 0, 0, 1, 2, 2], n_mols=3, with_converged=True)
-    out = result.dense()
-    torch.cuda.synchronize()
-    assert isinstance(out, DensePerConfResult)
-    assert out.energies.shape == (3, 3)
-    assert out.conf_mask.shape == (3, 3)
-    assert out.converged is not None and out.converged.shape == (3, 3)
-    assert out.conf_mask.sum(dim=1).tolist() == [3, 1, 2]
-    assert out.energies[0, 0].item() == 1
-    assert out.energies[0, 1].item() == 101
-    assert out.energies[0, 2].item() == 201
-    assert math.isnan(out.energies[1, 1].item())
-    # converged-flag scatter mirrors the energy scatter.
-    assert out.converged[0].tolist() == [1, 1, 1]
-    assert out.converged[1].tolist() == [1, 0, 0]
-
-
-def test_device_per_conf_result_dense_empty_returns_zero_shape():
-    result = _make_device_per_conf_result(mol_indices=[], n_mols=3)
-    out = result.dense()
-    assert out.energies.shape == (3, 0)
-    assert out.conf_mask.shape == (3, 0)
-    assert out.converged is None
