@@ -141,15 +141,11 @@ Other supported APIs
 The following wrappers are available; each returns the appropriate config
 type:
 
-.. autosummary::
-   :toctree: generated/
-   :template: function_template.rst
-
-   nvmolkit.autotune.tune_embed_molecules
-   nvmolkit.autotune.tune_mmff_optimize
-   nvmolkit.autotune.tune_uff_optimize
-   nvmolkit.autotune.tune_batched_forcefield
-   nvmolkit.autotune.tune_substructure
+* :func:`nvmolkit.autotune.tune_embed_molecules`
+* :func:`nvmolkit.autotune.tune_mmff_optimize`
+* :func:`nvmolkit.autotune.tune_uff_optimize`
+* :func:`nvmolkit.autotune.tune_batched_forcefield`
+* :func:`nvmolkit.autotune.tune_substructure`
 
 Tuning a batched forcefield
 ---------------------------
@@ -171,7 +167,7 @@ rebuilds a fresh forcefield with the trial-specific
         return ff
 
     result = autotune.tune_batched_forcefield(
-        molecules,
+        mols,
         factory,
         maxIters=100,
         n_trials=20,
@@ -181,16 +177,7 @@ rebuilds a fresh forcefield with the trial-specific
 Reference
 ---------
 
-.. autosummary::
-   :toctree: generated/
-   :template: class_template.rst
-
-   nvmolkit.autotune.TuneResult
-
-.. autosummary::
-   :toctree: generated/
-   :template: function_template.rst
-
-   nvmolkit.autotune.is_available
-   nvmolkit.autotune.save
-   nvmolkit.autotune.load
+* :class:`nvmolkit.autotune.TuneResult`
+* :func:`nvmolkit.autotune.is_available`
+* :func:`nvmolkit.autotune.save`
+* :func:`nvmolkit.autotune.load`
