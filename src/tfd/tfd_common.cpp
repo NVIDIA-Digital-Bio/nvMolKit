@@ -22,8 +22,6 @@
 #include <GraphMol/RingInfo.h>
 #include <omp.h>
 
-#include "versions.h"
-
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -32,6 +30,7 @@
 #include <unordered_set>
 
 #include "nvtx.h"
+#include "versions.h"
 
 namespace nvMolKit {
 
@@ -300,8 +299,8 @@ double calculateBeta(const RDKit::ROMol& mol, const double* distMat, int aid1) {
   // Pre-2026.03.1 RDKit had a typo that checked nb2 twice, inflating dmax by
   // including bonds where only the end atom was non-terminal. Commit b56f3dc68
   // (RDKit 2026.03.1) fixed it to check both endpoints. We match the RDKit version installed against.
-  constexpr bool kRdkitHasBetaTypoFix = RDKIT_VERSION_MAJOR > 2026
-                                        || (RDKIT_VERSION_MAJOR == 2026 && RDKIT_VERSION_MINOR >= 3);
+  constexpr bool kRdkitHasBetaTypoFix =
+    RDKIT_VERSION_MAJOR > 2026 || (RDKIT_VERSION_MAJOR == 2026 && RDKIT_VERSION_MINOR >= 3);
   double dmax = 0.0;
   for (const auto* bond : mol.bonds()) {
     auto       nb1                = getHeavyAtomNeighbors(bond->getBeginAtom());

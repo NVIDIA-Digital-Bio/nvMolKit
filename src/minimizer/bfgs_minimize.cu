@@ -801,11 +801,11 @@ __global__ void scaleGradKernel(const int16_t* statuses,
                                 double*        gradScales,
                                 const int*     activeSystemIndices,
                                 const int      DIM) {
-  constexpr bool kRdkitHasGradScaleFix = RDKIT_VERSION_MAJOR > 2025
-                                         || (RDKIT_VERSION_MAJOR == 2025 && RDKIT_VERSION_MINOR >= 9);
-  const int      sysIdx                = activeSystemIndices == nullptr ? blockIdx.x : activeSystemIndices[blockIdx.x];
-  const int      idxWithinSystem       = threadIdx.x;
-  const int      numTerms              = DIM * (atomStarts[sysIdx + 1] - atomStarts[sysIdx]);
+  constexpr bool kRdkitHasGradScaleFix =
+    RDKIT_VERSION_MAJOR > 2025 || (RDKIT_VERSION_MAJOR == 2025 && RDKIT_VERSION_MINOR >= 9);
+  const int sysIdx          = activeSystemIndices == nullptr ? blockIdx.x : activeSystemIndices[blockIdx.x];
+  const int idxWithinSystem = threadIdx.x;
+  const int numTerms        = DIM * (atomStarts[sysIdx + 1] - atomStarts[sysIdx]);
 
   if (statuses[sysIdx] == 0) {
     return;
