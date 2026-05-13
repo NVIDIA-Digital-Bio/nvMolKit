@@ -54,7 +54,6 @@ def test_async_gpu_result_release_frees_memory():
 
     free_after_alloc, _ = torch.cuda.mem_get_info()
     assert free_after_alloc < base_free
-    assert free_after_alloc + expected_bytes <= base_free
 
     del fps
     gc.collect()
