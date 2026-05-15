@@ -1,0 +1,104 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Python Build & Test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-build-test-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: py${{ matrix.python }} rdkit${{ matrix.rdkit }}
+    runs-on: colossus
+    container:
+      image: nvcr.io/nvidia/cuda:12.6.3-devel-ubuntu22.04
+      options: --gpus all
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Latest python + rdkit pair from the conda-build matrix that targets
+          # CUDA 12.x. Bump these together when conda-build.yml's matrix moves.
+          - python: "3.13"
+            rdkit: "2025.9.2"
+
+    steps:
+      - name: Verify GPU access
+        shell: bash
+        run: |
+          set -xeuo pipefail
+          nvidia-smi
+
+      - name: Check out source tree
+        uses: actions/checkout@v4
+
+      - name: Install conda + native dependencies
+        shell: bash
+        run: bash admin/ci/setup_dependencies.sh ${{ matrix.python }} ${{ matrix.rdkit }}
+
+      - name: Install Python build & test deps
+        shell: bash
+        run: |
+          set -xeuo pipefail
+          . /usr/local/anaconda/etc/profile.d/conda.sh && conda activate base
+          python -m pip install --upgrade pip
+          # Torch must come from the cu126 channel: the default PyPI wheel
+          # bundles a libcudart from an older CUDA minor that predates
+          # cudaGraphAddNode (added in CUDA 12.4) and gets picked up by the
+          # dynamic linker ahead of the container's libcudart, breaking
+          # nvmolkit's clustering module. cu126 also keeps sm_70 in the wheel,
+          # which the cu128 / cu129 channels have dropped — required for the
+          # V100 colossus runner.
+          python -m pip install \
+            --index-url https://download.pytorch.org/whl/cu126 \
+            torch
+          python -m pip install \
+            "scikit-build>=0.18" \
+            "numpy>=1.23" \
+            triton \
+            pandas \
+            psutil \
+            optuna
+
+      - name: Build & install nvmolkit
+        shell: bash
+        env:
+          CUDA_HOME: /usr/local/cuda
+          NVMOLKIT_CUDA_TARGET_MODE: native
+        run: |
+          set -xeo pipefail
+          . /usr/local/anaconda/etc/profile.d/conda.sh && conda activate base
+          export CMAKE_BUILD_PARALLEL_LEVEL="$(nproc)"
+          python -m pip install . --no-deps --no-build-isolation -v
+
+      - name: Run pytest
+        shell: bash
+        working-directory: /tmp
+        run: |
+          set -xeo pipefail
+          . /usr/local/anaconda/etc/profile.d/conda.sh && conda activate base
+          python -m pytest "${GITHUB_WORKSPACE}/nvmolkit/tests" --tb=short -k 'not long'
